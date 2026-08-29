@@ -1,84 +1,135 @@
 # UI2API
 
+[![CI](https://github.com/MeRezaRezaei/ui2api/actions/workflows/ci.yml/badge.svg)](https://github.com/MeRezaRezaei/ui2api/actions/workflows/ci.yml)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**UI2API** analyzes a website once, captures its *real* action recipes (the
-in-page JS functions and network calls the site actually uses), and generates a
-per-site [MCP](https://modelcontextprotocol.io) / ACP server so an AI agent can
-drive the site by calling tools like `send_prompt(text)` instead of
+> Turn any site you use into AI tools — analyze a website once, then generate a per-site MCP or ACP server so your AI agent can drive it by calling tools.
+
+**UI2API** analyzes a website once (instrumenting its in-page JS calls, network
+calls, and DOM interactions), captures the site's *real* action recipes, and
+generates a per-site [MCP](https://modelcontextprotocol.io) / ACP server so an AI
+agent can drive the site by calling tools like `send_prompt(text)` instead of
 screen-reading and clicking buttons.
 
 ## Why
 
 Today AI agents interact with websites the way humans do — navigate, locate a
-control, click, read the screen. That is high-friction and brittle. A site's
-real capabilities are a finite, structured set of actions. UI2API makes those
-actions first-class tools. When a site changes, re-run the analyzer and the
-tool surface regenerates.
+control, click, read the screen. That is high-friction and brittle. A site's real
+capabilities are a finite, structured set of actions. UI2API makes those actions
+first-class tools. When a site changes, re-run the analyzer and the tool surface
+regenerates.
 
-## How it works
+It is built for the sites you are *authorized* to automate: your own apps, APIs
+you hold keys for, accessibility workflows, and personal productivity. The output
+is a reviewable, generated tool-server you control.
 
+## Demo
+
+```bash
+# 1. Analyze a site once — capture its real action recipes
+npx ui2api analyse https://app.example.com --llm
+
+# 2. Generate a per-site MCP server from the captured map
+npx ui2api generate app.example.com
+
+# 3. Serve it — your AI agent now calls the site as tools
+npx ui2api serve app.example.com
 ```
-URL ──▶ analyze (headless browser + mapper agent + call interception)
-        ──▶ raw captures ──▶ map (normalize into action entries)
-        ──▶ action-map.json ──▶ generate ──▶ MCP/ACP server
-        ──▶ serve (live browser session) ──▶ AI calls tools
+
+An agent calling a generated tool:
+
+```json
+{
+  "tool": "send_prompt",
+  "arguments": { "text": "Summarize this thread" }
+}
 ```
 
-- **analyze** loads the site in Chromium, hooks `fetch`/`XHR`/`WebSocket` and
-  in-page function calls, and an LLM mapper agent performs representative tasks
-  while the real calls are recorded.
-- **map** diffs repeated captures to infer typed parameters and names each
-  action.
-- **generate** compiles the action map into one MCP/ACP tool per action.
-- **serve** keeps a live, authenticated browser session so generated tools
-  execute their recipe (Hybrid: live-JS delegation when state is needed,
-  server-side request replay when a pure call suffices).
+UI2API executes the captured recipe against the live, origin-pinned session and
+returns the result — no brittle screen-scraping.
+
+## Features
+
+- **Real action recipes** — the analyzer captures the exact in-page JS functions,
+  network calls, and DOM interactions a site actually uses, so generated tools
+  mirror the site's true behavior.
+- **MCP + ACP targets** — emit either a Model Context Protocol server or an ACP
+  server from the same action map.
+- **Agent-skill wrapper** — generated servers drop in as a callable tool source
+  for your AI agents and orchestrators.
+- **Cookie-session capture for auth'd sites** — `--login` records the authenticated
+  session cookies so tools can act on sites that require sign-in.
+- **LLM-assisted naming with offline fallback** — `--llm` uses a model to produce
+  semantic tool names and task mappings; a deterministic heuristic fallback keeps
+  the pipeline fully offline when no model is configured.
+- **Trust gate** — generated maps are marked `trusted:false` and `serve` refuses
+  to run an untrusted map without an explicit `--trust`, so generated tools are
+  reviewed before they can act.
 
 ## Quick start
 
 ```bash
-npm install
+npm i -g ui2api
 
-# 1. Analyze a site once — capture its real action recipes
-npx tsx src/cli.ts analyse https://your-site.example.com --root App
+# 1. Analyze a site once
+npx ui2api analyse https://app.example.com --llm
 
-# 2. Generate a per-site MCP server from the captured map
-npx tsx src/cli.ts generate your-site.example.com
+# 2. Generate a per-site MCP server
+npx ui2api generate app.example.com
 
-npx tsx src/cli.ts serve your-site.example.com
+# 3. Serve it — your AI agent now calls the site as tools
+npx ui2api serve app.example.com
 ```
 
-Then connect any MCP client (or `mcpproxy`) to the generated server and call
-tools like `send_prompt`. When the site changes, re-run `analyse`/`generate`
-(`remap` prints a stable diff).
+Then connect any MCP/ACP client to the generated server and call tools like
+`send_prompt`. Re-run `analyse`/`generate` when the site changes.
 
 ```bash
-npm test   # end-to-end integration test against the fixture SPA
+npm test   # runs the integration test against the fixture SPA
 ```
 
-> The analyzer discovers an in-page API root (e.g. `window.App`) and captures
-> each method's real call. Pass `--root` to name the global explicitly. A
-> mapper-agent LLM hook is the intended path for naming/describing actions; the
-> current build uses deterministic heuristics so the pipeline runs fully offline.
+## How it works
 
+```
+URL ──▶ analyze (headless browser + call interception + optional LLM mapper)
+        ──▶ raw captures ──▶ build action map (normalize into typed action entries)
+        ──▶ action-map.json ──▶ generate ──▶ MCP/ACP server
+        ──▶ serve / execute (live, origin-pinned session) ──▶ agent calls tools
+```
 
-each captured action as a callable tool; the agent stays model-agnostic and
+- **analyze** loads the site in Chromium, hooks `fetch`/`XHR`/`WebSocket` and
+  in-page function calls, and records the real calls while representative tasks
+  run. `--llm` names and describes actions semantically; otherwise deterministic
+  heuristics are used.
+- **build action map** normalizes repeated captures into typed action entries
+  with inferred parameters.
+- **generate** compiles the action map into one MCP/ACP tool per action.
+- **serve / execute** keeps a live, authenticated browser session and runs each
+  tool's recipe (live-JS delegation when state is needed, request replay when a
+  pure call suffices).
 
-Flags that shape the generated server:
+## Security & trust
 
-- `--llm` — use a mapper LLM to produce *semantic* tool names and descriptions
-  instead of deterministic heuristics (reads `UI2API_LLM_BASE_URL` / `UI2API_LLM_KEY`).
-- `--target acp` — emit an **ACP** server instead of the default MCP server.
-- `--trust <host>` — the **trust gate**: whitelist the origin before UI2API will
-  capture or replay its calls. Untrusted sites are refused, so a generated tool
-  can never silently drive an unapproved site.
+Generated artifacts are designed to be reviewed, not blindly trusted:
 
-## Status
+- **Generated maps are written `trusted:false`.** `serve` refuses to run an
+  untrusted map unless you pass an explicit `--trust`.
+- **Replay is origin-pinned** to the analyzed site and SSRF-guarded, so a
+  generated tool can only act on the origin it was built for.
+- **Cookie sessions are gitignored** — captured authentication is never committed.
 
-- ✅ **M1** — analyze → generate → serve MCP per site, verified end-to-end
-  against a fixture SPA.
-- 🚧 **M2–M5** — in progress: semantic naming (`--llm`), ACP target
+Only use UI2API on sites you are authorized to automate. You are responsible for
+complying with the terms of any site or API you point it at.
 
-## License
+## What it is / what it is not
 
-[MIT](LICENSE)
+- **What it is:** a tool for turning sites you are *authorized* to use — your own
+  properties, APIs you hold keys for, accessibility aids, personal productivity —
+  into reviewable, generated tool-servers for your own AI agents.
+  a site's terms of service. It does not help you do anything you are not already
+  permitted to do.
+
+## Docs & links
+
+- Documentation: [`docs/`](docs/)
+- License: [MIT](LICENSE)

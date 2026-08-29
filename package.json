@@ -1,7 +1,7 @@
 {
   "name": "ui2api",
   "version": "0.1.0",
-  "description": "Turn any website into MCP/ACP tools for AI — analyze a site's real action recipes and generate a per-site MCP server.",
+  "description": "Turn any site you use into AI tools — analyze a site's real action recipes once, then generate a per-site MCP or ACP server so your AI agent can drive it by calling tools.",
   "type": "module",
   "bin": {
     "ui2api": "dist/cli.js"
@@ -21,7 +21,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOURGITHUB/ui2api"
+    "url": "https://github.com/MeRezaRezaei/ui2api"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
