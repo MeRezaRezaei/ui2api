@@ -1,6 +1,5 @@
 # UI2API
 
-> Turn any website into MCP/ACP tools for AI — no clicking, just real site functions.
 
 **UI2API** analyzes a website once, captures its *real* action recipes (the
 in-page JS functions and network calls the site actually uses), and generates a
@@ -21,7 +20,7 @@ tool surface regenerates.
 ```
 URL ──▶ analyze (headless browser + mapper agent + call interception)
         ──▶ raw captures ──▶ map (normalize into action entries)
-        ──▶ action-map.json ──▶ generate ──▶ MCP server
+        ──▶ action-map.json ──▶ generate ──▶ MCP/ACP server
         ──▶ serve (live browser session) ──▶ AI calls tools
 ```
 
@@ -30,25 +29,23 @@ URL ──▶ analyze (headless browser + mapper agent + call interception)
   while the real calls are recorded.
 - **map** diffs repeated captures to infer typed parameters and names each
   action.
-- **generate** compiles the action map into one MCP tool per action.
+- **generate** compiles the action map into one MCP/ACP tool per action.
 - **serve** keeps a live, authenticated browser session so generated tools
   execute their recipe (Hybrid: live-JS delegation when state is needed,
   server-side request replay when a pure call suffices).
-
-## Status
-
-✅ Working MVP. The full pipeline is implemented and verified end-to-end
-(analyze → generate → serve → call a tool through the real MCP server over
-stdio) against a fixture SPA. See
-[`docs/superpowers/specs/2026-08-29-ui2api-design.md`](docs/superpowers/specs/2026-08-29-ui2api-design.md).
 
 ## Quick start
 
 ```bash
 npm install
+
+# 1. Analyze a site once — capture its real action recipes
 npx tsx src/cli.ts analyse https://your-site.example.com --root App
+
+# 2. Generate a per-site MCP server from the captured map
 npx tsx src/cli.ts generate your-site.example.com
-npx tsx src/cli.ts serve   your-site.example.com
+
+npx tsx src/cli.ts serve your-site.example.com
 ```
 
 Then connect any MCP client (or `mcpproxy`) to the generated server and call
@@ -63,6 +60,24 @@ npm test   # end-to-end integration test against the fixture SPA
 > each method's real call. Pass `--root` to name the global explicitly. A
 > mapper-agent LLM hook is the intended path for naming/describing actions; the
 > current build uses deterministic heuristics so the pipeline runs fully offline.
+
+
+each captured action as a callable tool; the agent stays model-agnostic and
+
+Flags that shape the generated server:
+
+- `--llm` — use a mapper LLM to produce *semantic* tool names and descriptions
+  instead of deterministic heuristics (reads `UI2API_LLM_BASE_URL` / `UI2API_LLM_KEY`).
+- `--target acp` — emit an **ACP** server instead of the default MCP server.
+- `--trust <host>` — the **trust gate**: whitelist the origin before UI2API will
+  capture or replay its calls. Untrusted sites are refused, so a generated tool
+  can never silently drive an unapproved site.
+
+## Status
+
+- ✅ **M1** — analyze → generate → serve MCP per site, verified end-to-end
+  against a fixture SPA.
+- 🚧 **M2–M5** — in progress: semantic naming (`--llm`), ACP target
 
 ## License
 
