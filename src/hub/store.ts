@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-export interface PackageVersion { file: string; manifest: Record<string, unknown>; trust: "reviewed" | "unreviewed"; }
+export interface PackageVersion { file: string; manifest: Record<string, unknown>; module?: string; trust: "reviewed" | "unreviewed"; }
 export interface RegistryIndex { packages: Record<string, { versions: Record<string, PackageVersion>; latest: string }>; }
 
 export class RegistryStore {
@@ -15,7 +15,10 @@ export class RegistryStore {
   }
   get(name: string, version?: string): PackageVersion | null {
     const i = this.readIndex(); const p = i.packages[name]; if (!p) return null;
-    const v = version ?? p.latest; return p.versions[v] ?? null;
+    const v = version ?? p.latest; const ver = p.versions[v]; if (!ver) return null;
+    let module = "";
+    try { module = JSON.parse(readFileSync(ver.file, "utf8")).module ?? ""; } catch {}
+    return { ...ver, module };
   }
   save(name: string, version: string, manifest: Record<string, unknown>, moduleText: string): void {
     const file = resolve(this.dataDir, "pkgs", name, `${version}.json`);
