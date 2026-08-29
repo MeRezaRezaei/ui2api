@@ -8,6 +8,7 @@ import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies } from "./runtime/browser.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
+import { startHub } from "./hub/server.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -23,6 +24,8 @@ interface Flags {
   author?: string;
   use?: string;
   registry?: string;
+  dataDir?: string;
+  port?: number;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -38,6 +41,8 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--author") f.author = argv[++i];
     if (argv[i] === "--use") f.use = argv[++i];
     if (argv[i] === "--registry") f.registry = argv[++i];
+    if (argv[i] === "--data-dir") f.dataDir = argv[++i];
+    if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
   }
   return f;
 }
@@ -158,10 +163,43 @@ async function cmdRemap(host: string, flags: Flags): Promise<void> {
   if (removed.length) console.log("DEPRECATED (downstream-safe): " + removed.join(", "));
 }
 
+async function cmdHubPublish(host: string): Promise<void> {
+  if (!host) throw new Error("usage: ui2api hub publish <host> [--out DIR]");
+  const sitesRoot = resolve(process.cwd(), "sites");
+  const pkgRoot = resolve(process.cwd(), "data");
+  const meta = {
+    author: process.env.UI2API_HUB_AUTHOR || "cli",
+    use: process.env.UI2API_HUB_USE || `own use of ${host}`,
+  };
+  const dir = buildPackage(host, sitesRoot, pkgRoot, meta);
+  const metadata = JSON.parse(readFileSync(resolve(dir, "metadata.json"), "utf8"));
+  const map = JSON.parse(readFileSync(resolve(dir, "action-map.json"), "utf8"));
+  const manifest = { ...metadata, version: metadata.version || "1.0.0" };
+  const moduleText = JSON.stringify(map, null, 2);
+  const base = process.env.UI2API_HUB_URL ?? `http://localhost:${process.env.PORT ?? 8787}`;
+  const token = process.env.UI2API_HUB_TOKEN ?? "";
+  const r = await fetch(`${base}/api/packages`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ manifest, module: moduleText }),
+  });
+  if (!r.ok) { console.error("publish failed:", await r.text()); process.exit(1); }
+  console.log(`[ui2api] published ${manifest.name}@${manifest.version}`);
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   const flags = parseFlags(rest);
   switch (cmd) {
+    case "hub": {
+      if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "");
+      const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+      const token = process.env.UI2API_HUB_TOKEN ?? "";
+      const port = Number(flags.port ?? process.env.PORT ?? 8787);
+      const registryUrl = process.env.UI2API_REGISTRY_URL ?? "https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/main";
+      startHub({ port, dataDir, token, registryUrl });
+      return;
+    }
     case "analyse":
       if (!arg) throw new Error("usage: ui2api analyse <url> [--root App] [--out DIR]");
       return cmdAnalyse(arg, flags);
@@ -188,6 +226,8 @@ async function main(): Promise<void> {
       console.log("  ui2api remap    <host>  [--out DIR]");
       console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
       console.log("  ui2api install  <host>  [--registry URL]");
+      console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
+      console.log("  ui2api hub publish <host>  (build + PUT to hub)");
       process.exit(cmd ? 1 : 0);
   }
 }
