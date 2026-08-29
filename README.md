@@ -130,6 +130,12 @@ complying with the terms of any site or API you point it at.
   not grant access you do not already have. Use it only where you are permitted to
   automate.
 
+## Responsibility
+
+UI2API is an automation tool. You are responsible for how you use it. Only
+automate sites you are authorized to use, respect each site's terms of service,
+and comply with applicable law. Use it at your own risk.
+
 ## Docs & links
 
 - Documentation: [`docs/`](docs/)

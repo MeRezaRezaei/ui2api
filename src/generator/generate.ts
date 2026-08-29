@@ -60,6 +60,7 @@ export async function runServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[ui2api] server for " + map.host + " ready, " + map.actions.length + " tools");
+  console.error("[ui2api] use at your own risk — only automate sites you are authorized to use.");
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
