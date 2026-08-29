@@ -8,3 +8,6 @@ sites/*/server/
 node_modules/
 dist/
 *.log
+
+# Local planning docs (intentionally not published)
+.plans/
