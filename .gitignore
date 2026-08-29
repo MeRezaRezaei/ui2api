@@ -1,0 +1,10 @@
+# Auth sessions / captured credentials — never commit
+sites/*/.session/
+
+# Generated per-site servers are build output of the workflow
+sites/*/server/
+
+# Dependencies / build
+node_modules/
+dist/
+*.log
