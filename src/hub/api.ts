@@ -1,5 +1,6 @@
 import { RegistryStore } from "./store.js";
 import { validatePackage } from "../../scripts/validate-registry.mjs";
+import { renderHubHtml } from "./ui.js";
 import { IncomingMessage, ServerResponse } from "node:http";
 
 const REQUIRED_MANIFEST = ["name", "version", "author", "authorizedUse", "license", "ui2api"];
@@ -9,6 +10,11 @@ export function createHubRouter(store: RegistryStore, opts: { token: string; reg
     const url = new URL(req.url ?? "/", "http://x");
     const auth = req.headers["authorization"];
     const okToken = auth === `Bearer ${opts.token}`;
+
+    // GET / and /ui — management UI (public read surface)
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/ui")) {
+      return html(res, 200, renderHubHtml(store, { registryUrl: opts.registryUrl }));
+    }
 
     // GET /api/packages[/:name[/:version]]
     if (req.method === "GET" && url.pathname.startsWith("/api/packages")) {
@@ -66,3 +72,4 @@ function readJson(req: IncomingMessage): Promise<unknown> {
   });
 }
 function json(res: ServerResponse, code: number, obj: unknown) { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
+function html(res: ServerResponse, code: number, s: string) { res.writeHead(code, { "content-type": "text/html; charset=utf-8" }); res.end(s); }
