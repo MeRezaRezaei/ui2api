@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "src",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
