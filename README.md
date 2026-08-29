@@ -126,8 +126,9 @@ complying with the terms of any site or API you point it at.
 - **What it is:** a tool for turning sites you are *authorized* to use — your own
   properties, APIs you hold keys for, accessibility aids, personal productivity —
   into reviewable, generated tool-servers for your own AI agents.
-  a site's terms of service. It does not help you do anything you are not already
-  permitted to do.
+- **What it is not:** it is not a substitute for a site's official API, and it does
+  not grant access you do not already have. Use it only where you are permitted to
+  automate.
 
 ## Docs & links
 

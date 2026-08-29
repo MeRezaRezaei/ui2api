@@ -52,9 +52,10 @@ were non-functional.
 
 ## Residual / out-of-scope (cannot be fixed in code alone)
 - **Novelty:** adjacent tools exist (browser-use, Playwright MCP, Skyvern, AgentQL).
-  thought of this".
+  UI2API's differentiating angle is automatic generation from a one-time analysis —
+  not "nobody thought of this".
 - **Real-site validation:** tested on a fixture SPA only; arbitrary complex/cookie-auth
   sites are unproven. `analyse --login` exists for gated sites but needs manual runs.
 - **Live LLM task-driving:** architecture + `--llm` hook present, but the LLM naming/
   task loop needs a real `UI2API_LLM_*` key to exercise (heuristic fallback verified).
-- `package.json` `repository.url` still has placeholder `YOURGITHUB` — replace before publish.
+- `package.json` `repository.url` is set to the project's repository.

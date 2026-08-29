@@ -17,7 +17,7 @@
     "acp",
     "ai-agents",
     "browser",
-    "playwright",
+    "playwright"
   ],
   "repository": {
     "type": "git",
