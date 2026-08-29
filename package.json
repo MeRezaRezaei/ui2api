@@ -32,7 +32,7 @@
     "serve": "tsx src/cli.ts serve",
     "remap": "tsx src/cli.ts remap",
     "test": "tsx test/integration.ts",
-    "test:unit": "node --import tsx --test test/agent.test.ts test/session.test.ts test/acp.test.ts test/security.test.ts test/disclaimer.test.ts test/package.test.ts test/install.test.ts test/validate-registry.test.ts test/hub.test.ts test/hub-runtime.test.ts test/hub-ui.test.ts test/hub-mirror.test.ts",
+    "test:unit": "node --import tsx --test test/agent.test.ts test/session.test.ts test/acp.test.ts test/security.test.ts test/disclaimer.test.ts test/package.test.ts test/install.test.ts test/validate-registry.test.ts test/hub.test.ts test/hub-runtime.test.ts test/hub-ui.test.ts test/hub-mirror.test.ts test/browser.test.ts",
     "prepublishOnly": "npm run build"
   },
   "license": "MIT",

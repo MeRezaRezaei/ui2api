@@ -143,6 +143,47 @@ complying with the terms of any site or API you point it at.
   not grant access you do not already have. Use it only where you are permitted to
   automate.
 
+## LLM mapping (tool naming)
+
+`analyse --llm` uses a model to turn a site's captured actions into clean
+`snake_case` tool names + descriptions. It is OpenAI-compatible, so any
+OpenAI-style endpoint works — including **Google Gemini** via its OpenAI-compatible
+API:
+
+```bash
+# Gemini (recommended): just set the key
+export UI2API_LLM_PROVIDER=gemini
+export UI2API_LLM_KEY=AIza...your-gemini-key
+npx tsx src/cli.ts analyse https://app.example.com --llm
+
+# Or any OpenAI-compatible endpoint explicitly:
+export UI2API_LLM_BASE_URL=https://api.openai.com
+export UI2API_LLM_KEY=sk-...
+export UI2API_LLM_MODEL=gpt-4o-mini
+```
+
+Without these env vars, `analyse` still works fully offline using deterministic
+heuristics (no LLM required).
+
+## Using your real Chrome profile
+
+By default UI2API launches Playwright's bundled Chromium. To analyze a site you
+are **already logged into** with your everyday Chrome, point it at your installed
+Chrome and profile so the session/cookies are reused:
+
+```bash
+export UI2API_CHROME=1                       # use the system Chrome
+export UI2API_USER_DATA_DIR=/path/to/profile # reuse your logged-in profile
+npx tsx src/cli.ts analyse https://app.example.com
+```
+
+- `UI2API_CHROME=1` → launches the system Chrome (`channel: "chrome"`).
+- `UI2API_CHROME_PATH=/path/to/chrome` → use a specific Chrome/Chromium binary.
+- `UI2API_USER_DATA_DIR=/path` → reuse an existing profile (cookies + sign-in).
+
+> Close your normal Chrome first, or copy the profile to another folder — two
+> Chrome instances cannot share one profile directory at the same time.
+
 ## Responsibility
 
 UI2API is an automation tool. You are responsible for how you use it. Only

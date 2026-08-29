@@ -11,14 +11,38 @@ export const LAUNCH_ARGS = [
   "--disable-software-rasterizer",
 ];
 
+// Build the Playwright launch options. By default this uses the bundled
+// Chromium. Opt-in env vars let a user reuse their REAL installed Chrome and
+// logged-in profile (for analyzing sites they're authenticated to):
+//   UI2API_CHROME=1          -> use the system Chrome (channel: "chrome")
+//   UI2API_CHROME_PATH=...   -> explicit Chrome/Chromium executable path
+//   UI2API_USER_DATA_DIR=... -> reuse an existing Chrome user-data dir (cookies/session)
+// Overrides (passed programmatically) take precedence over env.
+export function buildLaunchOptions(overrides: LaunchOpts = {}): Record<string, unknown> {
+  const opts: Record<string, unknown> = { args: LAUNCH_ARGS };
+  if (overrides.channel ?? (process.env.UI2API_CHROME && process.env.UI2API_CHROME !== "0")) opts.channel = "chrome";
+  if (overrides.executablePath ?? process.env.UI2API_CHROME_PATH) opts.executablePath = overrides.executablePath ?? process.env.UI2API_CHROME_PATH;
+  if (overrides.userDataDir ?? process.env.UI2API_USER_DATA_DIR) opts.userDataDir = overrides.userDataDir ?? process.env.UI2API_USER_DATA_DIR;
+  if (overrides.headless !== undefined) opts.headless = overrides.headless;
+  return opts;
+}
+
+export interface LaunchOpts {
+  channel?: string;
+  executablePath?: string;
+  userDataDir?: string;
+  headless?: boolean;
+}
+
 // Launch Chromium, retrying if the process dies before it is usable. This hides
 // the intermittent "Target page, context or browser has been closed" crashes
 // that otherwise make analyze/serve flaky.
-export async function launchBrowser(retries = 3): Promise<Browser> {
+export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Promise<Browser> {
+  const launchOpts = buildLaunchOptions(overrides);
   let lastErr: unknown;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const browser = await chromium.launch({ args: LAUNCH_ARGS });
+      const browser = await chromium.launch(launchOpts as any);
       let usable = true;
       const lost = new Promise<never>((_, reject) => {
         browser.on("disconnected", () => {
