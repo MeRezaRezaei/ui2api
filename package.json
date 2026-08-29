@@ -6,13 +6,32 @@
   "bin": {
     "ui2api": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "acp",
+    "ai-agents",
+    "browser",
+    "playwright",
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOURGITHUB/ui2api"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "tsx src/cli.ts",
     "analyse": "tsx src/cli.ts analyse",
     "generate": "tsx src/cli.ts generate",
     "serve": "tsx src/cli.ts serve",
     "remap": "tsx src/cli.ts remap",
-    "test": "tsx test/integration.ts"
+    "test": "tsx test/integration.ts",
+    "prepublishOnly": "npm run build"
   },
   "license": "MIT",
   "dependencies": {
