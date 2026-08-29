@@ -3,7 +3,33 @@ import { resolve } from "node:path";
 
 const DENY = ["captcha", "bot detection", "bypass cloudflare", "evade", "solve captcha", "anti-bot"];
 
-export function validatePackage(pkgDir) {
+// Validate a published package from its parsed manifest + module source.
+// Returns null on success, or a human-readable error string on failure.
+export function validateManifest(manifest, moduleText) {
+  const errors = [];
+  if (!manifest || typeof manifest !== "object") return "manifest must be an object";
+  if (!manifest.authorizedUse || String(manifest.authorizedUse).trim().length < 4)
+    errors.push("manifest.authorizedUse must be a non-empty authorized-use statement");
+  const haystack = [
+    manifest.authorizedUse || "",
+    manifest.name || "",
+    manifest.author || "",
+    manifest.license || "",
+    moduleText || "",
+  ].join(" ").toLowerCase();
+  for (const term of DENY) if (haystack.includes(term)) errors.push(`forbidden term in submission: "${term}"`);
+  return errors.length ? errors.join("; ") : null;
+}
+
+// Legacy CLI / directory form. Returns { ok, errors }.
+export function validatePackage(pkgDirOrManifest, moduleText) {
+  if (typeof pkgDirOrManifest === "string") {
+    return validateDir(pkgDirOrManifest);
+  }
+  return validateManifest(pkgDirOrManifest, moduleText);
+}
+
+function validateDir(pkgDir) {
   const errors = [];
   let metadata, map;
   try {
