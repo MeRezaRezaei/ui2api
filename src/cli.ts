@@ -6,6 +6,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies } from "./runtime/browser.js";
+import { buildPackage } from "./registry/package.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -18,6 +19,8 @@ interface Flags {
   login?: boolean;
   cookies?: string;
   maxTasks?: number;
+  author?: string;
+  use?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -30,6 +33,8 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--login") f.login = true;
     if (argv[i] === "--cookies") f.cookies = argv[++i];
     if (argv[i] === "--max-tasks") f.maxTasks = Number(argv[++i]) || undefined;
+    if (argv[i] === "--author") f.author = argv[++i];
+    if (argv[i] === "--use") f.use = argv[++i];
   }
   return f;
 }
@@ -115,6 +120,14 @@ async function cmdServe(host: string, flags: Flags): Promise<void> {
   await (mod as any).runServer();
 }
 
+async function cmdPackage(host: string, flags: Flags): Promise<void> {
+  const root = sitesRoot(flags);
+  if (!flags.author || !flags.use)
+    throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
+  const dir = buildPackage(host, root, root, { author: flags.author, use: flags.use });
+  console.log(`Packaged ${host} -> ${dir}`);
+}
+
 async function cmdRemap(host: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
   const prevPath = mapPath(host, root);
@@ -151,12 +164,16 @@ async function main(): Promise<void> {
     case "remap":
       if (!arg) throw new Error("usage: ui2api remap <host> [--out DIR]");
       return cmdRemap(arg, flags);
+    case "package":
+      if (!arg) throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
+      return cmdPackage(arg, flags);
     default:
       console.log("UI2API — turn any website into MCP tools for AI\n");
       console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
       console.log("  ui2api generate <host>  [--out DIR]");
       console.log("  ui2api serve    <host>  [--out DIR]");
       console.log("  ui2api remap    <host>  [--out DIR]");
+      console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
       process.exit(cmd ? 1 : 0);
   }
 }
