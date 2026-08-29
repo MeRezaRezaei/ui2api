@@ -7,6 +7,7 @@ import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies } from "./runtime/browser.js";
 import { buildPackage } from "./registry/package.js";
+import { installPackage } from "./registry/install.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -21,6 +22,7 @@ interface Flags {
   maxTasks?: number;
   author?: string;
   use?: string;
+  registry?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -35,6 +37,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--max-tasks") f.maxTasks = Number(argv[++i]) || undefined;
     if (argv[i] === "--author") f.author = argv[++i];
     if (argv[i] === "--use") f.use = argv[++i];
+    if (argv[i] === "--registry") f.registry = argv[++i];
   }
   return f;
 }
@@ -128,6 +131,13 @@ async function cmdPackage(host: string, flags: Flags): Promise<void> {
   console.log(`Packaged ${host} -> ${dir}`);
 }
 
+async function cmdInstall(host: string, flags: Flags): Promise<void> {
+  const root = sitesRoot(flags);
+  const reg = flags.registry || "https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/main";
+  const dir = await installPackage(host, reg, root);
+  console.log(`Installed ${host} -> ${dir}; run: ui2api serve ${host}`);
+}
+
 async function cmdRemap(host: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
   const prevPath = mapPath(host, root);
@@ -167,6 +177,9 @@ async function main(): Promise<void> {
     case "package":
       if (!arg) throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
       return cmdPackage(arg, flags);
+    case "install":
+      if (!arg) throw new Error("usage: ui2api install <host> [--registry URL]");
+      return cmdInstall(arg, flags);
     default:
       console.log("UI2API — turn any website into MCP tools for AI\n");
       console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
@@ -174,6 +187,7 @@ async function main(): Promise<void> {
       console.log("  ui2api serve    <host>  [--out DIR]");
       console.log("  ui2api remap    <host>  [--out DIR]");
       console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
+      console.log("  ui2api install  <host>  [--registry URL]");
       process.exit(cmd ? 1 : 0);
   }
 }
