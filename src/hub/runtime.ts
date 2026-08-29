@@ -1,5 +1,5 @@
 import type { RegistryStore } from "./store.js";
-import { loadPluginModule } from "../plugin/loader.js";
+import { loadPluginModule, loadPluginFromMap } from "../plugin/loader.js";
 import { createContext } from "../plugin/context.js";
 import type { HubConfig, Ui2ApiContext, LoadedPlugin } from "../plugin/types.js";
 
@@ -26,7 +26,14 @@ export class HubRuntime {
       baseUrl: `https://${host}`,
       dataDir: this.opts.dataDir,
     });
-    const plugin = await loadPluginModule(pkg.module ?? "", context);
+    const moduleText = pkg.module ?? "";
+    // Action-map packages store the captured map as JSON; hand-written plugin
+    // packages store a JS module. Dispatch on which one we have.
+    let asMap: unknown = null;
+    try { const parsed = JSON.parse(moduleText); if (parsed && Array.isArray((parsed as any).actions)) asMap = parsed; } catch { /* not JSON → JS module */ }
+    const plugin: LoadedPlugin = asMap
+      ? loadPluginFromMap(asMap as any, config, `https://${host}`)
+      : await loadPluginModule(moduleText, context);
     const inst: ManagedInstance = { host, store: this.opts.store, plugin };
     this.instances.set(host, inst);
     return inst;

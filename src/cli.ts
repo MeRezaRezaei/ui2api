@@ -9,6 +9,7 @@ import { sessionPath, saveCookies } from "./runtime/browser.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
+import { pushToMirror } from "./hub/mirror.js";
 import { RegistryStore } from "./hub/store.js";
 import { HubRuntime } from "./hub/runtime.js";
 import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
@@ -30,6 +31,8 @@ interface Flags {
   dataDir?: string;
   port?: number;
   acp?: boolean;
+  mirror?: boolean;
+  registryRepo?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -48,6 +51,8 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--data-dir") f.dataDir = argv[++i];
     if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
     if (argv[i] === "--acp") f.acp = true;
+    if (argv[i] === "--mirror") f.mirror = true;
+    if (argv[i] === "--registry-repo") f.registryRepo = argv[++i];
   }
   return f;
 }
@@ -178,7 +183,8 @@ async function cmdHubRun(host: string, flags: Flags): Promise<void> {
   else await serveInstanceStdio(inst);
 }
 
-async function cmdHubPublish(host: string): Promise<void> {  if (!host) throw new Error("usage: ui2api hub publish <host> [--out DIR]");
+async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
+  if (!host) throw new Error("usage: ui2api hub publish <host> [--mirror] [--registry-repo URL]");
   const sitesRoot = resolve(process.cwd(), "sites");
   const pkgRoot = resolve(process.cwd(), "data");
   const meta = {
@@ -199,6 +205,9 @@ async function cmdHubPublish(host: string): Promise<void> {  if (!host) throw ne
   });
   if (!r.ok) { console.error("publish failed:", await r.text()); process.exit(1); }
   console.log(`[ui2api] published ${manifest.name}@${manifest.version}`);
+  if (flags.mirror) {
+    pushToMirror({ name: manifest.name, version: manifest.version, manifest: manifest as Record<string, unknown>, module: moduleText }, { repoUrl: flags.registryRepo });
+  }
 }
 
 async function main(): Promise<void> {
@@ -206,7 +215,7 @@ async function main(): Promise<void> {
   const flags = parseFlags(rest);
   switch (cmd) {
     case "hub": {
-      if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "");
+      if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "", flags);
       if (arg === "run") return cmdHubRun(rest[0] ?? "", flags);
       const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
       const token = process.env.UI2API_HUB_TOKEN ?? "";
@@ -242,7 +251,7 @@ async function main(): Promise<void> {
       console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
       console.log("  ui2api install  <host>  [--registry URL]");
       console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
-      console.log("  ui2api hub publish <host>  (build + PUT to hub)");
+      console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]  (serve a registered plugin)");
       process.exit(cmd ? 1 : 0);
   }

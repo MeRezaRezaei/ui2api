@@ -40,4 +40,23 @@ describe("HubRuntime", () => {
       await rt.closeInstance("c.test");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it("loads an action-map (JSON) package as generated tools", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-rt-map-"));
+    try {
+      const store = new RegistryStore(dir);
+      // `ui2api hub publish` stores the captured action-map as the module string.
+      const map = JSON.stringify({
+        host: "map.test", url: "https://map.test", capturedAt: "2026-08-29",
+        auth: { required: false },
+        actions: [{ name: "ping", description: "ping", execution: "live-js", parameters: [], recipe: { kind: "js-function", target: "window.ping", argsFrom: {} }, result: { mode: "return" }, verified: true }],
+      });
+      store.save("map.test", "1.0.0", { name: "map.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0" }, map);
+      const rt = new HubRuntime({ store, dataDir: dir });
+      const inst = await rt.getInstance("map.test");
+      const toolNames = inst.plugin.tools ? [...inst.plugin.tools.values()].map((t:any)=>t.def.name) : [];
+      assert.ok(toolNames.includes("ping"), `action-map tools: ${toolNames.join(",")}`);
+      await rt.closeInstance("map.test");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });

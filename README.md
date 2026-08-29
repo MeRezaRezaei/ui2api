@@ -140,3 +140,32 @@ and comply with applicable law. Use it at your own risk.
 
 - Documentation: [`docs/`](docs/)
 - License: [MIT](LICENSE)
+
+## Hub (hosted registry + plugin runtime)
+
+UI2API can run as a small self-hosted **registry + runtime**: you publish generated
+site packages, and the Hub serves them to your AI agents as managed MCP/ACP plugin
+instances — no per-site server to babysit.
+
+```bash
+# Start the registry + operator UI on http://localhost:8787
+UI2API_HUB_TOKEN=op-secret npx ui2api hub --port 8787
+
+# In another terminal: build a site's package and publish it to your hub
+UI2API_HUB_TOKEN=op-secret npx ui2api hub publish app.example.com
+
+# ...optionally also push it to the public community mirror (ui2api-registry)
+UI2API_HUB_TOKEN=op-secret npx ui2api hub publish app.example.com --mirror
+
+# Serve a registered package as a live MCP plugin your agent can call
+npx ui2api hub run app.example.com          # stdio MCP
+npx ui2api hub run app.example.com --acp    # ACP JSON-RPC on :8788
+```
+
+- **Storage** is the filesystem (`data/registry.json` + `data/pkgs/<name>/<version>.json`) — backup = copy the folder. No database.
+- **Publish** (`PUT /api/packages`) requires `UI2API_HUB_TOKEN` and runs the validator on every push; invalid packages are rejected.
+- **Trust** — packages start `unreviewed`; the operator marks them `reviewed` from the UI or API. The Hub's resolve path proxies (read-only) the `ui2api-registry` mirror on a miss.
+- **Plugins** are loaded through the allow-listed `Ui2ApiContext` — a plugin can only use the abilities the host grants (analyse, SSRF-guarded replay/fetch, page-scoped `call`, session, dom). It never receives `launchBrowser`, `generate`, or raw filesystem access.
+- **Management UI** at `GET /` lists packages with trust badges, a publish form, and a review button.
+
+Only publish and run sites you are authorized to automate. See [Responsibility](#responsibility).
