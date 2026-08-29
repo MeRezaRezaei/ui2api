@@ -23,4 +23,21 @@ describe("HubRuntime", () => {
       await rt.closeInstance("demo.test");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it("hands the plugin an allow-listed context", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-ctx-"));
+    try {
+      const store = new RegistryStore(dir);
+      const module = `export default { name:"c.test", setup(c){ /* receives only the allow-listed context */ } };`;
+      store.save("c.test", "1.0.0", { name: "c.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0" }, module);
+      const rt = new HubRuntime({ store, dataDir: dir });
+      const inst = await rt.getInstance("c.test");
+      const keys = Object.keys(inst.plugin.context ?? {});
+      for (const k of ["config", "logger", "registerTool", "analyse", "replay", "call", "session", "http", "dom"]) {
+        assert.ok(keys.includes(k), `missing context key ${k} in ${keys.join(",")}`);
+      }
+      assert.ok(!keys.includes("launchBrowser") && !keys.includes("generate"), "leaked privileged key");
+      await rt.closeInstance("c.test");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
