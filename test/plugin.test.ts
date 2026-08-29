@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createContext } from "../src/plugin/context.js";
 import { loadPluginFromMap, loadPluginModule } from "../src/plugin/loader.js";
+import { servePlugin } from "../src/plugin/serve.js";
 import { validateActionMap } from "../src/schema.js";
 import type { ActionMap } from "../src/types.js";
 
@@ -38,5 +39,14 @@ describe("loader", () => {
     await assert.rejects(() => loaded.tools.get("do_replay")!.handler({}, {} as any));
     const ctx = (await import("../src/plugin/context.js")).createContext({ dataDir: "/tmp" }, { baseUrl: "https://a.test" }) as any;
     await assert.rejects(() => ctx.replay({ url: "https://evil.test/x" }), /SSRF guard/);
+  });
+});
+
+describe("servePlugin", () => {
+  it("registers each loaded tool on the MCP server", async () => {
+    const loaded = await loadPluginModule(new URL("./fixtures/sample-plugin.ts", import.meta.url).pathname, { dataDir: "/tmp/x" }, "https://a.test");
+    const server = await servePlugin(loaded, { transport: "stdio", trust: true });
+    assert.ok(loaded.tools.has("echo"));
+    await server.close();
   });
 });

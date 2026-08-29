@@ -35,6 +35,7 @@ export interface Ui2ApiPlugin {
 }
 export interface LoadedPlugin {
   manifest?: PluginManifest;
+  context: Ui2ApiContext;
   tools: Map<string, { def: ToolDefinition; handler: ToolHandler }>;
   hooks: Ui2ApiPlugin["hooks"];
 }

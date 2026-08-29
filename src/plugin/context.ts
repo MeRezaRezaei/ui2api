@@ -35,7 +35,7 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
     },
     async call(target, args) {
       const p = await getPage();
-      return p.evaluate((t: string, a: unknown[]) => { let fn: any = window; for (const part of t.split(".")) fn = fn[part]; return fn(...a); }, target, args);
+      return p.evaluate((a: { target: string; args: unknown[] }) => { let fn: any = window; for (const part of a.target.split(".")) fn = fn[part]; return fn(...a.args); }, { target, args });
     },
     session: {
       async load(host) { try { return JSON.parse(readFileSync(sessionPath(dataDir, host), "utf8")); } catch { return []; } },

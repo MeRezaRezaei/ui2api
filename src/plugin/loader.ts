@@ -25,7 +25,7 @@ export function loadPluginFromMap(map: ActionMap, config: HubConfig, baseUrl: st
   const m = validateActionMap(map);
   const ctx = createContext(config, { baseUrl });
   for (const a of m.actions) { const { def, handler } = actionToTool(a); ctx.registerTool(def, handler); }
-  return { manifest: { name: m.host, version: "0.0.0-generated", author: "generated", description: m.host, authorizedUse: "generated", license: "MIT", ui2api: "0.1.0" }, tools: ctx.tools, hooks: {} };
+  return { manifest: { name: m.host, version: "0.0.0-generated", author: "generated", description: m.host, authorizedUse: "generated", license: "MIT", ui2api: "0.1.0" }, context: ctx, tools: ctx.tools, hooks: {} };
 }
 export async function loadPluginModule(path: string, config: HubConfig, baseUrl: string): Promise<LoadedPlugin> {
   const mod = await import(path);
@@ -33,5 +33,5 @@ export async function loadPluginModule(path: string, config: HubConfig, baseUrl:
   if (!plugin?.setup) throw new Error(`plugin at ${path} must export a default Ui2ApiPlugin with setup()`);
   const ctx = createContext(config, { baseUrl });
   plugin.setup(ctx);
-  return { manifest: plugin.manifest, tools: ctx.tools, hooks: plugin.hooks || {} };
+  return { manifest: plugin.manifest, context: ctx, tools: ctx.tools, hooks: plugin.hooks || {} };
 }
