@@ -9,6 +9,9 @@ import { sessionPath, saveCookies } from "./runtime/browser.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
+import { RegistryStore } from "./hub/store.js";
+import { HubRuntime } from "./hub/runtime.js";
+import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -26,6 +29,7 @@ interface Flags {
   registry?: string;
   dataDir?: string;
   port?: number;
+  acp?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -43,6 +47,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--registry") f.registry = argv[++i];
     if (argv[i] === "--data-dir") f.dataDir = argv[++i];
     if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
+    if (argv[i] === "--acp") f.acp = true;
   }
   return f;
 }
@@ -163,8 +168,17 @@ async function cmdRemap(host: string, flags: Flags): Promise<void> {
   if (removed.length) console.log("DEPRECATED (downstream-safe): " + removed.join(", "));
 }
 
-async function cmdHubPublish(host: string): Promise<void> {
-  if (!host) throw new Error("usage: ui2api hub publish <host> [--out DIR]");
+async function cmdHubRun(host: string, flags: Flags): Promise<void> {
+  if (!host) throw new Error("usage: ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]");
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const store = new RegistryStore(dataDir);
+  const rt = new HubRuntime({ store, dataDir });
+  const inst = await rt.getInstance(host);
+  if (flags.acp) await serveInstanceAcp(inst, Number(flags.port ?? 8788));
+  else await serveInstanceStdio(inst);
+}
+
+async function cmdHubPublish(host: string): Promise<void> {  if (!host) throw new Error("usage: ui2api hub publish <host> [--out DIR]");
   const sitesRoot = resolve(process.cwd(), "sites");
   const pkgRoot = resolve(process.cwd(), "data");
   const meta = {
@@ -193,6 +207,7 @@ async function main(): Promise<void> {
   switch (cmd) {
     case "hub": {
       if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "");
+      if (arg === "run") return cmdHubRun(rest[0] ?? "", flags);
       const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
       const token = process.env.UI2API_HUB_TOKEN ?? "";
       const port = Number(flags.port ?? process.env.PORT ?? 8787);
@@ -228,6 +243,7 @@ async function main(): Promise<void> {
       console.log("  ui2api install  <host>  [--registry URL]");
       console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
       console.log("  ui2api hub publish <host>  (build + PUT to hub)");
+      console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]  (serve a registered plugin)");
       process.exit(cmd ? 1 : 0);
   }
 }
