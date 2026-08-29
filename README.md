@@ -68,24 +68,37 @@ returns the result — no brittle screen-scraping.
 
 ## Quick start
 
-```bash
-npm i -g ui2api
+> **ui2api is not published to npm yet** — install from source:
 
-# 1. Analyze a site once
-npx ui2api analyse https://app.example.com --llm
+```bash
+git clone https://github.com/MeRezaRezaei/ui2api.git
+cd ui2api
+npm install
+npx playwright install chromium   # one-time browser download
+```
+
+The CLI runs via `tsx` (no global install needed):
+
+```bash
+# 1. Analyze a site once  (drop --llm to run fully offline)
+npx tsx src/cli.ts analyse https://app.example.com --llm
 
 # 2. Generate a per-site MCP server
-npx ui2api generate app.example.com
+npx tsx src/cli.ts generate app.example.com
 
 # 3. Serve it — your AI agent now calls the site as tools
-npx ui2api serve app.example.com
+npx tsx src/cli.ts serve app.example.com
 ```
 
 Then connect any MCP/ACP client to the generated server and call tools like
 `send_prompt`. Re-run `analyse`/`generate` when the site changes.
 
+**Validate your install without owning a site** — these run against a local
+fixture and print `INTEGRATION OK` / `X tests … pass`:
+
 ```bash
-npm test   # runs the integration test against the fixture SPA
+npm run test:unit   # 22 unit tests
+npm test            # full integration test (needs the chromium browser above)
 ```
 
 ## How it works
