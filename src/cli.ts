@@ -12,6 +12,7 @@ interface Flags {
   root?: string;
   out?: string;
   llm?: boolean;
+  trust?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -20,6 +21,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--root") f.root = argv[++i];
     if (argv[i] === "--out") f.out = argv[++i];
     if (argv[i] === "--llm") f.llm = true;
+    if (argv[i] === "--trust") f.trust = true;
   }
   return f;
 }
@@ -53,6 +55,10 @@ async function cmdGenerate(host: string, flags: Flags): Promise<void> {
 async function cmdServe(host: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
   const serverDir = resolve(root, host, "server");
+  const mapPath = resolve(serverDir, "action-map.json");
+  if (!existsSync(mapPath)) throw new Error("No generated server for " + host + ". Run generate first.");
+  const map = validateActionMap(JSON.parse(readFileSync(mapPath, "utf8")));
+  if (!map.trusted && !flags.trust) throw new Error("action-map is untrusted — review it and re-run with --trust");
   const mod = await import(pathToFileURL(resolve(serverDir, "index.ts")).href);
   await (mod as any).runServer();
 }

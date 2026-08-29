@@ -93,8 +93,9 @@ export function generate(
     // keep the analyzed map as source of truth; copy into server dir
     copyFileSync(mapSrc, resolve(serverDir, "action-map.json"));
   } else {
-    writeFileSync(mapSrc, JSON.stringify(map, null, 2));
-    writeFileSync(resolve(serverDir, "action-map.json"), JSON.stringify(map, null, 2));
+    const generated: ActionMap = { ...map, trusted: false };
+    writeFileSync(mapSrc, JSON.stringify(generated, null, 2));
+    writeFileSync(resolve(serverDir, "action-map.json"), JSON.stringify(generated, null, 2));
   }
   return serverDir;
 }

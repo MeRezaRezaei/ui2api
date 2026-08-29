@@ -26,5 +26,6 @@ export function validateActionMap(map: any): ActionMap {
     if (a.result?.mode !== "return" && a.result?.mode !== "dom")
       err("result.mode must be return|dom");
   }
+  map.trusted = !!map.trusted;
   return map as ActionMap;
 }

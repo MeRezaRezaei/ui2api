@@ -36,6 +36,7 @@ export interface ActionMap {
   host: string;
   url: string;
   capturedAt: string;
+  trusted?: boolean;
   auth: { required: boolean; method?: string };
   actions: Action[];
 }
