@@ -1,24 +1,16 @@
-import { SRC_DIR } from "./generate.js";
-
-// Returns the source of a minimal stdio ACP (Agent Client Protocol) server as a
-// string. It speaks JSON-RPC over stdin/stdout, delegates tool execution to the
-// shared BrowserSession runtime, and mirrors the MCP template's runtime imports
-// via the absolute SRC_DIR so generated servers run under tsx.
-export function acpServerTemplate(root: string): string {
-  return `import { readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BrowserSession } from "${SRC_DIR}/runtime/browser-session.ts";
-import type { ActionMap, Action } from "${SRC_DIR}/types.ts";
+import { BrowserSession } from "/home/me/Documents/projects/ui2api/src/runtime/browser-session.ts";
+import type { ActionMap, Action } from "/home/me/Documents/projects/ui2api/src/types.ts";
 
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8")) as ActionMap;
-const SITES_ROOT = ${JSON.stringify(root)};
-const session = new BrowserSession(map, SITES_ROOT);
+const session = new BrowserSession(map);
 
 function sanitize(v: unknown): string {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-    return s.length > 8000 ? s.slice(0, 8000) + "\\u2026" : s;
+    return s.length > 8000 ? s.slice(0, 8000) + "\u2026" : s;
   } catch (e) {
     return String(v);
   }
@@ -81,7 +73,7 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   buf += chunk;
   let idx: number;
-  while ((idx = buf.indexOf("\\n")) >= 0) {
+  while ((idx = buf.indexOf("\n")) >= 0) {
     const line = buf.slice(0, idx).trim();
     buf = buf.slice(idx + 1);
     if (!line) continue;
@@ -94,16 +86,13 @@ process.stdin.on("data", (chunk) => {
     handle(msg)
       .then((result) => {
         const out = JSON.stringify({ jsonrpc: "2.0", id: msg.id ?? null, result });
-        process.stdout.write(out + "\\n");
+        process.stdout.write(out + "\n");
       })
       .catch((e) => {
         const out = JSON.stringify({ jsonrpc: "2.0", id: msg.id ?? null, error: { message: String(e) } });
-        process.stdout.write(out + "\\n");
+        process.stdout.write(out + "\n");
       });
   }
 });
 
 console.error("[ui2api] acp server for " + map.host + " ready, " + map.actions.length + " tools (browser starts on first call_tool)");
-`;
-
-}

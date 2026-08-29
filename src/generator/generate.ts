@@ -10,7 +10,7 @@ import { skillTemplate, skillLoaderTemplate } from "./skill-template.js";
 // shared runtime/types under tsx.
 export const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-function serverTemplate(): string {
+function serverTemplate(root: string): string {
   return `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -21,7 +21,8 @@ import type { ActionMap, Action } from "${SRC_DIR}/types.ts";
 
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8")) as ActionMap;
-const session = new BrowserSession(map);
+const SITES_ROOT = ${JSON.stringify(root)};
+const session = new BrowserSession(map, SITES_ROOT);
 
 function sanitize(v: unknown): string {
   try {
@@ -80,9 +81,9 @@ export function generate(
   const root = outDir || resolve(SRC_DIR, "..", "sites", map.host);
   const serverDir = resolve(root, "server");
   mkdirSync(serverDir, { recursive: true });
-  writeFileSync(resolve(serverDir, "index.ts"), serverTemplate());
+  writeFileSync(resolve(serverDir, "index.ts"), serverTemplate(root));
   if (target === "acp") {
-    writeFileSync(resolve(serverDir, "acp.ts"), acpServerTemplate());
+    writeFileSync(resolve(serverDir, "acp.ts"), acpServerTemplate(root));
   }
   if (opts.skill) {
     writeFileSync(resolve(serverDir, "SKILL.md"), skillTemplate(map));

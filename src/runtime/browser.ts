@@ -39,10 +39,22 @@ export async function launchBrowser(retries = 3): Promise<Browser> {
 
 // --- M7: cookie session capture for cookie-gated sites ---
 
+// A host taken from an untrusted action-map must never be able to escape the
+// sites directory via path separators or "..". Allow only hostname-safe chars.
+export function sanitizeHost(host: string): string {
+  const cleaned = String(host || "").replace(/[^a-zA-Z0-9._:\-[\]]/g, "");
+  return cleaned || "unknown";
+}
+
+// Default sites root (where analyzed maps + sessions live).
+export function defaultSitesDir(): string {
+  return resolve(process.cwd(), "sites");
+}
+
 // Resolve the path where a site's session cookies are stored
 // (sites/<host>/.session/cookies.json). `outDir` is the sites root.
 export function sessionPath(outDir: string, host: string): string {
-  return resolve(outDir, host, ".session", "cookies.json");
+  return resolve(outDir, sanitizeHost(host), ".session", "cookies.json");
 }
 
 // Persist cookies (array of Playwright cookie objects) to disk. Creates the

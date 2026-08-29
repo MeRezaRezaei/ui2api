@@ -74,7 +74,7 @@ export async function buildActionMap(
       execution,
       parameters,
       recipe: {
-        kind: "js-function",
+        kind: "dom-interaction",
         target: di.selector,
         argsFrom: Object.fromEntries(parameters.map((p) => [p.name, p.name])),
         network,

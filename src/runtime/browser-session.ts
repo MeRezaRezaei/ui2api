@@ -1,6 +1,6 @@
 import { type Browser, type BrowserContext, type Page } from "playwright";
 import type { ActionMap, Action } from "../types.js";
-import { launchBrowser } from "./browser.js";
+import { launchBrowser, sessionPath, defaultSitesDir } from "./browser.js";
 
 // Long-lived browser session per site. Loads the URL, keeps it authenticated,
 // and executes a generated tool's recipe — either by calling the real in-page
@@ -11,9 +11,11 @@ export class BrowserSession {
   private ctx!: BrowserContext;
   private page!: Page;
   private started = false;
+  private outDir: string;
 
-  constructor(map: ActionMap) {
+  constructor(map: ActionMap, outDir: string = defaultSitesDir()) {
     this.map = map;
+    this.outDir = outDir;
   }
 
   async start(): Promise<void> {
@@ -54,10 +56,7 @@ export class BrowserSession {
     // Session cookies are stored at sites/<host>/.session/cookies.json (gitignored).
     try {
       const { readFileSync } = await import("node:fs");
-      const { fileURLToPath } = await import("node:url");
-      const path = fileURLToPath(
-        new URL(`../../sites/${this.map.host}/.session/cookies.json`, import.meta.url)
-      );
+      const path = sessionPath(this.outDir, this.map.host);
       const cookies = JSON.parse(readFileSync(path, "utf8"));
       if (Array.isArray(cookies)) await this.ctx.addCookies(cookies);
     } catch (e) {
@@ -67,19 +66,49 @@ export class BrowserSession {
 
   async executeRecipe(action: Action, args: Record<string, unknown>): Promise<unknown> {
     if (!this.started) await this.start();
+    // Recover from a browser that died between start() and this call.
+    if (!this.browser?.isConnected()) {
+      this.started = false;
+      await this.start();
+    }
     const argArray = action.parameters.map((p) => args[p.name]);
 
+    // SSRF guard: replay only targets that share the analyzed site's origin.
+    // This prevents a crafted/compromised action-map from making the browser
+    // issue requests (carrying the page's session cookies) to localhost or
+    // internal services.
     if (action.execution === "replay" && action.recipe.network) {
       const net = action.recipe.network;
       const resolved = net.url.startsWith("http")
         ? net.url
         : new URL(net.url, this.map.url).toString();
+      if (!sameOrigin(resolved, this.map.url)) {
+        throw new Error(
+          `SSRF guard: replay target ${resolved} is cross-origin to analyzed site ${this.map.url}`
+        );
+      }
       const resp = await this.page.request.fetch(resolved, {
         method: (net.method as any) || "GET",
         data: net.requestBody,
         headers: { "content-type": "application/json" },
       });
       return await resp.text();
+    }
+
+    // DOM-interaction actions (button clicks / form submits captured during
+    // analysis) are re-driven by selector on the live page.
+    if (action.recipe.kind === "dom-interaction") {
+      const sel = action.recipe.target;
+      try {
+        await this.page.locator(sel).first().click({ timeout: 5000 });
+      } catch {
+        // Fall back to a synthetic click if the locator API can't resolve it.
+        await this.page.evaluate((s: string) => {
+          const el = document.querySelector(s) as HTMLElement | null;
+          el?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        }, sel);
+      }
+      return "";
     }
 
     // DOM-extract mode: read a value off the page using a constrained,
@@ -121,6 +150,18 @@ export class BrowserSession {
   async stop(): Promise<void> {
     if (this.browser) await this.browser.close();
     this.started = false;
+  }
+}
+
+// Returns true only if `url` is an http(s) URL whose host matches `base`.
+// Used as an SSRF guard so replay never targets localhost / internal services.
+function sameOrigin(url: string, base: string): boolean {
+  try {
+    const u = new URL(url, base);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return u.host === new URL(base).host;
+  } catch {
+    return false;
   }
 }
 

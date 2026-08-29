@@ -1,0 +1,39 @@
+{
+  "host": "example.test",
+  "url": "https://example.test",
+  "capturedAt": "2026-08-29T08:44:56.426Z",
+  "auth": {
+    "required": false
+  },
+  "actions": [
+    {
+      "name": "do_thing",
+      "description": "do a thing",
+      "execution": "replay",
+      "parameters": [
+        {
+          "name": "x",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "recipe": {
+        "kind": "js-function",
+        "target": "window.App.doThing",
+        "argsFrom": {
+          "x": "x"
+        },
+        "network": {
+          "method": "POST",
+          "url": "/api/x",
+          "requestBody": "{}"
+        }
+      },
+      "result": {
+        "mode": "return"
+      },
+      "verified": true
+    }
+  ],
+  "trusted": false
+}

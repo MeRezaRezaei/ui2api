@@ -19,7 +19,7 @@ export interface Action {
   execution: ExecutionMode;
   parameters: ActionParam[];
   recipe: {
-    kind: "js-function";
+    kind: "js-function" | "dom-interaction";
     target: string;
     argsFrom: Record<string, string>;
     network?: NetworkInfo;
