@@ -1,0 +1,28 @@
+{
+  "name": "ui2api",
+  "version": "0.1.0",
+  "description": "Turn any website into MCP/ACP tools for AI — analyze a site's real action recipes and generate a per-site MCP server.",
+  "type": "module",
+  "bin": {
+    "ui2api": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "analyse": "tsx src/cli.ts analyse",
+    "generate": "tsx src/cli.ts generate",
+    "serve": "tsx src/cli.ts serve",
+    "remap": "tsx src/cli.ts remap",
+    "test": "tsx test/integration.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

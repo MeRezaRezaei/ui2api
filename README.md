@@ -37,8 +37,32 @@ URL ──▶ analyze (headless browser + mapper agent + call interception)
 
 ## Status
 
-🧪 Design stage. See [`docs/superpowers/specs/2026-08-29-ui2api-design.md`](docs/superpowers/specs/2026-08-29-ui2api-design.md).
-Implementation begins after the spec is reviewed.
+✅ Working MVP. The full pipeline is implemented and verified end-to-end
+(analyze → generate → serve → call a tool through the real MCP server over
+stdio) against a fixture SPA. See
+[`docs/superpowers/specs/2026-08-29-ui2api-design.md`](docs/superpowers/specs/2026-08-29-ui2api-design.md).
+
+## Quick start
+
+```bash
+npm install
+npx tsx src/cli.ts analyse https://your-site.example.com --root App
+npx tsx src/cli.ts generate your-site.example.com
+npx tsx src/cli.ts serve   your-site.example.com
+```
+
+Then connect any MCP client (or `mcpproxy`) to the generated server and call
+tools like `send_prompt`. When the site changes, re-run `analyse`/`generate`
+(`remap` prints a stable diff).
+
+```bash
+npm test   # end-to-end integration test against the fixture SPA
+```
+
+> The analyzer discovers an in-page API root (e.g. `window.App`) and captures
+> each method's real call. Pass `--root` to name the global explicitly. A
+> mapper-agent LLM hook is the intended path for naming/describing actions; the
+> current build uses deterministic heuristics so the pipeline runs fully offline.
 
 ## License
 
