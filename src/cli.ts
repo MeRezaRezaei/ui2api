@@ -1,9 +1,11 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createInterface } from "node:readline";
 import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
+import { sessionPath, saveCookies } from "./runtime/browser.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -13,6 +15,9 @@ interface Flags {
   out?: string;
   llm?: boolean;
   trust?: boolean;
+  login?: boolean;
+  cookies?: string;
+  maxTasks?: number;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -22,6 +27,9 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--out") f.out = argv[++i];
     if (argv[i] === "--llm") f.llm = true;
     if (argv[i] === "--trust") f.trust = true;
+    if (argv[i] === "--login") f.login = true;
+    if (argv[i] === "--cookies") f.cookies = argv[++i];
+    if (argv[i] === "--max-tasks") f.maxTasks = Number(argv[++i]) || undefined;
   }
   return f;
 }
@@ -36,12 +44,56 @@ function mapPath(host: string, root: string): string {
 
 async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
-  const map = await analyse(url, { root: flags.root, outDir: root, llm: flags.llm });
-  const host = map.host;
+  const host = new URL(url).host;
+
+  // M7: a supplied --cookies <file> is injected into the site's session path so
+  // analyse() can pick it up. We just persist it before analysis runs.
+  if (flags.cookies) {
+    const cookies = JSON.parse(readFileSync(flags.cookies, "utf8"));
+    saveCookies(sessionPath(root, host), cookies);
+    console.log(`Loaded cookies from ${flags.cookies} -> ${sessionPath(root, host)}`);
+  }
+
+  // M7: --login opens a headed browser for the user to authenticate manually,
+  // then saves the resulting cookies before normal (headless) analysis runs.
+  if (flags.login) {
+    const cookies = await doInteractiveLogin(url);
+    saveCookies(sessionPath(root, host), cookies);
+    console.log(`Saved session cookies -> ${sessionPath(root, host)}`);
+  }
+
+  const map = await analyse(url, {
+    root: flags.root,
+    outDir: root,
+    llm: flags.llm,
+    maxTasks: flags.maxTasks,
+  });
   mkdirSync(resolve(root, host), { recursive: true });
   writeFileSync(mapPath(host, root), JSON.stringify(map, null, 2));
   console.log(`Analyzed ${host}: ${map.actions.length} actions -> ${mapPath(host, root)}`);
   console.log("Run: ui2api generate " + host + (flags.out ? ` --out ${flags.out}` : ""));
+}
+
+// Launch a HEADED browser solely for the user to log in (M7). This is the ONLY
+// place we ever call chromium.launch with headless:false. Returns the cookies.
+async function doInteractiveLogin(url: string): Promise<unknown[]> {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: false, args: ["--no-sandbox"] });
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "load", timeout: 30000 });
+    console.log(`[ui2api] Login page opened. Sign in, then return here and press Enter.`);
+    await new Promise<void>((resolve) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl.question("Press Enter once logged in: ", () => {
+        rl.close();
+        resolve();
+      });
+    });
+    return await page.context().cookies();
+  } finally {
+    await browser.close();
+  }
 }
 
 async function cmdGenerate(host: string, flags: Flags): Promise<void> {
@@ -101,7 +153,7 @@ async function main(): Promise<void> {
       return cmdRemap(arg, flags);
     default:
       console.log("UI2API — turn any website into MCP tools for AI\n");
-      console.log("  ui2api analyse  <url>   [--root App] [--out DIR]");
+      console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
       console.log("  ui2api generate <host>  [--out DIR]");
       console.log("  ui2api serve    <host>  [--out DIR]");
       console.log("  ui2api remap    <host>  [--out DIR]");
