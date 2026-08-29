@@ -1,6 +1,7 @@
 import { type Browser, type BrowserContext, type Page } from "playwright";
 import type { ActionMap, Action } from "../types.js";
 import { launchBrowser, sessionPath, defaultSitesDir } from "./browser.js";
+import { sameOrigin } from "./ssrf.js";
 
 // Long-lived browser session per site. Loads the URL, keeps it authenticated,
 // and executes a generated tool's recipe — either by calling the real in-page
@@ -150,18 +151,6 @@ export class BrowserSession {
   async stop(): Promise<void> {
     if (this.browser) await this.browser.close();
     this.started = false;
-  }
-}
-
-// Returns true only if `url` is an http(s) URL whose host matches `base`.
-// Used as an SSRF guard so replay never targets localhost / internal services.
-function sameOrigin(url: string, base: string): boolean {
-  try {
-    const u = new URL(url, base);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    return u.host === new URL(base).host;
-  } catch {
-    return false;
   }
 }
 
