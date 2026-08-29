@@ -97,6 +97,10 @@ async function main(): Promise<void> {
     const stext = (sres.content as any[]).map((c) => c.text).join("");
     assert.ok(stext.includes("{}"), "search tool replay unexpected: " + stext);
 
+    // Form-submit action (js-function target) should be present.
+    const formAction = map.actions.find((a) => /^(query_go|go|query)$/.test(a.name));
+    assert.ok(formAction, "form submit action missing");
+
     console.log("INTEGRATION OK — send_prompt:", text, "| search(replay):", stext);
 
     await client.close();

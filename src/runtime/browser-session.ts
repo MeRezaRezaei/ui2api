@@ -82,19 +82,29 @@ export class BrowserSession {
       return await resp.text();
     }
 
-    // live-js: call the real in-page function.
+    // DOM-extract mode: read a value off the page using a constrained,
+    // eval-free extractor. `result.extract` is one of:
+    //   "text <selector>"
+    //   "attr <selector> <attr>"
+    //   "json <selector>"
     if (action.result.mode === "dom" && action.result.extract) {
-      return this.page.evaluate(
-        (a: any) => {
-          const parts = a.target.split(".");
-          let fn: any = window;
-          for (const part of parts) fn = fn[part];
-          fn(...a.args);
-          // eslint-disable-next-line no-eval
-          return (0, eval)(a.extract);
-        },
-        { target: action.recipe.target, args: argArray, extract: action.result.extract }
-      );
+      const parsed = parseExtract(action.result.extract);
+      if (parsed) {
+        const { sel, kind, arg } = parsed;
+        return this.page.evaluate(
+          ({ sel, kind, arg }: { sel: string; kind: string; arg: string | null }) => {
+            const el = document.querySelector(sel) as HTMLElement | null;
+            if (!el) return null;
+            if (kind === "text" || kind === "json") return el.innerText;
+            if (kind === "attr") return el.getAttribute(arg as string);
+            return null;
+          },
+          { sel, kind, arg }
+        );
+      }
+      // Unsupported extract syntax — fall back to a safe page-text snapshot.
+      const fallback = await this.page.evaluate(() => document.body.innerText);
+      return fallback.length > 8000 ? fallback.slice(0, 8000) : fallback;
     }
 
     return this.page.evaluate(
@@ -112,4 +122,18 @@ export class BrowserSession {
     if (this.browser) await this.browser.close();
     this.started = false;
   }
+}
+
+// Parse a constrained DOM-extract expression. Returns null if the syntax is not
+// one of the supported forms (caller falls back to a safe page-text snapshot).
+function parseExtract(
+  extract: string
+): { sel: string; kind: string; arg: string | null } | null {
+  const m = extract.trim().match(/^(text|attr|json)\s+(\S+)(?:\s+(\S+))?$/);
+  if (!m) return null;
+  const kind = m[1];
+  const sel = m[2];
+  const arg = m[3] ?? null;
+  if (kind === "attr" && arg === null) return null;
+  return { sel, kind, arg };
 }
