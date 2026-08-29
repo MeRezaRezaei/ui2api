@@ -1,4 +1,6 @@
 import { chromium, type Browser } from "playwright";
+import { resolve, dirname } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // Hardened launch args that keep headless Chromium stable across environments
 // (containers/CI especially), where the default launch can crash intermittently.
@@ -33,4 +35,29 @@ export async function launchBrowser(retries = 3): Promise<Browser> {
   throw lastErr instanceof Error
     ? lastErr
     : new Error("failed to launch browser");
+}
+
+// --- M7: cookie session capture for cookie-gated sites ---
+
+// Resolve the path where a site's session cookies are stored
+// (sites/<host>/.session/cookies.json). `outDir` is the sites root.
+export function sessionPath(outDir: string, host: string): string {
+  return resolve(outDir, host, ".session", "cookies.json");
+}
+
+// Persist cookies (array of Playwright cookie objects) to disk. Creates the
+// .session directory as needed. Cookies are gitignored by convention.
+export function saveCookies(path: string, cookies: unknown[]): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(cookies, null, 2));
+}
+
+// Load previously saved cookies, or [] if none exist / unreadable. Never throws.
+export function loadCookies(path: string): any[] {
+  try {
+    if (!existsSync(path)) return [];
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    return [];
+  }
 }
