@@ -102,11 +102,7 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-session.start()
-  .then(() => console.error("[ui2api] acp server for " + map.host + " ready, " + map.actions.length + " tools"))
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
+console.error("[ui2api] acp server for " + map.host + " ready, " + map.actions.length + " tools (browser starts on first call_tool)");
 `;
+
 }
