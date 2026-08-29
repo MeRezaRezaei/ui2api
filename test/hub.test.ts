@@ -56,3 +56,25 @@ describe("Hub API", () => {
     } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("Hub uplink", () => {
+  it("proxies and caches from registryUrl on miss", async () => {
+    const fake = createServer((_q, r) => {
+      r.writeHead(200, { "content-type": "application/json" });
+      r.end(JSON.stringify({ manifest: { name: "up.test", version: "2.0.0", author: "u", authorizedUse: "own", license: "MIT", ui2api: "0.1.0" }, module: "export default {}" }));
+    });
+    fake.listen(0);
+    const base = `http://127.0.0.1:${(fake.address() as any).port}`;
+    const dir = mkdtempSync(join(tmpdir(), "u2a-up-"));
+    const store = new RegistryStore(dir);
+    const router = createHubRouter(store, { token: "t", registryUrl: base });
+    const srv = createServer(router); srv.listen(0);
+    const h = `http://127.0.0.1:${(srv.address() as any).port}`;
+    try {
+      const g = await fetch(`${h}/api/packages/up.test`);
+      const j = await g.json() as any;
+      assert.equal(j.manifest.version, "2.0.0");
+      assert.ok(store.get("up.test", "2.0.0"), "should be cached locally");
+    } finally { srv.close(); fake.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+});
