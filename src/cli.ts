@@ -212,7 +212,9 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
 
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
-  const flags = parseFlags(rest);
+  // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
+  // even though `--port` would otherwise be swallowed into `arg`.
+  const flags = parseFlags(process.argv.slice(2));
   switch (cmd) {
     case "hub": {
       if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "", flags);
