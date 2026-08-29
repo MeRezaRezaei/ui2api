@@ -1,11 +1,5 @@
 import type { ActionMap, Action, MethodCall, ActionParam, DomInteraction, NetworkInfo } from "../types.js";
-
-function toSnake(s: string): string {
-  return s
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s-]+/g, "_")
-    .toLowerCase();
-}
+import { llmDescribe } from "./llm.js";
 
 function humanize(s: string): string {
   return s.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
@@ -18,19 +12,13 @@ function inferType(v: unknown): "string" | "number" | "boolean" | "object" {
   return "string";
 }
 
-// Optional LLM hook: if UI2API_LLM_BASE_URL + UI2API_LLM_KEY are set, the mapper
-// can call them to name/describe actions more naturally. Falls back to heuristics.
-async function describe(method: string, params: ActionParam[]): Promise<string> {
-  const argList = params.map((p) => p.name).join(", ");
-  return `Invoke \`${method}\` on the site${argList ? ` with ${argList}` : ""}.`;
-}
-
 export async function buildActionMap(
   host: string,
   url: string,
   methodCalls: MethodCall[],
   domActions: DomInteraction[],
-  authRequired: boolean
+  authRequired: boolean,
+  llm = false
 ): Promise<ActionMap> {
   const actions: Action[] = [];
   for (const mc of methodCalls) {
@@ -47,9 +35,12 @@ export async function buildActionMap(
           requestBody: mc.networkCapture.requestBody,
         }
       : undefined;
+    const purpose = mc.method;
+    const summary = `js-function ${mc.target}(${mc.params.join(",")})`;
+    const { name, description } = await llmDescribe(purpose, summary);
     const action: Action = {
-      name: toSnake(mc.method),
-      description: await describe(mc.method, parameters),
+      name,
+      description,
       execution: "live-js",
       parameters,
       recipe: {
@@ -74,10 +65,12 @@ export async function buildActionMap(
     // A pure network call with no live-JS need → replay; otherwise re-drive the DOM.
     const execution: "replay" | "live-js" = di.network ? "replay" : "live-js";
     const network: NetworkInfo | undefined = di.network || undefined;
-    const nameBase = toSnake((di.label || di.selector || di.domKind).replace(/[^a-zA-Z0-9]+/g, " "));
+    const purpose = di.label || di.selector;
+    const summary = `dom ${di.domKind} ${di.selector}`;
+    const { name, description } = await llmDescribe(purpose, summary);
     const action: Action = {
-      name: nameBase || (di.domKind === "submit" ? "submit_form" : "click_element"),
-      description: await describe(di.label || di.selector, parameters),
+      name,
+      description,
       execution,
       parameters,
       recipe: {

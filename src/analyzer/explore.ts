@@ -7,6 +7,7 @@ import { buildActionMap } from "../mapper/build.js";
 export interface AnalyseOptions {
   root?: string; // explicit window root to wrap, e.g. "App"
   outDir?: string; // where sites/<host>/ is written
+  llm?: boolean; // use LLM for action naming when enabled
 }
 
 function toSnake(s: string): string {
@@ -246,7 +247,7 @@ export async function analyse(url: string, opts: AnalyseOptions = {}): Promise<A
     });
 
     const domActions = await exploreDom(page, url);
-    const map = await buildActionMap(host, url, methodCalls, domActions, authRequired);
+    const map = await buildActionMap(host, url, methodCalls, domActions, authRequired, opts.llm);
     if (crashed) throw new Error("browser crashed during analysis");
     return map;
   } catch (e) {

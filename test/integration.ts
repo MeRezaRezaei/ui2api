@@ -61,6 +61,8 @@ async function main(): Promise<void> {
     assert.ok(search, "DOM-discovered 'search' action missing (analyzer should find button-driven actions)");
     assert.strictEqual(search.execution, "replay", "search should be a replay action");
 
+    for (const a of map.actions) assert.match(a.name, /^[a-z][a-z0-9_]*$/);
+
     // 2. Generate the per-site MCP server.
     const serverDir = generate(map, tmp);
     const serverFile = resolve(serverDir, "index.ts");

@@ -11,6 +11,7 @@ const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
 interface Flags {
   root?: string;
   out?: string;
+  llm?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -18,6 +19,7 @@ function parseFlags(argv: string[]): Flags {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--root") f.root = argv[++i];
     if (argv[i] === "--out") f.out = argv[++i];
+    if (argv[i] === "--llm") f.llm = true;
   }
   return f;
 }
@@ -32,7 +34,7 @@ function mapPath(host: string, root: string): string {
 
 async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
-  const map = await analyse(url, { root: flags.root, outDir: root });
+  const map = await analyse(url, { root: flags.root, outDir: root, llm: flags.llm });
   const host = map.host;
   mkdirSync(resolve(root, host), { recursive: true });
   writeFileSync(mapPath(host, root), JSON.stringify(map, null, 2));
