@@ -22,7 +22,12 @@ export interface Ui2ApiContext {
   call(target: string, args: unknown[]): Promise<unknown>;
   session: { load(host: string): Promise<unknown[]>; save(host: string, cookies: unknown[]): Promise<void> };
   http: { fetch(url: string, init?: RequestInit): Promise<Response> };
-  dom: { click(selector: string): Promise<void>; extract(expr: string): Promise<unknown> };
+  dom: {
+    click(selector: string): Promise<void>;
+    type(selector: string, text: string): Promise<void>;
+    waitFor(selector: string, timeoutMs?: number): Promise<void>;
+    extract(expr: string): Promise<unknown>;
+  };
 }
 export interface Ui2ApiPlugin {
   name: string; version: string; manifest: PluginManifest;

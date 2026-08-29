@@ -44,6 +44,8 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
     http: { async fetch(url, init) { if (!sameOrigin(url, deps.baseUrl)) throw new Error(`SSRF guard: http ${url} cross-origin`); return fetch(url, init); } },
     dom: {
       async click(sel) { await (await getPage()).locator(sel).first().click({ timeout: 5000 }); },
+      async type(sel, text) { await (await getPage()).locator(sel).first().fill(text); },
+      async waitFor(sel, timeoutMs = 5000) { await (await getPage()).locator(sel).first().waitFor({ timeout: timeoutMs }); },
       async extract(expr) {
         const p = await getPage();
         const m = expr.trim().match(/^(text|attr|json)\s+(\S+)(?:\s+(\S+))?$/);

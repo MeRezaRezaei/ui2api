@@ -14,6 +14,8 @@ import { pushToMirror } from "./hub/mirror.js";
 import { RegistryStore } from "./hub/store.js";
 import { HubRuntime } from "./hub/runtime.js";
 import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
+import { servePlugin } from "./plugin/serve.js";
+import { loadPluginModule } from "./plugin/loader.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -34,6 +36,7 @@ interface Flags {
   acp?: boolean;
   mirror?: boolean;
   registryRepo?: string;
+  baseUrl?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -54,6 +57,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--acp") f.acp = true;
     if (argv[i] === "--mirror") f.mirror = true;
     if (argv[i] === "--registry-repo") f.registryRepo = argv[++i];
+    if (argv[i] === "--base-url") f.baseUrl = argv[++i];
   }
   return f;
 }
@@ -211,6 +215,15 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
   }
 }
 
+async function cmdPluginServe(modulePath: string, flags: Flags): Promise<void> {
+  if (!modulePath) throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR]");
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const baseUrl = flags.baseUrl ?? "https://example.com";
+  const loaded = await loadPluginModule(resolve(modulePath), { dataDir }, baseUrl);
+  console.log(`[ui2api] serving plugin ${loaded.manifest?.name ?? modulePath} (${loaded.tools.size} tools) over MCP`);
+  await servePlugin(loaded, { trust: true });
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
@@ -245,6 +258,10 @@ async function main(): Promise<void> {
     case "install":
       if (!arg) throw new Error("usage: ui2api install <host> [--registry URL]");
       return cmdInstall(arg, flags);
+    case "plugin": {
+      if (arg === "serve") return cmdPluginServe(rest[0] ?? "", flags);
+      throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR]");
+    }
     default:
       console.log("UI2API — turn any website into MCP tools for AI\n");
       console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
@@ -256,6 +273,7 @@ async function main(): Promise<void> {
       console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
       console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]  (serve a registered plugin)");
+      console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
       process.exit(cmd ? 1 : 0);
   }
 }
