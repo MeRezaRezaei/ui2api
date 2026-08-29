@@ -25,3 +25,29 @@ window.App = {
     return "cleared";
   },
 };
+
+// DOM-driven actions (no window.<root> required) so the analyzer can discover
+// actions by interacting with the page, not just by reading window.App.
+document.getElementById("searchBtn")?.addEventListener("click", async () => {
+  try {
+    await fetch("/api/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ q: "test query" }),
+    });
+  } catch (e) {}
+});
+
+document.getElementById("qform")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = new FormData(e.target).get("q") || "";
+  const el = document.getElementById("reply");
+  if (el) el.innerText = "Queried: " + q;
+  try {
+    await fetch("/api/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ q }),
+    });
+  } catch (e) {}
+});

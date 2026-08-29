@@ -64,5 +64,48 @@ export const INSTRUMENT_SRC = `
       }
     });
   };
+
+  // --- DOM-interaction capture (works on sites with NO window.<root>) ---
+  function selectorFor(el) {
+    if (!el || !el.tagName) return null;
+    var parts = [];
+    var e = el;
+    for (var i = 0; i < 5 && e && e.nodeType === 1; i++) {
+      var s = e.tagName.toLowerCase();
+      if (e.id) s += "#" + e.id;
+      else if (e.className && typeof e.className === "string" && e.className.trim())
+        s += "." + e.className.trim().split(/\s+/)[0];
+      parts.unshift(s);
+      e = e.parentElement;
+    }
+    return parts.join(">");
+  }
+  var _clearTimer = null;
+  function markDom(kind, el, extra) {
+    var callId = ++buf.seq; buf.current = callId;
+    var label = "";
+    try {
+      label = (el && (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("title") || "")).slice(0, 80);
+    } catch (e) {}
+    rec(Object.assign({ kind: "dom-event", domKind: kind, selector: selectorFor(el), label: label, callId: callId }, extra || {}));
+    if (_clearTimer) clearTimeout(_clearTimer);
+    // Keep the call id "open" briefly so network calls fired by the interaction
+    // are correlated to it even if they happen a few ticks later.
+    _clearTimer = setTimeout(function () { buf.current = null; }, 200);
+  }
+  document.addEventListener("click", function (e) { markDom("click", e.target); }, true);
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    var fields = [];
+    try {
+      var nodes = form.querySelectorAll("input[name],select[name],textarea[name]");
+      for (var i = 0; i < nodes.length; i++) if (nodes[i].name) fields.push(nodes[i].name);
+    } catch (err) {}
+    markDom("submit", form, { fields: fields });
+  }, true);
+  document.addEventListener("input", function (e) {
+    var v = e.target && e.target.value ? String(e.target.value).slice(0, 80) : "";
+    markDom("input", e.target, { value: v });
+  }, true);
 })();
 `;

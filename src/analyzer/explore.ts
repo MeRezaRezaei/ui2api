@@ -1,6 +1,7 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { type Browser, type Page } from "playwright";
 import { INSTRUMENT_SRC } from "./instrument.js";
-import type { ActionMap, MethodCall } from "../types.js";
+import { launchBrowser } from "../runtime/browser.js";
+import type { ActionMap, MethodCall, DomInteraction } from "../types.js";
 import { buildActionMap } from "../mapper/build.js";
 
 export interface AnalyseOptions {
@@ -70,13 +71,111 @@ async function discoverRoots(page: Page, explicit?: string): Promise<string[]> {
   });
 }
 
+// Heuristic DOM exploration: discovers actions on sites that do NOT expose a
+// window.<root> by clicking/submitting interactive controls and recording the
+// network calls each interaction triggers (correlated by call id in the page).
+async function exploreDom(page: Page, url: string): Promise<DomInteraction[]> {
+  const els = await page.evaluate(() => {
+    const out: { selector: string; label: string; domKind: string; fields: string[] }[] = [];
+    const nodes = document.querySelectorAll(
+      'button:not([type="submit"]), [role="button"], input[type="button"], form'
+    );
+    for (const el of Array.from(nodes)) {
+      const selector = ((node: any): string => {
+        if (!node || !node.tagName) return "";
+        const parts: string[] = [];
+        let e = node;
+        for (let i = 0; i < 5 && e && e.nodeType === 1; i++) {
+          let s = e.tagName.toLowerCase();
+          if (e.id) s += "#" + e.id;
+          else if (e.className && typeof e.className === "string" && e.className.trim())
+            s += "." + e.className.trim().split(/\s+/)[0];
+          parts.unshift(s);
+          e = e.parentElement;
+        }
+        return parts.join(">");
+      })(el);
+      const label = (
+        el.getAttribute("aria-label") ||
+        el.getAttribute("title") ||
+        (el.textContent || "").trim() ||
+        (el as any).id ||
+        ""
+      ).slice(0, 80);
+      const fields: string[] = [];
+      if ((el as any).tagName === "FORM") {
+        for (const n of Array.from((el as any).querySelectorAll("input[name],select[name],textarea[name]"))) {
+          const nm = (n as any).name;
+          if (nm) fields.push(nm);
+        }
+      }
+      out.push({ selector, label, domKind: (el as any).tagName === "FORM" ? "submit" : "click", fields });
+    }
+    return out;
+  });
+
+  const interactions: DomInteraction[] = [];
+  for (const el of els) {
+    if (!el.selector) continue;
+    try {
+      if (el.domKind === "submit") {
+        await page.evaluate((s: string) => {
+          const form = document.querySelector(s) as any;
+          if (!form) return;
+          for (const inp of Array.from(form.querySelectorAll("input,textarea,select")) as any[]) {
+            if (inp.type === "submit" || inp.type === "button") continue;
+            if (inp.name || inp.id) {
+              const nm = inp.name || inp.id;
+              inp.value = /q|query|search|prompt|text|input|message/i.test(nm) ? "test query" : "1";
+            }
+          }
+          if (form.requestSubmit) form.requestSubmit();
+          else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+        }, el.selector);
+      } else {
+        await page.click(el.selector);
+      }
+    } catch (e) {
+      continue;
+    }
+    await page.waitForTimeout(250);
+    const caps: any[] = await page.evaluate(() => (window as any).__ui2api.captures.slice());
+    const domEvt = [...caps].reverse().find((c) => c.kind === "dom-event" && c.selector === el.selector);
+    if (!domEvt) continue;
+    const net = caps.find((c) => c.kind === "network" && c.callId === domEvt.callId && !c.error);
+    interactions.push({
+      selector: el.selector,
+      label: el.label,
+      domKind: el.domKind as "click" | "submit",
+      fields: el.fields,
+      network: net ? { method: net.method || "GET", url: net.url, requestBody: net.requestBody } : null,
+      verified: !!net,
+    });
+    // If a click navigated away, return to the analyzed URL so later interactions run.
+    if (el.domKind !== "submit" && page.url() !== url) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+      } catch (e) {}
+    }
+  }
+  return interactions;
+}
+
+const MAX_ATTEMPTS = 3;
+
 export async function analyse(url: string, opts: AnalyseOptions = {}): Promise<ActionMap> {
-  const browser: Browser = await chromium.launch({ args: ["--no-sandbox"] });
-  try {
-    const page = await browser.newPage();
-    await page.addInitScript(INSTRUMENT_SRC);
-    await page.goto(url, { waitUntil: "load", timeout: 30000 });
-    await page.waitForTimeout(400);
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const browser: Browser = await launchBrowser();
+    let crashed = false;
+    browser.on("disconnected", () => {
+      crashed = true;
+    });
+    try {
+      const page = await browser.newPage();
+      await page.addInitScript(INSTRUMENT_SRC);
+      await page.goto(url, { waitUntil: "load", timeout: 30000 });
+      await page.waitForTimeout(400);
 
     const roots = await discoverRoots(page, opts.root);
     const methodCalls: MethodCall[] = [];
@@ -146,9 +245,22 @@ export async function analyse(url: string, opts: AnalyseOptions = {}): Promise<A
       return !!pwd;
     });
 
-    const map = await buildActionMap(host, url, methodCalls, authRequired);
+    const domActions = await exploreDom(page, url);
+    const map = await buildActionMap(host, url, methodCalls, domActions, authRequired);
+    if (crashed) throw new Error("browser crashed during analysis");
     return map;
+  } catch (e) {
+    lastErr = e;
+    if (attempt < MAX_ATTEMPTS) {
+      console.error(
+        `[ui2api] analyze attempt ${attempt} failed (${e instanceof Error ? e.message : e}); retrying...`
+      );
+      continue;
+    }
+    throw e;
   } finally {
-    await browser.close();
+    if (!crashed) await browser.close().catch(() => {});
   }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("analyze failed");
 }

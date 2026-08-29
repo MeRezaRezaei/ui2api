@@ -49,3 +49,12 @@ export interface MethodCall {
   jsReturnCapture: any;
   networkCapture: any;
 }
+
+export interface DomInteraction {
+  selector: string;
+  label: string;
+  domKind: "click" | "submit";
+  fields: string[];
+  network: NetworkInfo | null;
+  verified: boolean;
+}

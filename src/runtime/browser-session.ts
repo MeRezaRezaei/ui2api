@@ -1,5 +1,6 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { type Browser, type BrowserContext, type Page } from "playwright";
 import type { ActionMap, Action } from "../types.js";
+import { launchBrowser } from "./browser.js";
 
 // Long-lived browser session per site. Loads the URL, keeps it authenticated,
 // and executes a generated tool's recipe — either by calling the real in-page
@@ -17,13 +18,35 @@ export class BrowserSession {
 
   async start(): Promise<void> {
     if (this.started) return;
-    this.browser = await chromium.launch({ args: ["--no-sandbox"] });
-    this.ctx = await this.browser.newContext();
-    await this.loadSession();
-    this.page = await this.ctx.newPage();
-    await this.page.goto(this.map.url, { waitUntil: "load", timeout: 30000 });
-    await this.page.waitForTimeout(400);
-    this.started = true;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let crashed = false;
+      this.browser = await launchBrowser();
+      this.browser.on("disconnected", () => {
+        crashed = true;
+      });
+      try {
+        this.ctx = await this.browser.newContext();
+        await this.loadSession();
+        this.page = await this.ctx.newPage();
+        await this.page.goto(this.map.url, { waitUntil: "load", timeout: 30000 });
+        await this.page.waitForTimeout(400);
+        if (crashed) throw new Error("browser crashed during start");
+        this.started = true;
+        return;
+      } catch (e) {
+        lastErr = e;
+        if (!crashed) await this.browser.close().catch(() => {});
+        if (attempt < 3) {
+          console.error(
+            `[ui2api] serve start attempt ${attempt} failed (${e instanceof Error ? e.message : e}); retrying...`
+          );
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("serve start failed");
   }
 
   private async loadSession(): Promise<void> {
@@ -48,7 +71,10 @@ export class BrowserSession {
 
     if (action.execution === "replay" && action.recipe.network) {
       const net = action.recipe.network;
-      const resp = await this.page.request.fetch(net.url, {
+      const resolved = net.url.startsWith("http")
+        ? net.url
+        : new URL(net.url, this.map.url).toString();
+      const resp = await this.page.request.fetch(resolved, {
         method: (net.method as any) || "GET",
         data: net.requestBody,
         headers: { "content-type": "application/json" },

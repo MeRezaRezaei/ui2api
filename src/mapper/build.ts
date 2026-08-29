@@ -1,4 +1,4 @@
-import type { ActionMap, Action, MethodCall, ActionParam } from "../types.js";
+import type { ActionMap, Action, MethodCall, ActionParam, DomInteraction, NetworkInfo } from "../types.js";
 
 function toSnake(s: string): string {
   return s
@@ -29,6 +29,7 @@ export async function buildActionMap(
   host: string,
   url: string,
   methodCalls: MethodCall[],
+  domActions: DomInteraction[],
   authRequired: boolean
 ): Promise<ActionMap> {
   const actions: Action[] = [];
@@ -59,6 +60,34 @@ export async function buildActionMap(
       },
       result: { mode: "return" },
       verified: !mc.jsReturnCapture.error,
+    };
+    actions.push(action);
+  }
+
+  for (const di of domActions) {
+    const parameters: ActionParam[] = di.fields.map((f) => ({
+      name: f,
+      type: "string",
+      required: true,
+      description: humanize(f),
+    }));
+    // A pure network call with no live-JS need → replay; otherwise re-drive the DOM.
+    const execution: "replay" | "live-js" = di.network ? "replay" : "live-js";
+    const network: NetworkInfo | undefined = di.network || undefined;
+    const nameBase = toSnake((di.label || di.selector || di.domKind).replace(/[^a-zA-Z0-9]+/g, " "));
+    const action: Action = {
+      name: nameBase || (di.domKind === "submit" ? "submit_form" : "click_element"),
+      description: await describe(di.label || di.selector, parameters),
+      execution,
+      parameters,
+      recipe: {
+        kind: "js-function",
+        target: di.selector,
+        argsFrom: Object.fromEntries(parameters.map((p) => [p.name, p.name])),
+        network,
+      },
+      result: { mode: "return" },
+      verified: di.verified,
     };
     actions.push(action);
   }

@@ -16,7 +16,7 @@ const FIXTURE = resolve(ROOT, "fixture");
 function startFixtureServer(): Promise<{ server: Server; url: string }> {
   return new Promise((resolvePromise) => {
     const server = createServer((req, res) => {
-      if (req.method === "POST" && req.url === "/api/chat") {
+      if (req.method === "POST" && req.url!.startsWith("/api/")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end("{}");
         return;
@@ -55,6 +55,12 @@ async function main(): Promise<void> {
       ["model", "prompt"]
     );
 
+    // DOM-discovered action (no window.<root> needed): the Search button fires a
+    // network call, so it should be captured as a replayable tool.
+    const search = map.actions.find((a) => a.name === "search");
+    assert.ok(search, "DOM-discovered 'search' action missing (analyzer should find button-driven actions)");
+    assert.strictEqual(search.execution, "replay", "search should be a replay action");
+
     // 2. Generate the per-site MCP server.
     const serverDir = generate(map, tmp);
     const serverFile = resolve(serverDir, "index.ts");
@@ -83,7 +89,13 @@ async function main(): Promise<void> {
       text.includes("Echo[default]: hello"),
       "unexpected tool result: " + text
     );
-    console.log("INTEGRATION OK — tool result:", text);
+
+    // DOM-discovered tool should replay its captured network call end-to-end.
+    const sres = await client.callTool({ name: "search", arguments: {} });
+    const stext = (sres.content as any[]).map((c) => c.text).join("");
+    assert.ok(stext.includes("{}"), "search tool replay unexpected: " + stext);
+
+    console.log("INTEGRATION OK — send_prompt:", text, "| search(replay):", stext);
 
     await client.close();
   } finally {
