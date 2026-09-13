@@ -4,7 +4,7 @@
 // page in milliseconds instead of spawning + tearing down Chrome per request.
 // Pages beyond `min` are created on demand up to `max`, which scales with the
 // host's free memory. Requests over capacity queue on the next free page.
-import { spawnChromeAndConnect } from "../runtime/browser.js";
+import { spawnChromeAndConnect, connectExistingChrome } from "../runtime/browser.js";
 import { ChatDriver } from "./driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
@@ -64,7 +64,9 @@ export class ChatPool {
   private readonly attach: boolean;
 
   constructor(private readonly opts: PoolOptions) {
-    this.min = Math.max(1, opts.min ?? 1);
+    const envMin = Number(process.env.UI2API_POOL_MIN);
+    const min = opts.min ?? (Number.isFinite(envMin) && envMin >= 1 ? Math.floor(envMin) : 1);
+    this.min = Math.max(1, min);
     this.max = Math.max(this.min, opts.max ?? resourceMax());
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.defaultProfile = opts.defaultProfile ?? opts.profiles[0]?.id ?? "";
@@ -76,8 +78,14 @@ export class ChatPool {
   }
 
   async ensureBrowser(): Promise<Browser> {
-    if (this.browser) return this.browser;
-    const b = await spawnChromeAndConnect({ headless: true });
+    if (this.browser && this.browser.isConnected()) return this.browser;
+    // A stand-by Chrome can die while idle (the sandboxed-Chromium crash this
+    // host fights); respawn instead of handing the corpse to the next driver,
+    // which would 500 every acquire until the daemon restarts.
+    this.browser = undefined;
+    const b = this.attach
+      ? await connectExistingChrome(Number(process.env.UI2API_ATTACH_PORT))
+      : await spawnChromeAndConnect({ headless: true });
     this.browser = b;
     return b;
   }

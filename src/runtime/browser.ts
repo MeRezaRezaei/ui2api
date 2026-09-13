@@ -125,9 +125,7 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
   if (process.env.UI2API_ATTACH_PORT || overrides.attachPort) {
     const port = Number(process.env.UI2API_ATTACH_PORT ?? overrides.attachPort);
     try {
-      const browser = await connectWithTimeout(`http://127.0.0.1:${port}`);
-      await browser.newPage().then((p) => p.close());
-      return browser;
+      return await connectExistingChrome(port);
     } catch (e) {
       lastErr = e;
     }
@@ -212,6 +210,16 @@ async function connectWithTimeout(endpoint: string, ms = 25000): Promise<Browser
     new Promise((r) => setTimeout(r, ms)),
   ]);
   if (!ok || !browser) throw new Error(`connectOverCDP timed out after ${ms}ms (${endpoint})`);
+  return browser;
+}
+
+// Adopt an already-running Chrome over CDP (UI2API_ATTACH_PORT). The operator's
+// long-lived browser is the stable target on hosts that kill freshly-spawned
+// Chrome; this ONLY connects and sanity-checks via a throwaway tab — it never
+// spawns, kills or closes anything.
+export async function connectExistingChrome(port: number): Promise<Browser> {
+  const browser = await connectWithTimeout(`http://127.0.0.1:${port}`);
+  await browser.newPage().then((p) => p.close());
   return browser;
 }
 

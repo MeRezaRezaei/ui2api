@@ -58,34 +58,70 @@ export class ChatDriver {
     this.dom = makeDomPrimitives(() => this.getPage());
   }
 
+  // Bounded liveness probe for the current page. A stand-by page can die while
+  // idle; a dead page must be read as a transient crash (rebuild/retry) rather
+  // than a changed site UI.
+  private async pageAlive(ms = 5000): Promise<boolean> {
+    if (!this.page) return false;
+    return Promise.race([
+      this.page.evaluate(() => 1).then(() => true, () => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+    ]);
+  }
+
   private async getPage(): Promise<Page> {
-    if (this.page) return this.page;
-    if (!this.browser) {
-      this.browser = await launchBrowser(3, { headless: headlessDefault() });
-      this.ownsBrowser = true;
+    if (this.page) {
+      // A stand-by page can die (or wedge) while idle; probe it with a hard
+      // bound so a corpse is rebuilt, never served as a fake "no composer".
+      if (await this.pageAlive()) return this.page;
+      this.page = undefined;
     }
-    const usingDefaultContext = this.defaultContext && this.browser.contexts().length > 0;
-    const context = usingDefaultContext
-      ? this.browser.contexts()[0]
-      : await this.browser.newContext({ viewport: { width: lightMode() ? 1024 : 1280, height: lightMode() ? 700 : 900 } });
-    // Light mode (default): drop images/fonts/media so the page loads in a
-    // fraction of the memory — chat UIs are text; this keeps headless Chrome
-    // alive on memory-starved hosts and cuts load time dramatically. Skipped for
-    // an existing (user's-attached) context, whose look we must not change.
-    if (!usingDefaultContext && lightMode()) {
-      await context.route("**/*", (route) => {
-        const t = route.request().resourceType();
-        if (t === "image" || t === "font" || t === "media") return route.abort();
-        return route.continue();
-      });
+    // A browser can die between spawn and context/page setup (CDP socket lingers
+    // a moment); drop the corpse and relaunch rather than 500ing the request.
+    let lastErr = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (this.browser && !this.browser.isConnected()) this.browser = undefined;
+      if (!this.browser) {
+        this.browser = await launchBrowser(3, { headless: headlessDefault() });
+        this.ownsBrowser = true;
+      }
+      try {
+        const usingDefaultContext = this.defaultContext && this.browser.contexts().length > 0;
+        const context = usingDefaultContext
+          ? this.browser.contexts()[0]
+          : await this.browser.newContext({ viewport: { width: lightMode() ? 1024 : 1280, height: lightMode() ? 700 : 900 } });
+        // Light mode (default): drop images/fonts/media so the page loads in a
+        // fraction of the memory — chat UIs are text; this keeps headless Chrome
+        // alive on memory-starved hosts and cuts load time dramatically. Skipped
+        // for an existing (user's-attached) context, whose look we must not change.
+        if (!usingDefaultContext && lightMode()) {
+          await context.route("**/*", (route) => {
+            const t = route.request().resourceType();
+            if (t === "image" || t === "font" || t === "media") return route.abort();
+            return route.continue();
+          });
+        }
+        // Reuse a previously captured authenticated session, if one exists.
+        const host = new URL(this.profile.url).host;
+        const cookies = loadCookies(sessionPath(this.dataDir, host));
+        if (!usingDefaultContext && cookies.length > 0) await context.addCookies(cookies as never[]);
+        this.page = await context.newPage();
+        await this.page.goto(this.profile.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+        return this.page;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        if (!/Target page|context or browser has been closed|Execution context was destroyed/i.test(lastErr)) throw e;
+        if (this.ownsBrowser) {
+          try {
+            await this.browser?.close().catch(() => {});
+          } catch {
+            // browser already gone
+          }
+        }
+        this.browser = undefined;
+      }
     }
-    // Reuse a previously captured authenticated session, if one exists.
-    const host = new URL(this.profile.url).host;
-    const cookies = loadCookies(sessionPath(this.dataDir, host));
-    if (!usingDefaultContext && cookies.length > 0) await context.addCookies(cookies as never[]);
-    this.page = await context.newPage();
-    await this.page.goto(this.profile.url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    return this.page;
+    throw new Error(lastErr);
   }
 
   async start(): Promise<void> {
@@ -154,6 +190,10 @@ export class ChatDriver {
     await this.dismissOverlays();
     const composer = await this.firstVisible(this.profile.composer);
     if (!composer) {
+      if (!(await this.pageAlive())) {
+        // page died mid-read — retried on a fresh browser, not reported as rot
+        throw new Error("page died reading the composer — Target page, context or browser has been closed");
+      }
       let title = "", url = "";
       try { title = await this.page!.title(); url = await this.page!.url(); } catch { /* page gone */ }
       throw new Error(

@@ -76,6 +76,8 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--json") f.json = true;
     if (argv[i] === "--new") f.newChat = true;
     if (argv[i] === "--timeout-ms") f.timeoutMs = Number(argv[++i]) || undefined;
+    if (argv[i] === "--pool-min") f.poolMin = Number(argv[++i]) || undefined;
+    if (argv[i] === "--pool-max") f.poolMax = Number(argv[++i]) || undefined;
     if (argv[i] === "--sites") f.sites = true;
   }
   return f;
@@ -406,7 +408,7 @@ async function main(): Promise<void> {
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
       console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
-      console.log("  ui2api promptd            [--port N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
+      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
       process.exit(cmd ? 1 : 0);
   }
