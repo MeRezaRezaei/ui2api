@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
-import { sessionPath, saveCookies } from "./runtime/browser.js";
+import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -16,6 +16,9 @@ import { HubRuntime } from "./hub/runtime.js";
 import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
+import { resolveProfile, listProfiles, defaultSiteId } from "./profile/profile.js";
+import { ChatDriver } from "./prompt/driver.js";
+import { startPromptd } from "./prompt/http.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -33,10 +36,19 @@ interface Flags {
   registry?: string;
   dataDir?: string;
   port?: number;
+  poolMin?: number;
+  poolMax?: number;
   acp?: boolean;
   mirror?: boolean;
   registryRepo?: string;
   baseUrl?: string;
+  engine?: string;
+  site?: string;
+  profile?: string;
+  json?: boolean;
+  newChat?: boolean;
+  timeoutMs?: number;
+  sites?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -58,12 +70,26 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--mirror") f.mirror = true;
     if (argv[i] === "--registry-repo") f.registryRepo = argv[++i];
     if (argv[i] === "--base-url") f.baseUrl = argv[++i];
+    if (argv[i] === "--engine") f.engine = argv[++i];
+    if (argv[i] === "--site") f.site = argv[++i];
+    if (argv[i] === "--profile") f.profile = argv[++i];
+    if (argv[i] === "--json") f.json = true;
+    if (argv[i] === "--new") f.newChat = true;
+    if (argv[i] === "--timeout-ms") f.timeoutMs = Number(argv[++i]) || undefined;
+    if (argv[i] === "--sites") f.sites = true;
   }
   return f;
 }
 
 function sitesRoot(flags: Flags): string {
   return flags.out || DEFAULT_SITES;
+}
+
+// The only accepted engine names, symmetrical with `readEngine()` in context.ts.
+function validateEngine(name: string): void {
+  if (name !== "native" && name !== "wigolo") {
+    throw new Error("unknown engine '" + name + "' (expected 'native' or 'wigolo')");
+  }
 }
 
 function mapPath(host: string, root: string): string {
@@ -103,14 +129,19 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
 }
 
 // Launch a HEADED browser solely for the user to log in (M7). This is the ONLY
-// place we ever call chromium.launch with headless:false. Returns the cookies.
+// place we ever call chromium.launch with headless:false. When the user has set
+// UI2API_CHROME / UI2API_USER_DATA_DIR, the login happens in THEIR real Chrome
+// and profile so the authenticated session lives in their own data — the core of
+// the "drive the user's own browser" vision; otherwise a fresh bundled Chromium
+// window is used and the resulting cookies are captured. Returns the cookies.
 async function doInteractiveLogin(url: string): Promise<unknown[]> {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: false, args: ["--no-sandbox"] });
+  const opts = buildLaunchOptions({ headless: false });
+  const browser = await chromium.launch(opts as any);
   try {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "load", timeout: 30000 });
-    console.log(`[ui2api] Login page opened. Sign in, then return here and press Enter.`);
+    console.log(`[ui2api] Login page opened${usingUserChrome() ? " (your Chrome + profile)" : ""}. Sign in, then return here and press Enter.`);
     await new Promise<void>((resolve) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       rl.question("Press Enter once logged in: ", () => {
@@ -139,6 +170,9 @@ async function cmdServe(host: string, flags: Flags): Promise<void> {
   if (!existsSync(mapPath)) throw new Error("No generated server for " + host + ". Run generate first.");
   const map = validateActionMap(JSON.parse(readFileSync(mapPath, "utf8")));
   if (!map.trusted && !flags.trust) throw new Error("action-map is untrusted — review it and re-run with --trust");
+  // Engine: --engine wins over UI2API_ENGINE. Validated so a typo fails fast.
+  if (flags.engine) validateEngine(flags.engine);
+  if (flags.engine) process.env.UI2API_ENGINE = flags.engine;
   const mod = await import(pathToFileURL(resolve(serverDir, "index.ts")).href);
   await (mod as any).runServer();
 }
@@ -179,10 +213,12 @@ async function cmdRemap(host: string, flags: Flags): Promise<void> {
 }
 
 async function cmdHubRun(host: string, flags: Flags): Promise<void> {
-  if (!host) throw new Error("usage: ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]");
+  if (!host) throw new Error("usage: ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine wigolo|native]");
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
   const store = new RegistryStore(dataDir);
   const rt = new HubRuntime({ store, dataDir });
+  if (flags.engine) validateEngine(flags.engine);
+  if (flags.engine) process.env.UI2API_ENGINE = flags.engine;
   const inst = await rt.getInstance(host);
   if (flags.acp) await serveInstanceAcp(inst, Number(flags.port ?? 8788));
   else await serveInstanceStdio(inst);
@@ -224,6 +260,94 @@ async function cmdPluginServe(modulePath: string, flags: Flags): Promise<void> {
   await servePlugin(loaded, { trust: true });
 }
 
+async function cmdPrompt(text: string, flags: Flags): Promise<void> {
+  if (flags.sites) {
+    for (const p of listProfiles()) {
+      console.log(`${p.id.padEnd(12)} ${p.name} — ${p.loginRequired ? "login required" : "anonymous"}`);
+    }
+    console.log(`\ndefault: ${defaultSiteId()}`);
+    return;
+  }
+  if (!text?.trim()) {
+    throw new Error(
+      "usage: ui2api prompt '<text>' [--site gemini|chatgpt|claude|copilot|perplexity|huggingchat] [--profile FILE] [--new] [--timeout-ms N] [--data-dir DIR] [--json]"
+    );
+  }
+  const profile = resolveProfile(flags.site ?? flags.profile);
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const driver = new ChatDriver(profile, { dataDir });
+  try {
+    const r = await driver.ask(text, { newChat: flags.newChat, timeoutMs: flags.timeoutMs });
+    if (flags.json) {
+      console.log(JSON.stringify({ site: profile.id, ...r }, null, 2));
+    } else {
+      console.log(r.answer);
+      console.error(`[ui2api] ${profile.id} · ${r.doneReason} · ${r.chunkCount} reads · ${r.url}`);
+    }
+  } finally {
+    await driver.close();
+  }
+}
+
+async function cmdLiveProof(flags: Flags): Promise<void> {
+  const a = Math.floor(Math.random() * 10000) + 2;
+  const b = Math.floor(Math.random() * 10000) + 2;
+  const expected = a + b;
+  console.log(`[proof] a=${a} b=${b} expected=${expected}`);
+  const profile = resolveProfile(flags.site ?? "copilot");
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const question = `What is ${a} + ${b}? Reply with ONLY the number, no words or explanation.`;
+  // The host can hard-kill a fresh browser seconds after spawn (int3 trap), so
+  // a live proof must ride fresh spawns until one survives the streamed answer.
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const driver = new ChatDriver(profile, { dataDir });
+    try {
+      console.log(`[proof] attempt ${attempt} — asking ${profile.id}: ${question}`);
+      const r = await driver.ask(question, { timeoutMs: 55000, stableMs: 1200 });
+      const match = String(r.answer).match(/[\d,]+/g);
+      const got = match ? Number(match[match.length - 1]!.replace(/,/g, "")) : NaN;
+      const pass = got === expected;
+      console.log(`[proof] answer: ${r.answer}`);
+      console.log(`[proof] parsed=${got} expected=${expected} -> ${pass ? "PASS" : "FAIL"}`);
+      if (pass) {
+        process.exitCode = 0;
+        return;
+      }
+    } catch (e) {
+      console.log(`[proof] attempt ${attempt} died: ${(e as Error).message.split("\n")[0].slice(0, 100)}`);
+    } finally {
+      await driver.close().catch(() => {});
+    }
+  }
+  console.log("[proof] FAILED: no surviving browser completed the round-trip");
+  process.exitCode = 1;
+}
+
+async function cmdPromptd(flags: Flags): Promise<void> {
+  const port = Number(flags.port ?? process.env.UI2API_PROMPTD_PORT ?? 9797);
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const profiles = flags.site ? [resolveProfile(flags.site)] : undefined;
+  const svc = await startPromptd({
+    port,
+    dataDir,
+    token: process.env.UI2API_PROMPTD_TOKEN ?? "",
+    profiles,
+    min: flags.poolMin,
+    max: flags.poolMax,
+  });
+  const shown = profiles ? profiles.map((p) => p.id).join(", ") : listProfiles().map((p) => p.id).join(", ");
+  console.log(`[ui2api] promptd on http://127.0.0.1:${svc.port} · sites: ${shown} · default: ${defaultSiteId()}`);
+  console.log(`[ui2api] POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}`);
+  console.log(`[ui2api] GET  /status  -> pool (warm/idle/busy pages)  ·  UI2API_POOL_MIN/MAX=${flags.poolMin ?? "auto"}/${flags.poolMax ?? "auto"} · UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "off"}`);
+  const shutdown = async (): Promise<void> => { await svc.close(); process.exit(0); };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
+  svc.server.on("error", (e) => {
+    console.error("[ui2api] promptd error:", e.message);
+    process.exit(1);
+  });
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
@@ -262,18 +386,28 @@ async function main(): Promise<void> {
       if (arg === "serve") return cmdPluginServe(rest[0] ?? "", flags);
       throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR]");
     }
+    case "prompt":
+      return cmdPrompt(arg ?? "", flags);
+    case "promptd":
+      return cmdPromptd(flags);
+    case "proof":
+    case "live-proof":
+      return cmdLiveProof(flags);
     default:
       console.log("UI2API — turn any website into MCP tools for AI\n");
       console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
       console.log("  ui2api generate <host>  [--out DIR]");
-      console.log("  ui2api serve    <host>  [--out DIR]");
+      console.log("  ui2api serve    <host>  [--out DIR] [--engine native|wigolo]  (wigolo = drive the browser side through a local wigolo daemon)");
       console.log("  ui2api remap    <host>  [--out DIR]");
       console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
       console.log("  ui2api install  <host>  [--registry URL]");
       console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
       console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
-      console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR]  (serve a registered plugin)");
+      console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
       console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
+      console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
+      console.log("  ui2api promptd            [--port N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
+      console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
       process.exit(cmd ? 1 : 0);
   }
 }

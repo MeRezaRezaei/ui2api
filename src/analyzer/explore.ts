@@ -65,10 +65,14 @@ async function discoverRoots(page: Page, explicit?: string): Promise<string[]> {
         }
       } catch (e) {}
     }
-    // Prefer UI2API/App marked roots first.
-    found.sort((a, b) => {
-      const score = (s: string) => (s === "UI2API" ? 0 : s === "App" ? 1 : 2);
-      return score(a) - score(b);
+    // Prefer UI2API/App marked roots first. NOTE: this callback is serialized
+    // and evaluated inside the page, so it must stay fully self-contained — no
+    // function-valued const bindings (esbuild annotates them with a `__name`
+    // helper that does not exist in the page context).
+    found.sort(function (a, b) {
+      const pa = a === "UI2API" ? 0 : a === "App" ? 1 : 2;
+      const pb = b === "UI2API" ? 0 : b === "App" ? 1 : 2;
+      return pa - pb;
     });
     return found;
   });

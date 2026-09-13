@@ -1,4 +1,4 @@
-import { createContext } from "./context.js";
+import { createContext, createExecContext } from "./context.js";
 import { validateActionMap } from "../schema.js";
 import type { ActionMap, Action } from "../types.js";
 import type { Ui2ApiContext, Ui2ApiPlugin, ToolDefinition, ToolHandler, HubConfig, LoadedPlugin } from "./types.js";
@@ -15,7 +15,16 @@ function actionToTool(action: Action): { def: ToolDefinition; handler: ToolHandl
       const body = net.requestBody ?? Object.values(args)[0];
       return c.replay({ url: net.url, method: net.method, body });
     }
-    if (action.recipe.kind === "dom-interaction") { await c.dom.click(action.recipe.target); return ""; }
+    if (action.recipe.kind === "dom-interaction") {
+      const clickResult = (await c.dom.click(action.recipe.target)) ?? "";
+      // Composed interaction: click, then read the declared result. Previously
+      // the read was dead code (dom-interaction short-circuited to "").
+      if (action.result.mode === "dom" && action.result.extract) {
+        const read = await c.dom.extract(action.result.extract);
+        if (read !== null && read !== undefined && read !== "") return read;
+      }
+      return clickResult;
+    }
     if (action.result.mode === "dom" && action.result.extract) return c.dom.extract(action.result.extract);
     return c.call(action.recipe.target, action.parameters.map((p) => args[p.name]));
   };
@@ -23,7 +32,7 @@ function actionToTool(action: Action): { def: ToolDefinition; handler: ToolHandl
 }
 export function loadPluginFromMap(map: ActionMap, config: HubConfig, baseUrl: string): LoadedPlugin {
   const m = validateActionMap(map);
-  const ctx = createContext(config, { baseUrl });
+  const ctx = createExecContext(config, { baseUrl });
   for (const a of m.actions) { const { def, handler } = actionToTool(a); ctx.registerTool(def, handler); }
   return { manifest: { name: m.host, version: "0.0.0-generated", author: "generated", description: m.host, authorizedUse: "generated", license: "MIT", ui2api: "0.1.0" }, context: ctx, tools: ctx.tools, hooks: {} };
 }

@@ -1,12 +1,37 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { launchBrowser, sessionPath, defaultSitesDir } from "../runtime/browser.js";
+import { makeDomPrimitives } from "../runtime/dom-primitives.js";
 import { sameOrigin } from "../runtime/ssrf.js";
 import { analyse } from "../analyzer/explore.js";
+import { createWigoloContext } from "./wigolo-context.js";
 import type { ActionMap } from "../types.js";
 import type { Ui2ApiContext, HubConfig, Logger, ToolDefinition, ToolHandler, AnalyseOpts } from "./types.js";
 
-export interface ContextDeps { baseUrl: string; logger?: Logger; dataDir?: string; }
+export { createWigoloContext }; // re-exported so callers can pin an engine directly
+
+export interface ContextDeps { baseUrl: string; logger?: Logger; dataDir?: string; authRequired?: boolean; }
 type ToolEntry = { def: ToolDefinition; handler: ToolHandler };
+
+export type EngineName = "native" | "wigolo";
+
+// Resolve the execution engine from env. `createExecContext` picks it per load,
+// so a generated server (or hub run) can choose an engine without regenerating.
+export function readEngine(): EngineName {
+  const raw = (process.env.UI2API_ENGINE ?? "native").toLowerCase();
+  return raw === "wigolo" ? "wigolo" : "native";
+}
+
+// Create the Ui2ApiContext that backs a generated tool server, using the engine
+// selected by UI2API_ENGINE (default: native Playwright).
+export function createExecContext(
+  config: HubConfig,
+  deps: ContextDeps,
+  engine: EngineName = readEngine()
+): Ui2ApiContext & { tools: Map<string, ToolEntry> } {
+  return engine === "wigolo"
+    ? createWigoloContext(config, deps)
+    : createContext(config, deps);
+}
 
 export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiContext & { tools: Map<string, ToolEntry> } {
   const logger: Logger = deps.logger ?? console;
@@ -42,22 +67,7 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
       async save(host, cookies) { writeFileSync(sessionPath(dataDir, host), JSON.stringify(cookies)); },
     },
     http: { async fetch(url, init) { if (!sameOrigin(url, deps.baseUrl)) throw new Error(`SSRF guard: http ${url} cross-origin`); return fetch(url, init); } },
-    dom: {
-      async click(sel) { await (await getPage()).locator(sel).first().click({ timeout: 5000 }); },
-      async type(sel, text) { await (await getPage()).locator(sel).first().fill(text); },
-      async waitFor(sel, timeoutMs = 5000) { await (await getPage()).locator(sel).first().waitFor({ timeout: timeoutMs }); },
-      async extract(expr) {
-        const p = await getPage();
-        const m = expr.trim().match(/^(text|attr|json)\s+(\S+)(?:\s+(\S+))?$/);
-        if (!m) return (await p.evaluate(() => document.body.innerText)) as string;
-        const [, kind, sel, arg] = m;
-        return p.evaluate(({ sel, kind, arg }: { sel: string; kind: string; arg?: string }) => {
-          const el = document.querySelector(sel) as HTMLElement | null; if (!el) return null;
-          if (kind === "text" || kind === "json") return el.innerText;
-          if (kind === "attr") return el.getAttribute(arg as string); return null;
-        }, { sel, kind, arg });
-      },
-    },
+    dom: makeDomPrimitives(() => getPage()),
   };
   return ctx;
 }

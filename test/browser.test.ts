@@ -33,4 +33,37 @@ describe("buildLaunchOptions", () => {
     const o = buildLaunchOptions({ userDataDir: "/override" }) as any;
     assert.equal(o.userDataDir, "/override");
   });
+
+  describe("user-chrome mode (VISION)", () => {
+    function userChromeEnv() {
+      clearEnv();
+      process.env.UI2API_CHROME = "1";
+      process.env.UI2API_USER_DATA_DIR = "/home/me/real-profile";
+    }
+    it("uses channel chrome + the user profile with NO hardening args", () => {
+      userChromeEnv();
+      const o = buildLaunchOptions() as any;
+      assert.equal(o.channel, "chrome");
+      assert.equal(o.userDataDir, "/home/me/real-profile");
+      // The user's own Chrome must not get fingerprint-altering flags
+      // (--no-sandbox/--disable-gpu/--disable-dev-shm-usage) — see docs/VISION.md.
+      assert.ok(Array.isArray(o.args));
+      assert.ok(!o.args.some((a: string) => a.includes("no-sandbox")));
+      assert.ok(!o.args.some((a: string) => a.includes("disable-gpu")));
+      assert.ok(!o.args.some((a: string) => a.includes("disable-dev-shm")));
+    });
+    it("bundled chromium keeps the hardening args", () => {
+      clearEnv();
+      const o = buildLaunchOptions() as any;
+      assert.equal(o.channel, undefined);
+      assert.ok(o.args.some((a: string) => a.includes("no-sandbox")));
+    });
+    it("exposes the user profile for wigolo passthrough", async () => {
+      clearEnv();
+      process.env.UI2API_USER_DATA_DIR = "/home/me/real-profile";
+      const mod = await import("../src/runtime/browser.js");
+      assert.equal(mod.userChromeProfile?.(), "/home/me/real-profile");
+      assert.equal(mod.usingUserChrome?.(), true);
+    });
+  });
 });

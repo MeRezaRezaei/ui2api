@@ -101,6 +101,77 @@ npm run test:unit   # 22 unit tests
 npm test            # full integration test (needs the chromium browser above)
 ```
 
+## MVP — use AI sites for doing prompts
+
+The fastest path to a working prompt engine needs no API keys, no login, and no
+servers to babysit: **ui2api drives an AI chat website (ChatGPT-style UI) the way
+you would** — paste the prompt into the composer, hit Enter, and read the streamed
+answer off the page. All in your own browser session.
+
+```bash
+# One command: prompt Microsoft Copilot anonymously (no sign-in needed)
+npx tsx src/cli.ts prompt "summarize the last three books you know"
+
+# Pick the site explicitly, or reuse your logged-in Chrome for sites that need it
+npx tsx src/cli.ts prompt "hello" --site gemini            # needs a sign-in session
+npx tsx src/cli.ts prompt --sites                          # list the available sites
+
+# Or expose it as a localhost JSON service so live apps (e.g. anything in /var/www)
+# can call it WITHOUT touching them:
+UI2API_PROMPTD_TOKEN=op-secret npx tsx src/cli.ts promptd   # http://127.0.0.1:9797
+curl -X POST http://127.0.0.1:9797/prompt -H 'authorization: Bearer op-secret' \
+  -H 'content-type: application/json' \
+  -d '{"site":"copilot","prompt":"what is 2+2?"}'
+```
+
+### promptd is a stand-by daemon (warm page pool)
+
+`promptd` is a daemon that keeps `N` pages of the same site standing by, ready for
+parallel requests — exactly like the request queue + a browser. Semantics:
+
+- **`--pool-min N`** (or `UI2API_POOL_MIN`): warm at least `N` idle pages for the
+  default site before serving (default `1`). More sites warm lazily on first request.
+- **`--pool-max N`** (or `UI2API_POOL_MAX`): hard ceiling on per-site pages. Auto =
+  `max(1, min(4, floor(freeGB/2)))`.
+- A busy page is returned to the pool when the request finishes; pages whose
+  underlying browser died are discarded and respawned on demand — the *daemon*
+  stays up even when a browser process cycles. `GET /status` shows the pool
+  (`warm`: idle/busy pages per site).
+- The daemon is **headless by default**: nothing opens on your desktop, and the
+  spawned browser is the daemon's child — closing the daemon closes only pages
+  it owns (nothing you opened yourself).
+- **Attach mode** (`UI2API_ATTACH_PORT=9222`): instead of spawning, the pool adopts
+  **your own long-running Chrome** over CDP (loopback only) and uses its logged-in
+  session as the stand-by pages' identity. The daemon then never spawns or kills a
+  browser; ending the daemon leaves your Chrome running untouched. This is the mode
+  for hosts where freshly-spawned browsers crash (AppArmor `userns` traps etc.) but
+  a standing browser is stable.
+  ```
+  # on a stable host, once, in your Chrome:
+  google-chrome --remote-debugging-port=9222
+  # then the daemon adopts it:
+  UI2API_ATTACH_PORT=9222 UI2API_POOL_MIN=1 npx tsx src/cli.ts promptd
+  ```
+  (`promptd` itself starts Chrome with the debug port if you omit `--user-data-dir`.)
+
+Available sites (declarative, tune-able): `gemini`, `chatgpt`, `claude`,
+`copilot` (anonymous), `perplexity` (anonymous Ask), `huggingchat`. Sending is
+always the site's **own JS**: paste event + Enter — no synthetic mouse clicks; the
+answer is read from the page's event bus until it stops growing.
+
+- **Just works on its own**: zero-config browser (bundled Chromium, auto-fallbacks
+  to system Chrome), no external LLM API, no logins for the anonymous sites.
+- **`--login` / real Chrome profile** for signed-in sites: the session is yours, so
+  no captcha walls (see [Using your real Chrome profile](#using-your-real-chrome-profile)).
+- **Red-line safe**: `promptd` binds `127.0.0.1` only, serves only the profiles you
+  configure (never arbitrary URLs), optionally bearer-token gated, and never touches
+  `/var/www`. Apps there just `POST` in and read the answer out.
+- **Tuning a site**: profiles live in `src/profile/profile.ts`; ship a JSON override
+  with `--profile /path/gemini.json` (or `UI2API_AI_SITE`) if a site's UI changed.
+
+Wire it into an agent the same way as any generated server:
+`npx tsx src/cli.ts plugin serve src/plugins/ai-web.ts --base-url https://gemini.google.com` exposes `send_prompt`, `new_chat`, `read_last_response` and `ai_status` over MCP.
+
 ## How it works
 
 ```
@@ -167,22 +238,58 @@ heuristics (no LLM required).
 
 ## Using your real Chrome profile
 
-By default UI2API launches Playwright's bundled Chromium. To analyze a site you
-are **already logged into** with your everyday Chrome, point it at your installed
-Chrome and profile so the session/cookies are reused:
+> **This is the core of the product.** UI2API drives *your* Chrome with *your*
+> data, so the site just sees a normal user — no bot fingerprint, no captcha
+> wall. Read [`docs/VISION.md`](docs/VISION.md) before changing anything around
+> the browser.
+
+The vision requires the user to sign in to the site once in their own Chrome,
+then UI2API acts inside that same session:
 
 ```bash
-export UI2API_CHROME=1                       # use the system Chrome
-export UI2API_USER_DATA_DIR=/path/to/profile # reuse your logged-in profile
-npx tsx src/cli.ts analyse https://app.example.com
+export UI2API_CHROME=1                        # use your installed Chrome
+export UI2API_USER_DATA_DIR=/path/to/profile  # reuse your logged-in profile
+npx tsx src/cli.ts analyse https://app.example.com --login   # sign in once (your Chrome)
+npx tsx src/cli.ts generate app.example.com
+npx tsx src/cli.ts serve app.example.com
 ```
 
-- `UI2API_CHROME=1` → launches the system Chrome (`channel: "chrome"`).
-- `UI2API_CHROME_PATH=/path/to/chrome` → use a specific Chrome/Chromium binary.
+- `UI2API_CHROME=1` → the system Chrome (`channel: "chrome"`).
+- `UI2API_CHROME_PATH=/path/to/chrome` → a specific Chrome/Chromium binary.
 - `UI2API_USER_DATA_DIR=/path` → reuse an existing profile (cookies + sign-in).
+- `--login` now opens that same Chrome + profile headfully, so your login lives
+  in your own data (fallback: a fresh Chromium window + cookie capture).
+
+The bundled Chromium exists only as a zero-config fallback for demos/CI — never
+present it as the product's mode of operation.
 
 > Close your normal Chrome first, or copy the profile to another folder — two
-> Chrome instances cannot share one profile directory at the same time.
+> Chrome instances cannot share one profile directory at the same time. (For the
+> strictest "this is literally my running browser" mode, the wigolo engine accepts
+> `WIGOLO_CDP_URL` / `UI2API_CDP_URL` to attach to your live Chrome over CDP.)
+
+## Wigolo engine (`--engine wigolo`)
+
+UI2API can offload its web intelligence — browser acquisition, anti-bot handling,
+auth reuse, and structured extraction — to a local
+[wigolo](https://github.com/KnockOutEZ/wigolo) daemon over loopback HTTP. This
+keeps UI2API MIT and avoids any AGPL code import:
+
+```bash
+# Start a wigolo daemon in the background
+npx -y wigolo serve &
+
+# Analyze, generate, and serve through the daemon
+npx tsx src/cli.ts analyse https://app.example.com
+npx tsx src/cli.ts generate app.example.com
+npx tsx src/cli.ts serve app.example.com --engine wigolo
+```
+
+The wigolo engine works for both `serve` and `hub run` (in-process generated
+servers inherit the engine from the `UI2API_ENGINE` env var). The `native`
+Playwright engine remains the default unless you pass `--engine wigolo` or set
+`UI2API_ENGINE=wigolo`. See [`docs/ENGINE.md`](docs/ENGINE.md) for the full
+design, env vars, and the MIT/AGPL license boundary.
 
 ## Responsibility
 
@@ -192,7 +299,7 @@ and comply with applicable law. Use it at your own risk.
 
 ## Docs & links
 
-- Documentation: [`docs/`](docs/)
+- Documentation: [`docs/`](docs/) — start with [`docs/VISION.md`](docs/VISION.md)
 - License: [MIT](LICENSE)
 
 ## Hub (hosted registry + plugin runtime)

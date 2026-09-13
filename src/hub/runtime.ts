@@ -1,6 +1,6 @@
 import type { RegistryStore } from "./store.js";
 import { loadPluginModule, loadPluginFromMap } from "../plugin/loader.js";
-import { createContext } from "../plugin/context.js";
+import { createExecContext } from "../plugin/context.js";
 import type { HubConfig, Ui2ApiContext, LoadedPlugin } from "../plugin/types.js";
 
 export interface ManagedInstance {
@@ -18,11 +18,11 @@ export class HubRuntime {
     if (existing) return existing;
     const pkg = this.opts.store.get(host);
     if (!pkg) throw new Error(`no package registered for host ${host}`);
-    const config: HubConfig = { dataDir: this.opts.dataDir };
     // The Hub owns the per-host runtime: it builds the allow-listed context
     // (which internally manages the host-scoped browser session) and never
     // hands the plugin launchBrowser/generate or raw fs access.
-    const context: Ui2ApiContext = createContext(config, {
+    const config: HubConfig = { dataDir: this.opts.dataDir };
+    const context: Ui2ApiContext = createExecContext(config, {
       baseUrl: `https://${host}`,
       dataDir: this.opts.dataDir,
     });

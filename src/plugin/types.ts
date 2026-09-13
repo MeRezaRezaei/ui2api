@@ -23,10 +23,24 @@ export interface Ui2ApiContext {
   session: { load(host: string): Promise<unknown[]>; save(host: string, cookies: unknown[]): Promise<void> };
   http: { fetch(url: string, init?: RequestInit): Promise<Response> };
   dom: {
-    click(selector: string): Promise<void>;
-    type(selector: string, text: string): Promise<void>;
-    waitFor(selector: string, timeoutMs?: number): Promise<void>;
+    click(selector: string): Promise<string | void>;
+    type(selector: string, text: string): Promise<string | void>;
+    waitFor(selector: string, timeoutMs?: number): Promise<string | void>;
     extract(expr: string): Promise<unknown>;
+    // JS-level primitives (the map's "key section"): these drive the SITE's own
+    // JS through the same keyboard/paste events a real user sends, then read the
+    // event-bus chunks the site streams back. No mouse, no pointer simulation.
+    paste(selector: string, text: string): Promise<unknown>;
+    press(selector: string | null, keys: string[]): Promise<unknown>;
+    capture(selector: string, untilMs?: number): Promise<unknown>;
+    // Stable-wait read for streamed answers: poll until the text stops growing
+    // for `stableMs` (or the budget `timeoutMs` expires). Returns the longest
+    // text seen plus why it stopped ("stable" | "timeout" | "empty").
+    awaitAnswer(
+      selector: string,
+      opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number }
+    ): Promise<{ text: string; chunkCount: number; url: string; title: string; doneReason: "stable" | "timeout" | "empty" }>;
+    status(selector?: string): Promise<unknown>;
   };
 }
 export interface Ui2ApiPlugin {
