@@ -29,6 +29,57 @@ function stream(p){
 input.addEventListener("keydown",(e)=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();stream(input.value);}});
 </script></body></html>`;
 
+// Multiplication variant of the fixture, fully isolated from the add/echo mock
+// (and free of backslash escapes so template-literal smuggling can't corrupt it):
+// a page that looks like an AI chat site but whose "model" answers ONLY the
+// product of the two numbers in a too-long-for-10k "mul A B ..." request.
+const MOCK_MUL_HTML = `<!doctype html><html><body>
+<textarea id="in" placeholder="Ask anything"></textarea><div id="out"></div>
+<script>
+const input=document.getElementById("in"), out=document.getElementById("out");
+function stream(p){
+  const nums = p.split(/[^0-9]+/).filter(function (n) { return n !== ""; });
+  const up = p.toUpperCase().split(" ");
+  const isMul = up.indexOf("MUL") >= 0 || up.indexOf("TIMES") >= 0;
+  const words = (isMul && nums.length >= 2
+    ? [String(Number(nums[0]) * Number(nums[1]))]
+    : p.split(" ")).concat(["done"]);
+  let i=0; const t=setInterval(function(){
+    if(i<words.length){out.textContent+=(out.textContent?" ":"")+words[i];i++;}
+    else clearInterval(t);
+  },50);
+}
+input.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();stream(input.value);}});
+</script></body></html>`;
+
+function startMockMulChat(): Promise<{ url: string; close(): void; profile: ChatSiteProfile }> {
+  return new Promise((resolve) => {
+    const server = createServer((_req, res) => {
+      res.setHeader("content-type", "text/html");
+      res.end(MOCK_MUL_HTML);
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      const url = `http://127.0.0.1:${port}/`;
+      resolve({
+        url,
+        close: () => server.close(),
+        profile: {
+          id: "fixture-mul",
+          name: "Mock AI chat (multiply)",
+          url,
+          loginRequired: false,
+          composer: ["textarea#in"],
+          answer: ["#out"],
+          send: { kind: "keyEnter" },
+          captureMs: 10000,
+          stableMs: 600,
+        },
+      });
+    });
+  });
+}
+
 function startMockChat(): Promise<{ url: string; close(): void; profile: ChatSiteProfile }> {
   return new Promise((resolve) => {
     const server = createServer((_req, res) => {
@@ -95,6 +146,31 @@ test("the proof: two random numbers sum — streamed back and verified", async (
       const match = String(r.answer).match(/\d+/g);
       const got = match && match.length ? Number(match[match.length - 1]) : NaN;
       assert.equal(got, expected, `answer "${r.answer}" must equal ${a}+${b}=${expected}`);
+    } finally {
+      await driver.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    site.close();
+  }
+});
+
+test("the proof: two random numbers multiplication — streamed back and verified", async () => {
+  // The goal's exact ask: two random numbers, multiplied. The hermetic
+  // multiplication fixture model computes the product; real targets are
+  // exercised by `npm run proof` on a healthy host. Same pipeline as real AI.
+  const site = await startMockMulChat();
+  const dir = mkdtempSync(join(tmpdir(), "u2a-mul-"));
+  try {
+    const driver = new ChatDriver(site.profile, { dataDir: dir });
+    const a = Math.floor(Math.random() * 10000) + 2;
+    const b = Math.floor(Math.random() * 10000) + 2;
+    const expected = a * b;
+    try {
+      const r = await driver.ask(`mul ${a} ${b} — reply with only the number`);
+      const match = String(r.answer).match(/\d+/g);
+      const got = match && match.length ? Number(match[match.length - 1]) : NaN;
+      assert.equal(got, expected, `answer "${r.answer}" must equal ${a}×${b}=${expected}`);
     } finally {
       await driver.close();
     }
