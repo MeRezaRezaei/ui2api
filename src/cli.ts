@@ -387,6 +387,22 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
   console.log(`Sites driven through ui2api now see your logged-in session — chat history persists.`);
 }
 
+async function cmdProfileIngest(host: string, flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const { ingestProfile } = await import("./runtime/profile-ingest.js");
+  const { snapshot, stats, profileDir, warnings } = await ingestProfile({
+    targetHost: host,
+    profileDir: flags.profile,
+  });
+  const target = snapshotPath(dataDir, host);
+  saveSnapshot(target, snapshot);
+  console.log(`[ui2api] ingested ${profileDir} -> ${target}`);
+  console.log(`  cookies: ${stats.cookiesMatched}/${stats.cookiesTotal} matched for ${host} (${stats.decrypted} decrypted, ${stats.undecryptable} skipped)`);
+  console.log(`  localStorage: ${stats.localStorageEntries} entries for ${snapshot.origin}`);
+  for (const w of warnings) console.warn(`  ! ${w}`);
+  console.log("Sites driven through ui2api now see this logged-in session — chat history persists.");
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
@@ -430,7 +446,11 @@ async function main(): Promise<void> {
         if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--data-dir DIR]");
         return cmdProfileCapture(rest[0], flags);
       }
-      throw new Error("usage: ui2api profile capture <url> [--data-dir DIR]");
+      if (arg === "ingest") {
+        if (!rest[0]) throw new Error("usage: ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]");
+        return cmdProfileIngest(rest[0], flags);
+      }
+      throw new Error("usage: ui2api profile capture <url> | ingest <host> [--profile DIR]");
     }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);
@@ -452,6 +472,7 @@ async function main(): Promise<void> {
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
       console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
       console.log("  ui2api profile capture <url> [--data-dir DIR]  (login once, save cookies+localStorage+IndexedDB snapshot)");
+      console.log("  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
       console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
