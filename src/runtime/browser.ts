@@ -244,9 +244,14 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
   const exec = resolveChromeExec(overrides);
   if (!exec) throw new Error("no Chrome executable found for managed spawn");
   const port = await reserveFreePort();
-  const userDataDir = overrides.userDataDir
-    ? overrides.userDataDir
-    : mkdtempSync(resolve(tmpdir(), "ui2api-chrome-"));
+  // Reuse the user's real profile when one was configured (env UI2API_USER_DATA_DIR
+  // / UI2API_CHROME_PROFILE_PATH, or an explicit override). This is the whole
+  // "drive the user's own browser" point: cookies, localStorage, site logins and
+  // chat history live in the profile. A temp profile is ONLY the zero-config
+  // fallback for hosts that never pinned one.
+  const explicitProfile = overrides.userDataDir ?? userChromeProfile();
+  const userDataDir = explicitProfile || mkdtempSync(resolve(tmpdir(), "ui2api-chrome-"));
+  const usingRealProfile = Boolean(explicitProfile);
   // Headful only when explicitly requested AND a display exists; otherwise stay
   // headless (a window would pop on the user's desktop).
   const wantHeadful = !headlessDefaulted(overrides);
@@ -263,10 +268,10 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
     // renderers hit `trap int3` within seconds of loading a heavy SPA.
     // With unprivileged user namespaces re-enabled (kernel knob) the real
     // sandbox can run again: set UI2API_CHROME_NO_SANDBOX=0 to drop the flag.
-    ...(process.env.UI2API_CHROME_NO_SANDBOX === "0" ? [] : ["--no-sandbox"]),
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-    "--disable-software-rasterizer",
+    // A REAL user profile never gets the hardening flags — they would change
+    // the user's browser fingerprint.
+    ...(usingRealProfile || process.env.UI2API_CHROME_NO_SANDBOX === "0" ? [] : ["--no-sandbox"]),
+    ...(usingRealProfile ? [] : ["--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer"]),
     // The HangWatcher treats a thread stalled under scheduler pressure (this
     // host runs heavy services on 4 free GB) as a hang and CHECK-crashes via
     // int3. The same binary survives for hours once past bootstrap; kill the

@@ -7,6 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
+import { capturePageStorage, saveSnapshot, snapshotPath } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -111,11 +112,15 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
   }
 
   // M7: --login opens a headed browser for the user to authenticate manually,
-  // then saves the resulting cookies before normal (headless) analysis runs.
+  // then saves the FULL session (cookies + localStorage/sessionStorage/IndexedDB
+  // profile snapshot) before normal (headless) analysis runs. The snapshot is
+  // what makes later runs behave like the user's real logged-in session.
   if (flags.login) {
-    const cookies = await doInteractiveLogin(url);
-    saveCookies(sessionPath(root, host), cookies);
-    console.log(`Saved session cookies -> ${sessionPath(root, host)}`);
+    const host = new URL(url).host;
+    const session = await doInteractiveLogin(url, host);
+    saveCookies(sessionPath(root, host), session.cookies);
+    saveSnapshot(snapshotPath(root, host), session.snapshot);
+    console.log(`Saved session snapshot -> ${snapshotPath(root, host)}`);
   }
 
   const map = await analyse(url, {
@@ -135,14 +140,15 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
 // UI2API_CHROME / UI2API_USER_DATA_DIR, the login happens in THEIR real Chrome
 // and profile so the authenticated session lives in their own data — the core of
 // the "drive the user's own browser" vision; otherwise a fresh bundled Chromium
-// window is used and the resulting cookies are captured. Returns the cookies.
-async function doInteractiveLogin(url: string): Promise<unknown[]> {
+// window is used and the resulting session is captured. Returns cookies + the
+// full profile snapshot (cookies + localStorage + sessionStorage + IndexedDB).
+async function doInteractiveLogin(url: string, host: string): Promise<{ cookies: unknown[]; snapshot: import("./runtime/session-store.js").ProfileSnapshot }> {
   const { chromium } = await import("playwright");
   const opts = buildLaunchOptions({ headless: false });
   const browser = await chromium.launch(opts as any);
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "load", timeout: 30000 });
+    await page.goto(url, { waitUntil: "load", timeout: 60000 });
     console.log(`[ui2api] Login page opened${usingUserChrome() ? " (your Chrome + profile)" : ""}. Sign in, then return here and press Enter.`);
     await new Promise<void>((resolve) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -151,7 +157,26 @@ async function doInteractiveLogin(url: string): Promise<unknown[]> {
         resolve();
       });
     });
-    return await page.context().cookies();
+    const cookies = await page.context().cookies();
+    // The snapshot captures the same origin the page is on; if the login flow
+    // redirected off the target origin, fall back to the final landing origin —
+    // the FIRST-party cookies are what carry the auth.
+    const snapshot = await capturePageStorage(page, {
+      host,
+    }).catch((e) => {
+      console.error(`[ui2api] snapshot capture failed (${String(e)}) — saving cookies only`);
+      return {
+        version: 1 as const,
+        host,
+        origin: page.url().startsWith("http") ? new URL(page.url()).origin : "",
+        capturedAt: new Date().toISOString(),
+        cookies: cookies as unknown as Array<Record<string, unknown>>,
+        localStorage: [],
+        sessionStorage: [],
+        indexedDB: [],
+      };
+    });
+    return { cookies, snapshot };
   } finally {
     await browser.close();
   }
@@ -350,6 +375,18 @@ async function cmdPromptd(flags: Flags): Promise<void> {
   });
 }
 
+async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const host = new URL(url).host;
+  const session = await doInteractiveLogin(url, host);
+  saveCookies(sessionPath(dataDir, host), session.cookies);
+  saveSnapshot(snapshotPath(dataDir, host), session.snapshot);
+  console.log(`[ui2api] profile captured for ${host}:`);
+  console.log(`  cookies  -> ${sessionPath(dataDir, host)}`);
+  console.log(`  snapshot (cookies + localStorage + sessionStorage + IndexedDB) -> ${snapshotPath(dataDir, host)}`);
+  console.log(`Sites driven through ui2api now see your logged-in session — chat history persists.`);
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
@@ -388,6 +425,13 @@ async function main(): Promise<void> {
       if (arg === "serve") return cmdPluginServe(rest[0] ?? "", flags);
       throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR]");
     }
+    case "profile": {
+      if (arg === "capture") {
+        if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--data-dir DIR]");
+        return cmdProfileCapture(rest[0], flags);
+      }
+      throw new Error("usage: ui2api profile capture <url> [--data-dir DIR]");
+    }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);
     case "promptd":
@@ -407,6 +451,7 @@ async function main(): Promise<void> {
       console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
       console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
+      console.log("  ui2api profile capture <url> [--data-dir DIR]  (login once, save cookies+localStorage+IndexedDB snapshot)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
       console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
