@@ -278,6 +278,11 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
     // watchdog to stop the CHECK.
     "--disable-hang-monitor",
     "--disable-v8-idle-tasks",
+    // Heavy SPA renderers (Gemini/Copilot) die fastest on this host; stop
+    // background throttling/rendering so the renderer burns through the load
+    // (and the answer stream) before the bootstrap window closes.
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
     `--remote-debugging-port=${port}`,
     "--remote-debugging-address=127.0.0.1",
     `--user-data-dir=${userDataDir}`,
