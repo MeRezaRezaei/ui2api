@@ -6,6 +6,7 @@
 // own JS, and the streamed answer is read off the page's event bus.
 import { launchBrowser, loadCookies, sessionPath } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives } from "../runtime/dom-primitives.js";
+import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -101,10 +102,21 @@ export class ChatDriver {
             return route.continue();
           });
         }
-        // Reuse a previously captured authenticated session, if one exists.
+        // Reuse the site's captured session: a full profile snapshot (cookies +
+        // localStorage + sessionStorage + IndexedDB) when one exists, else the
+        // legacy cookie file. The snapshot makes the fresh incognito context
+        // indistinguishable from the user's logged-in session — so Gemini et al.
+        // persist chat history into the real account.
         const host = new URL(this.profile.url).host;
-        const cookies = loadCookies(sessionPath(this.dataDir, host));
-        if (!usingDefaultContext && cookies.length > 0) await context.addCookies(cookies as never[]);
+        if (!usingDefaultContext) {
+          const snap = loadSnapshot(snapshotPath(this.dataDir, host));
+          if (snap) {
+            await injectSnapshot(context, snap);
+          } else {
+            const cookies = loadCookies(sessionPath(this.dataDir, host));
+            if (cookies.length > 0) await context.addCookies(cookies as never[]);
+          }
+        }
         this.page = await context.newPage();
         await this.page.goto(this.profile.url, { waitUntil: "domcontentloaded", timeout: 60000 });
         return this.page;

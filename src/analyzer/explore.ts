@@ -1,6 +1,7 @@
 import { type Browser, type Page } from "playwright";
 import { INSTRUMENT_SRC } from "./instrument.js";
 import { launchBrowser, sessionPath, loadCookies } from "../runtime/browser.js";
+import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import type { ActionMap, MethodCall, DomInteraction } from "../types.js";
 import { buildActionMap } from "../mapper/build.js";
 import { runMapperAgent } from "../mapper/agent.js";
@@ -92,16 +93,27 @@ export async function analyse(url: string, opts: AnalyseOptions = {}): Promise<A
       const page = await browser.newPage();
       await page.addInitScript(INSTRUMENT_SRC);
 
-      // M7: inject any saved session cookies for cookie-gated sites, BEFORE the
-      // page loads, so authenticated content is reachable during analysis.
+      // M7: inject any saved session for cookie-gated sites, BEFORE the page
+      // loads, so authenticated content is reachable during analysis. A full
+      // profile snapshot (cookies + localStorage + sessionStorage + IndexedDB)
+      // is preferred; the legacy cookie file is the fallback.
       const host0 = new URL(url).host;
-      const cookieFile = sessionPath(opts.outDir || "sites", host0);
-      const savedCookies = loadCookies(cookieFile);
-      if (savedCookies.length) {
+      const savedSnap = loadSnapshot(snapshotPath(opts.outDir || "sites", host0));
+      if (savedSnap) {
         try {
-          await page.context().addCookies(savedCookies);
+          await injectSnapshot(page.context(), savedSnap);
         } catch (e) {
-          console.error(`[ui2api] failed to inject session cookies: ${String(e)}`);
+          console.error(`[ui2api] failed to inject session snapshot: ${String(e)}`);
+        }
+      } else {
+        const cookieFile = sessionPath(opts.outDir || "sites", host0);
+        const savedCookies = loadCookies(cookieFile);
+        if (savedCookies.length) {
+          try {
+            await page.context().addCookies(savedCookies);
+          } catch (e) {
+            console.error(`[ui2api] failed to inject session cookies: ${String(e)}`);
+          }
         }
       }
 
