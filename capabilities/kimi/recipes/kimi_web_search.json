@@ -1,0 +1,20 @@
+{
+  "capability": "kimi_web_search",
+  "site": "kimi",
+  "flow": "ui-toggle (composer Search / Web-access switch) + chat prompt",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.kimi.com", "note": "session snapshot injected (data/www.kimi.com/.session)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "optional clean conversation" },
+    { "step": 3, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] matching labels: search, web, web access, 搜索, 联网 — candidate selectors, verify on first live capture" },
+    { "step": 4, "action": "click", "note": "if checked/state != args.enable, click to toggle web-search mode; else no-op" },
+    { "step": 5, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 6, "action": "send", "note": "Enter (keyEnter strategy)" },
+    { "step": 7, "action": "read", "selector": ".segment-text", "until": "stable 2000ms", "timeoutMs": 90000 },
+    { "step": 8, "action": "extract", "kind": "citations", "selectors": ["[class*=\"citation\"]", "[class*=\"sources\"]", "[data-testid*=\"citation\"]"], "max": 12, "note": "CANDIDATE — citation block selectors TBD on first live capture" }
+  ],
+  "output": { "answer": "string", "citations": ["string (title — url)"], "webSearched": "boolean" },
+  "rpcEquivalent": "kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat — the switch's state feeds the tools field of ChatRequest; dedicated backend search.v2.SearchService (Search/SerpSaas/Highlight/Url2Text) exists separately",
+  "note": "toggle selector is UI-revision sensitive; re-tune per account after live capture",
+  "stealth": "real session, trusted inputs, site's own send handler",
+  "sessionLock": "session.lock.json"
+}

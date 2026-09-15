@@ -1,0 +1,68 @@
+{
+  "id": "kimi",
+  "name": "Kimi AI (www.kimi.com)",
+  "site": "www.kimi.com",
+  "url": "https://www.kimi.com",
+  "description": "Kimi AI assistant web app — chat with streaming answers, in-chat internet search, file/image upload, long-context mode. .cn mirror: kimi.moonshot.cn (login host login.moonshot.cn); canonical is www.kimi.com.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-15",
+  "siteVersion": "Connect RPC on notilo.kimi.com/apiv2 — 411 methods / 45 protobuf services decoded from 99 JS bundles (~12MB); chat = ChatService.Chat (server-stream), search = kimi.chat.v1.Tool.Search{force} + search.v2.SearchService, files = POST /apiv2-files/file/upload",
+  "capabilities": [
+    {
+      "id": "kimi_chat",
+      "name": "Chat",
+      "description": "Send a prompt on the composer; streamed answer off the page (ChatService.Chat server-stream on notilo.kimi.com/apiv2)",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/kimi_chat.json"
+    },
+    {
+      "id": "kimi_web_search",
+      "name": "Web search toggle (in-chat internet mode)",
+      "description": "Flip the composer web-search switch so the answer is grounded by live search (feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat)",
+      "method": "ui-toggle (composer Search / Web-access switch)",
+      "recipe": "recipes/kimi_web_search.json"
+    },
+    {
+      "id": "kimi_list_conversations",
+      "name": "Conversation history list",
+      "description": "List past chats (ChatService.ListChats / ListMessages); DOM sidebar fallback",
+      "method": "in-page Connect RPC or DOM sidebar read",
+      "recipe": null,
+      "notes": "RPC/selector details to be verified on first live capture; recipe pending"
+    },
+    {
+      "id": "kimi_file_upload",
+      "name": "File / image upload support",
+      "description": "Attach documents or images to a chat — REST multipart POST /apiv2-files/file/upload (FileService.Upload) with parse tracking (GetFileParseProgress, ListChatFiles)",
+      "method": "in-page REST multipart (Bearer access_token) or composer attach UI",
+      "recipe": null,
+      "notes": "Upload flow details to be verified on first live capture; recipe pending"
+    },
+    {
+      "id": "kimi_long_context",
+      "name": "Long-context / long-context-only mode",
+      "description": "Set context_length / context-length-only mode on ChatRequestOptions (kimi.common.v1.ContextLength) for long-input answers",
+      "method": "composer mode toggle or ChatService.Chat options",
+      "recipe": null,
+      "notes": "Toggle DOM + exact ContextLength codes to be verified on first live capture; recipe pending"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "www.kimi.com",
+    "apiHost": "https://notilo.kimi.com",
+    "localStorageKeys": ["access_token", "refresh_token", "msh_user_id"],
+    "capture": "ui2api profile capture \"https://www.kimi.com\" --login",
+    "note": "Auth is localStorage access_token (replayed as Bearer on notilo.kimi.com/apiv2, plus site-internal x-msh-shield-data TrustDecision header). Exact cookie set TBD on first live capture."
+  },
+  "permissions": [
+    "requires a real logged-in Kimi session snapshot (access_token in localStorage)",
+    "anti-bot: TrustDecision(同盾) blackbox + VolcanoEngine analytics on the page — no synthetic inputs, use the site's own JS paths",
+    "quota/captcha gates may fire on abuse signals (QUOTA_EXCEEDED_WINDOW_5H/7D, REASON_ACCOUNT_CAPTCHA_VERIFY_FAILED)"
+  ],
+  "builtinProfile": "kimi",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static JS-bundle analysis (see CAPABILITIES.md — 99 bundles / ~12MB, 411 RPC methods / 45 services); no browser launched"
+}

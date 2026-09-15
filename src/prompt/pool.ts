@@ -90,6 +90,12 @@ export class ChatPool {
     return b;
   }
 
+  // The pool's shared browser handle — capability runners reuse the SAME
+  // logged-in browser so their RPC/DOM calls run on the proven session.
+  async sharedBrowser(): Promise<Browser> {
+    return this.ensureBrowser();
+  }
+
   // Warm the pool: ensure at least `min` idle pages for the default site when it
   // is part of this pool (else the first available profile). Other sites are
   // warmed lazily on first request. Fails softly: a down site must not take the

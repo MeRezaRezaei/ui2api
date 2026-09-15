@@ -1,0 +1,30 @@
+{
+  "id": "hunyuan",
+  "name": "Tencent Hunyuan (yuanbao.tencent.com)",
+  "url": "https://yuanbao.tencent.com/",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://yuanbao.tencent.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); the yuanbao chat console needs an active hy_user/hy_token session",
+  "composer": [
+    "textarea[placeholder*=\"输入你的问题\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "[class*=\"chat-input\"] textarea",
+    "[class*=\"composer\"] textarea",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"message\"]",
+    ".chat-item",
+    "[class*=\"answer\"]",
+    "[class*=\"assistant\"] [class*=\"markdown\"]"
+  ],
+  "newChat": "[aria-label*=\"新建对话\"], [aria-label*=\"new chat\"], [class*=\"new-chat\"], button:has-text('新建对话')",
+  "dismiss": [
+    "button[aria-label*=\"关闭\"]",
+    "button[aria-label*=\"Close\"]",
+    "button:has-text('知道了')"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "note": "UNVERIFIED CANDIDATE selectors for yuanbao.tencent.com (Tencent Yuanbao, the consumer Hunyuan assistant). Tune each after the first live capture (data/yuanbao.tencent.com/.session). Composer and answer markup frequently change; keep entries generic-but-plausible until a real session confirms them."
+}

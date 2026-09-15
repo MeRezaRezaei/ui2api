@@ -1,0 +1,16 @@
+{
+  "capability": "kimi_chat",
+  "site": "kimi",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.kimi.com", "note": "session snapshot injected (data/www.kimi.com/.session); .cn mirror kimi.moonshot.cn is the same site surface on a different login host" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": ".segment-text", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = ChatService.Chat (Connect server-stream) POST https://notilo.kimi.com/apiv2/kimi.gateway.chat.v1.ChatService/Chat with Bearer access_token; the UI path drives the site's own JS so no proto reconstruction needed. Exact composer/send/answer-hydration selectors TBD on first live capture.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

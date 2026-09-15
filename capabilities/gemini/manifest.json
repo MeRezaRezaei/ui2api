@@ -1,0 +1,47 @@
+{
+  "id": "gemini",
+  "name": "Gemini (gemini.google.com)",
+  "url": "https://gemini.google.com",
+  "siteVersion": "boq_assistant-bard-web-server_20260914.08_p0",
+  "capabilities": [
+    {
+      "id": "gemini_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; streamed answer off the page (StreamGenerate RxAFq on the wire)",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/gemini_chat.json"
+    },
+    {
+      "id": "gemini_list_conversations",
+      "name": "Conversation list / search",
+      "description": "ListConversations / SearchConversations via batchexecute RPC, DOM-sidebar fallback",
+      "method": "in-page batchexecute (real cookies + XSRF token)",
+      "recipe": "recipes/gemini_list_conversations.json"
+    },
+    {
+      "id": "gemini_model_list",
+      "name": "Model picker read",
+      "description": "Enumerate visible models + WIZ_global_data model flags (no ListModels RPC exists)",
+      "method": "dom-picker read",
+      "recipe": "recipes/gemini_model_list.json"
+    },
+    {
+      "id": "gemini_search_toggle",
+      "name": "Search / Web-access toggle",
+      "description": "Flip the composer search switch (feeds the tools field of StreamGenerate)",
+      "method": "ui-toggle",
+      "recipe": "recipes/gemini_search_toggle.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "gemini.google.com",
+    "capturedAt": "2026-09-14T19:27:40Z",
+    "snapshotHashPrefix": "2d2095c4b6369d9f",
+    "note": "existing live snapshot (23 cookies incl. SID/SAPISID + BARD_EMBED_CHAT_STORAGE_KEY_V2); 3 live chat rounds already proven with it"
+  },
+  "builtinProfile": "gemini",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static curl + JS-bundle reading (boq-bard-web kernel 2.9MB); no browser launched"
+}

@@ -1,0 +1,14 @@
+{
+  "capability": "gemini_model_list",
+  "site": "gemini",
+  "flow": "dom-picker read (+ WIZ_global_data model flags)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected" },
+    { "step": 2, "action": "wait", "note": "hydration settle (readyState complete)" },
+    { "step": 3, "action": "read", "note": "[data-test-id*='model'], [data-model-id], [class*='model-picker'] rows -> [{id,name,selected}]" },
+    { "step": 4, "action": "read-flags", "note": "WIZ_global_data hex model ids (1bc6b5d98741cd3d / 1a43ad63cc8a7f9a / a74ec8485b3b5ce4 / 9d8ca3786ebdfbea / e6fa609c3fa255c0 / 797f3d0293f288ad)" }
+  ],
+  "output": { "models": "array", "wizModelFlags": "object" },
+  "note": "no separate ListModels RPC — model picker items ride inside StreamGenerate's picker-item proto (field 45 Ezc lzc); reading the live picker DOM is the reliable surface",
+  "sessionLock": "session.lock.json"
+}

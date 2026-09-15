@@ -1,0 +1,14 @@
+{
+  "capability": "gemini_search_toggle",
+  "site": "gemini",
+  "flow": "ui-toggle (composer Search / Web-access switch)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected" },
+    { "step": 2, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] matching labels: search, web access, google search, use google search" },
+    { "step": 3, "action": "click", "note": "if aria-checked/state != args.enable, click; else no-op" }
+  ],
+  "output": { "ok": "boolean", "clicked": "boolean", "now": "boolean" },
+  "rpcEquivalent": "UpdateToolPermission / GetAllToolConsentData (BardFrontendService) — the switch's state feeds the tools field (field 2) of StreamGenerate",
+  "note": "toggle selector is UI-revision sensitive; re-tune per account after live capture",
+  "sessionLock": "session.lock.json"
+}

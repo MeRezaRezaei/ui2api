@@ -1,0 +1,26 @@
+{
+  "id": "kimi",
+  "name": "Kimi AI (www.kimi.com)",
+  "url": "https://www.kimi.com",
+  "loginRequired": true,
+  "loginHint": "capture a www.kimi.com session once: ui2api analyse https://www.kimi.com --login",
+  "composer": [
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "textarea[placeholder*=\"Ask\"], textarea[placeholder*=\"输入\"]",
+    ".chat-input textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    ".segment-text",
+    "[class*=\"answer\"]",
+    "[class*=\"response\"]"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"], [aria-label*=\"新对话\"]",
+  "dismiss": [
+    "button[aria-label*=\"Sign in\"], button[aria-label*=\"登录\"]",
+    "button[aria-label*=\"Close\"], button[aria-label*=\"关闭\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses based on common Kimi React UI patterns (contenteditable composer, .segment-text answer blocks, sidebar New chat button). Tune each against a real browser after the first live capture (data/www.kimi.com/.session). Login is required; the session snapshot replays localStorage access_token against notilo.kimi.com/apiv2."
+}

@@ -55,9 +55,9 @@ with documented web-session auth (from the open-source OmniRoute repo).
 | Package | Status | Key discovery |
 |---|---|---|
 | `google-ai-search` | ✅ implemented | **AI Mode = `/search?q=…&udm=14`**, urlTemplate flow (one page load per query → `{answer, citations[]}`); session snapshot (www.google.com) pending first capture |
-| `gemini` | ✅ inventory | all RPCs over one `POST /_/BardChatUi/data/batchexecute`; 109 `BardFrontendService.*` descriptors incl. `StreamGenerate`, search toggle via `UpdateToolPermission`, image/video gen, Gems, canvas, deep research, MCP/skills control plane |
-| `kimi` | ✅ inventory | Connect/protobuf RPC on `notilo.kimi.com/apiv2`; **411 methods / 45 services decoded**; chat via `ChatService.Chat`, search = `Tool.Search{force}` + `search.v2.SearchService`, files via `/apiv2-files/file/upload`; auth = localStorage `access_token` (Bearer + `x-msh-shield-data`) |
-| `hunyuan-yuanbao` | ✅ inventory | Next.js shell, everything is tool-call content over one SSE endpoint `POST /api/chat/` (custom SSE-over-XHR); deep search, upload→COS→doc analysis, image gen; auth = `hy_user`/`hy_token` cookies; anti-bot: `X-webdriver: 1` flag on headless + Turing.js/QIMEI fingerprint |
+| `gemini` | ✅ implemented | all RPCs over one `POST /_/BardChatUi/data/batchexecute`; compact descriptor IDs live-captured (`aPya6c`=ListConversations, `otAQ7b`=bootstrap/model-catalog, `sJBwce`=undecoded); `gemini_chat` via trusted ChatDriver insertText path; **live-tested**: chat answers, list_conversations (RPC), model_list (Flash-Lite/Flash/Pro via otAQ7b); further surface (search toggle, CRUD, Gems, deep research) mapped in inventory — see `capabilities/gemini` |
+| `kimi` | ✅ inventory + package scaffold | Connect/protobuf RPC on `notilo.kimi.com/apiv2`; **411 methods / 45 services decoded**; chat via `ChatService.Chat`, search = `Tool.Search{force}` + `search.v2.SearchService`, files via `/apiv2-files/file/upload`; auth = localStorage `access_token` (Bearer + `x-msh-shield-data`); package files scaffolded, snapshot awaiting capture |
+| `hunyuan-yuanbao` | ✅ inventory + package scaffold | Next.js shell, everything is tool-call content over one SSE endpoint `POST /api/chat/` (custom SSE-over-XHR); deep search, upload→COS→doc analysis, image gen; auth = `hy_user`/`hy_token` cookies; anti-bot: `X-webdriver: 1` flag on headless + Turing.js/QIMEI fingerprint; package files scaffolded under `capabilities/hunyuan` (chat URL `yuanbao.tencent.com`), snapshot awaiting capture |
 | provider catalog | ✅ | 30 web providers with documented auth (from OmniRoute) |
 
 Also: `docs/STEALTH.md` — runtime stealth audit (8 findings, 10 quick wins,
@@ -75,10 +75,15 @@ the only true no-trace posture).
    package files (manifest/profile/recipe/session.lock) + driver urlTemplate flow
    implemented; **runtime smoke test still needs the first www.google.com session
    capture** (`ui2api profile capture "https://www.google.com" --login`).
-3. `gemini` — chat stream + search toggle + conversation CRUD + model picker
-   (the batchexecute RPC layer is already fully mapped).
+3. `gemini` — focused implementation: batchexecute RPC layer rebuilt + live-verified
+   (`aPya6c`=conversation list, `otAQ7b`=model catalog on the UI's real wire
+   format); `gemini_chat` = ChatDriver insertText path; task branch
+   `task/gemini-surface`. ✅ implemented + live-tested (2026-09-15). Remaining
+   stretch: search toggle, conversation CRUD, Gems, deep research.
 4. `kimi` — chat core + web search + file upload (the 411-method RPC surface).
+   Package scaffolded (`capabilities/kimi/`); needs first `--login` capture.
 5. `hunyuan-yuanbao` — chat + deep search + doc analysis (single SSE endpoint,
-   needs the real session cookies for /api/chat).
+   needs the real session cookies for /api/chat). Package scaffolded under
+   `capabilities/hunyuan/`; needs first `--login` capture.
 6. Then: rest of the provider catalog (poe, venice, doubao, deepseek, grok,
    claude, perplexity…) as requested.

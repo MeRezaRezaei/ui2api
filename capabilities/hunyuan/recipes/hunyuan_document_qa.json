@@ -1,0 +1,17 @@
+{
+  "capability": "hunyuan_document_qa",
+  "site": "hunyuan",
+  "flow": "ui-path — attach document (file picker) then ask about it via compositer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture" },
+    { "step": 2, "action": "upload", "input": "args.file", "note": "UNVERIFIED candidate: file picker via [input type=file] / attach button ([class*=\"upload\"] or aria/placeholder hints); repo inventory notes upload -> COS -> doc analysis. Exact DOM to be verified on first live capture." },
+    { "step": 3, "action": "wait", "selector": "enabled-send", "timeoutMs": 30000, "note": "wait until composer accepts the attached doc (ingest indicator appears)" },
+    { "step": 4, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 5, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 6, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture; doc analysis answers can take longer" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "per repo inventory, doc Q&A rides the same tool-call SSE as chat (/api/chat/, tool = document analysis) — TO BE VERIFIED on first live capture",
+  "stealth": "real session, real file via Playwright setInputFiles (no synthetic paste), site's own send handler; attach/headed + real profile required",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,16 @@
+{
+  "capability": "hunyuan_chat",
+  "site": "hunyuan",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 60000, "note": "UNVERIFIED candidate selector — tune after first live capture" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "per repo inventory (hunyuan-yuanbao): tool-call content over one SSE endpoint POST /api/chat/ (custom SSE-over-XHR) — TO BE VERIFIED on first live capture; the UI path drives the site's own JS so no over-the-wire reconstruction needed for this recipe",
+  "stealth": "real session, trusted inputs, site's own send handler; attach/headed + real profile required (headless is fingerprint-flagged per inventory)",
+  "sessionLock": "session.lock.json"
+}

@@ -153,15 +153,21 @@ export class ChatDriver {
     await this.getPage();
   }
 
-  // Pick the first selector that is actually present on the page (profiles carry
-  // a few candidate selectors because chat UIs rename classes constantly).
+  // Pick the first selector that actually becomes visible on the page (profiles
+  // carry a few candidate selectors because chat UIs rename classes constantly).
+  // Each candidate gets a bounded wait: chat shells (e.g. Gemini) redirect from
+  // the bare host to /app and only then hydrate the composer, so a snap
+  // isVisible() at domcontentloaded can miss it. First candidate to become
+  // visible wins; the per-call timeout keeps other callers unaffected.
   private async firstVisible(selectors: string[]): Promise<string | null> {
     for (const sel of selectors) {
       try {
         const loc = this.page!.locator(sel).first();
-        if (await loc.isVisible()) return sel;
+        await loc.waitFor({ state: "visible", timeout: 15000 });
+        return sel;
       } catch {
-        // selector syntax error or element absent — try the next candidate
+        // selector syntax error, element absent, or it never became visible —
+        // try the next candidate
       }
     }
     return null;

@@ -4,6 +4,9 @@
 //
 //   POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}
 //                 -> {answer, chunkCount, doneReason, url, title[, citations]}
+//   POST /capability/gemini  {"capability":"gemini_list_conversations", ...}
+//                 -> one Gemini capability result (chat/list_conversations/
+//                    model_list/search_toggle) over the same browser+session.
 //   GET  /sites   -> the available chat-site profiles
 //   GET  /status  -> pool health (warm/idle/busy pages)
 //   GET  /health  -> {ok, defaultSite}
@@ -15,6 +18,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { GeminiCapabilities } from "../capabilities/gemini.js";
 
 export interface PromptdOptions {
   port: number;
@@ -127,6 +131,28 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         } catch (e) {
           await pool.release(worker);
           throw e;
+        }
+      }
+      // Gemini capability surface: list/conversations/model-picker/search-toggle
+      // via the same logged-in browser machinery. Only gemini is wired so far —
+      // other sites' capability runners land with their packages.
+      if (req.method === "POST" && req.url === "/capability/gemini") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        const profile = idFrom("gemini", profilesById);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and RPC/DOM reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = await pool.sharedBrowser();
+        const caps = new GeminiCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
         }
       }
       send(res, 404, { error: "not found" });
