@@ -1,0 +1,14 @@
+{
+  "site": "venice.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "venice.ai",
+    "cookies": ["session"],
+    "captureCommand": "ui2api analyse https://venice.ai --login",
+    "targetDir": "data/venice.ai/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. Auth per provider-catalog.md: cookie 'session' (venice-web). Exact cookie set beyond session to be confirmed on first capture. Capture once, then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

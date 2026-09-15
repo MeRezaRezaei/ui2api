@@ -1,0 +1,31 @@
+{
+  "id": "perplexity",
+  "name": "Perplexity (perplexity.ai)",
+  "url": "https://www.perplexity.ai",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://www.perplexity.ai --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); package requires a logged-in session (cookie __Secure-next-auth.session-token) — the built-in allows anonymous Ask but this package pins loginRequired true per provider-catalog",
+  "composer": [
+    "textarea[placeholder*=\"Ask\"]",
+    "textarea[placeholder*=\"ask anything\"]",
+    "div[contenteditable=\"true\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[data-testid=\"answer\"]",
+    "div[class*=\"prose\"]",
+    ".answer-content",
+    "div[class*=\"markdown\"]",
+    "[data-testid*=\"message\"]"
+  ],
+  "newChat": "[aria-label*=\"New thread\"], [aria-label*=\"new thread\"], button:has-text('New thread')",
+  "dismiss": [
+    "button[aria-label*=\"Close\"]",
+    "button[aria-label*=\"Dismiss\"]",
+    "button:has-text('Maybe later')"
+  ],
+  "captureMs": 90000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED CANDIDATE selectors for www.perplexity.ai — generic Ask textarea/contenteditable composer and common answer containers (mirrors src/profile/profile.ts built-in perplexity entries). Tune each after the first live capture (data/www.perplexity.ai/.session); markup frequently changes, confirm on first live capture."
+}

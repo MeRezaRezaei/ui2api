@@ -1,0 +1,14 @@
+{
+  "site": "grok.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "grok.com",
+    "cookies": ["sso", "sso-rw"],
+    "captureCommand": "ui2api analyse https://grok.com --login",
+    "targetDir": "data/grok.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. All profile selectors and RPC details are unverified candidates. Cookie names (sso + sso-rw) come from the capabilities/provider-catalog.md grok-web entry. Capture a logged-in grok.com session once (ui2api analyse https://grok.com --login), then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

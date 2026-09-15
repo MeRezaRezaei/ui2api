@@ -1,17 +1,17 @@
 {
   "capability": "hunyuan_document_qa",
   "site": "hunyuan",
-  "flow": "ui-path — attach document (file picker) then ask about it via compositer",
+  "flow": "ui-path — attach document (file picker) then ask about it via the composer",
   "steps": [
     { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture" },
-    { "step": 2, "action": "upload", "input": "args.file", "note": "UNVERIFIED candidate: file picker via [input type=file] / attach button ([class*=\"upload\"] or aria/placeholder hints); repo inventory notes upload -> COS -> doc analysis. Exact DOM to be verified on first live capture." },
-    { "step": 3, "action": "wait", "selector": "enabled-send", "timeoutMs": 30000, "note": "wait until composer accepts the attached doc (ingest indicator appears)" },
+    { "step": 2, "action": "upload", "input": "args.file", "note": "UNVERIFIED candidate: file picker via [input type=file] / plus-panel attach button ([class*=\"upload\"] or aria hints). ONE document per turn (uploaderTypeList, toast '一次仅可上传一个文档'); accepted types pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv. Wire (bundles): /api/resource/genUploadInfo -> COS write -> /api/resource/fileParse|asyncFileParse. Exact DOM to be verified on first live capture." },
+    { "step": 3, "action": "wait", "selector": "enabled-send", "timeoutMs": 30000, "note": "wait until composer accepts the attached doc (upload -> parsing statuses SPEAKING/STOPPING/SPLIT/UPLOADING/PARSING; ingest indicator appears)" },
     { "step": 4, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
     { "step": 5, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
-    { "step": 6, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture; doc analysis answers can take longer" }
+    { "step": 6, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture; doc analysis answers stream doc_percent/docDeepModeInfo/step progress and can take longer" }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "per repo inventory, doc Q&A rides the same tool-call SSE as chat (/api/chat/, tool = document analysis) — TO BE VERIFIED on first live capture",
-  "stealth": "real session, real file via Playwright setInputFiles (no synthetic paste), site's own send handler; attach/headed + real profile required",
+  "rpc": "per repo inventory: document Q&A rides the same tool-call SSE as chat — JSON POST /api/chat/ with the parsed doc force-referenced on the turn; parsing announced via /api/resource/fileParse (sync) / /api/resource/asyncFileParse (async) after COS upload via /api/resource/genUploadInfo; per-resource reads via /api/resource/download (COS signed), status via /api/resource/check/status; analysis progress streams as content[].type doc_percent / docDeepModeInfo / step; deep-read modes TRANSLATION/SUMMARY/GUIDE/DEEP_SEARCH. Endpoints validated from bundles but not executed — TO BE VERIFIED on first live capture",
+  "stealth": "real session, real file via Playwright setInputFiles (no synthetic paste), site's own send handler; HEADED + real profile required (X-webdriver: 1 / Turing.js / QIMEI flag headless)",
   "sessionLock": "session.lock.json"
 }

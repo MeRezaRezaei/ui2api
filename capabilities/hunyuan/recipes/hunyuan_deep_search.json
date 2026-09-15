@@ -1,0 +1,18 @@
+{
+  "capability": "hunyuan_deep_search",
+  "site": "hunyuan",
+  "flow": "ui-path — enable deep / AI-search mode on the composer, send prompt, streamed deep-search CoT report",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "find-toggle", "note": "CANDIDATE: deep-search is an AI-search entry (inputguard ask bar) / 联网-composer deep mode, or scene-select on submit; exact DOM to be verified on first live capture" },
+    { "step": 4, "action": "click", "note": "if not already enabled, switch search mode to deep (ai_search_pro); else no-op" },
+    { "step": 5, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 6, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 7, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 120000, "note": "UNVERIFIED candidate selector — tune after first live capture; deep-search CoT can stream for a while" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "per repo inventory: deep mode = chat scene ai_search_pro (finance ai_search_pro_fin, DeepSeek ai_search_deepseek) sent on the turn; search-session provisioning GET /api/inputguide/search/create; CoT streams over the same POST /api/chat/ SSE as content[].type deep_search with step/process + per-step waits, guidance cards as searchGuid; tools google_web_search / paper_search / hunyuan_web_search render as deep-search CoT cards. Search-type persists as YB_ASK_AI_SEARCH_TYPE_NETWORK / model ext-info. Validated from bundles but not executed — TO BE VERIFIED on first live capture",
+  "stealth": "HEADED + real profile REQUIRED (X-webdriver: 1 flags headless; Turing.js + QIMEI fingerprint); real session, trusted inputs, site's own send handler",
+  "sessionLock": "session.lock.json"
+}

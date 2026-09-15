@@ -3,12 +3,12 @@
   "name": "Tencent Hunyuan (yuanbao.tencent.com)",
   "url": "https://yuanbao.tencent.com/",
   "loginRequired": true,
-  "loginHint": "sign in once via `ui2api analyse https://yuanbao.tencent.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); the yuanbao chat console needs an active hy_user/hy_token session",
+  "loginHint": "HEADED session REQUIRED — the API sets `X-webdriver: 1` when navigator.webdriver is true, so headless Chrome is fingerprint-flagged (Turing.js + QIMEI). Capture once with a real, headed profile: `ui2api analyse https://yuanbao.tencent.com --login`, or reuse your signed-in Chrome via UI2API_USER_DATA_DIR. The chat console trusts the hy_user/hy_token session cookies.",
   "composer": [
-    "textarea[placeholder*=\"输入你的问题\"]",
+    ".ql-editor[contenteditable=\"true\"]",
     "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "textarea[placeholder*=\"输入你的问题\"]",
     "[class*=\"chat-input\"] textarea",
-    "[class*=\"composer\"] textarea",
     "textarea"
   ],
   "send": { "kind": "keyEnter" },
@@ -26,5 +26,5 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "UNVERIFIED CANDIDATE selectors for yuanbao.tencent.com (Tencent Yuanbao, the consumer Hunyuan assistant). Tune each after the first live capture (data/yuanbao.tencent.com/.session). Composer and answer markup frequently change; keep entries generic-but-plausible until a real session confirms them."
+  "note": "UNVERIFIED CANDIDATE selectors for yuanbao.tencent.com (Tencent Yuanbao, the consumer Hunyuan assistant). Inventory-grounded: the single chat composer is a Quill contenteditable (bundle term 'quillFocusHold'), so .ql-editor is the strongest candidate; answers are per-turn tool-call content rendered by content[].type (text/step/reasoner/toolCall) over one POST /api/chat/ SSE stream, so no stable answer DOM class is known yet. One document per turn (uploaderTypeList). Tune every selector after the first live capture (data/yuanbao.tencent.com/.session) — composer and answer markup change frequently."
 }

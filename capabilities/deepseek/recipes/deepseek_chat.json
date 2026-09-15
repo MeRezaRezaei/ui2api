@@ -1,0 +1,16 @@
+{
+  "capability": "deepseek_chat",
+  "site": "deepseek",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://chat.deepseek.com", "note": "session snapshot injected (data/chat.deepseek.com/.session)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": ".ds-markdown", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire not yet known (no bundle analysis in this environment); the UI path drives the site's own JS so no endpoint reconstruction needed. Exact composer/send/answer selectors TBD on first live capture.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

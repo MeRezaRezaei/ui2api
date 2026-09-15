@@ -1,0 +1,26 @@
+{
+  "id": "poe",
+  "name": "Poe (poe.com)",
+  "url": "https://poe.com",
+  "loginRequired": true,
+  "loginHint": "capture a poe.com session once: ui2api analyse https://poe.com --login",
+  "composer": [
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "div[contenteditable=\"true\"][data-testid*=\"chat\"]",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[data-testid*=\"response\"]",
+    "[class*=\"Message\"]",
+    "[class*=\"answer\"]"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"]",
+  "dismiss": [
+    "button[aria-label*=\"Close\"]",
+    "button[aria-label*=\"Dismiss\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic contenteditable[role=textbox] composer, common answer containers). Tune each against a real browser after the first live capture (data/poe.com/.session). Auth per provider-catalog.md: cookie p-b."
+}

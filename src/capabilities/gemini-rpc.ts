@@ -77,13 +77,24 @@ async ({ method, payload }) => {
     if (m) sid = m[1];
   }
 
-  // 4. Wire the call EXACTLY like the site's own transport (matched against a
-  //    live capture of the UI's bootstrap RPCs): the descriptor id goes inside
-  //    the f.req body AND echoed as the rpcids query param on the batch URL;
-  //    f.sid/bl/hl/source-path/_reqid/rt ride the URL; the body carries only
-  //    f.req. The descriptor is either a full path ("/BardFrontendService.X")
-  //    or a compact short id the UI itself uses (e.g. "sJBwce" =
-  //    ListConversations, per live capture).
+// 4. Wire the call EXACTLY like the site's own transport (matched against a
+//    live capture of the UI's bootstrap RPCs): the descriptor id goes inside
+//    the f.req body AND echoed as the rpcids query param on the batch URL;
+//    f.sid/bl/hl/source-path/_reqid/rt ride the URL; the body carries only
+//    f.req. The descriptor is either a full path ("/BardFrontendService.X")
+//    or a compact short id the UI itself uses.
+//
+//    Compact IDs decoded on a live page (2026-09-15, replaying the UI's own
+//    payloads; see src/capabilities/gemini.ts header for the full map):
+//      aPya6c    ListConversations              payload [] -> [hasMore,totalCount,[convs]]
+//      otAQ7b    bootstrap/config catalog       payload [] -> models + grounding sources
+//      K4WWud    client location lookup         payload [[0],["en-US"]] -> [city,label,...]
+//      ozz5Z     per-entitlement status check   payload [[[null,"1",<id>],null,1],...]
+//      o30O0e    person profile request         payload [["me"],[[["person.photo",...]],null,[1,7]]]
+//      L5adhe    popup/notification state upsert (void reply)
+//      sJBwce    session/telemetry write        payload [[1,2]] -> null + [3] (void)
+//      GPRiHf / maGuAc / CNgdBe / I4z33b        state/pref writes (void reply)
+//      cYRIkd / whPPme / ku4Jyf                 read-style RPCs -> [] (empty)
   const bodyObj = [[[method, JSON.stringify(payload), "null", "generic"]]];
   const qp = new URLSearchParams();
   qp.set("rpcids", method);

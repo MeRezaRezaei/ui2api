@@ -1,14 +1,14 @@
 {
   "capability": "gemini_search_toggle",
   "site": "gemini",
-  "flow": "ui-toggle (composer Search / Web-access switch)",
+  "flow": "ui-toggle (composer Search / Web-access / grounding switch)",
   "steps": [
     { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected" },
-    { "step": 2, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] matching labels: search, web access, google search, use google search" },
+    { "step": 2, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] / [role='menuitemcheckbox'] matching labels: search, web access, google search, use google search, search on the web" },
     { "step": 3, "action": "click", "note": "if aria-checked/state != args.enable, click; else no-op" }
   ],
   "output": { "ok": "boolean", "clicked": "boolean", "now": "boolean" },
   "rpcEquivalent": "UpdateToolPermission / GetAllToolConsentData (BardFrontendService) — the switch's state feeds the tools field (field 2) of StreamGenerate",
-  "note": "toggle selector is UI-revision sensitive; re-tune per account after live capture",
+  "note": "Live probe 2026-09-15: this UI revision (boq_assistant-bard-web-server_20260914.08_p0) has NO standalone search toggle in the composer (toolbar = Upload & tools + Dictate only). Google Search grounding is a composer 'sources' picker entry (otAQ7b: Search=1, Gmail=3, Drive=4, Chat=12) exposed as a menuitemcheckbox on signed-in sessions; it then rides the StreamGenerate tools field. The toggle selector is UI-revision sensitive; re-tune per account after live capture.",
   "sessionLock": "session.lock.json"
 }

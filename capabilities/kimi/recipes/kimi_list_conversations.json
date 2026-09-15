@@ -1,0 +1,20 @@
+{
+  "capability": "kimi_list_conversations",
+  "site": "kimi",
+  "flow": "rpc-first (Connect ListChats) with dom-sidebar fallback",
+  "endpoint": "POST https://notilo.kimi.com/apiv2/kimi.gateway.chat.v1.ChatService/ListChats",
+  "rpc": {
+    "method": "kimi.gateway.chat.v1.ChatService.ListChats (also mirrored in kimi.chat.v1.ChatService)",
+    "auth": "Authorization: Bearer <localStorage access_token> + x-msh-version/x-msh-device-id headers",
+    "payload": "Connect/protobuf frame — response is listings of kimi.chat.v1.Chat{id, name, labels, files, pinned, last_request, status, model, timestamps} / ChatBrief{id,name,labels}; request field layout NOT yet captured (page-side fetch via connect-es fetchAdapter on first live capture)",
+    "note": "No thread-search RPC exists in the inventory — to search, use ListChats + client-side name filter (or DOM)"
+  },
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.kimi.com", "note": "session snapshot injected (data/www.kimi.com/.session); chat list surfaces on /chat/history and sidebar" },
+    { "step": 2, "action": "rpc", "note": "page-side Connect fetch to ChatService.ListChats with Bearer access_token — request shape must be pinned on first live capture" },
+    { "step": 3, "action": "fallback", "note": "if RPC envelope/shape fails: read sidebar history DOM (links to /chat/:id) -> [{id, title}]; per-chat details via GetChat / ListMessages" }
+  ],
+  "output": { "conversations": "array", "via": "rpc|dom-sidebar" },
+  "known": "RPC request field layout unverified until first live capture; DOM fallback (sidebar /chat/history, /chat/:id routes verified from router bundle) is the current-safe path",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,37 @@
+{
+  "id": "venice",
+  "name": "Venice (venice.ai)",
+  "site": "venice.ai",
+  "url": "https://venice.ai",
+  "description": "Privacy-first uncensored AI chat (OpenAI/Anthropic/Meta-style model lineups behind a 'session' cookie). Capability package drives the Venice composer and reads streamed answers off the page.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "siteVersion": "to be recorded on first live capture",
+  "capabilities": [
+    {
+      "id": "venice_chat",
+      "name": "Chat",
+      "description": "Send a prompt on the Venice composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/venice_chat.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "venice.ai",
+    "cookies": ["session"],
+    "capture": "ui2api analyse https://venice.ai --login",
+    "note": "provider-catalog.md (OmniRoute webSessionCredentials, venice-web): auth kind=cookie, credential='session'. Exact cookie set beyond session to be verified on first live capture."
+  },
+  "permissions": [
+    "requires a real logged-in venice.ai session snapshot (cookie session)",
+    "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://venice.ai --login)",
+    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture",
+    "Venice's private-mode / model-picker / image-gen surfaces are NOT catalogued in provider-catalog.md — do not package until verified on a live capture"
+  ],
+  "builtinProfile": "venice (loaded from capabilities/venice/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+}

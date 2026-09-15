@@ -1,0 +1,36 @@
+{
+  "id": "grok",
+  "name": "Grok (grok.com)",
+  "site": "grok.com",
+  "url": "https://grok.com",
+  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
+  "description": "Capability package for Grok's web chat at https://grok.com. Sends prompts through the site composer and reads streamed answers off the page. provider-catalog.md documents the auth surface only (grok-web: cookie kind, sso + sso-rw); no wire endpoints are documented there, so everything API-shaped is marked to be verified on first live capture.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "capabilities": [
+    {
+      "id": "grok_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the grok.com composer; streamed answer read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/grok_chat.json"
+    }
+  ],
+  "permissions": [
+    "session snapshot for grok.com (cookie sso + sso-rw per provider-catalog grok-web entry)",
+    "Playwright over CDP — trusted input only, no synthetic events",
+    "network scoped to https://grok.com and its api hosts (to be mapped on first live capture)"
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "grok.com",
+    "cookies": ["sso", "sso-rw"],
+    "capture": "ui2api analyse https://grok.com --login",
+    "regionNote": "credential names from capabilities/provider-catalog.md grok-web entry (kind: cookie, credentialName \"sso + sso-rw\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture"
+  },
+  "builtinProfile": "grok (loaded from capabilities/grok/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+}

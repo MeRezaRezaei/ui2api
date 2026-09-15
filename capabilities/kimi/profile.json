@@ -3,10 +3,10 @@
   "name": "Kimi AI (www.kimi.com)",
   "url": "https://www.kimi.com",
   "loginRequired": true,
-  "loginHint": "capture a www.kimi.com session once: ui2api analyse https://www.kimi.com --login",
+  "loginHint": "VERIFIED auth (from token-CrFSxcOs.js): sessions live in localStorage under keys access_token, refresh_token, msh_user_id; access_token is replayed as 'Authorization: Bearer <access_token>' against the Connect host https://notilo.kimi.com/apiv2 (OAuth base https://auth.kimi.com/api, login host login.moonshot.cn). Capture once: ui2api profile capture \"https://www.kimi.com\" --login → replay data/www.kimi.com/.session",
   "composer": [
     "div[contenteditable=\"true\"][role=\"textbox\"]",
-    "textarea[placeholder*=\"Ask\"], textarea[placeholder*=\"输入\"]",
+    "textarea[placeholder*=\"Ask anything\"], textarea[placeholder*=\"Ask\"], textarea[placeholder*=\"输入\"]",
     ".chat-input textarea"
   ],
   "send": { "kind": "keyEnter" },
@@ -22,5 +22,24 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses based on common Kimi React UI patterns (contenteditable composer, .segment-text answer blocks, sidebar New chat button). Tune each against a real browser after the first live capture (data/www.kimi.com/.session). Login is required; the session snapshot replays localStorage access_token against notilo.kimi.com/apiv2."
+  "selectorNotes": {
+    "composer": [
+      "unverified — plausible React rich-text composer (contenteditable textbox); the inventory proves the composer exists (i18n/state keys selectSearch, selectModelEntry, selectReasoningEffortV2, selectContextLength drive it) but gives NO DOM class; confirm on first live capture",
+      "unverified — 'Ask anything…' / 输入 placeholder fallbacks; placeholder text NOT proven by the bundles; confirm on first live capture",
+      "unverified — .chat-input textarea generic candidate only; confirm on first live capture"
+    ],
+    "answer": [
+      "unverified — .segment-text: bundles prove chat answers arrive as a server-streamed ChatResponse sliced into kimi.chat.v1.Block/TextBlock segments (kimi.chatMessages-*.js), but that is the data model, NOT a proven DOM class; confirm on first live capture",
+      "unverified — [class*=\"answer\"] generic guess; confirm on first live capture",
+      "unverified — [class*=\"response\"] generic guess; confirm on first live capture"
+    ],
+    "newChat": [
+      "unverified — sidebar '新建对话' (New chat) button; element text is i18n and routes /chat/history + /chat/:id are proven (router bundle), but the new-chat selector itself is not; confirm on first live capture"
+    ],
+    "dismiss": [
+      "unverified — sign-in / 登录 overlay candidate; confirm on first live capture",
+      "unverified — close / 关闭 overlay candidate; confirm on first live capture"
+    ]
+  },
+  "note": "REFINED SCAFFOLD — auth facts (localStorage access_token bearer → notilo.kimi.com/apiv2) and the RPC surface come from CAPABILITIES.md bundle analysis and are verified; every DOM selector above is an UNVERIFIED candidate to be confirmed on the first live capture (data/www.kimi.com/.session). Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine analytics on page — drive the site's own UI, no synthetic clicks."
 }

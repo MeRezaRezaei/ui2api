@@ -1,0 +1,36 @@
+{
+  "id": "claude",
+  "name": "Claude (claude.ai)",
+  "site": "claude.ai",
+  "url": "https://claude.ai",
+  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
+  "description": "Capability package for Anthropic's Claude chat at https://claude.ai. Sends prompts through the ProseMirror composer and reads streamed answers off the page. provider-catalog.md documents the auth surface only (claude-web: cookie kind, sessionKey); no wire endpoints are documented there, so everything API-shaped is marked to be verified on first live capture.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "capabilities": [
+    {
+      "id": "claude_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the claude.ai composer (ProseMirror); streamed answer read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/claude_chat.json"
+    }
+  ],
+  "permissions": [
+    "session snapshot for claude.ai (cookie sessionKey per provider-catalog claude-web entry)",
+    "Playwright over CDP — trusted input only, no synthetic events",
+    "network scoped to https://claude.ai and its api hosts (to be mapped on first live capture)"
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "claude.ai",
+    "cookies": ["sessionKey"],
+    "capture": "ui2api analyse https://claude.ai --login",
+    "regionNote": "credential name from capabilities/provider-catalog.md claude-web entry (kind: cookie, credentialName \"sessionKey\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture"
+  },
+  "builtinProfile": "claude (matches built-in in src/profile/profile.ts; package selectors mirror it but stay tagged unverified until a package-owned live capture confirms them)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+}

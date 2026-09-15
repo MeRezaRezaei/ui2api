@@ -3,34 +3,53 @@
   "name": "Tencent Hunyuan (yuanbao.tencent.com)",
   "site": "yuanbao.tencent.com",
   "url": "https://yuanbao.tencent.com/",
-  "siteVersion": "Next.js shell (hunyuan-yuanbao per repo inventory); exact build pins to be recorded on first live capture",
-  "description": "Capability package for Tencent's Hunyuan AI assistant web app. The consumer chat product is Tencent Yuanbao at https://yuanbao.tencent.com/ (chat console); https://hunyuan.tencent.com/ is the product/marketing site and console. package sends prompts through the yuanbao composer and reads streamed tool-call answers off the page.",
-  "version": "0.1.0-scaffold",
+  "siteVersion": "Next.js shell per repo inventory (hunyuan-yuanbao CAPABILITIES.md, JS-bundle analysis 2026-09-15); exact build pins to be recorded on first live capture",
+  "description": "Capability package for Tencent's Hunyuan AI assistant web app. The consumer chat product is Tencent Yuanbao at https://yuanbao.tencent.com/ (chat console). Everything is tool-call content streamed over ONE endpoint POST /api/chat/; this package sends prompts through the yuanbao composer and reads streamed tool-call answers off the page.",
+  "version": "0.2.0-inventory",
   "author": "ui2api capabilities",
   "date": "2026-09-15",
+  "transport": {
+    "chat": "single SSE-over-XHR endpoint POST /api/chat/ (vendored custom SSE client, NOT EventSource) — all chat/tool-call modes ride this one stream; control via site JS, no over-the-wire reconstruction needed for the UI paths",
+    "chunkShape": "custom_sse parses event:/data: lines; server replies `event: message, data: <json>`; capability/modality is encoded in content[].type (text, step, continue_step, page, middle_message(s), reasoner/deep_think_box chain-of-thought, toolCall, yuanqi_tool_call, doc_percent, docDeepModeInfo, deepSearch, deep_search CoT, searchGuid, progress, news, card, error, voice_recorder), not in endpoint variation",
+    "streamIdHeaders": ["x-traceid", "x-answer-msgid", "x-query-msgid"],
+    "authCookies": ["hy_user", "hy_token"],
+    "authMechanism": "hy_user/hy_token are domain session cookies managed by Tencent login (oneid/oauth) and asserted by the API server via the Cookie header; every browser request uses credentials 'include' / withCredentials, plus X-ID (userId) + X-Token (session token) headers; browser JS never writes these cookies directly",
+    "antiBot": "X-webdriver: 1 when navigator.webdriver is true -> headless/automated Chrome is flagged; Turing.js risk-control loader + QIMEI fingerprint SDK; expects a real logged-in session. HEADED + real profile required.",
+    "modelSelection": "GET /api/models and /api/agent/model/list; each model can carry internetSearch; URL param modelId= is honoured; fast-think/deep-think switch (modelType fastThink/deepThink); search-mode scenes ai_search_light / ai_search_pro / ai_search_deepseek",
+    "toVerify": "request bodies were not executed during bundle analysis; exact wire verified on first live capture"
+  },
   "capabilities": [
     {
       "id": "hunyuan_chat",
       "name": "Chat",
-      "description": "Send a prompt on the Yuanbao composer; streamed answer read off the page (deep-search / tool-call content). Exact RPC/selector details to be verified on first live capture.",
+      "description": "Send a prompt on the Yuanbao composer (Quill contenteditable, .ql-editor candidate); site's own JS posts to POST /api/chat/ and streams tool-call content (text, step, reasoner/deep_think_box CoT, toolCall, search cards). Method: ui-path (trusted input + Enter, site's own send handler).",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "recipe": "recipes/hunyuan_chat.json"
     },
     {
+      "id": "hunyuan_deep_search",
+      "name": "Deep search (AI-search report)",
+      "description": "Deep-search session: chat scene ai_search_pro (finance ai_search_pro_fin, DeepSeek ai_search_deepseek); session provisioning via GET /api/inputguide/search/create; CoT streams as deep_search content chunks with step/process + per-step waits and searchGuid cards; tools google_web_search/paper_search/hunyuan_web_search render as deep-search CoT cards. UI trigger (AI-search entry / 联网-deep mode on the composer) is a candidate — verify selector on first live capture.",
+      "method": "ui-path (search-mode toggle on composer + chat prompt)",
+      "recipe": "recipes/hunyuan_deep_search.json"
+    },
+    {
       "id": "hunyuan_list_conversations",
       "name": "Conversation history list",
-      "description": "Enumerate past conversations from the sidebar/history UI. Exact endpoint/selector to be verified on first live capture (DOM-sidebar fallback until then)."
+      "description": "List/detail: GET /api/convs, /api/conv (+ /api/user/agent/conversation/list, /api/user/agent/conversation/v1/detail, /api/user/agent/session/list); rename/pin/clear/delete via /api/conv/title, /api/user/agent/conversation/*. Endpoints verified from bundles; DOM-sidebar fallback until live-verified on first capture.",
+      "method": "wire (real cookies + X-ID/X-Token headers), DOM-sidebar fallback"
     },
     {
       "id": "hunyuan_document_qa",
       "name": "Knowledge-base / document Q&A",
-      "description": "Yuanbao supports document Q&A (upload -> COS -> doc analysis; repo inventory notes /api/chat serves tool-call content incl. doc analysis). Upload + ask flow; exact RPC/selector details to be verified on first live capture.",
+      "description": "Attach one document per turn (types per uploaderTypeList: pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv); wire = /api/resource/genUploadInfo -> COS write -> /api/resource/fileParse|asyncFileParse -> doc analysis rides the same /api/chat SSE stream as doc_percent/docDeepModeInfo/step chunks (deep-read modes TRANSLATION/SUMMARY/GUIDE/DEEP_SEARCH; mind-map GET /api/user/agent/doc/getMindMap).",
       "recipe": "recipes/hunyuan_document_qa.json"
     },
     {
       "id": "hunyuan_voice_mode",
       "name": "Voice mode",
-      "description": "Voice input mode exists on the assistant; not exercised in this scaffold. Exact trigger (mic button) to be verified on first live capture."
+      "description": "Voice input via mic on the composer; ASR/TTS temp key GET /api/generate/voice_tmpkey; voice_recorder content chunks with SPEAKING/STOPPING/SPLIT statuses. Thin and chat-coupled; to be validated on a live session.",
+      "method": "ui-path (mic button — exact trigger to be verified on first live capture)"
     }
   ],
   "auth": {
@@ -39,9 +58,9 @@
     "host": "yuanbao.tencent.com",
     "cookies": ["hy_user", "hy_token"],
     "capture": "ui2api analyse https://yuanbao.tencent.com --login",
-    "regionNote": "cookie names from prior repo inventory (hunyuan-yuanbao); verify live — anti-bot: X-webdriver:1 flag on headless + Turing.js/QIMEI fingerprint. Annotate exact cookie set after first capture."
+    "regionNote": "cookie names from repo inventory (hunyuan-yuanbao, auth section); verify live — anti-bot: X-webdriver:1 flag on headless + Turing.js/QIMEI fingerprint; headed-only. Annotate exact cookie set after first capture."
   },
   "builtinProfile": "hunyuan (loaded from capabilities/hunyuan/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
   "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped package examples + prior repo inventory; no browser launched; all selectors/RPC details marked to be verified on first live capture"
+  "analysisMethod": "static scaffold refined against shipped package examples + repo inventory (hunyuan-yuanbao CAPABILITIES.md JS-bundle analysis); no browser launched; selectors/DOM details remain marked for verification on first live capture"
 }

@@ -1,0 +1,31 @@
+{
+  "id": "grok",
+  "name": "Grok (grok.com)",
+  "url": "https://grok.com",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://grok.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); grok.com needs a logged-in session (cookies sso/sso-rw)",
+  "composer": [
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "div[contenteditable=\"true\"]",
+    "[class*=\"composer\"] textarea",
+    "[class*=\"chat-input\"] textarea",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"message\"]",
+    "[data-testid*=\"message\"]",
+    "[class*=\"markdown\"]",
+    "[class*=\"assistant\"] [class*=\"markdown\"]",
+    "[class*=\"answer\"]"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"], button:has-text('New chat')",
+  "dismiss": [
+    "button[aria-label*=\"Close\"]",
+    "button[aria-label*=\"Dismiss\"]",
+    "button:has-text('Got it')"
+  ],
+  "captureMs": 90000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED CANDIDATE selectors for grok.com — generic contenteditable/textarea composer and common answer containers; tune each after the first live capture (data/grok.com/.session). Composer and answer markup frequently change; keep entries generic-but-plausible until a real session confirms them."
+}

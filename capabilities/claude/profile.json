@@ -1,0 +1,30 @@
+{
+  "id": "claude",
+  "name": "Claude (claude.ai)",
+  "url": "https://claude.ai",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://claude.ai --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); claude.ai needs a logged-in session (cookie sessionKey)",
+  "composer": [
+    ".ProseMirror",
+    "div[contenteditable=\"true\"][data-testid=\"prompt-editor\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[data-testid=\"assistant-message\"]",
+    ".font-claude-message",
+    ".whitespace-pre-wrap",
+    "[data-testid=\"message-content\"]",
+    "[class*=\"markdown\"]"
+  ],
+  "newChat": "[aria-label=\"New chat\"], [data-testid=\"new-chat\"]",
+  "dismiss": [
+    "button[aria-label*=\"Close\"]",
+    "button[aria-label*=\"Dismiss\"]",
+    "button:has-text('Maybe later')"
+  ],
+  "captureMs": 90000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED CANDIDATE selectors for claude.ai — ProseMirror/contenteditable composer and common answer containers (mirrors src/profile/profile.ts built-in claude entries). Tune each after the first live capture (data/claude.ai/.session); markup frequently changes, confirm on first live capture."
+}

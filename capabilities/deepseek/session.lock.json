@@ -1,0 +1,14 @@
+{
+  "site": "chat.deepseek.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "chat.deepseek.com",
+    "credentials": { "kind": "token", "name": "userToken" },
+    "captureCommand": "ui2api analyse https://chat.deepseek.com --login",
+    "targetDir": "data/chat.deepseek.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. Auth per provider-catalog.md: token 'userToken' (deepseek-web). Exact storage (localStorage vs cookie) to be confirmed on first capture; the snapshot must preserve it. Capture once, then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

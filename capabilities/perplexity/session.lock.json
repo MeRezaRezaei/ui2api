@@ -1,0 +1,14 @@
+{
+  "site": "www.perplexity.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.perplexity.ai",
+    "cookies": ["__Secure-next-auth.session-token"],
+    "captureCommand": "ui2api analyse https://www.perplexity.ai --login",
+    "targetDir": "data/www.perplexity.ai/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. All profile selectors and RPC details are unverified candidates. Cookie name (__Secure-next-auth.session-token) comes from the capabilities/provider-catalog.md perplexity-web entry. Capture a logged-in www.perplexity.ai session once (ui2api analyse https://www.perplexity.ai --login), then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}
