@@ -140,6 +140,10 @@ parallel requests — exactly like the request queue + a browser. Semantics:
 - The daemon is **headless by default**: nothing opens on your desktop, and the
   spawned browser is the daemon's child — closing the daemon closes only pages
   it owns (nothing you opened yourself).
+- **Headed pool** (`UI2API_HEADED=1` + `DISPLAY`): the stable route for
+  signed-in, heavy-SPA sites — run the daemon against a virtual display
+  (`Xvfb :99 ...`) and it keeps the browser alive where headless died. See
+  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for the full recipe.
 - **Attach mode** (`UI2API_ATTACH_PORT=9222`): instead of spawning, the pool adopts
   **your own long-running Chrome** over CDP (loopback only) and uses its logged-in
   session as the stand-by pages' identity. The daemon then never spawns or kills a
@@ -300,6 +304,8 @@ and comply with applicable law. Use it at your own risk.
 ## Docs & links
 
 - Documentation: [`docs/`](docs/) — start with [`docs/VISION.md`](docs/VISION.md)
+- Hard-won field notes: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — includes the
+  `chrome-cdp.service` pkill loop that silently killed every CDP browser for days
 - License: [MIT](LICENSE)
 
 ## Hub (hosted registry + plugin runtime)

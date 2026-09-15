@@ -1,5 +1,11 @@
 # Auth sessions / captured credentials — never commit
 sites/*/.session/
+data/
+
+# Local agent tooling state — not part of the repo
+.agents/
+.opencode/
+skills-lock.json
 
 # Generated per-site servers are build output of the workflow
 sites/*/server/
