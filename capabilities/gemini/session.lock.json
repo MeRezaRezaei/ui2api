@@ -1,0 +1,15 @@
+{
+  "site": "gemini.google.com",
+  "locked": true,
+  "status": "locked",
+  "snapshot": {
+    "path": "data/gemini.google.com/.session/state.json",
+    "sha256Prefix": "2d2095c4b6369d9f",
+    "capturedAt": "2026-09-14T19:27:40Z",
+    "cookies": 23,
+    "localStorageKeys": ["BARD_EMBED_CHAT_STORAGE_KEY_V2", "GqGm3b", "_gcl_ls", "brd_dctG"],
+    "evidence": "3 live chat rounds completed with this snapshot (chat 1dc93d7438476596a / 95f64c582ebffca8)"
+  },
+  "note": "This package installs and runs from the built-in gemini profile + this locked snapshot. Both the ChatDriver path (chat) and the batchexecute path (conversation list) inject it into the fresh incognito context.",
+  "captureCommand": "ui2api profile capture \"https://gemini.google.com\" --login"
+}

@@ -1,0 +1,20 @@
+{
+  "capability": "gemini_list_conversations",
+  "site": "gemini",
+  "flow": "rpc-first (batchexecute) with dom-sidebar fallback",
+  "endpoint": "POST /_/BardChatUi/data/batchexecute",
+  "rpc": {
+    "method": "/BardFrontendService.ListConversations",
+    "v1Alias": "ListConversations (recognized bAc set)",
+    "payload": "[[null, null, []]]  (page-size/continuation; proto layout version-sensitive)",
+    "searchVariant": { "method": "/BardFrontendService.SearchConversations", "payload": "[[null, [null, <query>, null, null, [], null, null, null, null, null, [], null]]]", "when": "args.query" }
+  },
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected" },
+    { "step": 2, "action": "rpc", "note": "callGeminiRpc(ListConversations|SearchConversations) — page-side fetch, real cookies + X-Framework-Xsrf-Token" },
+    { "step": 3, "action": "fallback", "note": "if RPC envelope fails/shape unknown: read sidebar DOM a[href^='/app/'] -> [{id,title}]" }
+  ],
+  "output": { "conversations": "array", "via": "rpc|dom-sidebar" },
+  "known": "proto-json field layout must be verified against a live capture before trusting the RPC path; DOM fallback is always current",
+  "sessionLock": "session.lock.json"
+}

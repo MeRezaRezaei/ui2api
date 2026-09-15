@@ -1,0 +1,14 @@
+{
+  "id": "gemini",
+  "name": "Gemini (gemini.google.com)",
+  "url": "https://gemini.google.com",
+  "loginRequired": true,
+  "loginHint": "reuse your real Chrome profile (UI2API_USER_DATA_DIR) or the captured snapshot in data/gemini.google.com/.session",
+  "composer": ["div[contenteditable=\"true\"][role=\"textbox\"]", ".ql-editor", "textarea"],
+  "send": { "kind": "keyEnter" },
+  "answer": [".model-response-text", ".response-content", "[data-test-id=\"answer-container\"] .markdown"],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"]",
+  "captureMs": 40000,
+  "stableMs": 2000,
+  "note": "Gemini capability package profile — mirrors the builtin; recipes reference the capability ids"
+}

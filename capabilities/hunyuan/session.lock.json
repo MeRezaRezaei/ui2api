@@ -1,0 +1,14 @@
+{
+  "site": "yuanbao.tencent.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "yuanbao.tencent.com",
+    "cookies": ["hy_user", "hy_token"],
+    "captureCommand": "ui2api analyse https://yuanbao.tencent.com --login",
+    "targetDir": "data/yuanbao.tencent.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. All profile selectors and RPC details are unverified candidates. Capture a logged-in yuanbao.tencent.com session once (ui2api analyse https://yuanbao.tencent.com --login), then this lock file records the snapshot hash + date. Anti-bot note from repo inventory: headless is flagged via X-webdriver:1 + Turing.js/QIMEI fingerprint, so use attach/headed with the real profile.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

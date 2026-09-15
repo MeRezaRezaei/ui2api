@@ -1,0 +1,16 @@
+{
+  "capability": "gemini_chat",
+  "site": "gemini",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected (data/gemini.google.com/.session)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": ".model-response-text", "until": "stable 2000ms", "timeoutMs": 40000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = /_/BardChatUi/data/batchexecute StreamGenerate (tag RxAFq); the UI path drives the site's own JS so no proto reconstruction needed",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}
