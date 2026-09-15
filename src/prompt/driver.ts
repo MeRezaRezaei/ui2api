@@ -4,7 +4,7 @@
 // configured, zero-config fallback otherwise) and the same DOM primitives, so a
 // prompt behaves exactly like a human typing it: paste + Enter runs the site's
 // own JS, and the streamed answer is read off the page's event bus.
-import { launchBrowser, loadCookies, sessionPath } from "../runtime/browser.js";
+import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives } from "../runtime/dom-primitives.js";
 import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -22,6 +22,8 @@ export interface PromptResult {
   doneReason: "stable" | "timeout" | "empty";
   url: string;
   title: string;
+  /** Source citations for query-driven sites (e.g. Google AI Mode), when any. */
+  citations?: string[];
 }
 
 function cap(s: string, n: number): string {
@@ -88,14 +90,25 @@ export class ChatDriver {
       }
       try {
         const usingDefaultContext = this.defaultContext && this.browser.contexts().length > 0;
+        // Real-profile and headful modes inherit the user's actual viewport so the
+        // fingerprinted screen dimensions match what the site's own JS sees in the
+        // user's browser (audit item #6). Synthetic viewport is only for the
+        // headless-only fallback where no real user is watching.
+        const isInheritingViewport = usingDefaultContext || usingUserChrome() || !headlessDefault();
         const context = usingDefaultContext
           ? this.browser.contexts()[0]
-          : await this.browser.newContext({ viewport: { width: lightMode() ? 1024 : 1280, height: lightMode() ? 700 : 900 } });
+          : await this.browser.newContext({
+              viewport: isInheritingViewport
+                ? null
+                : { width: lightMode() ? 1024 : 1280, height: lightMode() ? 700 : 900 },
+            });
         // Light mode (default): drop images/fonts/media so the page loads in a
         // fraction of the memory — chat UIs are text; this keeps headless Chrome
         // alive on memory-starved hosts and cuts load time dramatically. Skipped
-        // for an existing (user's-attached) context, whose look we must not change.
-        if (!usingDefaultContext && lightMode()) {
+        // for an existing (user's-attached) context, whose look we must not change,
+        // and for real-profile/headed modes where resource blocking would leave
+        // tell-tale empty boxes the site's own analytics can see (audit item #5).
+        if (!usingDefaultContext && lightMode() && !usingUserChrome() && headlessDefault()) {
           await context.route("**/*", (route) => {
             const t = route.request().resourceType();
             if (t === "image" || t === "font" || t === "media") return route.abort();
@@ -194,14 +207,16 @@ export class ChatDriver {
     if (opts.newChat && this.profile.newChat) {
       try {
         await this.dom.click(this.profile.newChat);
-        await this.page!.waitForTimeout(800);
+        // Random 600–1300ms pause to match a human's post-click dwell time
+        // (audit item #4 — page-visible deterministic waits are trivially fingerprinted).
+        await this.page!.waitForTimeout(600 + Math.floor(Math.random() * 700));
       } catch {
         // no new-chat affordance on this profile/revision — continue in-page
       }
     }
     await this.dismissOverlays();
-    const composer = await this.firstVisible(this.profile.composer);
-    if (!composer) {
+    const composer = this.profile.urlTemplate ? null : await this.firstVisible(this.profile.composer);
+    if (!composer && !this.profile.urlTemplate) {
       if (!(await this.pageAlive())) {
         // page died mid-read — retried on a fresh browser, not reported as rot
         throw new Error("page died reading the composer — Target page, context or browser has been closed");
@@ -218,13 +233,26 @@ export class ChatDriver {
     // (Copilot/ChatGPT/Claude) are controlled React inputs: `type` sets the
     // value in one shot (Playwright fill semantics) so the element does not
     // detach on every keystroke, then Enter fires the site's own send handler.
-    if (this.profile.send.kind === "click") {
+    // Query-driven capability sites (Google AI Mode) skip composer typing
+    // entirely: the prompt goes in the URL ({q} = URL-encoded query), the
+    // site's own JS renders answer + citations on the single loaded page.
+    if (this.profile.urlTemplate) {
+      const target = this.profile.urlTemplate.replace("{q}", encodeURIComponent(text));
+      await this.page!.goto(target, { waitUntil: "domcontentloaded", timeout: 60000 });
+      // The SSR'd AI answer + citations arrive inside the page's init data; let
+      // the site's own scripts finish hydrating, then read the streamed render.
+      await this.page!.waitForTimeout(150 + Math.floor(Math.random() * 250));
+    } else if (this.profile.send.kind === "click") {
       const sendSel = this.profile.send.selector;
       if (!sendSel) throw new Error(`${this.profile.id}: send.kind "click" requires a selector`);
-      await this.dom.type(composer, text);
+      await this.dom.type(composer!, text);
+      // Random 50–200ms gate between the last input event and the click — a real
+      // human's eye-to-mouse travel time (audit item #7).
+      await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
       await this.dom.click(sendSel);
     } else {
-      await this.dom.type(composer, text);
+      await this.dom.type(composer!, text);
+      await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
       await this.dom.press(composer, ["Enter"]);
     }
     // Read the streamed answer off the page: stop when text stops growing.
@@ -242,12 +270,40 @@ export class ChatDriver {
             : "The page may be behind a consent wall — tune the profile's `dismiss` selectors.")
       );
     }
+    // Query-driven sites (Google AI Mode): gather the source citations that
+    // rendered alongside the answer so the caller gets {answer, citations[]}
+    // instead of a bare text blob.
+    let citations: string[] = [];
+    if (this.profile.urlTemplate && this.profile.citations?.length) {
+      try {
+        citations = (await this.page!.evaluate((sels: string[]) => {
+          const seen = new Set<string>();
+          const out: string[] = [];
+          for (const sel of sels) {
+            for (const a of document.querySelectorAll(sel)) {
+              const href = (a as HTMLAnchorElement).href;
+              const t = ((a as HTMLAnchorElement).innerText || href || "").trim();
+              if (href && !seen.has(href)) {
+                seen.add(href);
+                out.push(t ? `${t} — ${href}` : href);
+              }
+            }
+          }
+          return out;
+        }, this.profile.citations)) as string[];
+        // Cap an unruly citation list; prefer "title — url" or just url.
+        citations = citations.slice(0, 12).map((c) => c.slice(0, 300));
+      } catch {
+        // citations are best-effort — the answer itself is the contract
+      }
+    }
     return {
       answer: cap(answer, 60000),
       chunkCount: observed.chunkCount,
       doneReason: observed.doneReason,
       url: observed.url,
       title: observed.title,
+      ...(citations.length ? { citations } : {}),
     };
   }
 

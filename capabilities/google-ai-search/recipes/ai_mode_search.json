@@ -1,0 +1,13 @@
+{
+  "capability": "google_ai_mode_search",
+  "site": "google-ai-search",
+  "flow": "url-template one page load per query",
+  "steps": [
+    { "step": 1, "action": "navigate", "urlTemplate": "https://www.google.com/search?q={q}&udm=14&hl=en", "note": "{q} is URL-encoded; udm=14 = AI Mode tab" },
+    { "step": 2, "action": "wait", "selector": "answer", "timeoutMs": 30000, "stableMs": 2000, "note": "SSR answer hydrates into page init data; read off the event bus" },
+    { "step": 3, "action": "extract", "kind": "citations", "selectors": ["#via-container a[href^=\"http\"]", "[data-attrid=\"ai_web_answer\"] a[href^=\"http\"]"], "max": 12 }
+  ],
+  "output": { "answer": "string", "citations": ["string (title — url)"] },
+  "stealth": "real browser + logged-in session; single trusted navigation; no synthetic input events",
+  "sessionLock": "session.lock.json"
+}

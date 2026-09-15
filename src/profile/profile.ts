@@ -33,6 +33,15 @@ export interface ChatSiteProfile {
   captureMs: number;
   stableMs: number;
   note?: string;
+  // Query-driven "capability" sites (e.g. Google AI Mode): instead of typing
+  // into a composer, each prompt is ONE page load of `urlTemplate` with {q}
+  // replaced by the URL-encoded prompt. `url` stays the warm-pool landing
+  // page. There is no composer flow for these — the site's own JS renders the
+  // answer (and citations) into the loaded page.
+  urlTemplate?: string;
+  // Selector(s) for the citations/sources block inside the answer (read as
+  // link hrefs + text). Optional; only meaningful with urlTemplate.
+  citations?: string[];
 }
 
 export interface BuiltinProfiles {
@@ -52,6 +61,37 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     newChat: '[aria-label*="New chat"], [aria-label*="new chat"]',
     captureMs: 40000,
     stableMs: 2000,
+  },
+  // Google AI Mode ("use Google from my AI"): one logged-in /search?q=…&udm=14
+  // page load per query, answer + citations read off the SSR'd init data. No
+  // composer typing — the query goes in the URL, the site's own JS renders the
+  // AI answer. Requires a www.google.com session snapshot (cookies NID/SID)
+  // in data/www.google.com/.session — capture once via `ui2api profile capture
+  // https://www.google.com --login`, then every prompt is one page load.
+  "google-ai-search": {
+    id: "google-ai-search",
+    name: "Google AI Mode (google.com/search?udm=14)",
+    url: "https://www.google.com/search?udm=14",
+    loginRequired: true,
+    loginHint: "capture a www.google.com session once: ui2api profile capture \"https://www.google.com\" --login",
+    composer: [],
+    send: { kind: "keyEnter" },
+    answer: [
+      '[data-attrid="ai_web_answer"]',
+      ".Ants3c",
+      'div[data-md][class*="Ai"]',
+      '[aria-label="AI overview"]',
+      "#AI-MODE",
+      "#via-container",
+    ],
+    urlTemplate: "https://www.google.com/search?q={q}&udm=14&hl=en",
+    citations: [
+      '#via-container a[href^="http"], [data-attrid="ai_web_answer"] a[href^="http"]',
+      ".Ants3c a[href^='http']",
+    ],
+    captureMs: 30000,
+    stableMs: 2000,
+    note: "AI Mode answer block; selectors tune per-account after a live capture (data/www.google.com/.session)",
   },
   chatgpt: {
     id: "chatgpt",

@@ -54,7 +54,7 @@ with documented web-session auth (from the open-source OmniRoute repo).
 
 | Package | Status | Key discovery |
 |---|---|---|
-| `google-ai-search` | ✅ inventory | **AI Mode = `/search?q=…&udm=14`**, SSR answer in `AF_initDataCallback`; first package candidate |
+| `google-ai-search` | ✅ implemented | **AI Mode = `/search?q=…&udm=14`**, urlTemplate flow (one page load per query → `{answer, citations[]}`); session snapshot (www.google.com) pending first capture |
 | `gemini` | ✅ inventory | all RPCs over one `POST /_/BardChatUi/data/batchexecute`; 109 `BardFrontendService.*` descriptors incl. `StreamGenerate`, search toggle via `UpdateToolPermission`, image/video gen, Gems, canvas, deep research, MCP/skills control plane |
 | `kimi` | ✅ inventory | Connect/protobuf RPC on `notilo.kimi.com/apiv2`; **411 methods / 45 services decoded**; chat via `ChatService.Chat`, search = `Tool.Search{force}` + `search.v2.SearchService`, files via `/apiv2-files/file/upload`; auth = localStorage `access_token` (Bearer + `x-msh-shield-data`) |
 | `hunyuan-yuanbao` | ✅ inventory | Next.js shell, everything is tool-call content over one SSE endpoint `POST /api/chat/` (custom SSE-over-XHR); deep search, upload→COS→doc analysis, image gen; auth = `hy_user`/`hy_token` cookies; anti-bot: `X-webdriver: 1` flag on headless + Turing.js/QIMEI fingerprint |
@@ -69,9 +69,12 @@ the only true no-trace posture).
 1. **Stealth baseline** — apply the 10 quick wins (attach-by-default posture,
    gate light-mode aborts off for real profiles, `keyboard.insertText` over
    `fill()`, drop GPU-flag stack + synthetic viewport for real sessions,
-   jittered waits). No perf loss by design.
+   jittered waits). No perf loss by design. ✅ done (2026-09-15)
 2. `google-ai-search` — **first package**: one logged-in `udm=14` page load →
-   `{answer, citations}`. (The "use Google from my AI" ask.)
+   `{answer, citations}`. (The "use Google from my AI" ask.) ✅ built-in profile +
+   package files (manifest/profile/recipe/session.lock) + driver urlTemplate flow
+   implemented; **runtime smoke test still needs the first www.google.com session
+   capture** (`ui2api profile capture "https://www.google.com" --login`).
 3. `gemini` — chat stream + search toggle + conversation CRUD + model picker
    (the batchexecute RPC layer is already fully mapped).
 4. `kimi` — chat core + web search + file upload (the 411-method RPC surface).
