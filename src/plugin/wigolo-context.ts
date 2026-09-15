@@ -223,7 +223,10 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
         return withBrowserFallback<string>(
           async () => pageMarkdown(await domFetch([{ type: "type", selector: sel, text: String(text) }])),
           async (p) => {
-            await p.locator(sel).first().fill(String(text));
+            // Trusted input (CDP Input.insertText), not Playwright fill() — fill
+            // fabricates a synthetic JS value-set that looks automated to the site.
+            await p.locator(sel).first().focus();
+            await p.keyboard.insertText(String(text));
             return "";
           },
           "dom.type"

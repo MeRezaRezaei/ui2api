@@ -3,6 +3,7 @@
 // having ui2api or a browser themselves:
 //
 //   POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}
+//                 -> {answer, chunkCount, doneReason, url, title[, citations]}
 //   GET  /sites   -> the available chat-site profiles
 //   GET  /status  -> pool health (warm/idle/busy pages)
 //   GET  /health  -> {ok, defaultSite}

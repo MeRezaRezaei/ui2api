@@ -1,0 +1,14 @@
+{
+  "site": "www.google.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.google.com",
+    "cookies": ["NID", "SID", "__Secure-3PSID"],
+    "captureCommand": "ui2api profile capture \"https://www.google.com\" --login",
+    "targetDir": "data/www.google.com/.session/state.json"
+  },
+  "note": "This package installs and runs from the built-in profile; the session snapshot is what unlocks real AI Mode renders (anonymous is JS-walled). Capture once, then session.lock.json records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

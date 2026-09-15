@@ -137,21 +137,35 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
     lastErr = e;
   }
   // 2) Playwright's own launch as a fallback, retried, with the channel fallback.
-  for (const opts of candidates) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const browser = await chromium.launch(opts as any);
-        let usable = true;
-        const lost = new Promise<never>((_, reject) => {
-          browser.on("disconnected", () => {
-            usable = false;
-            reject(new Error("browser disconnected during launch"));
+  //    NEVER for the user's real Chrome/profile: `chromium.launch` injects
+  //    Playwright's automation defaults (--enable-automation, CDP hints) which a
+  //    real user profile would carry into the site as a detectable tell. The
+  //    managed spawn above already chose the real profile + clean flag set; if
+  //    that path failed, fail loudly rather than leak automation flags into the
+  //    user's browser. The bundled-Chromium fallback (no profile) stays.
+  const userProfileInPlay = Boolean(
+    (launchOpts as any).userDataDir ||
+      process.env.UI2API_USER_DATA_DIR ||
+      process.env.UI2API_CHROME_PROFILE_PATH ||
+      process.env.UI2API_CHROME_PATH
+  );
+  if (!userProfileInPlay) {
+    for (const opts of candidates) {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const browser = await chromium.launch(opts as any);
+          let usable = true;
+          const lost = new Promise<never>((_, reject) => {
+            browser.on("disconnected", () => {
+              usable = false;
+              reject(new Error("browser disconnected during launch"));
+            });
           });
-        });
-        await Promise.race([browser.newPage().then((p) => p.close()), lost]);
-        if (usable) return browser;
-      } catch (e) {
-        lastErr = e;
+          await Promise.race([browser.newPage().then((p) => p.close()), lost]);
+          if (usable) return browser;
+        } catch (e) {
+          lastErr = e;
+        }
       }
     }
   }

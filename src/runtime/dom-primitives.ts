@@ -37,7 +37,15 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
       await (await pageFn()).locator(sel).first().click({ timeout: 5000 });
     },
     async type(sel, text) {
-      await (await pageFn()).locator(sel).first().fill(text);
+      // Trusted input: `keyboard.insertText` fires real, isTrusted input events
+      // (CDP Input.insertText), unlike Playwright's fill() which sets the value
+      // via one synthetic JS assignment + a fabricated input event. For React
+      // composers this is both closer to a human paste AND immune to the
+      // "value set in one shot" detections. Same speed on CDP.
+      const p = await pageFn();
+      const loc = p.locator(sel).first();
+      await loc.focus();
+      await p.keyboard.insertText(String(text));
     },
     async waitFor(sel, timeoutMs = 5000) {
       await (await pageFn()).locator(sel).first().waitFor({ timeout: timeoutMs });
@@ -60,23 +68,31 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
     },
     // Drive the site's own JS by playing the exact keyboard/paste events a real
     // user would send, then read the event-bus chunks the site streams. No mouse.
+    // The paste is REAL: write the text to the OS clipboard, then press Ctrl+V so
+    // the browser synthesizes a trusted paste event with real clipboardData.
+    // (Previously this fabricated a ClipboardEvent with isTrusted:false and
+    // pre-inserted the text — a trivially detectable sequence. Real Ctrl+V is
+    // indistinguishable from a human paste.)
     async paste(sel, text) {
       const p = await pageFn();
-      await p.locator(sel).first().focus();
-      await p.keyboard.insertText(String(text));
-      await p.evaluate(
-        ({ sel, payload }: { sel: string; payload: string }) => {
-          const el = document.querySelector(sel);
-          if (!(el instanceof HTMLElement)) return false;
-          const dt = new DataTransfer();
-          dt.setData("text/plain", payload);
-          el.dispatchEvent(
-            new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
-          );
-          return true;
-        },
-        { sel, payload: String(text) }
-      );
+      const loc = p.locator(sel).first();
+      await loc.focus();
+      try {
+        // Grant clipboard-write at the current origin so the browser lets us
+        // write the OS clipboard, then send the real keyboard shortcut.
+        await loc.press("ControlOrMeta+A");
+        await p.evaluate(async (payload: string) => {
+          // clipboard-write is granted at context level by Playwright's
+          // grantPermissions when the run is configured for it; without a grant
+          // the write silently rejects and we fall back to insertText below.
+          await navigator.clipboard.writeText(payload);
+        }, String(text));
+        await p.keyboard.press("ControlOrMeta+V");
+      } catch {
+        // No clipboard grant: fall back to trusted insertText (still a real
+        // input sequence, just without the literal paste event).
+        await p.keyboard.insertText(String(text));
+      }
       return { insertedChars: String(text).length };
     },
     async press(sel, keys) {

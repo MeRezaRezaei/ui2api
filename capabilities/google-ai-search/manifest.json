@@ -1,0 +1,26 @@
+{
+  "id": "google-ai-search",
+  "name": "Google AI Mode (google.com/search?udm=14)",
+  "url": "https://www.google.com/search?udm=14",
+  "siteVersion": "udm-space closed: {1,2,3,4,5,14,15,18,21,44,50} server-validated; anonymous search JS-walled (emsg=SG_REL)",
+  "capabilities": [
+    {
+      "id": "google_ai_mode_search",
+      "name": "AI Mode search",
+      "description": "One logged-in /search?q=…&udm=14 page load -> {answer, citations[]}",
+      "method": "url-template navigation (one page load per query, no composer typing)",
+      "recipe": "recipes/ai_mode_search.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "www.google.com",
+    "cookies": ["NID", "SID", "__Secure-3PSID"],
+    "capture": "ui2api profile capture \"https://www.google.com\" --login",
+    "regionNote": "no consent wall from this region; requires a real browser + JS (no curl-able SSR)"
+  },
+  "builtinProfile": "google-ai-search",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static curl + JS-bundle reading; no browser launched"
+}
