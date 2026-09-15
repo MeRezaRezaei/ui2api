@@ -1,0 +1,109 @@
+# Stealth audit (ui2api runtime), 2026-09-15
+
+Scope: `src/runtime/browser.ts`, `src/runtime/dom-primitives.ts`, `src/prompt/driver.ts`, `src/runtime/session-store.ts`, `src/prompt/pool.ts`, `src/runtime/browser-session.ts`, `src/runtime/wigolo.ts`, plus `src/analyzer/{explore,instrument}.ts`, `src/plugin/wigolo-context.ts`, profiles, docs (VISION/AUDIT/TROUBLESHOOTING), and the on-disk Gemini session snapshot. No browsers launched, no files modified.
+
+Key architectural fact that colors every finding: there are effectively **three** execution modes, with very different postures:
+
+- **ATTACH** (`UI2API_ATTACH_PORT` / `overrides.attachPort`) — CPU/zero-trace: drives the operator's already-running Chrome over CDP; Playwright never spawns or flags anything, and `defaultContext` reuses the browser's real default context (no synthetic incognito viewport, no storage injection).
+- **SPAWN** (`spawnChromeAndConnect`) — the default path: Node `spawn()`s Chrome with a stack of stability flags, then `connectOverCDP`. Even when pointed at the user's real profile (`userDataDir`), `driver.ts` then calls `browser.newContext()` — an **incognito context** that does NOT carry the profile's cookies/extensions/history — and re-creates login by injecting the captured snapshot. So "user's real Chrome" is only literally true in attach mode.
+- **PLAYWRIGHT-LAUNCH fallback** (`chromium.launch`) — last resort; adds Playwright's own arg set including `--enable-automation`.
+
+## Findings (numbered, per-vector)
+
+### 1. navigator.webdriver / CDP automation markers — MEDIUM
+- **Detection:** In Chrome the `--enable-automation` switch is what actually flips `navigator.webdriver=true` and enables the "controlled by automated software" infobar; CDP sessions themselves are invisible to page JS (addBinding/injections run in isolated worlds; no `cdc_` object — that is Selenium's, not Playwright's). Residual page-visible tells are only "automation-shaped" browser behavior (single-shot fills, found below) — not the flag itself.
+- **Current state:** The **spawn** path passes *no* `--enable-automation` and sets *no* `navigator.webdriver` override — native `navigator.webdriver === false`; good. The **Playwright fallback** path (`chromium.launch` with channel `"chrome"` and a real profile, used whenever spawn fails) appends Playwright's defaults, which **include `--enable-automation`** — the same switch RAG/guard pages look for; Playwright's init script stubs `navigator.webdriver` to `undefined` for contexts it creates, which masks the flag's main JS effect but leaves the process flag itself (same-host tell) and any pre-attached default-context page unstubbed. `--disable-blink-features=AutomationControlled` is **absent** everywhere (correctly — it is itself a bot tell and unnecessary here).
+- **Fix (no perf loss):** Never route a *real user profile* through `chromium.launch`. If spawn fails in user-profile mode, fail the request or fall back to a *bundled* Chromium instead of relaunching the user's Chrome with automation flags. Keep the spawn path primary. Optionally add one `addInitScript` (only for createContext paths) that re-defines `navigator.webdriver` to `false` with a true descriptor so even future flag drift stays inert. **Guaranteed-safer** (slightly reduces resilience of the fallback — acceptable).
+
+### 2. User-Agent & client hints — LOW
+- **Detection:** UA/client-hint mismatch (e.g., `HeadlessChrome` brand leaking into `Sec-CH-UA`), or an automation suffix, or UA specifying a different Chrome version than the process.
+- **Current state:** No UA is ever overridden — the browser's real UA propagates unchanged, so `Sec-CH-UA-*` brands are consistent with the UA (no edit, no mismatch). User-mode (spawn/attach of real Chrome) yields a normal `Chrome/…` UA. The **bundled-Chromium fallback** is the only weak spot: legacy headless builds report `HeadlessChrome/…` in the UA and client hints. `--lang` is not pinned, but the process inherits host locale and the real profile carries its own prefs, so language is consistent in the modes that matter.
+- **Fix (no perf loss):** Never add UA/hint overrides. If the bundled fallback's UA still carries `HeadlessChrome`, prefer `channel: "chrome"` (no override needed). **Guaranteed-safer.**
+
+### 3. Typing/input realism — HIGH
+- **Detection:** Sites listen for `keydown/keypress/beforeinput/input` sequences, `compositionstart`, per-keystroke `performance.now()` deltas, and `event.isTrusted`. A composer that receives its full value in one synthetic `input` event, or a synthetic `paste` whose `isTrusted === false`, is trivially distinguishable from a human.
+- **Current state:**
+  - `dom.type()` → `locator.fill()` (dom-primitives.ts:40): single-shot JS value set + one synthetic `input` event. **No keystrokes, no composition, `isTrusted:false`.** This is what the ChatDriver sends every prompt (`driver.ts:224/227`).
+  - `dom.paste()` (dom-primitives.ts:63-81 and the wigolo fallback in wigolo-context.ts:297-304): first `keyboard.insertText` (trusted events, real value), **then** fabricates `new DataTransfer()` + `dispatchEvent(new ClipboardEvent("paste", …))` — the clipboard event is `isTrusted:false`, and the text is already in the field *before* the paste fires, an impossible real sequence.
+  - `dom.press()` → `page.keyboard.press()` → CDP `Input.dispatchKeyEvent`: real trusted keydown/keyup — **this part is already good** (Enter send is trusted). Same for `keyboard.insertText`’s `Input.insertText` (trusted `input` events; no keydown, which is fine for plain insertion).
+- **Fix (no perf loss):**
+  1. Replace `fill()` with `keyboard.insertText()` for the composer — trusted `input` events, essentially zero time delta on CDP. **Guaranteed-safer.**
+  2. For `paste()`: drop the fabricated ClipboardEvent. Do a real clipboard write (`navigator.clipboard.writeText` with a grant) then `keyboard.press("ControlOrMeta+V")` → a *trusted* paste event with real `clipboardData`. **Guaranteed-safer for the event semantics** (trade-off: needs a `clipboard-write` permission grant, which `navigator.permissions` will report — minor; or accept `insertText` alone for flows that don't need a literal paste).
+  3. Full human per-keystroke timing (5–30 ms/char) is the *only* genuinely slow fix — see finding 4 for the cheap version (jittered envelope, bounded).
+
+### 4. Timing fingerprints — MEDIUM
+- **Detection:** Clockwork patterns: click "new chat", fixed 800 ms pause, instant full text, fixed gap, Enter; then a fixed 400 ms poll cadence and a 3× instant-retry loop. A real user's delays are human-jittered; git-pairing/behavioral signals flag exact repeats across runs.
+- **Current state:** `waitForTimeout(800)` after new-chat (driver.ts:197); poll `awaitAnswer` at fixed `pollMs=400` (dom-primitives.ts:151); `capture()` in-page loop at fixed 120 ms; fixed 1500/300/5000 ms overlay/dismiss timeouts; 3 attempts with zero backoff. The polling loops are Node-side (invisible to page JS); the page-visible clockwork is the 800 ms gap + instant bulk text + instant Enter.
+- **Fix (no perf loss):** Jitter the *page-visible* waits with bounded randomness: new-chat pause `~600–1300 ms`; a `50–250 ms` gate between text insertion and Enter; e.g. `base * (0.75 + Math.random() * 0.5)`. Same latency envelope, kills exact-repeat detectability, near-zero end-to-end cost. **Guaranteed-safer** (keeps the same order of magnitude; the retry loop is invisible to the site — leave it). The only true perf trade-off is *human-grade* typing speed (finding 3), which you should add only for sensitive sites.
+
+### 5. Resource blocking tell — MEDIUM
+- **Detection:** Light-mode `route.abort()` on `image|font|media` (driver.ts:98-104) generates `net::ERR_ABORTED` for the real site's own assets: `img.onerror` fires, `document.fonts.check()/ready` shows no loaded fonts, `performance.getEntriesByType('resource')` records 0-byte/failed entries. A chat site's own telemetry/analytics sees a logged-in session whose avatars/emoji-fonts never load. A real user shows this pattern (roughly) only if they run a heavy ad-blocker.
+- **Current state:** Aborting is skipped only when `defaultContext` (attach). For **spawn** paths — including spawned-with-real-profile and the documented `UI2API_HEADED=1` headed pool on Xvfb — light-mode aborting still fires, so even headed "user" sessions load with broken images/fonts.
+- **Fix (no perf loss):** Gate the aborting off whenever a real profile or headed mode is in play (`usingUserChrome() || !headless`); keep it *only* as a memory shave for the bundled headless fallback. For real-user modes let assets load (chat pages are small; shave elsewhere). **Trade-off:** a few MB/page memory + small load-cost increase when enabled — negligible on a real profile host, and strictly safer behaviorally.
+
+### 6. Network/browser fingerprints (GPU/WebGL, plugins, screen) — HIGH
+- **Detection:**
+  - **GPU/WebGL:** spawn passes `--disable-gpu --disable-software-rasterizer` (also `--disable-dev-shm-usage`) whenever not using a real profile *— and `--disable-gpu --disable-dev-shm-usage --disable-software-rasterizer` on spawned non-real-profile — note the real-profile branch omits these, but the **headless** flag alone still usually means software GL; `gl.getParameter(gl.RENDERER)` reports `SwiftShader` (observed in this repo's logs) vs a real user's `ANGLE (… Vulkan/OpenGL …)`. `WebGL2` presence/absence is another tell.
+  - **Screen metrics:** driver forces `newContext({viewport: 1024×700})` in light mode / `1280×900` otherwise (driver.ts:93). In headless, `window.screen` reports the headless default (≈1280×720) — the 1024×700 inner size mismatches screen, and `outerWidth === innerWidth` (no window chrome) in headless, which a headed human window never shows. In headed mode the viewport still overrides the browser's own `--window-size=1280,800`, creating an outer/inner mismatch inside a real window.
+  - **Plugins/extensions:** fresh contexts have `navigator.plugins.length` at the bare-Chrome baseline and, critically in headless, no profile extensions at all; real user Chrome carries the user's installed extensions and fuller plugin surface. Also `navigator.platform`/timezone/language are host-inherited and match — those are the *good* parts.
+- **Current state:** As above — SwiftShader renderer, forced tiny viewport, plugin/ext absence, in every non-attach mode.
+- **Fix (no perf loss):**
+  1. For real-profile spawns, drop `--disable-gpu`/`--disable-software-rasterizer` (GPU + real WebGL renderer). **Guaranteed-safer** (they only help bundled-on-hostile-hosts).
+  2. Drop the synthetic viewport for real-user modes; instead inherit the user's screen (`newContext({ viewport: null })` or, in attach, the default context unmodified — already correct). The 1024×700 light-mode dimension is unnatural; a real user on a real display has a real rect. **Guaranteed-safer**, zero speed cost.
+  3. Accept that headless keeps a residual outer==inner and no-extensions profile; treat **headed or attach as the only "no-trace" posture** for real sessions (see verdict).
+
+### 7. Storage replay traces — MEDIUM
+- **Detection:** Divergence between the injected snapshot and a genuine session: storage re-created "new" on every context (`IndexedDB` fires `onupgradeneeded`/versionchange because it's created from scratch inside an incognito context), byte-identical replay each time (frozen `capturedAt` and frozen in-storage timestamps while the account keeps evolving), partial origin coverage (`state.json` covers `gemini.google.com`; cross-origin partners like `accounts.google.com` storage never exists — a real Chrome profile has the full cross-origin web of Google cookies/storage), and optionally mismatched cookie order/`sameSite`/CHIPS `partitionKey` fields between serialize and deserialize on older Playwright (1.40). A forensic site correlating "same user, storage creation timestamp identical across visits, partner origins missing" can score it.
+- **Current state:** `injectSnapshot` injects cookies via `context.addCookies` (protocol-level, correct ordering, before any navigation) plus a document-start `addInitScript` replay for localStorage/sessionStorage/IDB (session-store.ts:178-193). Because the spawn path uses a fresh **incognito** context on the real profile, even "real profile" mode depends entirely on this synthetic replay. The passing cookie values themselves look real (the snapshot here is a genuine Gemini session); the *metadata* diverges.
+- **Fix (no perf loss):** Prefer **attach** (real default context — storage already physically present, nothing to inject). When injecting: (a) reuse **one long-lived page** per pool worker (already done) so storage evolves naturally instead of re-replaying a frozen snapshot per request; (b) capture/replay *all* origins the snapshot covered, and adopt the site's visible cookie metadata verbatim (already verbatim); (c) when the snapshot is old, re-prime it — a stale snapshot silently degrades to "no cookies" on reject, which is an anonymous, cold-profile session (worse for stealth than a fresh login). Skip injection entirely in attach/real-profile mode. **Guaranteed-safer** (the only trade-off is standing up a long-lived page instead of per-request contexts — which the pool already does).
+
+### 8. Process/browser identity — MEDIUM
+- **Detection:** Same-host observability (not remotely readable by the site, but visible to any local process and leaves persistent traces): Node `spawn()`s Chrome with `--remote-debugging-port=N --remote-debugging-address=127.0.0.1` (an open loopback HTTP debug endpoint — any local process can `curl 127.0.0.1:N/json` and list live targets), a temp `--user-data-dir=/tmp/ui2api-chrome-XXXX` for the bundled path (no real user's Chrome lives there), and a stability-flag stack on the user's real profile that a real user's own Chrome never carries: `--no-first-run --no-default-browser-check --disable-background-networking --disable-component-update --mute-audio --disable-hang-monitor --disable-v8-idle-tasks --disable-background-timer-throttling --disable-renderer-backgrounding`. Playwright's `/proc/<pid>/cmdline`–only flags (site-invisible) are joined by `--headless=new` on the real profile — and launching headless against a profile the user's headed Chrome is *also* using trips Chrome's profile singleton (hand-off or pollinked instance), another process-level smell. The **attach** path spawns nothing and is genuinely indistinguishable from the user's own running browser.
+- **Current state:** `spawnChromeAndConnect` (browser.ts:243-345) is the default launch path for both raft and pool; the debug port is loopback-bound (not remotely reachable — good), but open locally; the temp-profile + disable-flag stack is the same-host tell. Documents themselves (TROUBLESHOOTING) already catalogue the `pkill -f chrome.*remote-debugging` hazard this shape invites in systemd setups (the self-eating service that killed *its own* Chrome — proof these flags are visible and greppable locally).
+- **Fix (no perf loss):**
+  1. Default real-user sessions to **attach mode** (zero flags, zero new process, zero debug port, literally the user's browser). **Guaranteed-safer.**
+  2. When spawn is unavoidable, trim the stack for real profiles: keep only what the host actually needs (`--no-sandbox` only where AppArmor/userns denies); drop `--disable-background-networking`, `--disable-component-update`, `--mute-audio`, `--v8-idle-tasks`, and the throttling trio on real-user/headed runs; bind the port to 127.0.0.1 (already done) and consider tearing the port down after handoff where possible. **Guaranteed-safer** for user modes; each flag's stability role was host-specific, so gate them behind an env or host capability detection.
+  3. Never point spawned *headless* at the user's live profile while their real Chrome is running (profile singleton). **Guaranteed-safer** (plus avoids weird tab-handoff).
+
+## Top 10 quick wins (ranked by impact/effort)
+
+1. **Attach by default for real profiles** — the only mode whose session *is* the user's browser; removes flags, debug port, incognito context, storage injection, and viewport problems at once. One line (`UI2API_ATTACH_PORT` default / doc the recipe). Impact: eliminates most findings at once. Effort: near-zero.
+2. **Gate light-mode resource aborting off for real-profile/headed modes** (driver.ts:98). Kills the broken-assets tell on real sessions. ~2 lines. Impact: high (finding 5).
+3. **Drop `--disable-gpu`/`--disable-software-rasterizer` on real-profile spawns** — the SwiftShader WebGL tell. Impact: high (finding 6). Small.
+4. **Remove the synthetic 1024×700 viewport for real-user modes** (`viewport: null` / inherit). Impact: high (finding 6). Small.
+5. **Composer input via `keyboard.insertText` instead of `fill()`** — trusted input events at zero speed cost. Impact: high (finding 3). Small.
+6. **Real paste: clipboard write + real Ctrl/Cmd+V, drop the fabricated `ClipboardEvent`.** Impact: medium-high for the `paste()` flows (finding 3). Small.
+7. **Jitter page-visible waits** (new-chat 600–1300 ms; 50–250 ms before Enter). Kills clockwork repeats with no latency increase. Impact: medium (finding 4). Tiny.
+8. **Never `chromium.launch` a real user profile** — kills `--enable-automation` on the user's Chrome; fail-to-attach or bundled fallback instead. Impact: medium-high (finding 1). Tiny.
+9. **One long-lived pool page per worker + skip injection when the real default context is in play + snapshot touch/TTL.** Stops frozen-storage replay and cold-anonymous degradation. Impact: medium (finding 7). Small.
+10. **Trim non-stability flags on real-profile spawns** (`--mute-audio`, `--disable-background-networking`, `--disable-component-update`, throttling trio) and keep the debug port loopback + documented. Impact: medium-low (finding 8, same-host traces). Small.
+
+## What is already good (keep list — things we must NOT break)
+
+- **No `--enable-automation` in the spawn path**, and no `--disable-blink-features=AutomationControlled` anywhere — the automation switch is never set natively; `navigator.webdriver` is `false`.
+- **No UA/client-hint spoofing whatsoever** — UA, `Sec-CH-UA*`, platform, timezone, and host language are all consistent with the real Chrome (VISION's "do not spoof" discipline is correct).
+- **`press()`/Enter goes out via CDP `Input.dispatchKeyEvent`** — trusted key events; the site's own keydown handler sees a real Enter.
+- **Storage injection order**: cookies via `context.addCookies` before navigation; storage replay only in a `document-start` init script so the site's own JS sees populated storage; injection is skipped entirely for `defaultContext` (attach) — exactly right.
+- **Debug port loopback-bound** (`127.0.0.1`) — not remotely reachable.
+- **Pool reuses one long-lived page per worker** — storage and chat state evolve naturally across prompts instead of re-spawning; also the speed win.
+- **Light-mode aborting is already skipped for attach sessions** — precedent for the finding-5 gating.
+- **Real Chrome + real profile in attach mode = genuinely the user's browser** — the design's core bet; keep it as the canonical posture, not a fallback.
+
+## Recommended stealth baseline for capability packages (checklist future packages must pass)
+
+Every new capability package must pass all of the following **before** it is marked installable:
+
+1. **No synthetic parse**: inputs are sent via trusted CDP primitives only (`keyboard.insertText`, `keyboard.press`, real clipboard paste); never `fill()`, never fabricated events (`new ClipboardEvent/MouseEvent(..., {bubbles})` is a hard fail).
+2. **No flag leakage on real sessions**: attach-mode or trimmed-spawn only; a package must not cause `--enable-automation`, `--disable-gpu`, temp `--user-data-dir=/tmp/…`, or `--headless=new` against the user's live profile.
+3. **No artificial surface**: no forced viewport/screen; inherit the user's window; no `outerWidth===innerWidth` in a "real session" mode.
+4. **No frozen storage**: one live, long-lived page; no per-request snapshot re-injection; snapshot re-primed before expiry; skip injection when the real default context is present.
+5. **No aborted first-party assets**: real sessions load images/fonts the site expects (light-mode aborting is a bundled-fallback-only optimization).
+6. **No clockwork**: any fixed wait a site could observe is jittered within a bounded envelope.
+7. **No injected globals**: nothing in the page's main world besides what the site itself wrote (`window.__ui2api`/`_u2u` instrumentation is analyse-only and must never load in a package's runtime context).
+8. **Headless is always declared as such**: if a package runs the bundled headless fallback it must not claim "no fingerprint difference"; real-profile capability runtime requires headed or attach.
+
+---
+
+### Summary verdict
+
+**8 findings — 2 high (input realism #3, GPU/WebGL+viewport #6), 4 medium (#1, #4, #5, #7, #8), 2 low (#2).** Top quick wins: (1) make attach-by-default the real-session posture, (2) stop aborting image/font resources in real profile/headed modes, (3) swap `fill()` for trusted `keyboard.insertText`. The only fix that genuinely trades performance is *human-grade* keystroke timing (submit fast-but-plausible jitter instead); the rest are free. **Verdict: yes — headed + real-profile (attach especially) is inherently safer than headless**: real GPU/WebGL, real screen geometry, real extensions/plugins, the user's actual profile storage, zero spawn flags, and natural timing all come for free, while even `--headless=new` keeps soft tells (outer==inner, no extensions, software GL, cmdline traces) that a determined site or same-host observer can score.
