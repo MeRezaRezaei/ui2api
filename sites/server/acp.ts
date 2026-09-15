@@ -5,7 +5,8 @@ import type { ActionMap, Action } from "/home/me/Documents/projects/ui2api/src/t
 
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8")) as ActionMap;
-const session = new BrowserSession(map);
+const SITES_ROOT = "/home/me/Documents/projects/ui2api/sites";
+const session = new BrowserSession(map, SITES_ROOT);
 
 function sanitize(v: unknown): string {
   try {

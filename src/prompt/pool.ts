@@ -85,7 +85,7 @@ export class ChatPool {
     this.browser = undefined;
     const b = this.attach
       ? await connectExistingChrome(Number(process.env.UI2API_ATTACH_PORT))
-      : await spawnChromeAndConnect({ headless: true });
+      : await spawnChromeAndConnect({ headless: process.env.UI2API_HEADED !== "1" });
     this.browser = b;
     return b;
   }
