@@ -55,9 +55,15 @@ with documented web-session auth (from the open-source OmniRoute repo).
 | Package | Status | Key discovery |
 |---|---|---|
 | `google-ai-search` | ✅ implemented | **AI Mode = `/search?q=…&udm=14`**, urlTemplate flow (one page load per query → `{answer, citations[]}`); session snapshot (www.google.com) pending first capture |
-| `gemini` | ✅ implemented | all RPCs over one `POST /_/BardChatUi/data/batchexecute`; compact descriptor IDs live-captured (`aPya6c`=ListConversations, `otAQ7b`=bootstrap/model-catalog, `sJBwce`=undecoded); `gemini_chat` via trusted ChatDriver insertText path; **live-tested**: chat answers, list_conversations (RPC), model_list (Flash-Lite/Flash/Pro via otAQ7b); further surface (search toggle, CRUD, Gems, deep research) mapped in inventory — see `capabilities/gemini` |
-| `kimi` | ✅ inventory + package scaffold | Connect/protobuf RPC on `notilo.kimi.com/apiv2`; **411 methods / 45 services decoded**; chat via `ChatService.Chat`, search = `Tool.Search{force}` + `search.v2.SearchService`, files via `/apiv2-files/file/upload`; auth = localStorage `access_token` (Bearer + `x-msh-shield-data`); package files scaffolded, snapshot awaiting capture |
-| `hunyuan-yuanbao` | ✅ inventory + package scaffold | Next.js shell, everything is tool-call content over one SSE endpoint `POST /api/chat/` (custom SSE-over-XHR); deep search, upload→COS→doc analysis, image gen; auth = `hy_user`/`hy_token` cookies; anti-bot: `X-webdriver: 1` flag on headless + Turing.js/QIMEI fingerprint; package files scaffolded under `capabilities/hunyuan` (chat URL `yuanbao.tencent.com`), snapshot awaiting capture |
+| `gemini` | ✅ implemented | all RPCs over one `POST /_/BardChatUi/data/batchexecute`; compact descriptor IDs live-captured (`aPya6c`=ListConversations, `otAQ7b`=bootstrap/model-catalog, `otAQ7b` also carries the grounding "sources" picker; `sJBwce`=session/telemetry write — see `gemini/CAPABILITIES.md` §0 live decode table); `gemini_chat` via trusted ChatDriver insertText path; **live-tested**: chat answers, list_conversations (RPC), model_list (Flash-Lite/Flash/Pro); search toggle = **no standalone switch in this UI revision** (grounding rides StreamGenerate `tools`; sources-picker fallback selector added) |
+| `kimi` | ✅ inventory + package | Connect/protobuf RPC on `notilo.kimi.com/apiv2`; **411 methods / 45 services decoded**; chat via `ChatService.Chat` (server-stream), search = `Tool.Search{force}` + `search.v2.SearchService`, threads via `ListChats`, files via `/apiv2-files/file/upload`; auth = localStorage `access_token` (Bearer + `x-msh-shield-data`); package grounded in inventory, snapshot awaiting capture |
+| `hunyuan-yuanbao` | ✅ inventory + package | Next.js shell, everything is tool-call content over one SSE endpoint `POST /api/chat/` (custom SSE-over-XHR); auth = `hy_user`/`hy_token` cookies; **anti-bot: `X-webdriver: 1` on headless + Turing.js/QIMEI fingerprint → headed/real-profile only**; package under `capabilities/hunyuan` (chat URL `yuanbao.tencent.com`) + deep-search & doc-QA recipes, snapshot awaiting capture |
+| `poe` | ⬜ scaffold | auth: `p-b` cookie (provider-catalog); chat ui-path only; awaiting capture |
+| `venice` | ⬜ scaffold | auth: `session` cookie; private-mode/image-gen unverified; awaiting capture |
+| `deepseek` | ⬜ scaffold | auth: `userToken` (storage, replaying to confirm); CoT block unverified; awaiting capture |
+| `grok` | ⬜ scaffold | auth: `sso` + `sso-rw` cookies; chat ui-path only; awaiting capture |
+| `claude` | ⬜ scaffold | auth: `sessionKey` cookie; ProseMirror composer; awaiting capture |
+| `perplexity` | ⬜ scaffold | auth: `__Secure-next-auth.session-token`; loginRequired (differs from anonymous built-in); awaiting capture |
 | provider catalog | ✅ | 30 web providers with documented auth (from OmniRoute) |
 
 Also: `docs/STEALTH.md` — runtime stealth audit (8 findings, 10 quick wins,
@@ -81,9 +87,13 @@ the only true no-trace posture).
    `task/gemini-surface`. ✅ implemented + live-tested (2026-09-15). Remaining
    stretch: search toggle, conversation CRUD, Gems, deep research.
 4. `kimi` — chat core + web search + file upload (the 411-method RPC surface).
-   Package scaffolded (`capabilities/kimi/`); needs first `--login` capture.
+   Package grounded in inventory (`capabilities/kimi/`); needs first `--login`
+   capture for the live round-trip.
 5. `hunyuan-yuanbao` — chat + deep search + doc analysis (single SSE endpoint,
-   needs the real session cookies for /api/chat). Package scaffolded under
-   `capabilities/hunyuan/`; needs first `--login` capture.
-6. Then: rest of the provider catalog (poe, venice, doubao, deepseek, grok,
-   claude, perplexity…) as requested.
+   needs the real session cookies for /api/chat). Package grounded in inventory
+   under `capabilities/hunyuan/`; needs first `--login` capture (headed only —
+   anti-bot fingerprint flags headless).
+6. Remaining catalog scaffolds ready (`poe`, `venice`, `deepseek`, `grok`,
+   `claude`, `perplexity` — auth facts from provider-catalog, chat ui-path
+   recipes; each needs a first `--login` capture).
+7. Then: rest of the provider catalog (doubao, and any others) as requested.

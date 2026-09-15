@@ -1,0 +1,14 @@
+{
+  "site": "poe.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "poe.com",
+    "cookies": ["p-b"],
+    "captureCommand": "ui2api analyse https://poe.com --login",
+    "targetDir": "data/poe.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. Auth per provider-catalog.md: cookie 'p-b' (poe-web). The Poe app may serve from www.poe.com; confirm the cookie domain on first capture. Capture once, then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

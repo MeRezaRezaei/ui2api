@@ -1,0 +1,36 @@
+{
+  "id": "poe",
+  "name": "Poe (poe.com)",
+  "site": "poe.com",
+  "url": "https://poe.com",
+  "description": "Quora's AI chat aggregator (many models behind one composer). Capability package drives the Poe composer and reads streamed answers off the page.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "siteVersion": "to be recorded on first live capture",
+  "capabilities": [
+    {
+      "id": "poe_chat",
+      "name": "Chat",
+      "description": "Send a prompt on the Poe composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/poe_chat.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "poe.com",
+    "cookies": ["p-b"],
+    "capture": "ui2api analyse https://poe.com --login",
+    "note": "provider-catalog.md (OmniRoute webSessionCredentials, poe-web): auth kind=cookie, credential='p-b'. The Poe app may serve from www.poe.com; exact cookie set beyond p-b to be verified on first live capture."
+  },
+  "permissions": [
+    "requires a real logged-in poe.com session snapshot (cookie p-b)",
+    "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://poe.com --login)",
+    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture"
+  ],
+  "builtinProfile": "poe (loaded from capabilities/poe/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+}

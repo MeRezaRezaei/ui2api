@@ -1,0 +1,36 @@
+{
+  "id": "perplexity",
+  "name": "Perplexity (perplexity.ai)",
+  "site": "www.perplexity.ai",
+  "url": "https://www.perplexity.ai",
+  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
+  "description": "Capability package for Perplexity's AI search chat at https://www.perplexity.ai. Sends prompts through the Ask composer and reads streamed answers (with citations) off the page. provider-catalog.md documents the auth surface only (perplexity-web: cookie kind, __Secure-next-auth.session-token); no endpoints — including any search focus-mode API — are documented there, so search-focus capabilities are NOT fabricated here and are marked to be verified on first live capture.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "capabilities": [
+    {
+      "id": "perplexity_chat",
+      "name": "Chat / Ask stream",
+      "description": "Send a prompt on the Ask composer; streamed answer + citations read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/perplexity_chat.json"
+    }
+  ],
+  "permissions": [
+    "session snapshot for www.perplexity.ai (cookie __Secure-next-auth.session-token per provider-catalog perplexity-web entry)",
+    "Playwright over CDP — trusted input only, no synthetic events",
+    "network scoped to https://www.perplexity.ai and its api hosts (to be mapped on first live capture)"
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "www.perplexity.ai",
+    "cookies": ["__Secure-next-auth.session-token"],
+    "capture": "ui2api analyse https://www.perplexity.ai --login",
+    "regionNote": "credential name from capabilities/provider-catalog.md perplexity-web entry (kind: cookie, credentialName \"__Secure-next-auth.session-token\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture. NOTE: the src/profile/profile.ts built-in currently allows anonymous 'Ask' (loginRequired false); this package requires a real session per the catalog."
+  },
+  "builtinProfile": "perplexity (matches built-in in src/profile/profile.ts selectors; package requires loginRequired true per provider-catalog — anonymous built-in differs)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+}

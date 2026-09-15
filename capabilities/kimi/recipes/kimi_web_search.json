@@ -4,17 +4,17 @@
   "flow": "ui-toggle (composer Search / Web-access switch) + chat prompt",
   "steps": [
     { "step": 1, "action": "open", "url": "https://www.kimi.com", "note": "session snapshot injected (data/www.kimi.com/.session)" },
-    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "optional clean conversation" },
-    { "step": 3, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] matching labels: search, web, web access, 搜索, 联网 — candidate selectors, verify on first live capture" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "optional clean conversation (sidebar '新建对话')" },
+    { "step": 3, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] matching labels: search, web, web access, 搜索, 联网 — CANDIDATE selectors, verify on first live capture; composer state key selectSearch drives this switch in the bundles" },
     { "step": 4, "action": "click", "note": "if checked/state != args.enable, click to toggle web-search mode; else no-op" },
     { "step": 5, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
     { "step": 6, "action": "send", "note": "Enter (keyEnter strategy)" },
-    { "step": 7, "action": "read", "selector": ".segment-text", "until": "stable 2000ms", "timeoutMs": 90000 },
-    { "step": 8, "action": "extract", "kind": "citations", "selectors": ["[class*=\"citation\"]", "[class*=\"sources\"]", "[data-testid*=\"citation\"]"], "max": 12, "note": "CANDIDATE — citation block selectors TBD on first live capture" }
+    { "step": 7, "action": "read", "selector": ".segment-text", "until": "stable 2000ms", "timeoutMs": 90000, "note": "answer selector UNVERIFIED — confirm on first live capture" },
+    { "step": 8, "action": "extract", "kind": "citations", "selectors": ["[class*=\"citation\"]", "[class*=\"sources\"]", "[data-testid*=\"citation\"]"], "max": 12, "note": "CANDIDATE — citation block selectors TBD on first live capture; RPC-side per-message refs are kimi.chat.v1.Refs / CodeReference via GetSearchCitation" }
   ],
   "output": { "answer": "string", "citations": ["string (title — url)"], "webSearched": "boolean" },
-  "rpcEquivalent": "kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat — the switch's state feeds the tools field of ChatRequest; dedicated backend search.v2.SearchService (Search/SerpSaas/Highlight/Url2Text) exists separately",
-  "note": "toggle selector is UI-revision sensitive; re-tune per account after live capture",
+  "rpcEquivalent": "In-chat search is a tool on the chat stream: kimi.chat.v1.Tool{type:kimi.common.v1.ToolType.TOOL_TYPE_SEARCH=1, search{force}} rides inside ChatService.Chat's ChatRequest.tools — the switch's state feeds that field. Citations per message: ChatService.GetSearchCitation{chat_id,message_id} / GetToolBlock; Ref data = kimi.chat.v1.Refs / CodeReference. A separate dedicated backend search.v2.SearchService (Search/SerpSaas/Highlight/Url2Text/GetPdfMeta) exists but is NOT what the composer switch drives. No payloads verified on the wire yet.",
+  "note": "toggle selector is UI-revision sensitive (state key selectSearch in bundles); re-tune per account after live capture",
   "stealth": "real session, trusted inputs, site's own send handler",
   "sessionLock": "session.lock.json"
 }

@@ -1,0 +1,14 @@
+{
+  "site": "claude.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "claude.ai",
+    "cookies": ["sessionKey"],
+    "captureCommand": "ui2api analyse https://claude.ai --login",
+    "targetDir": "data/claude.ai/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. All profile selectors and RPC details are unverified candidates. Cookie name (sessionKey) comes from the capabilities/provider-catalog.md claude-web entry. Capture a logged-in claude.ai session once (ui2api analyse https://claude.ai --login), then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

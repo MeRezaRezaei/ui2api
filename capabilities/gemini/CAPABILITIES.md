@@ -15,6 +15,30 @@ header `X-Framework-Xsrf-Token`). RPCs are declared as descriptors
 `[_.cg /*frontendMethodType*/, <idempotent>, _.eg /*unobfuscatedRpcId*/, "/BardFrontendService.<Method>"]`,
 plus a numeric "extension" id (`_.pna`) in the wire payload.
 
+## 0. Live compact-ID decode (2026-09-15; replayed the UI's own bootstrap payloads on a headed Chrome + snapshot)
+
+| compact id | method / role (verified live) | payload → response |
+|---|---|---|
+| `aPya6c` | ListConversations | `[]` → `[hasMore,totalCount,[convs]]` |
+| `otAQ7b` | bootstrap/config catalog | `[]` → models catalog + grounding "sources" entries: **Search=1**, Gmail=3, Drive=4, Chat=12, plus `Flash3p6PaidV2Rollout` flag |
+| `K4WWud` | client location lookup | `[[0],["en-US"]]` → `[city, consent label, false, null, maps/vt tile url]` (IP-derived) |
+| `ozz5Z` | per-entitlement status check | `[[[null,"1",<id>],null,1],…]` → echoes rows, trailing `1→0` = not entitled (ids 447,448,702,961,960,1062,1240,1237,1238,1239,1241) |
+| `o30O0e` | person profile request | `[["me"],[[["person.photo","person.name","person.email"]],null,[1,7]]]` → `null` in non-personalized sessions |
+| `L5adhe` | popup/notification state upsert | `[<104+ null flags>, [[current_popup_id|popup_zs_visits_cooldown|last_selected_mode_id_on_web]]]` → `null` (void) |
+| `sJBwce` | session/telemetry write | `[[1,2]]` → `null`+`[3]` (void) |
+| `GPRiHf` / `maGuAc` (`[1]`,`[2]`) / `CNgdBe` (`[1|2,["en-US"],0]`) / `I4z33b` | state/pref writes | → `null`+`[7]` (void) |
+| `cYRIkd` (`["en-US"]`) / `whPPme` (`["en-US",null,[4]]`) / `ku4Jyf` | read-style RPCs | → `[]` |
+| `Te6DCf` | discovery/landing content | `[["en-US"],[1,2]]` → ~18 KB featured cards |
+| `GPRiHf` empty | — | `null` + `[7]` |
+
+Void RPCs carry no data-bearing payload; none merit their own capability. Conversation
+CRUD compact IDs (create/rename/delete) were **not** pinnable live: New-chat fires no
+batchexecute (conversation created lazily on first `StreamGenerate`), and the snapshot
+account renders a signed-out SSR leaf with 0 conversations (rename/delete not
+exercisable). TODO re-capture a signed-in session + row-kebab walk to pin them; v1 full
+paths are `CreateConversation / MutateConversation / UpdateChat / DeleteConversation /
+BranchConversation / UpdateConversation / ListConversationTurns / GetConversationTurn`.
+
 ## 1. Chat core (baseline)
 - Send path: composer → `StreamGenerate` (`"/BardFrontendService.StreamGenerate"`,
   descriptor `$Dd = new _.SPc("RxAFq",_.Fzc,_.tL,…)`, `server_streaming`).
@@ -110,6 +134,8 @@ plus a numeric "extension" id (`_.pna`) in the wire payload.
 - LLM history import: `ListImports`, `disable_llm_history_import_disclaimer`,
   `has_seen_llm_history_import_page`, `is_imported_chats_panel_open_by_default`.
 - Memory retrieval: `"/BardFrontendService.RetrieveMemories"`.
+- Live decode: `aPya6c` = ListConversations is the only conversation RPC pinned to a
+  compact id; CRUD compact ids un-pinnable in the current signed-out SSR session (see §0).
 ### 3.10. Your Day / scheduled briefs / proactive
 - `GenerateDailyBrief`, `GetDailyBrief`, goal CRON-style RPCs; `SCHEDULED_PROMPTS`(4),
   `PROACTIVE_SCHEDULING`(15)/`_SUGGESTION`(21); keys `opt_out_your_day`,

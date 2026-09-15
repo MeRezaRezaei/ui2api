@@ -1,0 +1,36 @@
+{
+  "id": "deepseek",
+  "name": "DeepSeek Chat (chat.deepseek.com)",
+  "site": "chat.deepseek.com",
+  "url": "https://chat.deepseek.com",
+  "description": "DeepSeek's chat product (deepseek-chat / deepseek-reasoner). Capability package drives the composer and reads streamed answers off the page.",
+  "version": "0.1.0-scaffold",
+  "author": "ui2api capabilities",
+  "date": "2026-09-15",
+  "siteVersion": "to be recorded on first live capture",
+  "capabilities": [
+    {
+      "id": "deepseek_chat",
+      "name": "Chat",
+      "description": "Send a prompt on the DeepSeek composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture (deepseek-reasoner renders a separate reasoning block — surface to be confirmed).",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/deepseek_chat.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "chat.deepseek.com",
+    "credentials": { "kind": "token", "name": "userToken" },
+    "capture": "ui2api analyse https://chat.deepseek.com --login",
+    "note": "provider-catalog.md (OmniRoute webSessionCredentials, deepseek-web): auth kind=token, credential='userToken'. Exact storage (localStorage vs cookie) and replay (header/cookie/payload) to be verified on first live capture."
+  },
+  "permissions": [
+    "requires a real logged-in chat.deepseek.com session snapshot (token userToken)",
+    "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://chat.deepseek.com --login)",
+    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture"
+  ],
+  "builtinProfile": "deepseek (loaded from capabilities/deepseek/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
+  "analyzed": "2026-09-15",
+  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+}

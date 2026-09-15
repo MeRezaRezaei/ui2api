@@ -1,0 +1,27 @@
+{
+  "id": "deepseek",
+  "name": "DeepSeek Chat (chat.deepseek.com)",
+  "url": "https://chat.deepseek.com",
+  "loginRequired": true,
+  "loginHint": "capture a chat.deepseek.com session once: ui2api analyse https://chat.deepseek.com --login",
+  "composer": [
+    "textarea[placeholder*=\"Message\"]",
+    "textarea[placeholder*=\"请输入\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    ".ds-markdown",
+    "[class*=\"markdown\"]",
+    "[class*=\"answer\"]"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"], button:has-text('new chat')",
+  "dismiss": [
+    "button[aria-label*=\"Close\"]",
+    "button[aria-label*=\"Accept\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (DeepSeek's current web UI renders answers with the .ds-markdown class). Tune each against a real browser after the first live capture (data/chat.deepseek.com/.session). Auth per provider-catalog.md: token 'userToken'."
+}

@@ -3,14 +3,14 @@
   "site": "hunyuan",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture" },
+    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — pending first live capture; recover cookies from the real login, not from the page" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
-    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
-    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
-    { "step": 5, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 60000, "note": "UNVERIFIED candidate selector — tune after first live capture" }
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "composer is a Quill contenteditable (bundle term 'quillFocusHold') — .ql-editor candidate; trusted keyboard.insertText" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate; site's own JS POSTs to /api/chat/" },
+    { "step": 5, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 60000, "note": "UNVERIFIED candidate selector — tune after first live capture. Answer DOM is rendered per content[].type (text/step/reasoner/toolCall); prefer a container that captures streamed text + CoT" }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "per repo inventory (hunyuan-yuanbao): tool-call content over one SSE endpoint POST /api/chat/ (custom SSE-over-XHR) — TO BE VERIFIED on first live capture; the UI path drives the site's own JS so no over-the-wire reconstruction needed for this recipe",
-  "stealth": "real session, trusted inputs, site's own send handler; attach/headed + real profile required (headless is fingerprint-flagged per inventory)",
+  "rpc": "underlying wire (per repo inventory): JSON POST to https://yuanbao.tencent.com/api/chat/ (API_CHAT), answers streamed over a custom SSE-over-XHR client (NOT EventSource): `event: message, data: <json>` chunks; capability/modality lives in content[].type (text, step, continue_step, reasoner/deep_think_box chain-of-thought, toolCall, deepSearch/ai_search_pro*, doc_percent, searchGuid, error); stream ids in x-traceid / x-answer-msgid / x-query-msgid response headers; modelId= URL param honoured (fastThink/deepThink switch). Tool/step timing validated from bundles but not executed — TO BE VERIFIED on first live capture; the UI path drives the site's own JS so no over-the-wire reconstruction is needed for this recipe",
+  "stealth": "HEADED + real profile REQUIRED (anti-bot per inventory): X-webdriver: 1 flags headless Chrome, Turing.js + QIMEI fingerprint; real session, trusted inputs, site's own send handler",
   "sessionLock": "session.lock.json"
 }

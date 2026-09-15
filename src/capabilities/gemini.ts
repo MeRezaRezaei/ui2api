@@ -12,6 +12,48 @@
 //
 // All RPC calls run inside the logged-in page (page.evaluate + fetch) so the
 // request carries the real session cookies + XSRF token; nothing synthetic.
+//
+// ===== Live wire findings — compact batchexecute IDs (2026-09-15, verified
+// ===== by replaying the UI's own bootstrap payloads on a live page) =====
+//   aPya6c = ListConversations       (payload [] -> [hasMore,totalCount,[convs]])
+//   otAQ7b = bootstrap/config catalog(payload [] -> model defs + grounding/
+//                                   composer "sources" picker entries:
+//                                   Search=id 1, Gmail=3, Drive=4, Chat=12;
+//                                   the Search source is what "Google Search"
+//                                   grounding maps to, sent via StreamGenerate)
+//   K4WWud = client location lookup  (payload [[0],["en-US"]] -> [city, consent
+//                                   label, false, null, maps/vt tile url])
+//   ozz5Z  = per-entitlement status  (payload [[[null,"1",<id>],null,1],...] ->
+//                                   echoes rows with trailing 1 -> 0 = not
+//                                   entitled; ids incl. 447,448,702,961,960,
+//                                   1062,1240,1237,1238,1239,1241)
+//   o30O0e = person profile request  (real payload [["me"],[[["person.photo",
+//                                   "person.name","person.email"]],null,[1,7]]];
+//                                   reply null in non-personalized sessions)
+//   L5adhe = popup/notification state upsert
+//                                   (payload [<104+ null flags>, [[key]]] with
+//                                   key = current_popup_id / popup_zs_visits_
+//                                   cooldown / last_selected_mode_id_on_web;
+//                                   null reply — fire-and-forget pref write)
+//   sJBwce = session/telemetry write (real payload [[1,2]]; null + [3] reply)
+//   GPRiHf / maGuAc ([1],[2]) / CNgdBe ([1|2,["en-US"],0]) / I4z33b =
+//                                   state/pref writes — null reply (void)
+//   cYRIkd(["en-US"]) / whPPme(["en-US",null,[4]]) / ku4Jyf([...]) -> [] (reads)
+//   Te6DCf = discovery/landing content ([[ "en-US"],[1,2]] -> ~18 KB feature cards)
+//   These void RPCs carry no data-bearing response; none merit a capability.
+//
+// ===== Conversation CRUD compact IDs: NOT pinned =====
+//   A live New-chat click fires NO batchexecute in this UI revision — the
+//   conversation is created lazily on the first StreamGenerate. The account that
+//   the shipped snapshot signs into currently renders a signed-out SSR leaf with
+//   0 conversations, so rename/delete could not be exercised to capture their
+//   compact IDs. DO NOT fabricate:
+//   TODO: re-capture a signed-in session, then New chat -> first send to catch
+//   the create RPC; open a row kebab ("More options") -> Rename / Delete to
+//   catch their compact IDs. v1 full paths already known from the bundle:
+//   CreateConversation, MutateConversation, UpdateChat, DeleteConversation,
+//   BranchConversation, UpdateConversation, ListConversationTurns,
+//   GetConversationTurn.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
@@ -139,11 +181,12 @@ export class GeminiCapabilities {
     // Search support: /BardFrontendService.SearchConversations with a query.
     const query = String(args.query ?? "").trim();
     // Compact descriptor IDs pinned from live capture (2026-09-15, build
-    // boq_assistant-bard-web-server_20260914.08_p0):
+    // boq_assistant-bard-web-server_20260914.08_p0) — see header comment for
+    // the full decode:
     //   aPya6c = ListConversations   (body [] → [hasMore, totalCount, [conversations]])
-    //   sJBwce = search/pagination?  (returns null [7] — not yet decoded)
-    //   otAQ7b = bootstrap/config    (returns model defs, schema IDs, etc.)
-    // Search not yet pinned to a compact id — use v1 full path.
+    //   sJBwce = session/telemetry write (void — null + [3]/[7] reply)
+    //   otAQ7b = bootstrap/config    (model defs, schema IDs, grounding sources)
+    // Search stays on the v1 full path — its compact ID was not observed live.
     const method = query ? "/BardFrontendService.SearchConversations" : "aPya6c";
     try {
       const payload = query ? [[null, [null, query, null, null, [], null, null, null, null, null, [], null]]] : [];
@@ -273,6 +316,13 @@ export class GeminiCapabilities {
   }
 
   // --- gemini_search_toggle: the composer Web-access / Search switch ---
+  // Verdict (2026-09-15 live probe): this UI revision has NO standalone search
+  // toggle button in the composer — the composer toolbar is only "Upload &
+  // tools" + "Dictate". "Google Search" grounding is enabled via the composer
+  // extensions/"sources" picker (otAQ7b source entries: Search=1, Gmail=3,
+  // Drive=4, Chat=12) and rides the StreamGenerate tools field, so a signed-in
+  // session normally exposes it as a menuitemcheckbox labelled "Search".
+  // Keep a best-effort toggle AND cover the sources-picker checkbox.
   private async searchToggle(args: Record<string, unknown>): Promise<GeminiCapabilityResult> {
     const page = await this.openPage();
     await waitForDomain(page, 4000);
@@ -281,12 +331,12 @@ export class GeminiCapabilities {
       const toggled = await page.evaluate((wantOn: boolean) => {
         // The search/web-access switch: find the toggle button by aria-label or
         // role, click it when its current state differs from `wantOn`.
-        const labels = ["search", "web access", "google search", "use google search"];
-        const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox']")).find((b) => {
+        const labels = ["search", "web access", "google search", "use google search", "search on the web"];
+        const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']")).find((b) => {
           const t = ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").toLowerCase();
           return labels.some((l) => t.includes(l));
         });
-        if (!btn) return { ok: false, reason: "no search toggle found (page may not expose one in this UI revision)" };
+        if (!btn) return { ok: false, reason: "no search toggle found — this UI revision has no standalone switch; set grounding via the composer 'sources' picker or the StreamGenerate tools field" };
         const currentlyOn = (btn as HTMLElement).getAttribute("aria-checked") === "true" || (btn as HTMLElement).className.includes("active") || (btn as HTMLElement).className.includes("checked");
         if (currentlyOn !== wantOn) {
           (btn as HTMLElement).click();
