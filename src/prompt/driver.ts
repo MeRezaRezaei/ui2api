@@ -6,7 +6,7 @@
 // own JS, and the streamed answer is read off the page's event bus.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives } from "../runtime/dom-primitives.js";
-import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -40,6 +40,9 @@ export interface ChatDriverOptions {
      creation, and the user's standing browser must keep its own look. */
   defaultContext?: boolean;
   dataDir?: string;
+  /* Identity-keyed account to drive (email or vault slug). Defaults to the
+     legacy single-account snapshot; pass "default" explicitly for it. */
+  account?: string;
 }
 
 export class ChatDriver {
@@ -49,12 +52,14 @@ export class ChatDriver {
   private page?: Page;
   private dom: DomPrimitives;
   private readonly dataDir: string;
+  private readonly account?: string;
 
   constructor(
     private readonly profile: ChatSiteProfile,
-    { browser, defaultContext = false, dataDir = resolveDataDir() }: ChatDriverOptions = {}
+    { browser, defaultContext = false, dataDir = resolveDataDir(), account }: ChatDriverOptions = {}
   ) {
     this.dataDir = dataDir;
+    this.account = account;
     this.browser = browser;
     this.ownsBrowser = !browser;
     this.defaultContext = defaultContext;
@@ -122,7 +127,13 @@ export class ChatDriver {
         // persist chat history into the real account.
         const host = new URL(this.profile.url).host;
         if (!usingDefaultContext) {
-          const snap = loadSnapshot(snapshotPath(this.dataDir, host));
+          // Identity-keyed account wins when one is requested ("default" picks
+          // the legacy single-account path); otherwise fall back to the legacy
+          // snapshot so zero-config runs keep working unchanged.
+          const snap =
+            this.account && this.account !== "default"
+              ? loadAccountSnapshot(this.dataDir, host, this.account)
+              : loadSnapshot(snapshotPath(this.dataDir, host));
           if (snap) {
             await injectSnapshot(context, snap);
           } else {
