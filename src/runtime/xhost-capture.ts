@@ -167,18 +167,17 @@ export async function launchHeadedChromeForLogin(opts: {
 }): Promise<LaunchHeadedResult> {
   try {
     mkdirSync(opts.profileDir, { recursive: true });
-    // `userDataDir` rides on launch() as a runtime-only option (Playwright's
-    // type only exposes it on launchPersistentContext) — same cast the rest of
-    // this codebase uses to hand Playwright a real profile.
-    const browser = await chromium.launch({
+    // Persistent context: Playwright rejects userDataDir on launch(); the
+    // persistent-context form is the one that hands a real on-disk profile
+    // dir to the user's Chrome (same mechanism the pool's own Chrome uses).
+    const context = await chromium.launchPersistentContext(opts.profileDir, {
       headless: false,
       channel: "chrome",
-      userDataDir: opts.profileDir,
       args: ["--window-size=1280,800"],
       env: { ...process.env, DISPLAY: opts.display } as Record<string, string>,
       ...(process.env.UI2API_CHROME_PATH ? { executablePath: process.env.UI2API_CHROME_PATH } : {}),
-    } as Parameters<typeof chromium.launch>[0] & { userDataDir: string });
-    const page = await browser.newPage();
+    });
+    const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(opts.url, { waitUntil: "load", timeout: 60000 });
     const executable = process.env.UI2API_CHROME_PATH || "chrome";
     return {

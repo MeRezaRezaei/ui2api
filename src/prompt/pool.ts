@@ -27,6 +27,10 @@ export interface PoolWorker {
   profileId: string;
   driver: ChatDriver;
   busy: boolean;
+  /* Dedicated single-request workers (identity-keyed account) are created on
+     demand, handed out once, and closed on release — they never join the idle
+     pool, because a warm page carries the legacy default account. */
+  dedicated?: { account: string };
 }
 
 export type PoolStatus = {
@@ -121,8 +125,17 @@ export class ChatPool {
   }
 
   // Borrow a ready page for `siteId`, creating + warming one on demand (subject
-  // to `max`); past capacity, wait for the next released page.
-  acquire(siteId: string): Promise<PoolWorker> {
+  // to `max`); past capacity, wait for the next released page. An explicit
+  // `account` (identity-keyed vault account, "default" = legacy) gets a
+  // dedicated worker instead of a pooled page, so warm pages keep the default
+  // account and per-account requests never pick up the wrong session.
+  acquire(siteId: string, account?: string): Promise<PoolWorker> {
+    if (account && account !== "default") {
+      return this.spawn(siteId, account).then((w) => {
+        w.busy = true;
+        return w;
+      });
+    }
     const existing = this.workers.find((w) => w.profileId === siteId && !w.busy);
     if (existing) {
       existing.busy = true;
@@ -148,7 +161,7 @@ export class ChatPool {
     });
   }
 
-  private async spawn(siteId: string): Promise<PoolWorker> {
+  private async spawn(siteId: string, account?: string): Promise<PoolWorker> {
     const profile = this.opts.profiles.find((p) => p.id === siteId);
     if (!profile) throw new Error(`unknown site: ${siteId}`);
     const browser = await this.ensureBrowser();
@@ -156,15 +169,23 @@ export class ChatPool {
       browser,
       dataDir: this.dataDir,
       defaultContext: this.attach,
+      account,
     });
     await driver.start();
-    return { profileId: siteId, driver, busy: false };
+    const dedicated = account && account !== "default" ? { account } : undefined;
+    return { profileId: siteId, driver, busy: false, dedicated };
   }
 
   // Return a page to the pool after a prompt. Unusable pages (browser died) are
-  // discarded and replaced lazily.
+  // discarded and replaced lazily. Dedicated account workers are closed right
+  // away — they never idle back into the pool.
   async release(worker: PoolWorker): Promise<void> {
     worker.busy = false;
+    if (worker.dedicated) {
+      this.workers = this.workers.filter((w) => w !== worker);
+      await worker.driver.close();
+      return;
+    }
     const usable = await isWorkerUsable(worker);
     if (!usable) {
       this.workers = this.workers.filter((w) => w !== worker);

@@ -59,6 +59,10 @@ returns the result — no brittle screen-scraping.
   for your AI agents and orchestrators.
 - **Cookie-session capture for auth'd sites** — `--login` records the authenticated
   session cookies so tools can act on sites that require sign-in.
+- **V1 login simplicity gate** — `xhost+` display-share capture (login in a real
+  visible browser as the `ui2api` user), OS-wide Chrome-profile scanning with
+  checkbox-style site import, and an identity-keyed multi-account session vault.
+  See [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
 - **LLM-assisted naming with offline fallback** — `--llm` uses a model to produce
   semantic tool names and task mappings; a deterministic heuristic fallback keeps
   the pipeline fully offline when no model is configured.
@@ -271,6 +275,61 @@ present it as the product's mode of operation.
 > Chrome instances cannot share one profile directory at the same time. (For the
 > strictest "this is literally my running browser" mode, the wigolo engine accepts
 > `WIGOLO_CDP_URL` / `UI2API_CDP_URL` to attach to your live Chrome over CDP.)
+
+## V1 gate — login made simple (end-user sessions)
+
+> The v1 done-condition (verbatim: [`VERBATIM.md`](VERBATIM.md)). Login must not
+> require scripts, cookies, or automation skills. Three mechanisms:
+
+### 1. `xhost+` display-share capture — the most reliable way
+
+On Linux the X display lock is released with `xhost +...`, so a browser running
+as the **`ui2api` system user** appears on *your* screen and you log in **the
+regular way** — typing and clicking normally. The only difference is the
+command released the display lock, and the session data lands in the `ui2api`
+user, **not** your own account.
+
+```bash
+# One command, one visible browser window, one normal login:
+npx tsx src/cli.ts profile capture "https://gemini.google.com" --assist \
+  [--identity me@example.com]      # optional identity label
+```
+
+- Data lands in `data/sessions/<host>/<slug>/state.json` **owned by the ui2api
+  user** (`UI2API_USER`, default `ui2api`).
+- `--xhost-all` uses the literal `xhost +` from the verbatim; the default is the
+  scoped `xhost +SI:localuser:ui2api`.
+
+### 2. Chrome-profile scanning — checkbox indexing
+
+Chrome stores cookies/localStorage per site domain. ui2api scans the whole OS
+for **any Chrome/Chromium profile** (all users), lists every site that has data
+there, and lets you import the ones you want into the identity-keyed vault:
+
+```bash
+npx tsx src/cli.ts profile scan      # every site in every Chrome profile on the OS
+npx tsx src/cli.ts profile import gemini.google.com [--identity me@example.com]
+npx tsx src/cli.ts profile list gemini.google.com   # accounts stored for the site
+```
+
+### 3. Identity-keyed multi-account sessions
+
+One user often has several accounts for one site (several Gemini accounts).
+Sessions are stored keyed by **site + identity** (email, or whatever the site's
+auth provides) — so you can use *any* account, aggregate them, and (future)
+orchestrate across sites since everything is API:
+
+```bash
+# Drive a specific account:
+npx tsx src/cli.ts prompt "hello" --site gemini --account me@example.com
+
+# promptd: pick the account per request, and list what's stored:
+curl -X POST http://127.0.0.1:9797/prompt -d '{"site":"gemini","account":"me@example.com","prompt":"hi"}'
+curl http://127.0.0.1:9797/accounts?site=gemini
+```
+
+Fallback keeps working: without `--account`, the legacy single-session path is
+used, so existing setups are unaffected.
 
 ## Wigolo engine (`--engine wigolo`)
 

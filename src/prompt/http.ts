@@ -2,12 +2,13 @@
 // elsewhere on the machine (including anything in /var/www) can call it without
 // having ui2api or a browser themselves:
 //
-//   POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}
+//   POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true, "account":"me@gmail.com"}
 //                 -> {answer, chunkCount, doneReason, url, title[, citations]}
 //   POST /capability/gemini  {"capability":"gemini_list_conversations", ...}
 //                 -> one Gemini capability result (chat/list_conversations/
 //                    model_list/search_toggle) over the same browser+session.
 //   GET  /sites   -> the available chat-site profiles
+//   GET  /accounts?site=gemini  -> identity-keyed accounts stored for the site
 //   GET  /status  -> pool health (warm/idle/busy pages)
 //   GET  /health  -> {ok, defaultSite}
 //
@@ -18,6 +19,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { listAccounts } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -119,6 +121,18 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       if (req.method === "GET" && req.url === "/sites") {
         return send(res, 200, { sites: Object.values(profilesById).map((p) => ({ id: p.id, name: p.name, url: p.url, loginRequired: p.loginRequired })) });
       }
+      // Identity-keyed accounts stored for a site (the multi-account vault):
+      //   GET /accounts?site=gemini  -> { site, accounts: [{slug, identity, capturedAt, source}] }
+      // A `/prompt` may then pass `account: <slug|identity>` to drive that
+      // specific logged-in session.
+      if (req.method === "GET" && req.url?.startsWith("/accounts")) {
+        const q = new URL(req.url, "http://localhost");
+        const site = q.searchParams.get("site") ?? "";
+        const profile = site ? idFrom(site, profilesById) : undefined;
+        if (!profile) return send(res, 400, { error: "site is required" });
+        const host = new URL(profile.url).host;
+        return send(res, 200, { site: profile.id, host, accounts: listAccounts(dataDir, host) });
+      }
       if (req.method === "GET" && req.url === "/status") {
         return send(res, 200, { ok: true, pool: pool.status });
       }
@@ -131,7 +145,10 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         if (!prompt.trim()) return send(res, 400, { error: "prompt is required" });
         const profile = idFrom(body.site, profilesById);
         const newChat = Boolean(body.newChat);
-        const worker = await pool.acquire(profile.id);
+        // Identity-keyed account (email or vault slug). A dedicated worker
+        // carries the requested account's snapshot; "default" = legacy path.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        const worker = await pool.acquire(profile.id, account);
         try {
           const result = await worker.driver.ask(prompt, { newChat });
           await pool.release(worker);

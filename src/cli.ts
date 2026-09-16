@@ -7,7 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
-import { capturePageStorage, saveSnapshot, snapshotPath } from "./runtime/session-store.js";
+import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -50,6 +50,10 @@ interface Flags {
   newChat?: boolean;
   timeoutMs?: number;
   sites?: boolean;
+  assist?: boolean;
+  account?: string;
+  identity?: string;
+  xhostAll?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -80,6 +84,10 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--pool-min") f.poolMin = Number(argv[++i]) || undefined;
     if (argv[i] === "--pool-max") f.poolMax = Number(argv[++i]) || undefined;
     if (argv[i] === "--sites") f.sites = true;
+    if (argv[i] === "--assist") f.assist = true;
+    if (argv[i] === "--account") f.account = argv[++i];
+    if (argv[i] === "--identity") f.identity = argv[++i];
+    if (argv[i] === "--xhost-all") f.xhostAll = true;
   }
   return f;
 }
@@ -302,14 +310,14 @@ async function cmdPrompt(text: string, flags: Flags): Promise<void> {
   }
   const profile = resolveProfile(flags.site ?? flags.profile);
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
-  const driver = new ChatDriver(profile, { dataDir });
+  const driver = new ChatDriver(profile, { dataDir, account: flags.account });
   try {
     const r = await driver.ask(text, { newChat: flags.newChat, timeoutMs: flags.timeoutMs });
     if (flags.json) {
-      console.log(JSON.stringify({ site: profile.id, ...r }, null, 2));
+      console.log(JSON.stringify({ site: profile.id, account: flags.account ?? "default", ...r }, null, 2));
     } else {
       console.log(r.answer);
-      console.error(`[ui2api] ${profile.id} · ${r.doneReason} · ${r.chunkCount} reads · ${r.url}`);
+      console.error(`[ui2api] ${profile.id}${flags.account ? ` / ${flags.account}` : ""} · ${r.doneReason} · ${r.chunkCount} reads · ${r.url}`);
     }
   } finally {
     await driver.close();
@@ -327,7 +335,7 @@ async function cmdLiveProof(flags: Flags): Promise<void> {
   // The host can hard-kill a fresh browser seconds after spawn (int3 trap), so
   // a live proof must ride fresh spawns until one survives the streamed answer.
   for (let attempt = 1; attempt <= 5; attempt++) {
-    const driver = new ChatDriver(profile, { dataDir });
+    const driver = new ChatDriver(profile, { dataDir, account: flags.account });
     try {
       console.log(`[proof] attempt ${attempt} — asking ${profile.id}: ${question}`);
       const r = await driver.ask(question, { timeoutMs: 55000, stableMs: 1200 });
@@ -378,12 +386,57 @@ async function cmdPromptd(flags: Flags): Promise<void> {
 async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
   const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
   const host = new URL(url).host;
+
+  // --assist: xhost display-share flow — data stored in the ui2api user, not
+  // the current user. The browser runs as the ui2api user, headed on the
+  // caller's X display; the user logs in the regular visual way.
+  if (flags.assist) {
+    const { assistedLoginFlow, captureProfileFromLiveChrome, ui2apiUser, detectDisplayInfo } = await import("./runtime/xhost-capture.js");
+    const waitForEnter = (): Promise<void> =>
+      new Promise<void>((resolve) => {
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        rl.question("Press Enter once logged in: ", () => {
+          rl.close();
+          resolve();
+        });
+      });
+    const display = detectDisplayInfo();
+    if (!display) throw new Error("--assist requires a visible X display (set DISPLAY=:0 or similar)");
+    const user = ui2apiUser();
+    const { resolve } = await import("node:path");
+    const { existsSync } = await import("node:fs");
+    const profileDir = resolve(dataDir, `chrome-${host}`);
+    const result = await assistedLoginFlow({
+      url, host, dataDir, profileDir, display: display.display,
+      ui2apiUser: user, relaxMode: flags.xhostAll ? "all" : "specific",
+      identity: flags.identity,
+    });
+    if (!result.browserLaunched) throw new Error(result.error ?? "failed to launch browser");
+    console.log(`[ui2api] Browser launched as ${user} on display ${display.display}.`);
+    console.log(`  Log in to ${host} in the browser window, then return here and press Enter.`);
+    await waitForEnter();
+    const captured = await captureProfileFromLiveChrome({ profileDir, host, dataDir, identity: flags.identity });
+    console.log(`[ui2api] identity-keyed session captured for ${host}:`);
+    console.log(`  identity: ${captured.identity}`);
+    console.log(`  snapshot: ${captured.snapshotPath}`);
+    console.log(`  (data stored in ui2api user ${user})`);
+    return;
+  }
+
+  // Default capture: headed browser as current user (existing flow).
   const session = await doInteractiveLogin(url, host);
-  saveCookies(sessionPath(dataDir, host), session.cookies);
-  saveSnapshot(snapshotPath(dataDir, host), session.snapshot);
-  console.log(`[ui2api] profile captured for ${host}:`);
-  console.log(`  cookies  -> ${sessionPath(dataDir, host)}`);
-  console.log(`  snapshot (cookies + localStorage + sessionStorage + IndexedDB) -> ${snapshotPath(dataDir, host)}`);
+  const identity = flags.identity;
+  if (identity) {
+    saveAccountSnapshot(dataDir, host, identity, session.snapshot, { source: "capture" });
+    console.log(`[ui2api] profile captured for ${host} (identity: ${identity}):`);
+    console.log(`  snapshot -> ${snapshotPath(dataDir, host)}`);
+  } else {
+    saveCookies(sessionPath(dataDir, host), session.cookies);
+    saveSnapshot(snapshotPath(dataDir, host), session.snapshot);
+    console.log(`[ui2api] profile captured for ${host}:`);
+    console.log(`  cookies  -> ${sessionPath(dataDir, host)}`);
+    console.log(`  snapshot (cookies + localStorage + sessionStorage + IndexedDB) -> ${snapshotPath(dataDir, host)}`);
+  }
   console.log(`Sites driven through ui2api now see your logged-in session — chat history persists.`);
 }
 
@@ -401,6 +454,89 @@ async function cmdProfileIngest(host: string, flags: Flags): Promise<void> {
   console.log(`  localStorage: ${stats.localStorageEntries} entries for ${snapshot.origin}`);
   for (const w of warnings) console.warn(`  ! ${w}`);
   console.log("Sites driven through ui2api now see this logged-in session — chat history persists.");
+}
+
+// OS-wide Chrome profile scan: find any site with stored data in ANY Chrome
+// profile on the machine (v1 gate: "scan the Linux of our user"). The result is
+// a checkbox-index list of importable sessions.
+async function cmdProfileScan(flags: Flags): Promise<void> {
+  const { findAllChromeProfilesOnOs, scanProfilesForSites, renderCheckboxList } = await import("./runtime/profile-scan.js");
+  const { profiles, skipped } = findAllChromeProfilesOnOs();
+  if (profiles.length === 0) {
+    console.log("[ui2api] no Chrome/Chromium profiles found on this machine.");
+    console.log("  Install + sign in to Chrome (or Chromium), then re-run. Everything else stays local.");
+    return;
+  }
+  const index = scanProfilesForSites(profiles);
+  console.log(`[ui2api] scanned ${profiles.length} Chrome profile root(s):`);
+  for (const p of profiles) console.log(`  - ${p.root} (user: ${p.user})`);
+  console.log("");
+  if (index.hits.length === 0) {
+    console.log("No sites with stored cookie data were found in any profile.");
+    return;
+  }
+  console.log("Sites found (checkbox index) — import any with:");
+  console.log("  ui2api profile import <host> [--account email]");
+  console.log("");
+  console.log(renderCheckboxList(index.hits));
+  if (skipped.length > 0) {
+    console.log("");
+    console.warn(`Skipped (unreadable/denied): ${skipped.length} path(s) — run as the owning user or check permissions.`);
+  }
+  console.log("");
+  console.log(`Tip: ${index.hits.filter((h) => h.known).length} of ${index.hits.length} hosts match known AI chat sites.`);
+}
+
+// Import one host from a scanned Chrome profile into the identity-keyed vault.
+async function cmdProfileImport(host: string, flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const { findAllChromeProfilesOnOs, importSiteSnapshot } = await import("./runtime/profile-scan.js");
+  const { profiles, skipped } = findAllChromeProfilesOnOs();
+  const profileFilter = flags.profile;
+  const chosen = profileFilter
+    ? profiles.filter((p) => p.root === profileFilter || p.root.endsWith(profileFilter))
+    : profiles;
+  if (chosen.length === 0) {
+    console.error("[ui2api] no matching Chrome profile. Available:");
+    for (const p of profiles) console.error(`  ${p.root}  (user: ${p.user})`);
+    if (skipped.length > 0) console.error(`  (${skipped.length} path(s) skipped — check permissions)`);
+    throw new Error("no chrome profile found for import");
+  }
+  const wanted = host.toLowerCase();
+  let found = false;
+  for (const p of chosen) {
+    try {
+      const r = await importSiteSnapshot({ root: p.root, host: wanted, dataDir, identity: flags.identity });
+      found = true;
+      console.log(`[ui2api] imported ${r.host} from ${p.root}:`);
+      console.log(`  identity: ${r.identity}`);
+      console.log(`  snapshot: ${r.snapshotPath}`);
+      console.log(`  cookies: ${r.stats.cookiesMatched}/${r.stats.cookiesTotal} matched${r.ok ? "" : " (NOT logged in — no cookies matched)"}`);
+      console.log(`  localStorage: ${r.stats.localStorageEntries} entries`);
+      for (const w of r.warnings) console.warn(`  ! ${w}`);
+    } catch (e) {
+      console.warn(`  ! ${p.root}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+    }
+  }
+  if (!found) console.warn(`[ui2api] no Chrome profile matched host ${host}`);
+}
+
+// List identity-keyed accounts stored in the vault for a site.
+async function cmdProfileList(host: string, flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const accounts = listAccounts(dataDir, host);
+  if (accounts.length === 0) {
+    console.log(`[ui2api] no identity-keyed accounts for ${host}.`);
+    console.log("  Capture one:  ui2api profile capture https://<host> [--identity email] [--assist]");
+    console.log("  Import from Chrome:  ui2api profile import <host>");
+    return;
+  }
+  console.log(`[ui2api] accounts for ${host}:`);
+  for (const a of accounts) {
+    console.log(`  ${a.slug.padEnd(36)} ${a.identity}  (${a.source}, ${a.capturedAt.slice(0, 10)})`);
+  }
+  console.log("");
+  console.log("Drive one with:  ui2api prompt '...' --site <id> --account <slug|email>");
 }
 
 async function main(): Promise<void> {
@@ -443,14 +579,25 @@ async function main(): Promise<void> {
     }
     case "profile": {
       if (arg === "capture") {
-        if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--data-dir DIR]");
+        if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--assist] [--identity email] [--data-dir DIR]");
         return cmdProfileCapture(rest[0], flags);
       }
       if (arg === "ingest") {
         if (!rest[0]) throw new Error("usage: ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]");
         return cmdProfileIngest(rest[0], flags);
       }
-      throw new Error("usage: ui2api profile capture <url> | ingest <host> [--profile DIR]");
+      if (arg === "scan") {
+        return cmdProfileScan(flags);
+      }
+      if (arg === "import") {
+        if (!rest[0]) throw new Error("usage: ui2api profile import <host> [--profile DIR] [--identity email] [--data-dir DIR]");
+        return cmdProfileImport(rest[0], flags);
+      }
+      if (arg === "list") {
+        if (!rest[0]) throw new Error("usage: ui2api profile list <host> [--data-dir DIR]");
+        return cmdProfileList(rest[0], flags);
+      }
+      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | list <host>");
     }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);
