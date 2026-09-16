@@ -1,5 +1,5 @@
 import { RegistryStore } from "./store.js";
-import { validatePackage } from "../../scripts/validate-registry.mjs";
+import { validateManifest } from "../../scripts/validate-registry.mjs";
 import { renderHubHtml } from "./ui.js";
 import { IncomingMessage, ServerResponse } from "node:http";
 
@@ -36,7 +36,7 @@ export function createHubRouter(store: RegistryStore, opts: { token: string; reg
       const { manifest, module } = body;
       const missing = REQUIRED_MANIFEST.filter((k) => !manifest?.[k]);
       if (missing.length) return json(res, 400, { error: `missing manifest fields: ${missing.join(",")}` });
-      const err = validatePackage(manifest, module);
+      const err = validateManifest(manifest, module);
       if (err) return json(res, 400, { error: err });
       store.save(manifest.name, manifest.version, manifest, module);
       return json(res, 200, { ok: true });
