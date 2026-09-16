@@ -208,6 +208,69 @@ export function findChromeProfileDirs(): string[] {
   return found;
 }
 
+// --- Identity detection (multi-account vault) ---
+//
+// A Chrome profile carries the signed-in account in its `Preferences` file:
+//   account_info[].email        (accounts signed into browser sync)
+//   profile.name (in Local State profiles.info_cache)  (display name)
+// Plus many sites keep their own identity in prefs `account_info`. We read them
+// all and return the best-guess identity string, or "" when nothing is found.
+
+export interface ProfileIdentity {
+  email?: string;
+  name?: string;
+  best: string; // email || name || "" — the vault slug basis
+}
+
+function readJsonIfExists(p: string): unknown {
+  try {
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function detectProfileIdentity(profileDir: string): ProfileIdentity {
+  const prefs = readJsonIfExists(join(profileDir, "Default", "Preferences")) as
+    | { account_info?: Array<{ email?: string }> }
+    | null;
+  const localState = readJsonIfExists(join(profileDir, "Local State")) as
+    | { profile?: { info_cache?: Record<string, { name?: string; user_name?: string }> } }
+    | null;
+
+  const email = prefs?.account_info?.find((a) => a.email)?.email;
+  // The "Default" profile's entry in Local State profile.info_cache has the
+  // display name; other entries are named profiles (Person 1, ...).
+  const cache = localState?.profile?.info_cache ?? {};
+  const defaultMeta = cache["Default"] ?? Object.values(cache)[0];
+  const name = defaultMeta?.name || defaultMeta?.user_name;
+
+  return {
+    email,
+    name,
+    best: email || name || "",
+  };
+}
+
+// Scan every subdir of a profile dir that looks like an actual Chrome profile
+// ("Default", "Profile N") and has its own Cookies DB.
+export function findProfileDirsIn(profileDir: string): string[] {
+  const out: string[] = [];
+  if (!existsSync(join(profileDir, "Local State"))) return out;
+  for (const entry of readdirSync(profileDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const d = entry.name;
+    const isDefault = d === "Default" || d === "Profile 1" || /^Profile \d+$/.test(d);
+    if (!isDefault) continue;
+    const hasCookies =
+      existsSync(join(profileDir, d, "Cookies")) ||
+      existsSync(join(profileDir, d, "Network", "Cookies"));
+    if (hasCookies) out.push(join(profileDir, d));
+  }
+  return out;
+}
+
 // Copy a running Chrome's session DB + Local State to a temp dir (the originals
 // are locked). Returns paths to the readable copy.
 function copyProfileForReading(profileDir: string): { dbPath: string; localStatePath: string } {

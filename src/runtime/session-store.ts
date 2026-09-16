@@ -192,3 +192,105 @@ export async function injectSnapshot(context: BrowserContext, snap: ProfileSnaps
     // nothing else to do
   }
 }
+
+// --- Identity-keyed account vault ---
+//
+// One user can hold SEVERAL accounts per site (several Gemini accounts, several
+// ChatGPT accounts). Snapshots are therefore stored per (host, identity):
+//
+//   <sitesDir>/sessions/<host>/accounts.json   <- index of stored identities
+//   <sitesDir>/sessions/<host>/<slug>/state.json <- ProfileSnapshot per identity
+//
+// The identity is whatever the site's auth provides — email for Google/GitHub
+// logins, the profile display name otherwise. `slugifyIdentity` turns it into a
+// filesystem-safe slug. The legacy flat path (<sitesDir>/<host>/.session/…)
+// is RE-EXPORTED as the "default" account, so existing captures keep working.
+export type AccountSource = "capture" | "ingest" | "import" | "legacy";
+
+export interface StoredAccount {
+  slug: string; // filesystem-safe id (slugifyIdentity of identity)
+  identity: string; // email / display name the site identified the user by
+  host: string;
+  source: AccountSource;
+  capturedAt: string;
+  profileDir?: string; // where an ingest/import pulled the data from
+}
+
+export function slugifyIdentity(identity: string): string {
+  const s = identity.trim().toLowerCase().replace(/[^a-z0-9._@-]+/g, "-").replace(/^-+|-+$/g, "");
+  return s.length <= 64 ? s : s.slice(0, 64);
+}
+
+export function vaultRoot(sitesDir: string): string {
+  return resolve(sitesDir, "sessions");
+}
+
+export function accountDir(sitesDir: string, host: string, slug: string): string {
+  return resolve(vaultRoot(sitesDir), sanitizeHost(host), slug);
+}
+
+export function accountSnapshotPath(sitesDir: string, host: string, slug: string): string {
+  return resolve(accountDir(sitesDir, host, slug), "state.json");
+}
+
+export function accountsIndexPath(sitesDir: string, host: string): string {
+  return resolve(vaultRoot(sitesDir), sanitizeHost(host), "accounts.json");
+}
+
+export function listAccounts(sitesDir: string, host: string): StoredAccount[] {
+  const idx = accountsIndexPath(sitesDir, host);
+  try {
+    if (!existsSync(idx)) return [];
+    const raw = JSON.parse(readFileSync(idx, "utf8")) as { accounts?: StoredAccount[] };
+    if (!Array.isArray(raw.accounts)) return [];
+    return raw.accounts;
+  } catch {
+    return [];
+  }
+}
+
+export function saveAccountSnapshot(
+  sitesDir: string,
+  host: string,
+  identity: string,
+  snap: ProfileSnapshot,
+  meta: { source: AccountSource; profileDir?: string }
+): StoredAccount {
+  const slug = slugifyIdentity(identity);
+  const account: StoredAccount = {
+    slug,
+    identity,
+    host: sanitizeHost(host),
+    source: meta.source,
+    capturedAt: snap.capturedAt,
+    profileDir: meta.profileDir,
+  };
+  // Write the snapshot first, then append/replace in the index.
+  saveSnapshot(accountSnapshotPath(sitesDir, host, slug), snap);
+  const existing = listAccounts(sitesDir, host).filter((a) => a.slug !== slug);
+  mkdirSync(dirname(accountsIndexPath(sitesDir, host)), { recursive: true });
+  writeFileSync(accountsIndexPath(sitesDir, host), JSON.stringify({ accounts: [...existing, account] }, null, 2));
+  return account;
+}
+
+// Load a snapshot for (host, identity|slug|undefined). Never throws.
+//   - identity/slug given -> the vault account, else null
+//   - undefined            -> the legacy default path (old captures), else null
+//   - "default"            -> explicit legacy path
+export function loadAccountSnapshot(
+  sitesDir: string,
+  host: string,
+  identity?: string
+): ProfileSnapshot | null {
+  const h = sanitizeHost(host);
+  if (identity && identity !== "default") {
+    const slug = slugifyIdentity(identity);
+    const snap = loadSnapshot(accountSnapshotPath(sitesDir, h, slug));
+    if (snap) return snap;
+    // Identity may be an already-slugged account id.
+    const bySlug = listAccounts(sitesDir, h).find((a) => a.slug === slug || a.identity === identity);
+    if (bySlug) return loadSnapshot(accountSnapshotPath(sitesDir, h, bySlug.slug));
+    return null;
+  }
+  return loadSnapshot(snapshotPath(sitesDir, h));
+}
