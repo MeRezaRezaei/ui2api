@@ -1,0 +1,21 @@
+{
+  "capability": "doubao_chat",
+  "site": "doubao",
+  "flow": "ui-path (ChatDriver) — composer text input + Enter/submit, SSE answer stream",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.doubao.com/chat/", "note": "session snapshot injected (cookies: sessionid, ttwid, s_v_web_id)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "set currentLocalConversationId='' or navigate to /chat/new-thread; jittered 600-1300ms dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "insertText into composer (s2-input-engine-editor-v2-host)" },
+    { "step": 4, "action": "send", "note": "Enter or submit button (input-engine-submit-runtime → submit-pipeline → create-message → POST /samantha/chat/completion)" },
+    { "step": 5, "action": "read", "selector": "unverified — confirm on first live capture", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = POST /samantha/chat/completion (application/json, Agw-Js-Conv: str, credentials: same-origin); response is SSE stream via onMessage handler; IM commands via WebSocket wss://www.doubao.com/ws/v2 (protocol pbbp2); Alice gateway API at POST /alice/* with same-origin base",
+  "stealth": "real session, trusted inputs, site's own submit pipeline — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json",
+  "unverified": [
+    "response-reader-selector — no confirmed answer container class/id found in bundles; needs live capture",
+    "composer-selector — input editor is contenteditable via s2-input-engine-editor-v2-host; exact DOM selector unconfirmed",
+    "exact SSE data format — stream uses onMessage callback; need live capture to parse event payload shape"
+  ]
+}

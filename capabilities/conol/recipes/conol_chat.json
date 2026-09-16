@@ -1,0 +1,16 @@
+{
+  "capability": "conol_chat",
+  "site": "conol",
+  "flow": "ui-path (ChatDriver) -- composer insertText + Enter, streamed answer (UNVERIFIED -- all selectors and wire facts pending first live capture)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://conol.ai/home", "note": "session snapshot injected (data/conol.ai/.session); SPA renders client-side after better-auth session check via /api/auth/get-session" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "selector UNKNOWN -- confirm on first live capture after passkey auth; jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "composer selector UNKNOWN -- trusted keyboard.insertText into whatever contenteditable/textarea the SPA exposes after auth" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "UNKNOWN", "until": "stable 2500ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "UNKNOWN -- no chat/agent API endpoints, streaming transports (SSE/WebSocket/ReadableStream), or request body shapes were found in the 22 static JS bundles. The SPA app is fully lazy-loaded behind better-auth session. Wire facts to be captured from a live headed session after passkey authentication.",
+  "stealth": "real session, trusted inputs, site's own send handler -- indistinguishable from the user typing (pending selector verification)",
+  "sessionLock": "session.lock.json"
+}

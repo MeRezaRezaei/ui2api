@@ -1,0 +1,46 @@
+{
+  "id": "adapta",
+  "name": "Adapta (adapta.app)",
+  "site": "adapta.app",
+  "url": "https://adapta.app",
+  "description": "DEAD-END scaffold: provider-catalog 'adapta-web' (kind=cookie, credential __client) but the canonical domain adapta.app is a parked DonDominio domain, adapta.com is NXDOMAIN, and adapta.ai is a different company (Adapta Dynamics corporate site). No live AI chat product found on any candidate — no app bundles to analyze, no chat DOM, no auth surface. Ship as a slot to be re-pointed once the correct brand/domain is identified.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "parked-domain page (DonDominio, Apache + PHPSESSID, gen 2026-09-16 15:14:35); no application runtime present",
+  "transport": {
+    "type": "none",
+    "protocol": "unreachable — HTTPS 443 connection refused (IP 31.214.178.55); HTTP 80 serves a registrar parking page with a single PHPSESSID cookie; no chat/SSE/WS transport exists on the live surface",
+    "baseUrl": null,
+    "streaming": "none observed; nothing to stream from a parking page",
+    "auth": {
+      "scheme": "unknown — catalog-only: kind=cookie, credential '__client'. No login flow present on any live candidate; cookie shape and token origin UNVERIFIED/imaginary until the real product is found"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "adapta_chat",
+      "name": "Chat",
+      "description": "Placeholder for the chat capability of the real adapta product — NOT RENDERABLE: no live chat surface exists at adapta.app (parked). Re-point the package to the correct brand domain and re-analyze before use.",
+      "method": "ui-path (trusted input + Enter, site's own send handler) — selectors unverifiable, no DOM rendered",
+      "implementation": "None derivable. No app JS bundles exist to extract endpoints / streaming / model literals from (parking page ships only /js/searchlinks.js + /css/*). Endpoint, wire transport, stream-delta shape and model set are UNKNOWN.",
+      "recipe": "recipes/adapta_chat.json",
+      "notes": "Recipe shipped for schema parity with gemini_chat.json but is inoperable until the domain/brand is re-identified."
+    }
+  ],
+  "auth": {
+    "required": null,
+    "kind": "cookie",
+    "credentialName": "__client",
+    "host": "adapta.app",
+    "capture": "ui2api profile capture \"https://<resolved-domain>\" --login (once the correct adapta product domain is identified; adapta.app itself has no login surface)",
+    "note": "provider-catalog.md:56 'adapta-web' kind=cookie credentialName __client — taken from upstream OmniRoute webSessionCredentials.ts verbatim, NOT verified against any live site. No cookie or session observable on the parked landing page beyond PHPSESSID. Everything auth here is inherited from the catalog, none of it live-verified."
+  },
+  "permissions": [
+    "BLOCKED until the real adapta product/domain is identified — current domain is a parked registrar page with zero application surface",
+    "no artificial risk: no bot wall present (parking page served directly); anti-bot stance of the real product unknown"
+  ],
+  "builtinProfile": "adapta",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl/DNS probe, dead-end verdict (parked domain); no browser launched; no JS bundles to download (parking page has none)"
+}

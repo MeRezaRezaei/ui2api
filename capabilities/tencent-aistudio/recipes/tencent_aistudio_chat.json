@@ -1,0 +1,16 @@
+{
+  "capability": "tencent_aistudio_chat",
+  "site": "tencent-aistudio",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://aistudio.tencent.com", "note": "session snapshot injected (data/aistudio.tencent.com/.session); site is React SPA under aistudio.tencent.com, routes /chat/* ; alternate URL if default redirects: /chat/HunyuanDefault" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell; target: sidebar new-chat button or navigate to /chat/HunyuanDefault to start fresh; selector unverified — confirm on first live capture" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer; none verified yet)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[class*='message-content'], [class*='answer'], [class*='response-text']", "until": "stable 2500ms", "timeoutMs": 90000, "note": "answer selector UNVERIFIED — see profile selectorNotes for candidates to confirm on first live capture; timeout 90s matches server 15-min limit margin" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "Chat is streamed via POST https://aistudio.tencent.com/api/new-portal/chat/{chatId}; response is per-chunk JSON objects (parsed by JSON.parse(e.data) in the frontend) with {type, content, code, msg}; type maps to HYCSpeechType enum (TEXT, CARD, DEEP_THOUGHT, REASONER, ai_search_pro, etc.); chatId generated via POST /api/new-portal/generate/id; multi-turn via POST /api/new-portal/user/agent/conversation/continue; exact wire framing (chunk delimiter) to verify on first live capture. UI path below drives the SPA; a later incarnation may call the API directly via page fetch once the chunk framing is captured. No wire payloads verified on the wire yet.",
+  "stealth": "real session (iOA/WeChat cookie auth), trusted inputs, site's own send handler — indistinguishable from the user typing; avoids Tencent anti-bot monitoring",
+  "sessionLock": "session.lock.json"
+}

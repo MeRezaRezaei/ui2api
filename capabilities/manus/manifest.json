@@ -1,0 +1,78 @@
+{
+  "site": "manus",
+  "siteName": "Manus (manus.im)",
+  "url": "https://manus.im",
+  "version": "0.1.0",
+  "analysisMethod": "static bundle analysis (6 bundles ~6.6MB, manus.im Next.js SSR 231KB, no bot wall)",
+  "siteVersion": "unknown (Next.js SPA)",
+  "date": "2026-09-16",
+  "transport": {
+    "type": "rest+ws+sse",
+    "base": "https://manus.im",
+    "restFamily": "/api/chat/*",
+    "verifiedEndpoints": [
+      "POST /api/chat/getSessionV2",
+      "POST /api/chat/getSessionFilesV2",
+      "POST /api/chat/getSessionOutline",
+      "POST /api/chat/getSandboxStatus",
+      "POST /api/chat/startSandbox",
+      "POST /api/chat/scheduleTask",
+      "POST /api/chat/getPresignedUploadUrl",
+      "POST /api/chat/uploadComplete",
+      "POST /api/chat/getMobilePreviewStatus",
+      "POST /api/chat/requestVncOtp",
+      "POST /api/chat/wakeMobilePreview",
+      "POST /api/chat/deleteSession",
+      "POST /api/chat/getDownloadUrl",
+      "POST /api/chat/getMapReduceTool",
+      "POST /api/chat/getOnlineMyBrowserClients"
+    ],
+    "messageSend": "NOT PINNED — stream of `event:` frames present in bundles (36 refs in ms-5.js) but the exact send endpoint literal is not recoverable statically; task-autonomy product (sessions, sandbox, mobile preview, VNC OTP). TO-VERIFY on first live capture.",
+    "streaming": "SSE (`event:` literals) + WebSocket + ReadableStream all referenced",
+    "protobuf": "schedule/v1/sandbox proto refs present"
+  },
+  "auth": {
+    "kind": "cookie+jwt+localStorage",
+    "cookieCandidates": ["manus_session (from provider-catalog)", "*_session (bundle refs)"],
+    "localStorageKeys": ["manus", "manus-account", "manus_account_package", "webrtc_token"],
+    "jwt": "present in bundles",
+    "login": true,
+    "loginRequired": true,
+    "loginHint": "login via `ui2api analyse https://manus.im --login` — OAuth (Google/GitHub) signup/login; capture must preserve cookies + localStorage"
+  },
+  "capabilities": [
+    {
+      "id": "manus_chat",
+      "name": "Chat (UI path)",
+      "method": "ui-path (unverified selectors)",
+      "recipe": "recipes/manus_chat.json",
+      "status": "awaiting capture"
+    },
+    {
+      "id": "manus_session_start",
+      "name": "Session start",
+      "method": "rest /api/chat/getSessionV2 + createSession literal (bundle-verified endpoint, live shape to-verify)",
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "manus_session_list",
+      "name": "Session list",
+      "method": "rest /api/chat/getSessionV2 (bundle-verified endpoint, live shape to-verify)",
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "manus_sandbox",
+      "name": "Sandbox control",
+      "method": "rest /api/chat/startSandbox + getSandboxStatus (bundle-verified endpoints, VNC OTP flow to-verify)",
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "manus_upload",
+      "name": "File upload",
+      "method": "rest /api/chat/getPresignedUploadUrl + uploadComplete (bundle-verified endpoints, presign flow to-verify)",
+      "status": "verified-endpoint / live-to-verify"
+    }
+  ],
+  "antiBot": "none observed statically (plain curl 200, bundles served; server-side auth gating expected)",
+  "note": "task-autonomy product — conversation semantics are session/task based; only chat (UI path) is directly runnable pre-capture; session/sandbox/upload capability shapes to-verify on first live capture"
+}

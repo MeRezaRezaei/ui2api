@@ -1,0 +1,16 @@
+{
+  "site": "copilot.cloud.microsoft",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "copilot.cloud.microsoft",
+    "localStorageKeys": [],
+    "cookieKeys": [".AspNetCore.OpenIdConnect.Nonce.*", ".AspNetCore.Correlation.*", "OH.SID", "OH.FLID", "ASLBSA", "ASLBSACORS"],
+    "apiHost": "https://copilot.cloud.microsoft",
+    "captureCommand": "ui2api profile capture \"https://copilot.cloud.microsoft\" --login",
+    "targetDir": "data/copilot.cloud.microsoft/.session/state.json"
+  },
+  "note": "M365 Copilot (Harmony app) is hard-gated by Entra ID server-side OIDC (Microsoft.Identity.Web). auth kind per provider-catalog: token 'access_token + chathubPath' — expected to resolve to an Entra access token driving a chat backend hub, but the actual chat transport is UNOBSERVED pre-auth (no anonymous chat API; all app paths 302 to login.microsoftonline.com authorize). Expected wire: SSE/WS to turbo.microsoft.com with bundled-conversation upload for tenant grounding (per CSP connect-src) — to confirm on live authenticated capture. Cookies listed are those issued during the observed authorize hop; post-auth session set TBD. loginRequired true; MSA blocked, needs a real M365 work/school Entra session; conditional access (MFA/device) may gate headless contexts.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

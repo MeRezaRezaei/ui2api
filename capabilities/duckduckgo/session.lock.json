@@ -1,0 +1,19 @@
+{
+  "site": "duck.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "duck.ai",
+    "note": "ANONYMOUS — no session capture required for basic chat. VQD tokens are obtained at runtime by the app (GET /duckchat/v1/status with x-vqd-accept:1 header → response header carries the VQD token). A snapshot is only needed if you want DDG account features (chat history sync). For anonymous use, set locked:true with a null snapshot.",
+    "anonymous": true,
+    "apiHost": "https://duck.ai",
+    "apiBase": "/duckchat/v1",
+    "chatEndpoint": "/duckchat/v1/chat",
+    "statusEndpoint": "/duckchat/v1/status",
+    "captureCommand": "ui2api profile capture \"https://duck.ai\" --login",
+    "targetDir": "data/duck.ai/.session/state.json"
+  },
+  "note": "This package works ANONYMOUSLY — no session capture required for chat. The VQD token is fetched by the app from GET /duckchat/v1/status (x-vqd-accept:1) and refreshed per chat response. DDG account sync (internal_duckchat_user cookie) is optional. Capture once headed only if DDG account features are needed; otherwise set locked:true with a null snapshot hash. All DOM selectors are UNVERIFIED — confirm on first live capture. Bot-wall: no wall on static page loads; ERR_CHALLENGE may trigger on chat POST abuse (X-Vqd-Hash-1 canvas PoW).",
+  "capturedAt": null,
+  "snapshotHash": null
+}

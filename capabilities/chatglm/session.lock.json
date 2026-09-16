@@ -1,0 +1,28 @@
+{
+  "site": "chatglm.cn | chat.z.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "hosts": {
+      "chatglm.cn": {
+        "kind": "cookie",
+        "cookies": ["chatglm_token", "chatglm_refresh_token", "chatglm_user_id"],
+        "localStorageKeys": ["vuex", "chatglm-deid"],
+        "captureCommand": "ui2api profile capture \"https://chatglm.cn\" --login",
+        "targetDir": "data/chatglm.cn/.session/state.json",
+        "note": "Auth is cookie-based: chatglm_token (access, SameSite=None Secure, 30d), chatglm_refresh_token (180d), chatglm_user_id. Refresh via POST /chatglm/user-api/user/refresh with Bearer refresh_token. Catalog kind=cookie credentialName=chatglm_session (OmniRoute naming: chatglm-web)."
+      },
+      "chat.z.ai": {
+        "kind": "token",
+        "localStorageKeys": ["token"],
+        "cookies": [],
+        "captureCommand": "ui2api profile capture \"https://chat.z.ai\" --login",
+        "targetDir": "data/chat.z.ai/.session/state.json",
+        "note": "Auth is localStorage JWT key 'token', set from GET /api/v1/auths/ session.token; no refresh token literal found. Login route /auth?action=signup."
+      }
+    }
+  },
+  "note": "This package installs and runs from the profile plus captured session snapshots. Two distinct auth models: chatglm.cn (cookies chatglm_token/chatglm_refresh_token) vs chat.z.ai (localStorage token). Capture both once, then this file records the snapshot hashes + dates. Exact wire formats (zh stream_context response; intl chat/completions SSE chunk shape) TBD on first live capture.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

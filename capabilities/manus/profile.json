@@ -1,0 +1,20 @@
+{
+  "id": "manus",
+  "name": "Manus (manus.im)",
+  "url": "https://manus.im",
+  "loginRequired": true,
+  "loginHint": "login once via `ui2api analyse https://manus.im --login` — OAuth (Google/GitHub); capture preserves cookies + localStorage (manus_session / *_session / manus_account keys)",
+  "composer": [
+    "[contenteditable='true'][data-placeholder]",
+    "textarea[placeholder]",
+    "div[contenteditable='true']"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": ["[class*='message']", "[class*='assistant']", "[class*='answer']"],
+  "newChat": ["button[aria-label*='New'], button[aria-label*='new'], [data-slot*='new-chat']"],
+  "dismiss": ["button[aria-label*='Close'], button[aria-label*='关闭'], button[aria-label*='Sign in']"],
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "cookieNames": ["manus_session"],
+  "note": "ALL selectors UNVERIFIED — structural guesses only, confirm on first live capture (data/manus.im/.session). manus is task-autonomy product: use /prompt via ChatDriver UI path; session/sandbox capabilities need live wire capture."
+}

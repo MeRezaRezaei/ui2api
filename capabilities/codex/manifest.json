@@ -1,0 +1,119 @@
+{
+  "id": "chatgpt-web-codex",
+  "name": "ChatGPT Codex (chatgpt.com/codex)",
+  "site": "chatgpt.com",
+  "url": "https://chatgpt.com/codex",
+  "description": "OpenAI Codex engineering-agent surface on chatgpt.com — task dashboard, Codex Cloud, environments, connectors, usage/credits. Distinct from plain ChatGPT chat; same SPA shell + same /backend-api host (Codex namespace /wham/* + conversation-bound task SSE).",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "cluster unified-184 (client-bootstrap); shared app shell (entry.client-*, conversation-small-*); logged-out /codex = Contentful marketing page; auth-gated Codex SPA = 73 routes in the embedded React Router manifest",
+  "transport": {
+    "type": "json-rest + sse",
+    "protocol": "JSON REST over https://chatgpt.com/backend-api (sampled by auth via /api/auth/session) plus fetch-based SSE (text/event-stream, [DONE], last-event-id replay) on the task stream",
+    "baseUrl": "https://chatgpt.com/backend-api",
+    "namespaces": {
+      "rest": "/wham/* (tasks, turns, environments, machines, github/gitlab, usage/rate-limits, analytics, settings, workspace-messages) + /share/codex/task_samples",
+      "sse": "/backend-api/tasks/{task_id}/stream?parent_conversation_id=&message_id= (codex-in-chat task stream)"
+    },
+    "auth": {
+      "scheme": "Authorization: Bearer <accessToken>",
+      "tokenOrigin": "same-origin /api/auth/session (same chatgpt.com cookie jar as plain ChatGPT)",
+      "refresh": "BroadcastChannel auth-session / access-token-refreshed-v1; cookies __Secure-oai-is, __Secure-oai-employee-device",
+      "sentinel": "task creation requires a Sentinel chat-requirements token generated for mode codex_create_task_turn (OpenAI-Sentinel-Token, optional -Chat-Requirements-Token/-Turnstile-Token/-Proof-Token, OAI-Telemetry)"
+    },
+    "headers": {
+      "X-OpenAI-Target-Path": "target path routing (same as chatgpt)",
+      "X-OpenAI-Target-Route": "target route routing (same as chatgpt)",
+      "x-openai-codex-window-type": "codex-specific window tag (e.g. not_applicable in chat)",
+      "x-codex-entrypoint": "codex onboarding attribution header",
+      "x-codex-share-post-id": "codex share post id"
+    },
+    "streaming": "SSE via a fetch-event-source-style helper in the auth bundle (4013494d/…): Accept text/event-stream, retry 1000ms, last-event-id for replay, [DONE] terminates. Stream payloads (JSON per data line): task_status | final_message | row | title; task statuses seen: created/running/finalizing.",
+    "authOutcome": "host-constrained static probe only — Bearer + exact sentinel header shapes and any cookie-localStorage set to be confirmed on first live capture (session.lock.json)"
+  },
+  "capabilities": [
+    {
+      "id": "codex_chat",
+      "name": "Codex task create + stream",
+      "description": "Create a Codex task from the /codex composer and read the task/turn stream (POST /backend-api/wham/tasks {new_task, input_items} + SSE GET /backend-api/tasks/{task_id}/stream)",
+      "method": "ui-path (trusted input + send on the Codex composer, site's own handler) — wire documented for a later wire-first driver",
+      "implementation": "POST /wham/tasks body {new_task:{environment_id, branch, run_environment_in_qa_mode}, input_items:[{type:message, role:user, content:[{content_type:text, text}]}]} with Sentinel token (mode codex_create_task_turn) in additionalHeaders; SSE stream read off /tasks/{task_id}/stream with parent_conversation_id + message_id query; task_status/final_message/row/title JSON events, [DONE] terminator",
+      "recipe": "recipes/codex_chat.json"
+    },
+    {
+      "id": "codex_task_crud",
+      "name": "Task list / detail / lifecycle",
+      "description": "List, search, get, archive, cancel, fork, mark-read, recover Codex tasks via /wham/tasks*",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /wham/tasks (query limit/cursor/task_filter), GET /wham/tasks/list, GET /wham/tasks/search, GET /wham/tasks/{task_id}; POST /wham/tasks/{task_id}/archive|cancel|fork|mark_read|recover; GET /wham/task_suggestions/github/user_handle; GET /share/codex/task_samples",
+      "recipe": null
+    },
+    {
+      "id": "codex_task_turns",
+      "name": "Task turns & PRs",
+      "description": "Turn list/detail, logs, cancel, copy-git-apply, viewed, and pull-request create/update",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /wham/tasks/{task_id}/turns, GET .../turns/{task_turn_id}, GET .../turns/{task_turn_id}/logs; POST .../turns/{task_turn_id}/cancel|viewed|copy_git_apply|pr; POST|PATCH .../turns/{task_turn_id}/pr/{pr_id}",
+      "recipe": null
+    },
+    {
+      "id": "codex_environment",
+      "name": "Environments & machines",
+      "description": "Sandbox environment CRUD + machine inventory for Codex tasks",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /wham/environments, /recent, /search, /with-creators; POST /wham/environments; PATCH|DELETE /wham/environments/{environment_id}; POST .../reset-cache; POST /wham/environments/test/{test_session_id}/command; GET /wham/machines",
+      "recipe": null
+    },
+    {
+      "id": "codex_repo_connect",
+      "name": "GitHub / GitLab connectors",
+      "description": "Repo discovery, branch search, installations, code review + GitLab service-account config",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /wham/github/installations(/(events)? etc), GET /wham/github/repositories/*, GET /wham/github/branches/{repo_id}/search, POST /wham/github/repositories/{repo_id}/pull-requests/review, /wham/github/repositories/{repo_id}/pull-requests; POST /wham/github/installations/{installation_id}/repositories/{repo_id}/pull-request/{pr_number}/review (post variant); GitLab: /wham/gitlab/groups, /groups/{group_id}/webhook, /service-account-credential*",
+      "recipe": null
+    },
+    {
+      "id": "codex_usage_credits",
+      "name": "Usage & credits",
+      "description": "Token/credit usage breakdowns, credit events, rate-limit reset credits",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /wham/usage, /wham/usage/approximate-credit-usage, /credit-usage-events, /daily-token-usage-breakdown, /daily-workspace-user-token-usage-breakdown, /daily-enterprise-token-usage-breakdown; GET /wham/rate-limit-reset-credits(+ /history), POST .../consume",
+      "recipe": null
+    },
+    {
+      "id": "codex_cloud",
+      "name": "Codex Cloud",
+      "description": "Codex Cloud SPA surface (universe/tasks/access/security/settings) + cloud task PR page",
+      "method": "ui-path / in-page fetch — ROUTES-VERIFIED / CLOUD-WIRE-TO-VERIFY",
+      "implementation": "SPA routes /codex/cloud, /codex/cloud/tasks, /codex/cloud/tasks/:taskId, /codex/cloud/tasks/:taskId/turns/:turnId/pr, /codex/cloud/access, /codex/cloud/security, /codex/cloud/settings, /codex/cloud/failwhale; cloud-specific REST prefix not separated in shared bundles — confirm on first live capture",
+      "recipe": null
+    },
+    {
+      "id": "codex_oauth_cli",
+      "name": "Codex CLI / desktop auth",
+      "description": "OAuth client config for the Codex CLI + desktop/install entrypoints",
+      "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "GET /oauth/codex/client.json, GET /oauth/codex/:callbackId/client.json (device-code pairing, gate codex_device_code_auth); routes /codex/install.sh, /codex/install.ps1, /codex/desktop-auth, /codex/desktop-session, /codex/rosalind-download",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "chatgpt.com",
+    "apiHost": "https://chatgpt.com/backend-api",
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "note": "provider-catalog: chatgpt-web-codex kind=cookie (full ChatGPT Cookie header). Codex reuses the chatgpt.com login + cookie jar (/api/auth/session -> Authorization: Bearer). Bundles: Wham client K keys its base URL off the Authorization header -> https://chatgpt.com/backend-api; /wham/* namespace. Capture once headed (url https://chatgpt.com/codex), then fill session.lock.json.",
+    "captureCommand": "ui2api profile capture \"https://chatgpt.com/codex\" --login"
+  },
+  "permissions": [
+    "requires a real logged-in chatgpt.com session (Codex gates: wham_access / codex_only / credit limits)",
+    "task creation additionally needs a Sentinel chat-requirements token (mode codex_create_task_turn) — driven by the site's own JS on the ui-path",
+    "anti-automation: Cloudflare challenge on cold fetch (see CAPABILITIES.md §7) + ChatGPT sentinel + /accounts/check/{version} tier gates once abuse signals appear"
+  ],
+  "builtinProfile": "chatgpt",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 14 JS bundles (~12MB: conversation-small 5.3MB, auth/wham-client 2.3MB, shell 3.6MB, manifest 0.7MB + codex route chunks) + SSR client-bootstrap; Cloudflare challenge bypassed with full browser headers (HTTP 200); no browser launched; logged-out /codex only serves the marketing page"
+}

@@ -1,0 +1,43 @@
+{
+  "id": "blackbox",
+  "name": "Blackbox AI (www.blackbox.ai)",
+  "url": "https://www.blackbox.ai",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://www.blackbox.ai --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR); provider-catalog blackbox-web = cookie __Secure-authjs.session-token (AuthJS/NextAuth-style; NOT bundle-verified). After login the chat composer SPA mounts on a route that does NOT exist in the anonymous static graph (/chat = 404, app.blackbox.ai -> marketing) — record the exact logged-in URL on first capture",
+  "composer": [
+    "textarea[placeholder*=\"Ask\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"answer\"]",
+    "[class*=\"response\"]",
+    "[data-message-role=\"assistant\"], [class*=\"assistant\"]"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"]",
+  "dismiss": [
+    "button[aria-label*=\"Sign in\"], button[aria-label*=\"Log in\"], button[aria-label*=\"Get started\"]",
+    "button[aria-label*=\"Close\"], [aria-label*=\"dismiss\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "selectorNotes": {
+    "composer": [
+      "unverified — 'Ask'-placeholder textarea guessed from Blackbox chat conventions; composer JS is code-split behind login and NOT in the static bundles; confirm on first live capture",
+      "unverified — contenteditable rich-text fallback (genuinely unproven for blackbox); confirm on first live capture"
+    ],
+    "answer": [
+      "unverified — generic [class*=\"answer\"] guess; no chat-bundle evidence was statically available; confirm on first live capture",
+      "unverified — [class*=\"response\"] generic guess; confirm on first live capture",
+      "unverified — assistant-message attribute guess; confirm on first live capture"
+    ],
+    "newChat": [
+      "unverified — no chat-sidebar JS present in anonymous chunks (marketing site only); label guess; confirm on first live capture"
+    ],
+    "dismiss": [
+      "unverified — login/Get-started overlay candidate (login page has a blackbox-authsubmit submit button, but no overlay class proven); confirm on first live capture",
+      "unverified — generic close/dismiss candidate; confirm on first live capture"
+    ]
+  },
+  "note": "HONEST SCAFFOLD — verified vs unverified is inverted vs a normal profile: the ONLY things proven statically are (a) root / is the B2B marketing site, (b) /login = 224KB JS auth form, (c) the consumer chat app does not exist in the anonymous module graph (/chat 404, app.blackbox.ai redirects home), and (d) the inference API surface enterprise.blackbox.ai/chat/completions + /enc/<model>/message_stream. EVERY composer/send/answer/newChat/dismiss selector above is an UNVERIFIED candidate for the first logged-in capture (data/www.blackbox.ai/.session). Do not trust any selector until confirmed."
+}

@@ -1,0 +1,137 @@
+{
+  "id": "chatglm",
+  "name": "ChatGLM / Zhipu AI (智谱清言)",
+  "hosts": [
+    {
+      "id": "chatglm-zh",
+      "site": "chatglm.cn",
+      "url": "https://chatglm.cn",
+      "lang": "zh-CN",
+      "description": "Chinese product — Vue/Vuex SPA, page_version 20260914183501-aa8fb894…"
+    },
+    {
+      "id": "chatglm-intl",
+      "site": "chat.z.ai",
+      "url": "https://chat.z.ai",
+      "lang": "en-US | zh-CN",
+      "description": "International product (Z.ai) — Vite/Svelte SPA, prod-fe-1.1.95, Open WebUI-derived"
+    }
+  ],
+  "siteVersion": "zh: page_version 20260914183501-aa8fb894135063deb698fed0b17320172c75ee87; intl: prod-fe-1.1.95 (Vite build); transport zh: POST /chatglm/backend-api/v1/stream_context (EventSource-style, wire format to-verify); transport intl: POST /api/chat/completions (SSE text/event-stream, fetch reader)",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "capabilities": [
+    {
+      "id": "chatglm_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; streamed answer off the page",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/chatglm_chat.json"
+    },
+    {
+      "id": "chatglm_conversation_crud",
+      "name": "Conversation CRUD + history",
+      "description": "List/get/rename/delete conversations — zh: /chatglm/backend-api/v1/conversation/*; intl: /api/v1/chats/* (endpoint literals verified, live shapes to-verify)",
+      "method": "in-page fetch (cookie/token auth) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_web_search",
+      "name": "Web search / tools toggle",
+      "description": "Z.ai: client-side web_search toggle feeds chat completions; zh: server-controlled per assistant config",
+      "method": "Z.ai: composer toggle (site UI); zh: assistant config — exact tool-shape to-verify",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_image_gen",
+      "name": "Image generation (CogView)",
+      "description": "CogView image gen — zh: drawing-api config + chat tool; intl: /api/v1/images base",
+      "method": "in-page fetch or tool call — VERIFIED-TOOL-NAME / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_model_list",
+      "name": "Model picker read",
+      "description": "Read available models — intl: GET /api/models; zh: GET /chatglm/agent-api/operation/detail?tag=available_models",
+      "method": "in-page fetch or DOM read",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_file_upload",
+      "name": "File upload",
+      "description": "Attach files to chat — zh: POST /chatglm/productivity-api/file/chat_upload; intl: GET/DELETE /api/v1/files/",
+      "method": "in-page fetch multipart — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_ppt",
+      "name": "PPT generation",
+      "description": "PPT creation/editing — intl: /api/chat/ppt/*; zh: CogView slides tools in GLMS engine",
+      "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatglm_glms_assistant",
+      "name": "GLMS task-engine assistant",
+      "description": "Server-configured assistant chat via POST /chatglm/mainchat-api/engine/submit (zh only); tools/prompts selected by assistant_id server-side",
+      "method": "in-page fetch (zh mainchat-api) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    }
+  ],
+  "transport": {
+    "zh": {
+      "send": "POST /chatglm/backend-api/v1/stream_context?__requestid={uuid}",
+      "stop": "POST /chatglm/backend-api/v1/manualstop?__requestid={task_id}",
+      "streaming": "EventSource-style (isEventSourceaOpen flag proven); wire format TBD on first live capture — may be SSE, NDJSON, or chunked JSON",
+      "requestHeaders": {
+        "App-Name": "chatglm",
+        "X-Device-Id": "{chatglm-deid UUID}",
+        "X-Request-Id": "{uuid}",
+        "Content-Type": "application/json;charset=utf-8",
+        "Authorization": "Bearer {chatglm_token cookie}",
+        "withCredentials": "true"
+      }
+    },
+    "intl": {
+      "send": "POST /api/chat/completions",
+      "streaming": "SSE text/event-stream via fetch reader (Accept: text/event-stream; AN='last-event-id')",
+      "requestHeaders": {
+        "Authorization": "Bearer {localStorage.token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "X-FE-Version": "prod-fe-1.1.95",
+        "X-Signature": "{signature key}",
+        "Accept-Language": "en-US | zh-CN"
+      },
+      "sendBody": {
+        "stream": "boolean",
+        "model": "string (e.g. glm-4.7, glm-5.3-flash)",
+        "messages": "OpenAI-format messages array",
+        "params": "object (format, keep_alive, ...)",
+        "signature_prompt": "string"
+      }
+    }
+  },
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "hosts": {
+      "chatglm.cn": {
+        "kind": "cookie",
+        "credentialName": "chatglm_token",
+        "note": "Access token in cookie chatglm_token (SameSite=None, Secure, Expires=30d); refresh token in chatglm_refresh_token (180d); user id in chatglm_user_id. Refresh via POST /chatglm/user-api/user/refresh (Bearer refresh_token) → rewrites cookies. Cookie domain: .chatglm.cn. Also /chatglm/backend-api/v2/user/login?satoken={satoken} for SSO login."
+      },
+      "chat.z.ai": {
+        "kind": "token",
+        "credentialName": "token",
+        "note": "JWT stored in localStorage key 'token' (set on session load: localStorage.token = T.token where T = GET /api/v1/auths/ response {id,email,name,role,token}). No explicit refresh mechanism found — JWT may be long-lived. OAuth route: /auth?action=signup. Bootstrap: window.GLOBAL_FETCHES.session = fetch('/api/v1/auths/')."
+      }
+    },
+    "capturedAt": null,
+    "snapshotHashPrefix": null
+  },
+  "builtinProfile": "chatglm",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + JS bundles (zh: 5 bundles ~6.3MB main.e4ae608c.js; intl: index 3.2MB + inline HTML bootstrap + lazy chunks); no browser launched"
+}

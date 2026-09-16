@@ -1,0 +1,26 @@
+{
+  "capability": "manus_chat",
+  "name": "Manus chat (UI path)",
+  "flow": {
+    "method": "ui-path",
+    "steps": [
+      { "step": 1, "action": "navigate", "target": "https://manus.im" },
+      { "step": 2, "action": "type", "selector": "[contenteditable][data-placeholder] (unverified)", "text": "{prompt}" },
+      { "step": 3, "action": "send", "method": "keyEnter" },
+      { "step": 4, "action": "wait_answer", "timeoutMs": 60000 },
+      { "step": 5, "action": "extract", "selectors": ["[class*='message']", "[class*='assistant']", "[class*='answer'] (unverified)"] }
+    ]
+  },
+  "output": {
+    "type": "object",
+    "fields": { "answer": "string", "chunkCount": "number", "doneReason": "string", "url": "string", "title": "string" }
+  },
+  "rpc": {
+    "note": "direct-wire REST family verified in bundles (/api/chat/getSessionV2, startSandbox, scheduleTask, getPresignedUploadUrl...) but exact message-send endpoint NOT pinned statically (obfuscated) — see capabilities/manus/CAPABILITIES.md",
+    "method": "dom.ui-path",
+    "verified": false
+  },
+  "sessionLock": { "required": true, "storage": ["cookies: manus_session", "localStorage: manus_account"] },
+  "site": "manus",
+  "stealth": { "note": "no anti-bot observed statically; server-side auth gating expected" }
+}

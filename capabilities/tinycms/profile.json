@@ -1,0 +1,14 @@
+{
+  "id": "tinycms",
+  "name": "TinyCMS (DEAD END)",
+  "url": null,
+  "loginRequired": true,
+  "loginHint": "DEAD END — no AI chat product found. Cannot capture a session. If the product resurfaces, re-run: ui2api analyse <url> --login",
+  "composer": [],
+  "send": null,
+  "answer": [],
+  "newChat": null,
+  "captureMs": null,
+  "stableMs": null,
+  "note": "DEAD END package. All selectors UNVERIFIED and N/A — no live app to capture. OmniRoute catalog lists tinycms-web with kind=token, credentialName=app-config-uuid, placeholder=R..., but no AI chat product was found at any of the 13 probed domains. tinycms.xyz is a static CMS docs site (docute), not a chat product."
+}

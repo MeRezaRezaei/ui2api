@@ -1,0 +1,66 @@
+{
+  "id": "copilot-m365-web",
+  "name": "Microsoft Copilot for M365 (copilot.cloud.microsoft — Harmony app)",
+  "url": "https://copilot.cloud.microsoft",
+  "aliases": ["https://m365.cloud.microsoft (health root, body 'OK')", "https://www.microsoft365.com (301 -> m365.cloud.microsoft)"],
+  "siteVersion": "Harmony app (CSP report-uri csp.microsoft.com/report/Harmony-App-PROD); chatType \"Work\"; shell bundles unauth-* (unauth-c07bac78a1.js 178KB main, unauth-vendor-f0ab3fa70e.js 109KB); Entra app client_id 4765445b-32c6-49b0-83e6-1d93765276ca",
+  "transport": {
+    "kind": "undetermined (pre-auth)",
+    "status": "NOT OBSERVABLE pre-auth — chat SPA and its JS bundles are only served to authenticated Entra sessions; every app path 302s to login.microsoftonline.com authorize",
+    "cspTargets": ["https://turbo.microsoft.com (403 root, Front Door WAF)", "*.office.com", "*.office.microsoft.com", "deeplinkservice.svc.cloud.microsoft", "config.centro.core.microsoft", "graph.microsoft.com (dns-prefetch)"],
+    "note": "M365 Copilot is expected to use SSE/WebSocket to the Turbo backend with a bundled-conversation upload flow for tenant grounding — consistent with the CSP connect-src literal but NOT verified. Consumer Copilot's verified wss://copilot.microsoft.com/c/api/chat protocol does NOT carry over; this package must re-derive the wire from an authenticated capture."
+  },
+  "capabilities": [
+    {
+      "id": "copilot_m365_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; streamed answer (expected turbo/webchat transport — to-verify post-auth). Requires a real Entra M365 session.",
+      "method": "ui-path (composer selectors UNVERIFIED) — blocked pre-auth",
+      "recipe": "recipes/copilot_m365_chat.json"
+    },
+    {
+      "id": "copilot_m365_auth_entra",
+      "name": "Entra ID OIDC sign-in flow",
+      "description": "Server-side OpenID Connect on ASP.NET Core (Microsoft.Identity.Web): /login -> /loginv2 -> login.microsoftonline.com/common/oauth2/v2.0/authorize (client_id 4765445b-32c6-49b0-83e6-1d93765276ca, redirect /landingv2, response_mode form_post, scope M365Copilot.Read.All). MSA blocked (blockMsaFed:true) — org tenants only.",
+      "method": "HTTP redirect chain — VERIFIED literals",
+      "recipe": null
+    },
+    {
+      "id": "copilot_m365_grounding",
+      "name": "Tenant-data grounding",
+      "description": "Answers grounded on M365 tenant data via Graph/SharePoint — M365Copilot.Read.All scope + graph.microsoft.com dns-prefetch verified; actual grounding wire to-verify live.",
+      "method": "in-app scope (to-verify post-auth)",
+      "recipe": null
+    },
+    {
+      "id": "copilot_m365_deep_link",
+      "name": "Work prompt deep links",
+      "description": "/chat/entity1-d870f6cd-4aa5-4d42-9626-ab690c041429/<base64> deep links; payload decodes to {properties:{promptSource:microsoft}, scenario:tryinappgrowth, chatType:\"Work\", referral:{cmmid}} — instance-scoped prompt-injection entry point.",
+      "method": "URL — VERIFIED literal (payload of landing \"Get started\" prompts)",
+      "recipe": null
+    },
+    {
+      "id": "copilot_m365_webchat",
+      "name": "/webchat/* API segment",
+      "description": "M365 mounts a /webchat/* REST segment (302 authorize evidence on /webchat/api). Surface contents unobservable pre-auth.",
+      "method": "HTTPS GET (to-verify post-auth)",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "entra-oidc-session-cookie (server-side), NOT client token",
+    "host": "copilot.cloud.microsoft",
+    "endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=4765445b-32c6-49b0-83e6-1d93765276ca&redirect_uri=https%3A%2F%2Fcopilot.cloud.microsoft%2Flandingv2&response_type=code%20id_token&scope=openid%20profile%20offline_access%20https%3A%2F%2Fm365.cloud.microsoft%2Fv2%2FM365Copilot.Read.All&response_mode=form_post&x-client-SKU=ID_NET10_0&x-client-ver=8.15.0.0",
+    "scope": "https://m365.cloud.microsoft/v2/M365Copilot.Read.All (chat); https://www.office.com/v2/OfficeHome.All (landing click)",
+    "clientId": "4765445b-32c6-49b0-83e6-1d93765276ca (chat); 4345a7b9-9a63-4910-a426-35363201d503 (shell shell config)",
+    "callback": "form_post to /landingv2; ASP.NET Core OIDC state cookies .AspNetCore.OpenIdConnect.Nonce.* / .AspNetCore.Correlation.*; session cookies OH.SID, OH.FLID; ASLBSA/ASLBSACORS from LoginService",
+    "blockMsa": true,
+    "agentType": "Microsoft.Identity.Web (x-client-SKU ID_NET8_0/ID_NET10_0)",
+    "antiBot": "Microsoft Front Door/AEG WAF on turbo tier + Entra conditional access (MFA/device) expected; no Turnstile/hashcash observed on this surface",
+    "note": "There is NO anonymous path (unlike consumer copilot). Capture must come from a real M365 (work/school) Entra session in a headed browser; the token lives in an ASP.NET session cookie, not a JS-accessible token."
+  },
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + redirect-chain capture + marketing-shell JS-bundle grep (~1.9MB of unauth-* bundles); full Entra authorize URL captured from live 302 location; NO browser launched, NO chat API observable pre-auth; honest hard-wall verdict"
+}

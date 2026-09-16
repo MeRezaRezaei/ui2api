@@ -1,0 +1,16 @@
+{
+  "capability": "blackbox_chat",
+  "site": "blackbox",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.blackbox.ai", "note": "session snapshot injected (data/www.blackbox.ai/.session). Anonymous / renders the B2B marketing site; /chat 404s statically. FIRST LIVE CAPTURE: record the exact logged-in URL where the composer mounts (expected /chat or a dashboard route) and the real DOM classes before trusting profile.json selectors" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "UNVERIFIED selector (see profile.json); jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into the composer (UNVERIFIED selector — candidates textarea[placeholder*=\"Ask\"] / div[contenteditable=true])" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[class*=\"answer\"], [class*=\"response\"], [class*=\"assistant\"]", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "UNVERIFIED — the consumer chat wire is NOT statically reachable (login-gated, code-split SPA; no stream/auth literals in 14 anonymous chunks). Statically verified SIBLING API (marketing terminal demo 6.js): POST https://enterprise.blackbox.ai/chat/completions (OpenAI-compatible, Bearer sk-*), SSE path https://enterprise.blackbox.ai/enc/<model>/message_stream, model literal nvidia/nemotron-3.5-lightning, proxy modes bbenc/<model>@e2ee-proxy-1 (encrypted) vs plaintext@api-proxy-1. Whether the anti-bot gate (e.g. token/csrf header or fingerprint cookie) applies to the chat wire is unknown — the UI path drives the site's own JS, so record the real network calls on first live capture instead of assuming this API shape.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

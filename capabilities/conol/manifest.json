@@ -1,0 +1,51 @@
+{
+  "id": "conol",
+  "name": "Conol (conol.ai)",
+  "url": "https://conol.ai",
+  "description": "Conol is a knowledge base powered by agents that research, run long jobs in the background, file results into your notes, and reach you when done. Passkey-only auth via better-auth; no email/password or social login.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "Next.js Turbopack SPA on Vercel; better-auth v1.6.16 client + passkey + organization plugins; 22 JS bundles (~958 KB) covering marketing + auth; app code lazy-loaded behind session (no API surface reachable statically)",
+  "transport": {
+    "type": "unknown (app SPA behind auth)",
+    "protocol": "better-auth cookie session on /api/auth/*; chat/agent wire unknown -- no SSE, WebSocket, or fetch ReadableStream signatures found in the static bundle set",
+    "baseUrl": "https://conol.ai",
+    "auth": {
+      "scheme": "cookie (__Secure-better-auth.session_token)",
+      "plugin": "better-auth v1.6.16 with passkey (simplewebauthn) + organization",
+      "serverRoutes": "/api/auth/* (get-session, sign-out, passkey/generate-register-options, passkey/register, passkey/authenticate, admin/list-users)",
+      "errorShape": "{\"message\":\"...\",\"code\":\"...\"}",
+      "signInMethod": "passkey (WebAuthn) only -- email/password, Google OAuth, OTP, magic-link all return 404"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "conol_chat",
+      "name": "Chat (UNVERIFIED)",
+      "description": "Send a prompt on the composer; streamed answer -- wire protocol, selectors, and streaming transport all unknown from static analysis (requires headed capture)",
+      "method": "ui-path (presumed -- composer + Enter; site's own send handler; exact selectors unverified)",
+      "implementation": "APP CODE IS LAZY-LOADED BEHIND AUTH. No chat/agent API endpoints or streaming transports found in the 22 static JS bundles. The SPA app renders client-side after session injection. All selectors, API paths, and streaming protocol must be captured from a live headed session.",
+      "recipe": "recipes/conol_chat.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "cookie",
+    "host": "conol.ai",
+    "cookieName": "__Secure-better-auth.session_token",
+    "betterAuthVersion": "1.6.16",
+    "plugins": ["passkey", "organization"],
+    "signInMethod": "passkey (WebAuthn) only -- no email/password or social login",
+    "capture": "ui2api profile capture \"https://conol.ai\" --login",
+    "note": "Auth is passkey-only via better-auth. The passkey registration uses WebAuthn generateRegistrationOptions + verifyRegistrationOptions (browser-native prompt). After registration, authentication uses generateAuthenticationOptions + verifyAuthenticationOptions. Cookie is __Secure-better-auth.session_token (Secure prefix, HttpOnly). Session check: GET /api/auth/get-session returns null when unauthenticated. Admin plugin is present (/api/auth/admin/list-users returns 401 without bearer). Organization plugin is present but not probed."
+  },
+  "permissions": [
+    "requires a real logged-in Conol session (passkey-registered account)",
+    "passkey registration requires browser-native WebAuthn ceremony (cannot be scripted)",
+    "no anti-bot fingerprint SDK detected in static surface"
+  ],
+  "builtinProfile": "conol",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 22 JS bundles (~958 KB total) + live API probe against /api/auth/*; no browser launched; app code unreachable without auth"
+}

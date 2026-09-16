@@ -1,0 +1,39 @@
+{
+  "id": "tinycms",
+  "name": "TinyCMS (DEAD END — no AI chat product found)",
+  "url": null,
+  "siteVersion": null,
+  "status": "dead-end",
+  "capabilities": [
+    {
+      "id": "tinycms_chat",
+      "name": "Chat (dead-end scaffold)",
+      "method": "none — no live product",
+      "recipe": "recipes/tinycms_chat.json",
+      "status": "dead-end"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "token",
+    "host": null,
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "credentialName": "app-config-uuid",
+    "placeholder": "R...",
+    "note": "DEAD END: OmniRoute catalog lists tinycms-web as kind=token with credentialName=app-config-uuid and placeholder=R..., but no AI chat product exists at any resolvable tinycms domain. The only live domain (tinycms.xyz) is a Chinese foreign-trade CMS docs site, not an AI chat product. All other domains (cc, app, com, io, ai, net, chat, com.cn, cn) fail DNS or timeout."
+  },
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl probes across 12 candidate domains; no browser launched; no JS bundles available to analyze",
+  "deadEnd": {
+    "reason": "No AI chat product found at any tinycms domain. Catalog entry appears to be a placeholder or refers to a product that no longer exists.",
+    "domainsProbed": [
+      "tinycms.cc", "tinycms.app", "tinycms.com", "www.tinycms.com",
+      "tinycms.io", "tinycms.ai", "tinycms.net", "tiny-cms.com",
+      "tinycms.chat", "tinycms.com.cn", "tinycms.cn", "tinycms.xyz",
+      "app.tinycms.xyz"
+    ],
+    "tinycmsXyzVerdict": "200 OK but is a docute-based CMS documentation site for Chinese foreign-trade inquiry forms (leadscloud/inquiry), NOT an AI chat product"
+  }
+}

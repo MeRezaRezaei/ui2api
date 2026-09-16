@@ -1,0 +1,153 @@
+{
+  "id": "tencent-aistudio",
+  "name": "Tencent AI Studio (aistudio.tencent.com)",
+  "site": "aistudio.tencent.com",
+  "url": "https://aistudio.tencent.com",
+  "description": "Tencent Hy AI Studio — developer/professional Hunyuan assistant: chat with streaming, deep search, deep thought/reasoning, image/video/3D generation, code execution, file upload + doc QA, TTS/ASR, podcast, translation, AI agent roles. Under the Tencent Hunyuan umbrella (yuanbao.tencent.com is the consumer surface; already covered by capabilities/hunyuan).",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "SPA on aistudio.tencent.com; API routes /api/new-portal/* (5 JS bundles ~12.6 MB; hy-web main 7.6 MB); chat = POST /api/new-portal/chat/{chatId} with JSON stream; auth = iOA/QR scan cookie-based",
+  "transport": {
+    "type": "http-rest-streaming",
+    "protocol": "HTTP POST; responses parsed as per-chunk JSON objects (NOT standard SSE — no text/event-stream literal found); exact byte framing to verify on live capture",
+    "baseUrl": "https://aistudio.tencent.com",
+    "chatEndpoint": "POST /api/new-portal/chat/{chatId}",
+    "chatEndpointContinuation": "POST /api/new-portal/user/agent/conversation/continue",
+    "chatEndpointRepeat": "POST /api/new-portal/chat/repeat/{chatId}",
+    "chatEndpointStop": "POST /api/new-portal/stop/chat/{chatId}",
+    "chatEndpointGenerateId": "POST /api/new-portal/generate/id",
+    "auth": {
+      "scheme": "Cookie (credentials: include on all requests)",
+      "loginFlows": [
+        "POST /api/oalogin — Tencent iOA (enterprise SSO) login initiation (QR code scan)",
+        "POST /api/getuserinfo — get logged-in user profile",
+        "POST /api/new-portal/login/logout — logout",
+        "/_logout/?url=... — iOA redirect logout"
+      ],
+      "note": "Server sets session cookies on login (likely hy_user + hy_token, same umbrella as yuanbao.tencent.com — exact cookie names to verify on live capture). X-Token/X-ID/Space-Id headers are injected for miniprogram/openapi contexts only; the primary web path is pure cookie auth."
+    },
+    "headers": {
+      "credentials": "include",
+      "X-Token": "session token (URL param or localStorage weapp-token — miniprogram mode only)",
+      "X-ID": "user ID (URL param or localStorage weapp-uid — miniprogram mode only)",
+      "X-Source": "\"miniprogram\" (when miniprogram context detected)",
+      "Space-Id": "from localStorage hy-space-id (team space context)",
+      "note": "OpenAPI paths (path.startsWith('/openapi')) also get 'Authorization: Bearer <X-Token>'; primary web path uses cookies only"
+    },
+    "streaming": "Per-chunk JSON decode: response body parsed via JSON.parse(e.data) yielding {type, content, code, msg}; type mapped to internal HYCSpeechType enum; exact wire framing (newline-delimited JSON? length-prefixed? custom separator?) to verify on live capture",
+    "responseTypes": [
+      "text", "card", "ai_search_pro", "ai_search_pro_fin", "reasoner",
+      "deep_think_box", "multiModelResult", "outline", "multimodal",
+      "image-group", "deep_thought", "doc_card", "doc_deep_mode",
+      "doc_deep_read_card", "podcast", "search_deep_mode", "search_deep_mode_fin",
+      "multi_model_output", "olympic_poster", "status", "message_revoke",
+      "use_model", "local_mock_loading", "thought_with_img"
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "tencent_aistudio_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; streamed answer via POST /api/new-portal/chat/{chatId} (JSON chunk parsing)",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "implementation": "POST https://aistudio.tencent.com/api/new-portal/chat/{chatId}; body = {model, prompt, options, plugin, searchDeepMode, aiRoleClone, ...}; response = JSON chunks parsed by JSON.parse(e.data) with type field → HYCSpeechType mapping; 15 min timeout (9e5 ms). generate/id endpoint needed to create chatId; conversation continue for multi-turn.",
+      "recipe": "recipes/tencent_aistudio_chat.json"
+    },
+    {
+      "id": "tencent_aistudio_web_search",
+      "name": "Web search (deep search mode)",
+      "description": "Toggle deep-search mode for grounded answers; sets searchDeepMode=true on the chat request",
+      "method": "composer toggle (unverified DOM)",
+      "implementation": "searchDeepMode + searchDeepModeParentIndex fields on chat request body. Stream speech types SEARCH_DEEP_MODE, SEARCH_DEEP_MODE_FIN, ai_search_pro, card carry search-grounded content. Config: POST /api/new-portal/config {key:'getAgentConfig'}. Toggle DOM unverified.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_deep_think",
+      "name": "Deep thought / reasoning",
+      "description": "Chain-of-Thought reasoning mode (DEEP_THOUGHT / DEEP_THINK / REASONER stream speech types)",
+      "method": "composer toggle or model config (unverified)",
+      "implementation": "Stream speech types DEEP_THOUGHT (11 refs), DEEP_THINK (9 refs), REASONER (8 refs), THOUGHT_WITH_IMG (11 refs) carry reasoning blocks. Exact toggle/request field to verify on live capture.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_conversation_crud",
+      "name": "Conversation CRUD + history",
+      "description": "List/get/rename/delete conversations via /api/new-portal/ endpoints + generate/id + continue",
+      "method": "in-page fetch (credentials: include) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue. Response shapes to verify.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_image_gen",
+      "name": "Image generation (DIT / vision)",
+      "description": "Generate images via /api/vision_platform/generation (DIT model at dit.hunyuan.tencent.com); poll via query_task",
+      "method": "in-page fetch (credentials: include) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "POST /api/vision_platform/generation, /api/vision_platform/query_task, /api/vision_platform/query_task_list, /api/vision_platform/taskHistoryDel. Config: POST /api/new-portal/config {key:'visionGeneration'}. Supports style/clarity/outpainting/elimination/watermark-removal/OCR endpoints. 3D model host: 3d-models.hunyuan.tencent.com; video host: aivideo.hunyuan.tencent.com.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_code_run",
+      "name": "Code interpreter / sandbox",
+      "description": "Execute code in a sandbox (coder/runCode features; env to verify)",
+      "method": "in-page or composer mode — VERIFIED-FEATURE / LIVE-SHAPE-TO-VERIFY",
+      "implementation": "coder (36 refs in index), runCode (7 refs) present in bundles. Execution environment type, language support, and invocation API not yet captured. Candidate for deep-think/code hybrid mode.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_file_upload",
+      "name": "File upload + document QA",
+      "description": "Upload docs via COS tempCred → genUploadInfo; parse via /api/resource/fileParse; document analysis rides chat as DOC_CARD/DOC_DEEP_MODE speech types",
+      "method": "in-page COS upload (Tencent COS SDK) or composer attach UI",
+      "implementation": "POST /api/new-portal/tempCred → COS upload → POST /api/new-portal/chat/resource/genUploadInfo → POST /api/resource/fileParse. Supported: pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv/md/video (from speechContent parser). Stream types: DOC_CARD, DOC_DEEP_MODE, DOC_DEEP_READ_CARD, doc_percent, docDeepModeInfo.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_tts",
+      "name": "Speech synthesis (TTS) + ASR",
+      "description": "Text-to-speech via /api/new-portal/audio/synthesis; speech recognition via /api/new-portal/asr/ + asr.cloud.tencent.com",
+      "method": "in-page fetch (TTS); ASR may require WebSocket to asr.cloud.tencent.com",
+      "implementation": "POST /api/new-portal/audio/synthesis (TTS). ASR: POST /api/new-portal/asr/file/recognize + queryTask; history: asr/history/list, asr/history/del. Real-time ASR via WebSocket to asr.cloud.tencent.com (events: 'asr.started'). WebRecorder/WebAudioSpeechRecognizer window globals present.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_podcast",
+      "name": "Podcast generation",
+      "description": "Generate podcast content: audioDeltaBase64 chunks + script timing; interact via /api/new-portal/podcast/*",
+      "method": "in-page fetch (credentials: include)",
+      "implementation": "POST /api/new-portal/podcast/hint, /api/new-portal/podcast/relInfo, /api/new-portal/podcast/interact. Stream speech type PODCAST (10 refs). Podcast data includes audioDeltaBase64 (chunked base64 audio) and script.text for word-level timing. Configure show/podcast-related localStorage flags.",
+      "recipe": null
+    },
+    {
+      "id": "tencent_aistudio_translations",
+      "name": "In-chat translation",
+      "description": "Translate via translateModelList + sourceLang/targetLang fields on chat request",
+      "method": "composer options (unverified DOM)",
+      "implementation": "Chat request body includes translateModelList, sourceLang, targetLang, sourceLangLabel, targetLangLabel. Translation model list sourced from GET /api/agent/model/list or /api/models. Exact picker DOM to verify on live capture.",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "aistudio.tencent.com",
+    "apiHost": "https://aistudio.tencent.com",
+    "catalogRef": "tencent-aistudio-web, kind: cookie, credentialName: Cookie header (full)",
+    "loginFlows": [
+      "iOA (Tencent enterprise SSO) — QR code scan (二维码) + WeChat login via POST /api/oalogin",
+      "WeChat — direct login (UI button)",
+      "Access check: POST /api/getuserinfo returns user profile; 403 → re-auth"
+    ],
+    "cookieNames": ["likely hy_user + hy_token (hypothesis based on yuanbao.tencent.com overlap — to verify on live capture)"],
+    "capture": "ui2api profile capture \"https://aistudio.tencent.com\" --login",
+    "note": "provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). Exact cookie names are hypotheses; the SPA uses credentials:'include' on all requests and may rely on httpOnly cookies set by Tencent's SSO. X-Token/X-ID/Space-Id headers are injected for miniprogram mode only (not the primary web path). Capture once headed, then fill session.lock.json."
+  },
+  "permissions": [
+    "requires a real logged-in Tencent iOA / WeChat session (Cookie header for aistudio.tencent.com)",
+    "anti-bot: enterprise Tencent Cloud monitoring + galileotelemetry + traceId on all requests — no synthetic inputs, use the site's own JS paths",
+    "iOA login expired flow: '/_logout/?url=...' redirect; re-login required on 401/403"
+  ],
+  "builtinProfile": "tencent-aistudio",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 5 JS bundles (~12.6 MB, hy-web 7.6 MB + index 4 MB + utils + monitor + runtime); no browser launched; no wire payloads verified"
+}

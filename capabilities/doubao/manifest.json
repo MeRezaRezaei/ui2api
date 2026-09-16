@@ -1,0 +1,109 @@
+{
+  "name": "doubao",
+  "version": "1.0.0",
+  "status": "awaiting-capture",
+  "url": "https://www.doubao.com/chat/",
+  "provider": "doubao",
+  "displayName": "豆包 (Doubao)",
+  "capabilities": [
+    {
+      "id": "doubao_chat",
+      "name": "Chat",
+      "method": "ui-path (ChatDriver) + POST /samantha/chat/completion",
+      "recipe": "recipes/doubao_chat.json",
+      "status": "awaiting capture"
+    },
+    {
+      "id": "doubao_image-generation",
+      "name": "Image Generation",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_video-generation",
+      "name": "Video Generation",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_web-search",
+      "name": "Web Search",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_deep-research",
+      "name": "Deep Research",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_code-interpreter",
+      "name": "Code Interpreter",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_canvas",
+      "name": "Canvas",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_document-analysis",
+      "name": "Document Analysis",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_audio-voice",
+      "name": "Audio Voice",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_writing",
+      "name": "Writing",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_ppt-generation",
+      "name": "Ppt Generation",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    },
+    {
+      "id": "doubao_search-images",
+      "name": "Search Images",
+      "method": "to-verify on first live capture",
+      "recipe": null,
+      "status": "verified-endpoint / live-to-verify"
+    }
+  ],
+  "transport": {
+    "api": "HTTP POST JSON (same-origin /alice/*, /samantha/*)",
+    "streaming": "HTTP SSE (fetchSSE) via /samantha/chat/completion",
+    "realtime": "WebSocket wss://www.doubao.com/ws/v2 (protocol pbbp2)"
+  },
+  "auth": {
+    "method": "cookie",
+    "credentials": [
+      "sessionid",
+      "ttwid",
+      "s_v_web_id"
+    ],
+    "loginRequired": true
+  },
+  "backend": "ByteDance Modern.js (Goofy Node), volc-dcdn"
+}

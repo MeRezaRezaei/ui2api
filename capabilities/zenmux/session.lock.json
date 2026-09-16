@@ -1,0 +1,15 @@
+{
+  "site": "zenmux.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "zenmux.com",
+    "cookieNames": [],
+    "apiHost": null,
+    "captureCommand": "ui2api profile capture \"https://zenmux.com\" --login",
+    "targetDir": "data/zenmux.com/.session/state.json"
+  },
+  "note": "This package installs and runs from a captured session snapshot of zenmux.com per provider-catalog (zenmux-free, kind=cookie, credential 'Cookie header (full)'). DEAD-END WARNING: the origin is parked as of 2026-09-16 — HTTPS :443 times out, HTTP returns an empty 94-byte shell (identical to the 2026-06-14 Wayback snapshot); no cookie is currently obtainable. 'awaiting-capture' is kept so the slot is tracked; re-open only when the domain serves an app again, then record the actual cookie names/hash.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

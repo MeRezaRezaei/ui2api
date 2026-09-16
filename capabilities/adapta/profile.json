@@ -1,0 +1,14 @@
+{
+  "id": "adapta",
+  "name": "Adapta (adapta.app)",
+  "url": "https://adapta.app",
+  "loginRequired": null,
+  "loginHint": "No login surface exists: adapta.app serves a public DonDominio parking page (PHPSESSID only). Once the real adapta product domain is identified, sign in once via `ui2api analyse https://<resolved-domain> --login` or reuse your real Chrome profile (UI2API_USER_DATA_DIR), then land the __client cookie into the session snapshot.",
+  "composer": null,
+  "send": { "kind": "keyEnter" },
+  "answer": null,
+  "newChat": null,
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED — all selectors are null because there is NO live chat DOM: adapta.app is a parked DonDominio domain (https 443 refused; http 80 = parking page), adapta.com is NXDOMAIN, adapta.ai is a different company's corporate site. catalog-only auth fact (cookie '__client') is inherited from provider-catalog.md:56, not live-verified. Verify on first capture of the REAL product once the domain is re-identified; selectors must be derived from the actual rendered chat page then."
+}

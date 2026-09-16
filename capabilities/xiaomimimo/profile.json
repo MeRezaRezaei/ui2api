@@ -1,0 +1,45 @@
+{
+  "id": "xiaomimimo",
+  "name": "Xiaomi MiMo — MiMo Studio (aistudio.xiaomimimo.com)",
+  "url": "https://aistudio.xiaomimimo.com",
+  "loginRequired": true,
+  "loginHint": "UNVERIFIED (provider-catalog.md line 89): xiaomimimo-web auth kind=cookie, credentialName=session → session cookie expected under the literal key/name 'session'. Studio login is deep-linked by the platform console via GET aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=<path>; console i18n shows WeChat/Alipay/Feishu QR auth patterns. HOST UNREACHABLE this run: public DNS pins aistudio.xiaomimimo.com to 127.0.0.1 (DNSPod A, TTL 600), so no live cookie could be observed. Capture once reachable: ui2api profile capture \"https://aistudio.xiaomimimo.com\" --login → replay data/aistudio.xiaomimimo.com/.session",
+  "composer": [
+    "textarea[placeholder*=\"Ask\"]",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "[class*=\"composer\"] textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"answer\"]",
+    "[class*=\"response\"]",
+    "[data-role=\"assistant\"]"
+  ],
+  "newChat": "button[aria-label*=\"New chat\"], button[aria-label*=\"新对话\"]",
+  "dismiss": [
+    "button[aria-label*=\"Sign in\"], button[aria-label*=\"登录\"]",
+    "button[aria-label*=\"Close\"], button[aria-label*=\"关闭\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "selectorNotes": {
+    "composer": [
+      "UNVERIFIED — no DOM evidence (aistudio host DNS-pinned to 127.0.0.1, no live capture possible). Generic textarea-with-Ask-placeholder guess, mirroring common chat UIs; confirm on first live capture",
+      "UNVERIFIED — contenteditable-rich-composer guess, no evidence; confirm on first live capture",
+      "UNVERIFIED — 'composer' class-name guess, no evidence; confirm on first live capture"
+    ],
+    "answer": [
+      "UNVERIFIED — 'answer' class-name guess, no evidence; confirm on first live capture",
+      "UNVERIFIED — 'response' class-name guess, no evidence; confirm on first live capture",
+      "UNVERIFIED — data-role assistant guess, no evidence; confirm on first live capture"
+    ],
+    "newChat": [
+      "UNVERIFIED — sidebar new-chat button; text is i18n (en/zh) and there is NO evidence for it — aistudio unreachable; confirm on first live capture"
+    ],
+    "dismiss": [
+      "UNVERIFIED — sign-in / 登录 overlay candidate; confirm on first live capture",
+      "UNVERIFIED — close / 关闭 overlay candidate; confirm on first live capture"
+    ]
+  },
+  "note": "SCAFFOLD, CHEAPLY-GROUNDED — every selector above is an UNVERIFIED candidate; the chat surface (MiMo Studio, aistudio.xiaomimimo.com) was publicly DNS-pinned to 127.0.0.1 at analysis time (2026-09-16) so no chat DOM or wire was observed. Verified facts (from platform.xiaomimimo.com console bundle + catalog): provider auth kind=cookie, credentialName=session; aistudio login gate open-apis/v1/genLoginUrl; API-only siblings at api.xiaomimimo.com (/v1 OpenAI shape, /anthropic) authenticated with the api-key header. DO NOT deploy this profile for chat until aistudio is routable and confirmed on a live capture."
+}

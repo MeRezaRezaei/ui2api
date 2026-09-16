@@ -1,0 +1,60 @@
+{
+  "id": "duckduckgo",
+  "name": "DuckDuckGo AI Chat (duck.ai)",
+  "url": "https://duck.ai/chat",
+  "loginRequired": false,
+  "loginHint": "No login required — anonymous chat works out of the box. If you want chat history sync, sign in to a DDG account once: ui2api profile capture \"https://duck.ai\" --login. For anonymous-only use, no capture is needed.",
+  "composer": [
+    "textarea",
+    "[contenteditable=\"true\"]",
+    "div[class*=\"chat-input\"] textarea",
+    "div[class*=\"composer\"] textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"message\"][class*=\"assistant\"]",
+    "[class*=\"response\"]",
+    "[class*=\"markdown\"]",
+    "[class*=\"chat-message\"]"
+  ],
+  "newChat": [
+    "[aria-label*=\"New chat\"]",
+    "[aria-label*=\"new chat\"]",
+    "button[class*=\"new-chat\"]",
+    "[class*=\"sidebar\"] button:first-child"
+  ],
+  "dismiss": [
+    "[class*=\"onboarding\"] button",
+    "[class*=\"welcome\"] button",
+    "button[aria-label*=\"Skip\"]",
+    "button[aria-label*=\"Close\"]"
+  ],
+  "modelPicker": [
+    "button[class*=\"model\"]",
+    "[class*=\"model-picker\"]",
+    "[class*=\"model-selector\"]",
+    "[aria-label*=\"Model\"]"
+  ],
+  "captureMs": 45000,
+  "stableMs": 2000,
+  "selectorNotes": {
+    "composer": [
+      "unverified — the SPA renders a text input in the empty state; exact DOM class/selector NOT proven by the bundles (CSS class names are hashed module-scoped). Candidates: textarea, [contenteditable=true], div[class*=chat-input]. Confirm on first live capture.",
+      "unverified — DUCKCHAT_USER_PROMPT_PLACEHOLDER i18n key exists but the actual placeholder text is locale-dependent. Confirm on first live capture."
+    ],
+    "answer": [
+      "unverified — bundle proves assistant messages are rendered with role='assistant' content, but the DOM class is module-scoped/hashed. Candidates from i18n keys: DUCKCHAT_GENERATING_RESPONSE, DUCKCHAT_CHAT_LOADING_STATE_LABEL suggest a loading state element exists. Confirm on first live capture.",
+      "unverified — markdown rendering class is present (DUCKCHAT_COPY_CODE_BUTTON exists) but DOM selector unknown. Confirm on first live capture."
+    ],
+    "newChat": [
+      "unverified — DUCKCHAT_NEW_CHAT_BUTTON i18n key proves the button exists; 'New chat' text is the English label. DOM selector unverified. Confirm on first live capture."
+    ],
+    "dismiss": [
+      "unverified — ONBOARDING_AGREE_AND_CONTINUE / ONBOARDING_NOT_NOW i18n keys prove an onboarding flow exists. Exact dismiss selector unverified. Confirm on first live capture."
+    ],
+    "modelPicker": [
+      "unverified — DUCKCHAT_MODEL_PICKER_LABEL, DUCKCHAT_MODEL_MODAL_PICK_CHAT_MODEL i18n keys prove a model picker exists. DOM trigger button unverified. Confirm on first live capture."
+    ]
+  },
+  "note": "All selectors are UNVERIFIED candidates — the bundles prove the UI elements exist (via i18n keys and state management) but provide NO DOM class names (React module-scoped CSS). Confirm on first live capture. Anonymous chat works without login — set loginRequired to false and omit session snapshot injection. The VQD token is obtained at runtime by the app (GET /duckchat/v1/status) and is NOT a static capture — ui2api driver should let the page handle this internally."
+}

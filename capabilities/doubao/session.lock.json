@@ -1,0 +1,9 @@
+{
+  "provider": "doubao",
+  "url": "https://www.doubao.com/chat/",
+  "status": "awaiting-capture",
+  "createdAt": "2026-09-16T00:00:00.000Z",
+  "updatedAt": "2026-09-16T00:00:00.000Z",
+  "notes": "Static-only analysis complete. Browser capture needed to verify auth flow, session cookies, and UI selectors.",
+  "locked": false
+}

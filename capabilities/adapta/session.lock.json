@@ -1,0 +1,16 @@
+{
+  "site": "adapta.app",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "adapta.app",
+    "cookieNames": ["__client"],
+    "apiHost": null,
+    "authEndpoint": null,
+    "captureCommand": "ui2api profile capture \"https://<resolved-domain>\" --login",
+    "targetDir": "data/adapta.app/.session/state.json"
+  },
+  "note": "Dead-end scaffold: provider-catalog classifies adapta-web as cookie auth with credential __client, but adapta.app is a parked DonDominio domain (443 refused, parking page over http) and adapta.com is NXDOMAIN; adapta.ai is a different company. There is no live session to capture — nothing renders, no login surface, no cookies beyond PHPSESSID on the parking page. Re-identify the real adapta product/domain, then capture once headed and record the actual cookie/localStorage set in state.json, replacing the catalog-inherited __client hint if it does not match.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

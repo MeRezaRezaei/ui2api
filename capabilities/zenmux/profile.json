@@ -1,0 +1,34 @@
+{
+  "id": "zenmux",
+  "name": "ZenMux (zenmux.com)",
+  "url": "https://zenmux.com",
+  "loginRequired": true,
+  "loginHint": "catalog says cookie auth ('Cookie header (full)' for zenmux-free). BUT the origin is DEAD-END/PARKED as of 2026-09-16: HTTPS times out, HTTP serves a 94-byte empty shell — the intended capture (`ui2api profile capture \"https://zenmux.com\" --login`) cannot succeed until the domain serves an app again.",
+  "composer": [
+    "textarea[placeholder*=\"Send a message\"], textarea[placeholder*=\"问\"], textarea[placeholder*=\"询问\"]",
+    "[contenteditable=\"true\"][role=\"textbox\"]"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"assistant\"], [class*=\"message\"]",
+    "[data-message-author-role='assistant']"
+  ],
+  "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"新对话\"]",
+  "dismiss": [],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "selectorNotes": {
+    "composer": [
+      "UNVERIFIED placeholder — not one selector has been confirmed; the parked shell contains no DOM. Drafted from generic chat-site conventions + catalog's 'proxy/aggregator' hint. Everything must be re-derived from the live app once the domain revives.",
+      "UNVERIFIED placeholder — generic contenteditable composer candidate."
+    ],
+    "answer": [
+      "UNVERIFIED placeholder — generic assistant/message class guess.",
+      "UNVERIFIED placeholder — copied pattern from other packages only."
+    ],
+    "newChat": [
+      "UNVERIFIED placeholder — generic naming; no app DOM exists to match."
+    ]
+  },
+  "note": "DORMANT SCAFFOLD (dead-end package). provider-catalog.md line 14 classifies zenmux-free as kind=cookie ('Cookie header (full)') — free tier of a proxy/aggregator. Static probe 2026-09-16: domain parked (CSC DNS, MX custmx.cscdns.net), HTTPS :443 timeout, HTTP 200 empty `<body></body>` shell — identical to the 2026-06-14 Wayback capture. Therefore EVERY selector above is an UNVERIFIED, fictional-origin placeholder FLAGGED for re-derivation; this profile will not match any live DOM today and should not be driven until a live capture exists."
+}

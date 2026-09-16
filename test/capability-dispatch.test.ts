@@ -10,7 +10,10 @@ import { HunyuanCapabilities } from "../src/capabilities/hunyuan.js";
 import { VeniceCapabilities } from "../src/capabilities/venice.js";
 import { DeepSeekCapabilities } from "../src/capabilities/deepseek.js";
 import { ClaudeCapabilities } from "../src/capabilities/claude.js";
+import { ChatGPTCapabilities } from "../src/capabilities/chatgpt.js";
 import { GeminiCapabilities } from "../src/capabilities/gemini.js";
+import { HuggingChatCapabilities } from "../src/capabilities/huggingchat.js";
+import { CopilotCapabilities } from "../src/capabilities/copilot.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Hermetic capability-runner dispatch tests (no browser, no network, no daemon)
@@ -91,11 +94,32 @@ const RUNNERS: RunnerDef[] = [
     make: (p) => new ClaudeCapabilities(p),
   },
   {
+    id: "chatgpt",
+    profilePath: u("../capabilities/chatgpt/profile.json"),
+    manifestPath: u("../capabilities/chatgpt/manifest.json"),
+    sourcePath: u("../src/capabilities/chatgpt.ts"),
+    make: (p) => new ChatGPTCapabilities(p),
+  },
+  {
     id: "gemini",
     profilePath: u("../capabilities/gemini/profile.json"),
     manifestPath: u("../capabilities/gemini/manifest.json"),
     sourcePath: u("../src/capabilities/gemini.ts"),
     make: (p) => new GeminiCapabilities(p),
+  },
+  {
+    id: "huggingchat",
+    profilePath: u("../capabilities/huggingchat/profile.json"),
+    manifestPath: u("../capabilities/huggingchat/manifest.json"),
+    sourcePath: u("../src/capabilities/huggingchat.ts"),
+    make: (p) => new HuggingChatCapabilities(p),
+  },
+  {
+    id: "copilot",
+    profilePath: u("../capabilities/copilot/profile.json"),
+    manifestPath: u("../capabilities/copilot/manifest.json"),
+    sourcePath: u("../src/capabilities/copilot.ts"),
+    make: (p) => new CopilotCapabilities(p),
   },
 ];
 

@@ -1,0 +1,16 @@
+{
+  "site": "app.innerai.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "app.innerai.com",
+    "cookieNames": ["token", "email", "deviceId"],
+    "apiHost": "https://platformapi.innerai.com/api",
+    "authEndpoint": "/api/v1/users/me",
+    "captureCommand": "ui2api profile capture \"https://app.innerai.com\" --login",
+    "targetDir": "data/app.innerai.com/.session/state.json"
+  },
+  "note": "This package installs and runs from the profile plus a captured session snapshot of app.innerai.com; real auth is cookies token/email/deviceId injected as USER-TOKEN/USER-EMAIL/DEVICE-ID headers on every platformapi.innerai.com call (bundle-verified interceptor), matching provider-catalog inner-ai kind=cookie credentialName 'token + email'. Login UI = platform.innerai.com/login.html (#email + #password, social Google/Microsoft/Apple). Capture once headed, then session.lock.json records the snapshot hash + date. Exact cookie-set materialization (names/httponly/secure) TBD on first live capture; Centrifuge channel names and turn-event schema also unverified.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

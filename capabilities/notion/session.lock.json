@@ -1,0 +1,16 @@
+{
+  "site": "www.notion.so",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.notion.so",
+    "cookieNames": ["token_v2", "notion_user_id", "notion_users", "notion_browser_id", "csrf"],
+    "apiHost": "https://www.notion.so",
+    "authEndpoint": "/api/v3/authValidate",
+    "captureCommand": "ui2api profile capture \"https://www.notion.so\" --login",
+    "targetDir": "data/www.notion.so/.session/state.json"
+  },
+  "note": "This package installs and runs from a captured session snapshot of www.notion.so. Bundles read token_v2 via getCookieWithoutPermissionCheck; api base is /api/v3 (module 96265); route guard skips /api/v3/ URLs. eventName-based RPC (module 773163) builds POST /api/v3/<EventName> at runtime — exact body shape NOT recoverable from static bundles. getAnswer/enrichedAIGenerate NOT present in downloadable JS — live capture needed to recover the chat/Q&A request method. Selectors below are unverified pending first live capture.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

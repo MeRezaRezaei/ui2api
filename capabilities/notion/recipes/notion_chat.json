@@ -1,0 +1,16 @@
+{
+  "capability": "notion_chat",
+  "site": "notion",
+  "flow": "ui-path (eventName RPC client, trusted input + Enter, site's own send handler)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.notion.so/ai", "note": "session snapshot injected (data/www.notion.so/.session); chatThreadId can be set via query params t/ct/at" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "navigate to /ai to start a fresh thread; jittered 600-1300ms dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into the AI composer (textarea or contenteditable — UNVERIFIED selector; update after first capture)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[data-block-id]", "until": "stable 2500ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "Underlying wire = same-origin eventName RPC: client builds POST /api/v3/<EventName> via webpack module 773163 (exports qU = query, G2 = transaction). Literal endpoints seen: /api/v3/queryCollectionHTML, /api/v3/contentPreview, /api/v3/authValidate, /api/v3/getSkilljarProfile. Streaming/polling mechanism NOT confirmed (ReadableStream present, no EventSource/WebSocket literal). UI path drives the site's own JS, so no request reconstruction needed — confirm exact body shape on first live capture.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "conol",
+  "name": "Conol (conol.ai)",
+  "url": "https://conol.ai",
+  "loginRequired": true,
+  "loginHint": "Conol uses passkey-only auth (WebAuthn via better-auth v1.6.16). No email/password or social login exists. Register a passkey on first login via browser-native WebAuthn prompt. Capture once: ui2api profile capture \"https://conol.ai\" --login, then replay data/conol.ai/.session",
+  "composer": [],
+  "send": { "kind": "keyEnter" },
+  "answer": [],
+  "newChat": "",
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "note": "ALL SELECTORS ARE EMPTY / UNVERIFIED CANDIDATES. The Conol SPA is fully client-rendered behind better-auth session; the 22 static JS bundles contain only the marketing/landing page + better-auth client + passkey plugin -- no app UI code was reachable. Composer, answer, and new-chat selectors must be populated from the first headed live capture after passkey authentication.",
+  "selectorNotes": {
+    "composer": [
+      "UNKNOWN -- the SPA app UI (knowledge base, agent runner, chat) is lazy-loaded behind auth and not present in any static bundle",
+      "REQUIRES: first live capture after passkey auth to extract DOM selectors from the rendered app"
+    ],
+    "answer": [
+      "UNKNOWN -- same constraint as composer; no answer/assistant-turn DOM class available from static analysis"
+    ],
+    "newChat": [
+      "UNKNOWN -- sidebar navigation selector unknown; SPA routing behind auth"
+    ]
+  }
+}

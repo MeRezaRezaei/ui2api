@@ -1,0 +1,16 @@
+{
+  "capability": "inner_ai_chat",
+  "site": "app.innerai.com",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer (Centrifuge WS turn events with seq-paginated REST fallback)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://app.innerai.com", "note": "session snapshot injected (data/app.innerai.com/.session); may redirect to https://platform.innerai.com/login.html when anonymous — complete email+password (or social) once, then continue. Selectors UNVERIFIED (hashed CSS-modules SPA)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer (contenteditable/textarea/role=textbox candidate)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": ".assistant-message, [data-message-role='assistant']", "until": "stable 2500ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = v3 agentic chat: POST https://platformapi.innerai.com/api/v1/chat/messages {session_id, message, document_ids?, metadata{capability_hint?}} -> {turn_id, assistant_message_id}; realtime = Centrifuge WS wss://chat-api-v3-ws.innerai.com/connection/websocket using connection_token + subscription_token from POST /api/v1/realtime/tokens {session_id}; turn events REST fallback GET /api/v1/chat/conversations/{conv_id}/turns/{turn_id}/events (since_seq, limit). Auth = USER-EMAIL/USER-TOKEN/DEVICE-ID headers from cookies token/email/deviceId. The UI path drives the site's own JS so no channel names / protobuf reconstruction needed.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

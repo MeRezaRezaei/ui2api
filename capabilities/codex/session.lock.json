@@ -1,0 +1,16 @@
+{
+  "site": "chatgpt.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "chatgpt.com",
+    "cookieNames": ["__Secure-oai-is", "__Secure-oai-employee-device"],
+    "apiHost": "https://chatgpt.com",
+    "authEndpoint": "/api/auth/session",
+    "captureCommand": "ui2api profile capture \"https://chatgpt.com/codex\" --login",
+    "targetDir": "data/chatgpt.com/.session/codex.json"
+  },
+  "note": "This package installs and runs from the built-in chatgpt profile plus a captured session snapshot of chatgpt.com (Codex is a route set on the same SPA and requires the same login/cookie jar — provider-catalog classifies chatgpt-web-codex as cookie auth, 'ChatGPT Cookie header (full)'). Wire (bundle-verified, no browser): Bearer token from same-origin /api/auth/session, refreshed via BroadcastChannel auth-session; Codex calls ride https://chatgpt.com/backend-api under /wham/* and the SSE task stream /tasks/{task_id}/stream; task creation needs a Sentinel token for mode codex_create_task_turn. UNVERIFIED until first live capture: exact cookie/localStorage set materialized by /api/auth/session in the codex context, live codex model slugs (eligible_codex_model_slugs), SSE event-field names, and every Codex SPA selector (profile.json). Capture once headed, then record the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

@@ -1,0 +1,125 @@
+{
+  "id": "duckduckgo",
+  "name": "DuckDuckGo AI Chat (duck.ai)",
+  "url": "https://duck.ai/chat",
+  "siteVersion": "serp_20260915_052329_ET (data-version-tag, page SHA af41a90799e2d64643c19a933f25b799c589b2df)",
+  "description": "DuckDuckGo AI Chat — private, anonymous AI chat via duck.ai. Routes through multiple providers (OpenAI GPT-5.x, Anthropic Claude 4.x, Meta Llama 4, Mistral, Kimi K2). No account required.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "transport": {
+    "type": "sse-over-fetch",
+    "protocol": "POST /duckchat/v1/chat → text/event-stream (SSE); frames are JSON lines or bracket-marked markers ([PING]/[DONE]/[CHAT_TITLE:…])",
+    "baseUrl": "https://duck.ai/duckchat/v1",
+    "chatEndpoint": "/duckchat/v1/chat",
+    "statusEndpoint": "/duckchat/v1/status",
+    "capabilitiesEndpoint": "/duckchat/v1/capabilities",
+    "usageEndpoint": "/duckchat/v1/usage",
+    "summarizeEndpoint": "/duckchat/v1/summarize",
+    "auth": {
+      "anonymous": true,
+      "vqdToken": "GET /status with x-vqd-accept:1 → response header carries VQD token → included in chat POST headers → new VQD returned in each chat response header for next request",
+      "ddgAccountOptional": "POST /duckchat/v1/auth/authorize → /auth/token → internal_duckchat_user cookie; enables chat history sync only",
+      "headers": {
+        "x-fe-version": "${__DDG_BE_VERSION__}-${__DDG_FE_CHAT_HASH__} (runtime-injected, dev fallback)",
+        "x-fe-signals": "fraud/browser-fingerprint signals (built from page state)",
+        "vqd": "server-issued anonymous session token, refreshed per-request (header name obfuscated in module exports, historically x-vqd-4)"
+      }
+    },
+    "streaming": "SSE frames: JSON lines (action:success/error with role, content) + markers ([PING], [DONE], [CHAT_TITLE:text], [FIXED_COST_WINDOW_USAGE:...], [STOP_REASON:word], [LIMIT_ACCOUNT], [LIMIT_CONVERSATION], [ADS:{windowID}], [SUMMARY_REFRESH_HINT:...], [SUMMARY_INVALID], [WARN_CONVERSATION_LIMIT:n])"
+  },
+  "capabilities": [
+    {
+      "id": "duckduckgo_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; SSE-streamed answer via POST /duckchat/v1/chat (accept: text/event-stream). Model configurable per message.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "implementation": "POST /duckchat/v1/chat with JSON body {model, messages[{role,content[{type,text}]}], metadata{toolChoice}, reasoningEffort, canUseWebSearch, ...}; SSE response parsed for [DONE], assistant role content, error markers. VQD token from GET /status preflight.",
+      "recipe": "recipes/duckduckgo_chat.json"
+    },
+    {
+      "id": "duckduckgo_web_search",
+      "name": "Web search toggle",
+      "description": "Toggle in-chat web search (metadata.toolChoice.WebSearch → backend performs search, injects results + citations)",
+      "method": "ui-toggle (composer toolbar Web Search switch)",
+      "implementation": "metadata.toolChoice.WebSearch:true on the chat POST request. UI toggle driven by DUCKCHAT_TOOLS_WEB_SEARCH_LABEL state. Exact DOM selector unverified.",
+      "recipe": null
+    },
+    {
+      "id": "duckduckgo_model_picker",
+      "name": "Model picker read",
+      "description": "Read available AI models from the embedded bundle config (gpt-4o/5.x, claude-sonnet-4-x/opus-4-x, llama-4, mistral-small, kimi-k2-5)",
+      "method": "dom.picker (unverified selectors) or embedded model list",
+      "implementation": "Model names are embedded in the JS bundle (NOT fetched from an endpoint). Model picker state key: availableModels. Picker UI DOM selectors unverified. Subscription tiers (free/plus/pro) gate model access.",
+      "recipe": null
+    },
+    {
+      "id": "duckduckgo_file_upload",
+      "name": "File / image upload",
+      "description": "Attach files and images to a chat message (base64-encoded in request body)",
+      "method": "composer attach UI (file input) or programmatic (base64 in content array)",
+      "implementation": "Content parts: {type:'image', mimeType, image: dataUrl} for images; {type:'file', content: base64, encoding:'base64', mimeType, filename} for documents. Page context: {type:'file', ..., source:'page-context', url, title}. Max file/image limits enforced client+server.",
+      "recipe": null
+    },
+    {
+      "id": "duckduckgo_reasoning",
+      "name": "Reasoning mode",
+      "description": "Set reasoning effort (fast / reasoning / extended) for supported models",
+      "method": "composer reasoning toggle or request param",
+      "implementation": "reasoningEffort field in chat POST body; values from DUCKCHAT_REASONING_MODE_{FAST,REASONING,EXTENDED_REASONING} i18n keys. Extended reasoning flag: extendedThinking in request metadata.",
+      "recipe": null
+    },
+    {
+      "id": "duckduckgo_chat_history",
+      "name": "Chat history (local or synced)",
+      "description": "Read recent chats from IndexedDB (anonymous, device-local) or DDG-account sync",
+      "method": "IndexedDB read or DOM sidebar",
+      "implementation": "Local storage via CHATS_STORAGE_* events (IndexedDB-backed); DDG sync via internal_duckchat_user cookie + /duckchat/v1/auth/* endpoints. CHATS_DATA_GET/SET/REMOVE operations in bundle. Selectors unverified.",
+      "recipe": null
+    }
+  ],
+  "models": {
+    "note": "Model list is embedded in the JS bundle (NOT fetched from a /models endpoint). The following are the literal model IDs found. Subscription tier (free/plus/pro) gates access server-side.",
+    "free": [
+      "gpt-4o",
+      "claude-3-haiku-20240307", "claude-haiku",
+      "Llama-3.3-70B-Instruct-Turbo",
+      "Mistral-Small-3", "Mistral-Small-24B-Instruct-2501",
+      "Mixtral-8x7B-Instruct-v0.1"
+    ],
+    "plus": [
+      "gpt-4.1", "gpt-4.5",
+      "claude-3-7-sonnet-latest", "claude-sonnet-4", "claude-sonnet-4-5", "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct",
+      "o3-mini", "o4-mini", "mistral-small-2603"
+    ],
+    "pro": [
+      "gpt-5", "gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.6",
+      "claude-opus-4", "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-6-thinking",
+      "claude-opus-4-7", "claude-opus-4-8",
+      "kimi-k2-5"
+    ],
+    "internal": [
+      "claude-sonnet-4-internal", "Llama-4-Maverick-internal",
+      "gpt-realtime", "gpt-realtime-2.1-mini", "gpt-oss"
+    ],
+    "voice": ["voice-mode"]
+  },
+  "auth": {
+    "required": false,
+    "kind": "anonymous-with-optional-account",
+    "note": "ANONYMOUS: chat works without login. VQD token obtained from GET /status with x-vqd-accept:1 header — refreshed per chat response. DDG account (internal_duckchat_user cookie) is optional for chat history sync. No cookies needed for anonymous chat. provider-catalog duckduckgo-web cookie duckai is NOT required for anonymous usage.",
+    "anonymous": true,
+    "anonymousMechanism": "GET /duckchat/v1/status (x-vqd-accept:1) → response header → token → POST /duckchat/v1/chat header → new token in chat response header",
+    "ddgAccount": {
+      "optional": true,
+      "cookie": "internal_duckchat_user",
+      "authEndpoints": ["/duckchat/v1/auth/authorize", "/duckchat/v1/auth/token", "/duckchat/v1/auth/callback", "/duckchat/v1/auth/logout"],
+      "purpose": "chat history sync across devices only; chat functionality not gated on this"
+    }
+  },
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 3 JS bundles (~4.3MB) from duck.ai (the final 302 target of duckduckgo.com/?ia=chat and /aichat); no browser launched"
+}

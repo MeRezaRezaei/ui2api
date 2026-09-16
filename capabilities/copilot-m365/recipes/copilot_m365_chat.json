@@ -1,0 +1,17 @@
+{
+  "capability": "copilot_m365_chat",
+  "site": "copilot-m365-web",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer (schema identical to gemini_chat.json)",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://copilot.cloud.microsoft", "note": "Entra-sign-in wall: session snapshot of a real M365 work/school account required (MSA blocked). Redirect observed: /login -> /loginv2 -> login.microsoftonline.com authorize (client 4765445b..., scope M365Copilot.Read.All) -> form_post to /landingv2." },
+    { "step": 2, "action": "dismiss", "onlyWhen": "consent / first-run overlay present", "note": "dismiss selectors UNVERIFIED (inherited candidates only)" },
+    { "step": 3, "action": "new-chat", "onlyWhen": "args.newChat", "note": "New-chat button selector UNVERIFIED" },
+    { "step": 4, "action": "type", "input": "args.prompt", "note": "composer selector UNVERIFIED — type into visible chat textarea" },
+    { "step": 5, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 6, "action": "read", "selector": "message blocks (answer selectors UNVERIFIED — see profile.json)", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire NOT OBSERVED pre-auth (Entra wall). Grounding notes: CSP connect-src allows https://turbo.microsoft.com (expected SSE/WS chat backend, root 403 via Front Door) + *.office.com + *.office.microsoft.com; scope M365Copilot.Read.All + graph.microsoft.com dns-prefetch => tenant-data grounding. Transport to be derived from an authenticated capture — consumer copilot's wss://.../c/api/chat protocol does NOT carry over.",
+  "stealth": "real M365 Entra session snapshot required; conditional access (MFA/device compliance) may gate headless contexts; Front Door WAF on turbo tier. No anonymous path exists.",
+  "sessionLock": "session.lock.json"
+}
