@@ -3,18 +3,50 @@
   "name": "Venice (venice.ai)",
   "site": "venice.ai",
   "url": "https://venice.ai",
-  "description": "Privacy-first uncensored AI chat (OpenAI/Anthropic/Meta-style model lineups behind a 'session' cookie). Capability package drives the Venice composer and reads streamed answers off the page.",
-  "version": "0.1.0-scaffold",
+  "description": "Privacy-first uncensored AI chat + image/video/audio generation. Plain REST/SSE (OpenAI-compatible) against api.venice.ai/api/v1 — no protobuf/RPC layer. Grounded by landing bundle analysis 2026-09-16; logged-in web-session wire still to-verify.",
+  "version": "0.2.0-ground",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
-  "siteVersion": "to be recorded on first live capture",
+  "date": "2026-09-16",
+  "siteVersion": "landing bundles from cdn.venice.ai (Turbopack immutable chunks, 17 files ~900KB); chat app chunks lazy-loaded",
+  "transport": {
+    "base": "https://api.venice.ai/api/v1",
+    "protocol": "plain REST over HTTPS; OpenAI-compatible chat/completions; SSE streaming inferred from OpenAI contract (not observed raw in landing bundles)",
+    "auth": {
+      "publicApi": "Authorization: Bearer <api-key> (VENICE_API_KEY)",
+      "webSession": "cookie 'session' (provider-catalog venice-web); session-minted bearer flow to-verify on live capture"
+    },
+    "streaming": "OpenAI-style SSE on /chat/completions (inferred)",
+    "mediaHost": "https://media.venice.ai",
+    "evidence": "embedded SDK samples + venice-14.js chunk 52809 (base url, chat/image/video/audio request bodies, bearer scheme)"
+  },
   "capabilities": [
     {
       "id": "venice_chat",
       "name": "Chat",
-      "description": "Send a prompt on the Venice composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture.",
-      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "description": "OpenAI-compatible chat completion: POST https://api.venice.ai/api/v1/chat/completions with {model, messages, venice_parameters:{enable_web_search:'auto', enable_web_citations:true}}. UI path on /chat/v2 as fallback; composer/send/answer selectors still unverified candidates.",
+      "method": "api-path (POST /api/v1/chat/completions, Bearer auth) with ui-path fallback on /chat/v2",
       "recipe": "recipes/venice_chat.json"
+    },
+    {
+      "id": "venice_image",
+      "name": "Image generation",
+      "description": "POST https://api.venice.ai/api/v1/image/generate with {model:'flux-2-pro', prompt, width, height}. Studio UI at /studio/image (edit/upscale/background-remove advertised). Response shape (file url on media.venice.ai vs base64) to-verify.",
+      "method": "api-path (POST /api/v1/image/generate, Bearer auth)",
+      "recipe": "recipes/venice_image.json"
+    },
+    {
+      "id": "venice_video",
+      "name": "Video generation",
+      "description": "POST https://api.venice.ai/api/v1/video/queue with {model:'veo3-full-text-to-video', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/video.",
+      "method": "api-path (POST /api/v1/video/queue, Bearer auth)",
+      "recipe": "recipes/venice_video.json"
+    },
+    {
+      "id": "venice_audio",
+      "name": "Music / audio generation",
+      "description": "POST https://api.venice.ai/api/v1/audio/queue with {model:'stable-audio-25', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/audio.",
+      "method": "api-path (POST /api/v1/audio/queue, Bearer auth)",
+      "recipe": "recipes/venice_audio.json"
     }
   ],
   "auth": {
@@ -23,15 +55,15 @@
     "host": "venice.ai",
     "cookies": ["session"],
     "capture": "ui2api analyse https://venice.ai --login",
-    "note": "provider-catalog.md (OmniRoute webSessionCredentials, venice-web): auth kind=cookie, credential='session'. Exact cookie set beyond session to be verified on first live capture."
+    "note": "provider-catalog.md (OmniRoute webSessionCredentials, venice-web): auth kind=cookie, credential='session'. Public REST API instead takes a plain API key (Authorization: Bearer) — a capability may alternatively use a Venice API key. Exact cookie set beyond session to be verified on first live capture."
   },
   "permissions": [
-    "requires a real logged-in venice.ai session snapshot (cookie session)",
-    "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://venice.ai --login)",
-    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture",
-    "Venice's private-mode / model-picker / image-gen surfaces are NOT catalogued in provider-catalog.md — do not package until verified on a live capture"
+    "requires a real logged-in venice.ai session snapshot (cookie session) for the web path",
+    "image/video/audio capabilities call the public REST API with a Bearer API key (VENICE_API_KEY) — session not required if key is available",
+    "selectors for the /chat/v2 composer/send/answer are unverified candidates — confirm on first live capture",
+    "logged-in web-session token-mint flow and exact SSE frames to-verify on first live capture (chat-app chunks lazy-loaded, absent from landing bundle graph)"
   ],
   "builtinProfile": "venice (loaded from capabilities/venice/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static analysis of https://venice.ai HTML + 17 landing JS bundles (cdn.venice.ai immutable chunks). No browser launched. Endpoints/request bodies/auth scheme VERIFIED from embedded SDK samples and bundle strings; web-session wire and DOM selectors remain to-verify on live capture."
 }

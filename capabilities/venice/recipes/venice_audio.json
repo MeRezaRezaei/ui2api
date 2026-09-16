@@ -1,0 +1,13 @@
+{
+  "capability": "venice_audio",
+  "site": "venice",
+  "flow": "api-path — direct REST POST https://api.venice.ai/api/v1/audio/queue with Bearer API key; async queue then poll status",
+  "steps": [
+    { "step": 1, "action": "api", "url": "https://api.venice.ai/api/v1/audio/queue", "method": "POST", "headers": { "Authorization": "Bearer <api-key>", "Content-Type": "application/json" }, "body": { "model": "stable-audio-25", "prompt": "args.prompt" }, "note": "endpoint + body VERIFIED from landing bundles" },
+    { "step": 2, "action": "poll", "note": "async queue — poll job status until done; exact poll/job endpoints + download shape to-verify on first live call" }
+  ],
+  "output": { "audioUrl": "string", "queueId": "string" },
+  "rpc": "VERIFIED endpoint/body: POST https://api.venice.ai/api/v1/audio/queue, {model:'stable-audio-25', prompt}. Auth: Bearer API key. Queue/poll/download endpoints to-verify. Alternative UI path at /studio/audio — selectors unverified.",
+  "stealth": "direct API call with a real Venice API key; indistinguishable from any platform API consumer",
+  "sessionLock": "session.lock.json"
+}

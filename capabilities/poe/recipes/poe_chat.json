@@ -3,14 +3,14 @@
   "site": "poe",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://poe.com", "note": "session snapshot injected (data/poe.com/.session); app may 302 to www.poe.com" },
+    { "step": 1, "action": "open", "url": "https://poe.com", "note": "session snapshot injected (data/poe.com/.session); site is Cloudflare-walled — first live capture must record the real session (cookie p-b) and any challenge handling; app may 302 to www.poe.com" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
     { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer)" },
     { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
     { "step": 5, "action": "read", "selector": "[data-testid*=\"response\"]", "until": "stable 2000ms", "timeoutMs": 60000 }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "underlying wire not yet known (no bundle analysis in this environment); the UI path drives the site's own JS so no endpoint reconstruction needed. Exact composer/send/answer selectors TBD on first live capture.",
-  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "rpc": "NOT retrievable statically — poe.com is Cloudflare-walled (HTTP 403 'Just a moment…' on every probed path) and the challenge page leaks no JS bundle URLs, so no endpoint reconstruction was possible. Community recall suggests POST to poe.com/api/gql_POST + SSE/WS streaming, but that is UNVERIFIED; confirm the wire on first live capture before trusting it. The UI path drives the site's own JS regardless.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing (a real-browser challenge cookie is part of the captured session)",
   "sessionLock": "session.lock.json"
 }

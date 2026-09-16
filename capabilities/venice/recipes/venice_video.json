@@ -1,0 +1,13 @@
+{
+  "capability": "venice_video",
+  "site": "venice",
+  "flow": "api-path — direct REST POST https://api.venice.ai/api/v1/video/queue with Bearer API key; async queue then poll status",
+  "steps": [
+    { "step": 1, "action": "api", "url": "https://api.venice.ai/api/v1/video/queue", "method": "POST", "headers": { "Authorization": "Bearer <api-key>", "Content-Type": "application/json" }, "body": { "model": "veo3-full-text-to-video", "prompt": "args.prompt" }, "note": "endpoint + body VERIFIED from landing bundles" },
+    { "step": 2, "action": "poll", "note": "async queue — poll job status until done; exact poll/job endpoints + download shape to-verify on first live call" }
+  ],
+  "output": { "videoUrl": "string", "queueId": "string" },
+  "rpc": "VERIFIED endpoint/body: POST https://api.venice.ai/api/v1/video/queue, {model:'veo3-full-text-to-video', prompt}. Auth: Bearer API key. Queue/poll/download endpoints to-verify. Alternative UI path at /studio/video — selectors unverified.",
+  "stealth": "direct API call with a real Venice API key; indistinguishable from any platform API consumer",
+  "sessionLock": "session.lock.json"
+}

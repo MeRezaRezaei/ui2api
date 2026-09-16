@@ -3,22 +3,45 @@
   "name": "Perplexity (perplexity.ai)",
   "site": "www.perplexity.ai",
   "url": "https://www.perplexity.ai",
-  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
-  "description": "Capability package for Perplexity's AI search chat at https://www.perplexity.ai. Sends prompts through the Ask composer and reads streamed answers (with citations) off the page. provider-catalog.md documents the auth surface only (perplexity-web: cookie kind, __Secure-next-auth.session-token); no endpoints — including any search focus-mode API — are documented there, so search-focus capabilities are NOT fabricated here and are marked to be verified on first live capture.",
-  "version": "0.1.0-scaffold",
+  "siteVersion": "NextAuth SPA (sitemap partitions reference internal web app codename 'comet'); exact build pins not obtainable (HTML shell Cloudflare-challenged) — record on first live capture",
+  "description": "Capability package for Perplexity's AI search chat at https://www.perplexity.ai. Probe-verified (2026-09-16): Next.js + NextAuth stack; Live NextAuth route group (providers apple/email/google/googleonetap/pplx-jwt-to-cookie/workos, /api/auth/csrf, /api/auth/session, /api/auth/callback/email); session cookie __Secure-next-auth.session-token (matches catalog perplexity-web entry). Chat/search/model surfaces (POST /api/chat, /socket.io/, /rest/chat, /api/config, /api/perplexity/model, /api/search, /api/models) and the HTML shell are behind Cloudflare managed challenge — NO JS bundles obtainable statically, so streaming mechanism, focus modes and model ids are NOT fabricated here and are marked to be verified on first live capture.",
+  "version": "0.2.0-probed",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
+  "date": "2026-09-16",
   "capabilities": [
     {
       "id": "perplexity_chat",
       "name": "Chat / Ask stream",
-      "description": "Send a prompt on the Ask composer; streamed answer + citations read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "description": "Send a prompt on the Ask composer; streamed answer + citations read off the page. Playwright/CDP UI path: type into composer, keyEnter, read answer until stable. Wire transport behind the composer is unobservable statically (Cloudflare wall) and is driven by the site's own JS — no wire reconstruction needed for the UI path.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "recipe": "recipes/perplexity_chat.json"
     }
   ],
+  "transport": {
+    "status": "partially-verified",
+    "verified": {
+      "kind": "http (NextAuth route group)",
+      "routes": [
+        "GET /api/auth/providers — 200 JSON providers list",
+        "GET /api/auth/csrf — 200 {csrfToken}",
+        "GET /api/auth/session — 200 {} (logged out)",
+        "GET /api/auth/signin — 302 -> /auth/signin",
+        "GET /api/auth/callback/email — 307 (magic-link flow)",
+        "GET /robots.txt, /sitemap.xml — 200"
+      ],
+      "cookie": "__Secure-next-auth.session-token (NextAuth default on HTTPS; matches provider-catalog perplexity-web entry)",
+      "sso": "WorkOS enterprise SSO provider present"
+    },
+    "notVerified": {
+      "chatStream": "POST /api/chat, /socket.io/?EIO=4&transport=polling, /rest/chat, /api/config, /api/perplexity/model, /api/search, /api/models all return 403 Cloudflare managed-challenge to curl",
+      "streaming": "Socket.IO vs SSE vs fetch route handlers — no bundle access; community docs (unverified) describe Engine.IO/Socket.IO with a perplexity_asks JSON event carrying query/search_focus/model",
+      "focusModes": "search_focus values (web/math/video/social/file/science) community-documented only, NOT bundle-verified — perplexity_search focus capability NOT added",
+      "modelIds": "N/A statically",
+      "antiBot": "expect cf_clearance / cf_chl_* cookies and possible re-challenge inside a real browser session"
+    }
+  },
   "permissions": [
-    "session snapshot for www.perplexity.ai (cookie __Secure-next-auth.session-token per provider-catalog perplexity-web entry)",
+    "session snapshot for www.perplexity.ai (cookie __Secure-next-auth.session-token per provider-catalog perplexity-web entry + NextAuth probes)",
     "Playwright over CDP — trusted input only, no synthetic events",
     "network scoped to https://www.perplexity.ai and its api hosts (to be mapped on first live capture)"
   ],
@@ -28,9 +51,9 @@
     "host": "www.perplexity.ai",
     "cookies": ["__Secure-next-auth.session-token"],
     "capture": "ui2api analyse https://www.perplexity.ai --login",
-    "regionNote": "credential name from capabilities/provider-catalog.md perplexity-web entry (kind: cookie, credentialName \"__Secure-next-auth.session-token\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture. NOTE: the src/profile/profile.ts built-in currently allows anonymous 'Ask' (loginRequired false); this package requires a real session per the catalog."
+    "regionNote": "Probe-verified NextAuth surface (2026-09-16): providers apple/email/google/googleonetap/pplx-jwt-to-cookie/workos; magic-link (email) is the most automation-friendly credential path. Cookie name __Secure-next-auth.session-token matches capabilities/provider-catalog.md perplexity-web entry; exact cookie set, expiry, sameSite and any Cloudflare challenge cookies to be confirmed on first live capture. NOTE: the src/profile/profile.ts built-in currently allows anonymous 'Ask' (loginRequired false); this package requires a real session per the catalog — profile.json pins loginRequired true."
   },
   "builtinProfile": "perplexity (matches built-in in src/profile/profile.ts selectors; package requires loginRequired true per provider-catalog — anonymous built-in differs)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl probes only (host-constrained, no browser/JS): GET /api/auth/* (NextAuth) verified 200/30x; HTML shell + all chat/model/search endpoints Cloudflare-managed-challenged -> no bundle download, no wire evidence; all chat/selector details marked to be verified on first live capture"
 }

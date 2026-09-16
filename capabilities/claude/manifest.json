@@ -3,24 +3,24 @@
   "name": "Claude (claude.ai)",
   "site": "claude.ai",
   "url": "https://claude.ai",
-  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
-  "description": "Capability package for Anthropic's Claude chat at https://claude.ai. Sends prompts through the ProseMirror composer and reads streamed answers off the page. provider-catalog.md documents the auth surface only (claude-web: cookie kind, sessionKey); no wire endpoints are documented there, so everything API-shaped is marked to be verified on first live capture.",
-  "version": "0.1.0-scaffold",
+  "siteVersion": "2026-09 anonymous app-shell capture (index-DviVWZR7, shared-{0-16}, shared-msg-{0-2}, shared-frame-*) — asset pins on assets-proxy.anthropic.com/claude-ai/v2/assets/v1/",
+  "description": "Capability package for Anthropic's Claude chat at https://claude.ai. Sends prompts through the ProseMirror composer and reads streamed answers off the page. Real bundle analysis completed 2026-09-16 (22 bundles, ~4.2MB): conversation-scoped REST under /api/organizations/{org}/chat_conversations/{conv}/…, SSE (text/event-stream, resumable via resume_token, typed Ping/MessageStart/MessageDelta/MessageStop events), cookie auth over credentials:include with anthropic-version header. claude.ai itself is Cloudflare/hCaptcha gated — the DOM session must come from a headed live capture.",
+  "version": "0.2.0-grounded",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
+  "date": "2026-09-16",
   "capabilities": [
     {
       "id": "claude_chat",
       "name": "Chat stream",
-      "description": "Send a prompt on the claude.ai composer (ProseMirror); streamed answer read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "description": "Send a prompt on the claude.ai composer (ProseMirror, confirmed in bundles); streamed answer read off [data-testid=\"assistant-message\"] nodes (confirmed in bundles shared-7/shared-msg-1). Wire takes the site's own send handler (src/profile/profile.ts built-in claude profile); raw send endpoint pending first live network log.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "recipe": "recipes/claude_chat.json"
     }
   ],
   "permissions": [
-    "session snapshot for claude.ai (cookie sessionKey per provider-catalog claude-web entry)",
+    "session snapshot for claude.ai (cookie sessionKey per provider-catalog claude-web entry; Cloudflare + hCaptcha attestation require a headed capture)",
     "Playwright over CDP — trusted input only, no synthetic events",
-    "network scoped to https://claude.ai and its api hosts (to be mapped on first live capture)"
+    "network scoped to https://claude.ai/api (credentials:include, anthropic-version 2023-06-01) and assets-proxy.anthropic.com (public bundle CDN)"
   ],
   "auth": {
     "required": true,
@@ -28,9 +28,35 @@
     "host": "claude.ai",
     "cookies": ["sessionKey"],
     "capture": "ui2api analyse https://claude.ai --login",
-    "regionNote": "credential name from capabilities/provider-catalog.md claude-web entry (kind: cookie, credentialName \"sessionKey\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture"
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    },
+    "regionNote": "credential name from capabilities/provider-catalog.md claude-web entry (kind cookie, credentialName \"sessionKey\"); all app fetches run with credentials:include. Cookie set/expiry must be confirmed on live capture; CF challenge must be solved in the headed browser first."
   },
-  "builtinProfile": "claude (matches built-in in src/profile/profile.ts; package selectors mirror it but stay tagged unverified until a package-owned live capture confirms them)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+  "transport": {
+    "gate": "Cloudflare (cli.ai returns a 'Just a moment…' JS challenge to plain curl) + hCaptcha invisible attestation (js.hcaptcha.com, __antClientAttestationHcaptchaInvisibleReady) + X-Device-Attestation header on streams",
+    "appShell": "public HTML at https://claude.ai embeds module manifest; JS bundles are public on assets-proxy.anthropic.com (not gated) — endpoint mining is scriptable, DOM/session is not",
+    "restBase": "https://claude.ai/api/organizations/{orgUuid}/chat_conversations/{convUuid}",
+    "streaming": "SSE text/event-stream; resume_token param + sse_recovered; typed events Ping/MessageStart/MessageDelta/ContentBlock*/MessageStop/Error",
+    "sendEndpoint": "unverified for this build — classic POST …/chat_conversations/{conv}/completion absent from harnessed bundles; candidate …/chat_messages + …/task/{id}/status. Record from first live network log."
+  },
+  "implementation": {
+    "selectors": [
+      {
+        "composer": ".ProseMirror",
+        "proseMirror": "confirmed in b-shared-3/b-shared-15"
+      },
+      {
+        "answer": "[data-testid=\"assistant-message\"]",
+        "confirmed": "b-shared-7, b-shared-msg-1, b-shared-common-msg-1"
+      },
+      {
+        "flags": "extended_thinking (b-shared-0/b-shared-13), web_search (b-shared-0 et al.), artifacts/CCR sandbox"
+      }
+    ],
+    "recommendation": "drive the composer over trusted input (built-in profile), stream-read the assistant-message nodes; do not reconstruct the send wire until a live capture confirms it"
+  },
+  "builtinProfile": "claude (src/profile/profile.ts lines 109-120) — package selectors mirror it; composer+answer selectors now bundle-grounded, send path still marked unverified until a package-owned live capture",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static bundle analysis: curl claude.ai (CF challenge) -> extracted app-shell module manifest from challenge HTML -> downloaded 22 bundles from assets-proxy.anthropic.com (~4.2MB) -> grepped for endpoints/streaming/auth/flags. No browser launched; DOM-selector and wire-send claims state confidence explicitly."
 }

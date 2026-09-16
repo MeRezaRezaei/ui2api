@@ -3,17 +3,42 @@
   "name": "DeepSeek Chat (chat.deepseek.com)",
   "site": "chat.deepseek.com",
   "url": "https://chat.deepseek.com",
-  "description": "DeepSeek's chat product (deepseek-chat / deepseek-reasoner). Capability package drives the composer and reads streamed answers off the page.",
-  "version": "0.1.0-scaffold",
+  "description": "DeepSeek's chat product (deepseek-chat / deepseek-reasoner mode via per-session model_type + thinking toggle). REST + SSE chat on same origin, PoW-protected, token-auth from localStorage userToken.",
+  "version": "0.2.0",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
-  "siteVersion": "to be recorded on first live capture",
+  "date": "2026-09-16",
+  "siteVersion": "SPA commit 9a1e24e6; bundles default-vendors.73c732e189.js + main.39d5f46438.js on fe-static.deepseek.com/chat/static/ (~2.5MB) — static bundle analysis, 2026-09-16",
+  "transport": {
+    "type": "sse-json",
+    "protocol": "HTTP POST + SSE (text/event-stream) via fetch reader; REST JSON envelope {data:{biz_code,biz_data,biz_msg}}; TTS uses WebSocket wss://<host>/api/v0/chat/tts/",
+    "baseUrl": "https://chat.deepseek.com/api",
+    "streaming": "error-free SSE events: ready, delta, toast, title, finish, close, hint, updateSession, updateParentMessage, updateFile; delta payloads are JSON-patch ops {p,o:SET|BATCH|APPEND,v}; ready carries response_message_id/request_message_id/model_type; heartbeat watchdog (x-ds-sse-heartbeat-timeout-secs) + auto-resume via /chat/resume_stream on dropped streams",
+    "auth": {
+      "scheme": "Authorization: Bearer <userToken>",
+      "tokenOrigin": "localStorage key userToken (also settingsJwt → x-settings-token; __appKit_userInfo → user id)",
+      "refresh": "mobile-SMS/email-OTP registration & login (no password path found); streaming JWT not observed — userToken persists across sessions"
+    },
+    "antiBot": {
+      "pow": "POST /api/v0/chat/create_pow_challenge {target_path} → {algorithm,challenge,salt,signature,expire_at,expire_after}; client mines then sends X-DS-PoW-Response (guest: X-DS-Guest-PoW-Response) = base64(JSON{pow fields, target_path}). Mining loop in async chunk, algorithm not read.",
+      "waf": "AWS WAF JS challenge on / (202 + x-amzn-waf-action: challenge; curl UA 403). API + static CDN (fe-static.deepseek.com) reachable without WAF token.",
+      "throttle": "request x-hif-leim/x-hif-dliq bucket tokens; response x-hif-ttl (default 600s) and x-fetch-after-sec throttle hints; x-ds-trace-id per request"
+    }
+  },
   "capabilities": [
     {
       "id": "deepseek_chat",
       "name": "Chat",
-      "description": "Send a prompt on the DeepSeek composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture (deepseek-reasoner renders a separate reasoning block — surface to be confirmed).",
+      "description": "Send a prompt on the DeepSeek composer; streamed answer off the page. Wire: POST /api/v0/chat/completion {chat_session_id, parent_message_id, model_type, prompt, ref_file_ids, thinking_enabled, search_enabled, source, action, preempt}; answer = SSE delta patches applied to a state tree.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "implementation": "composer POST → SSE stream. Session mgmt /api/v0/chat_session/{create,delete,delete_all,fetch_page,update_title,batch_update_pinned}; resume /api/v0/chat/resume_stream; variants /api/v0/chat/{continue,regenerate,edit_message,stop_stream,message_feedback}; history GET /api/v0/chat/history_messages. PoW header required on completion (see transport.antiBot). Envelope: biz_code/biz_data/biz_msg.",
+      "recipe": "recipes/deepseek_chat.json"
+    },
+    {
+      "id": "deepseek_reasoner",
+      "name": "Reasoning / CoT mode (thinking toggle)",
+      "description": "Toggle reasoning (CoT) on per request/session. Mechanism verified in bundles: thinking_enabled boolean in completion body; x-thinking-enabled:'1'|'0' + x-model-type headers on file uploads; per-session model_type passed on every completion; i18n 'Think before responding to solve reasoning problems' toggle tooltip. model_type id VALUES are server-driven from /api/v0/client/settings feature model_configs (: [{model_type,is_default,enabled,switchable,file_feature:{vision}}]); literal 'deepseek-reasoner'/'deepseek-chat' ids do NOT appear in bundles — resolve from a live /client/settings read before use.",
+      "method": "ui-path (flip in-page thinking toggle) or model_type on direct wire",
+      "implementation": "set args.thinking → drive the page toggle (localStorage thinkingEnabledStorageHandle / searchEnabledStorageHandle back the composer switches); or set thinking_enabled/model_type on the /api/v0/chat/completion body. Reasoning text arrives in the same SSE delta/title patch stream (exact reasoning path key is in an async chunk — to capture live).",
       "recipe": "recipes/deepseek_chat.json"
     }
   ],
@@ -23,14 +48,14 @@
     "host": "chat.deepseek.com",
     "credentials": { "kind": "token", "name": "userToken" },
     "capture": "ui2api analyse https://chat.deepseek.com --login",
-    "note": "provider-catalog.md (OmniRoute webSessionCredentials, deepseek-web): auth kind=token, credential='userToken'. Exact storage (localStorage vs cookie) and replay (header/cookie/payload) to be verified on first live capture."
+    "note": "verified: localStorage userToken replayed as Authorization: Bearer <userToken> on every withToken request. Login paths are PoW-guarded (create_pow_challenge / guest challenge) and mobile-SMS/email-OTP only in bundles; password login not found. AWS WAF JS challenge sits on / — a real browser session (Playwright) that clears it is required."
   },
   "permissions": [
-    "requires a real logged-in chat.deepseek.com session snapshot (token userToken)",
-    "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://chat.deepseek.com --login)",
-    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture"
+    "requires a real logged-in chat.deepseek.com session snapshot (localStorage userToken; also preserves settingsJwt + __appKit_userInfo)",
+    "chat/completion targets carry a PoW header — page (Playwright) solves it invisibly; raw-call automation would need the miner",
+    "composer/send/answer selectors are still unverified candidates — confirm on first live capture (ui2api analyse https://chat.deepseek.com --login)"
   ],
   "builtinProfile": "deepseek (loaded from capabilities/deepseek/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static analysis of 2 real bundles (fe-static.deepseek.com/chat/static/: default-vendors.73c732e189.js, main.39d5f46438.js) recovered despite AWS WAF wall on the HTML entry (SPA HTML served from /api/v0/users/me). All endpoints/headers/SSE names verified as literal strings in main bundle. No browser launched; DOM selectors + model id values + PoW algorithm remain to-verify."
 }

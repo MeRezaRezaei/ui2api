@@ -1,7 +1,7 @@
 {
   "capability": "venice_chat",
   "site": "venice",
-  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer; underlying wire grounded: POST https://api.venice.ai/api/v1/chat/completions (OpenAI-compatible, venice_parameters web-search/citations)",
   "steps": [
     { "step": 1, "action": "open", "url": "https://venice.ai", "note": "session snapshot injected (data/venice.ai/.session)" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
@@ -10,7 +10,7 @@
     { "step": 5, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 60000 }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "underlying wire not yet known (no bundle analysis in this environment); the UI path drives the site's own JS so no endpoint reconstruction needed. Exact composer/send/answer selectors TBD on first live capture.",
+  "rpc": "underlying wire VERIFIED from landing bundles: POST https://api.venice.ai/api/v1/chat/completions (OpenAI-compatible REST/SSE). Body {model, messages, venice_parameters:{enable_web_search:'auto', enable_web_citations:true}}. Auth: Bearer api key (public) or session-derived bearer (web, to-verify). The UI path drives the site's own JS so no endpoint reconstruction needed. Composer/send/answer selectors remain unverified candidates (chat-app chunks lazy-loaded).",
   "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
   "sessionLock": "session.lock.json"
 }

@@ -23,5 +23,5 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (DeepSeek's current web UI renders answers with the .ds-markdown class). Tune each against a real browser after the first live capture (data/chat.deepseek.com/.session). Auth per provider-catalog.md: token 'userToken'."
+  "note": "SCAFFOLD — composer/answer/new-chat/dismiss selectors are UNVERIFIED candidate guesses (no browser run; .ds-markdown is from prior UI knowledge, not this analysis). Tune against a real browser after the first live capture. CANDIDATES confirmed by bundle analysis (use as verification anchors): localStorage keys userToken (=Bearer token), settingsJwt (→ x-settings-token), __appKit_userInfo (user id); thinking/search composer toggles back onto localStorage thinkingEnabledStorageHandle / searchEnabledStorageHandle."
 }

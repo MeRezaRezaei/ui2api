@@ -3,14 +3,15 @@
   "site": "deepseek",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://chat.deepseek.com", "note": "session snapshot injected (data/chat.deepseek.com/.session)" },
+    { "step": 1, "action": "open", "url": "https://chat.deepseek.com", "note": "session snapshot injected (data/chat.deepseek.com/.session). AWS WAF JS challenge on / must be cleared by the real browser; the page then reads localStorage userToken and Bearer-auths itself." },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
-    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer)" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer candidate (see profile composer). Optional args.thinking flips the in-page thinking toggle (backed by localStorage thinkingEnabledStorageHandle)." },
     { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
     { "step": 5, "action": "read", "selector": ".ds-markdown", "until": "stable 2000ms", "timeoutMs": 60000 }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "underlying wire not yet known (no bundle analysis in this environment); the UI path drives the site's own JS so no endpoint reconstruction needed. Exact composer/send/answer selectors TBD on first live capture.",
-  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
-  "sessionLock": "session.lock.json"
+  "rpc": "wire (verified from bundles): POST /api/v0/chat/completion {chat_session_id, parent_message_id, model_type, prompt, ref_file_ids, thinking_enabled, search_enabled, source, action, preempt} → SSE stream of JSON-patch deltas (events ready/delta/toast/title/finish/close/hint/updateSession/updateParentMessage/updateFile; envelope {data:{biz_code,biz_data,biz_msg}}); auth via localStorage userToken as Bearer; PoW header X-DS-PoW-Response required (browser solves invisibly). The UI path drives the site's own JS so no PoW mining is needed.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing; PoW/WAF handled by the real browser",
+  "sessionLock": "session.lock.json",
+  "notes": "composer/send/answer selectors (.ds-markdown) remain UNVERIFIED candidates — the SPA rendered classes were not observable without a browser. model_type for the session is server-driven (/api/v0/client/settings model_configs); drive the in-page toggle for reasoning mode unless a live model_type read is wired up."
 }
