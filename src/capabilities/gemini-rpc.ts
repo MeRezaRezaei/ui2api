@@ -30,7 +30,9 @@ export interface GeminiRpcResult {
 
 // The page-side implementation — a single evaluate body so esbuild's __name
 // helpers never leak into the page. Stays anonymous, closes over nothing.
-const PAGE_RPC = String.raw`
+// Exported (read-only) so the wire format + page-source purity can be unit
+// tested hermetically; callers never run it outside the page.
+export const PAGE_RPC = String.raw`
 async ({ method, payload }) => {
   // 1. XSRF token — the same source the site's own XHRs use (WIZ_global_data's
   //    SNlM0e field; falls back to the __Secure-1PSIDTS cookie, and finally to
@@ -190,5 +192,63 @@ export async function callGeminiRpc(page: {
     raw: out?.raw ?? "",
     latencyMs: out?.latencyMs ?? 0,
     error: out?.error ?? (out?.ok ? undefined : "rpc failed (http " + (out?.http ?? "?") + ")"),
+  };
+}
+
+export interface GeminiBatchFrame {
+  ok: boolean;
+  method: string;
+  data: unknown;
+  raw: string;
+  error?: string;
+}
+
+// Pure re-implementation of the response half of PAGE_RPC (the XSSI guard strip
+// + length-framing unwrap) as a module-level function so it can be exercised
+// outside the browser. Same rules as the page code: strip a leading )]}' guard
+// line if present, skip length-prefix lines, parse every leading-bracket line
+// as a frame, take the first "wrb.fr" entry, and surface "er" entries as errors.
+// Never throws — malformed input returns an { ok:false, error } frame.
+export function parseBatchFrames(text: string, fallbackMethod = ""): GeminiBatchFrame {
+  let body: string;
+  if (text.startsWith(")]}'")) body = text.slice(5); // 4 guard chars + \n
+  else body = text;
+  const frames: unknown[] = [];
+  for (const line of body.split("\n")) {
+    const l = line.trim();
+    if (!l) continue;
+    if (/^\d+$/.test(l)) continue; // length prefix line
+    if (!l.startsWith("[")) continue; // not a JSON frame (be safe)
+    try {
+      frames.push(JSON.parse(l));
+    } catch (e) {
+      return { ok: false, method: fallbackMethod, data: undefined, raw: text.slice(0, 4000), error: "unparseable batch frame: " + String(e) };
+    }
+  }
+  if (frames.length === 0) return { ok: false, method: fallbackMethod, data: undefined, raw: text.slice(0, 4000), error: "empty batch response" };
+  const parsed = frames[0];
+  // Batch shape: [["wrb.fr", "<method>", <payload-json>, null, ...], ...]
+  const entry = Array.isArray(parsed) ? parsed.find((r) => Array.isArray(r) && r[0] === "wrb.fr") : null;
+  if (!entry) return { ok: false, method: fallbackMethod, data: undefined, raw: body.slice(0, 4000), error: "no wrb.fr entry in batch" };
+  const methodEcho = typeof entry[1] === "string" ? entry[1] : fallbackMethod;
+  // Gemini encodes errors as ["er",<code>,<msg>,...] entries — surface them.
+  const er = Array.isArray(parsed) && parsed.find((r) => Array.isArray(r) && r[0] === "er");
+  const payloadJson = entry[2];
+  let data: unknown;
+  if (typeof payloadJson === "string") {
+    try {
+      data = JSON.parse(payloadJson);
+    } catch {
+      data = payloadJson;
+    }
+  } else {
+    data = payloadJson;
+  }
+  return {
+    ok: !er,
+    method: methodEcho,
+    data,
+    raw: body.slice(0, 20000),
+    ...(er ? { error: "batch error " + JSON.stringify(er).slice(0, 400) } : {}),
   };
 }

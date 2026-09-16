@@ -21,6 +21,9 @@ import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } fro
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
+import { VeniceCapabilities } from "../capabilities/venice.js";
+import { DeepSeekCapabilities } from "../capabilities/deepseek.js";
+import { ClaudeCapabilities } from "../capabilities/claude.js";
 
 export interface PromptdOptions {
   port: number;
@@ -196,6 +199,76 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
         const shared = await pool.sharedBrowser();
         const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Venice capability surface: chat + list_conversations (DOM sidebar).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/venice") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("venice", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/venice/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new VeniceCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // DeepSeek capability surface: chat + list_conversations (DOM sidebar) +
+      // reasoner (honest ok:false until a grounded "Think" toggle exists).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/deepseek") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("deepseek", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/deepseek/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new DeepSeekCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Claude capability surface: chat + list_conversations (DOM sidebar).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/claude") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("claude", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/claude/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new ClaudeCapabilities(profile, { browser: shared, dataDir });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
