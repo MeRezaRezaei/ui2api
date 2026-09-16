@@ -1,0 +1,19 @@
+{
+  "capability": "hunyuan_voice_mode",
+  "site": "hunyuan",
+  "flow": "surface documentation — voice input is NOT directly scriptable by Playwright/CDP; this recipe documents the capability, grounded facts, and the handoff boundary instead of an execution sequence",
+  "scriptable": false,
+  "verdict": "NOT directly scriptable: voice mode requires a real microphone, real speech, and the site's anti-bot headed session (X-webdriver:1 + Turing.js/QIMEI fingerprint). Browser automation cannot feed the mic a clean synthetic audio signal through the site's ASR path without tripping ASR/anti-bot gates, so this capability is documented for a human-assisted round-trip, not an automated one. Send of a voice turn also rides the same POST /api/chat/ SSE stream as text chat (voice_recorder content chunks) but the audio-capture step itself has no scriptable entry point.",
+  "surface": {
+    "ui": "mic button in the composer input box; behaviour gated by ASR experiment flag media.asr.exp_asr_web_voice_input_switch (bundle value, not a live-verified flag)",
+    "stream": "voice turns emit chat-stream content[].type 'voice_recorder' with recorder statuses SPEAKING / STOPPING / SPLIT on POST /api/chat/ (same stream as text chat)",
+    "key": "GET /api/generate/voice_tmpkey (API_GET_VOICE_SDK_TOKEN) returns the TTS/ASR SDK temp key used before capture",
+    "inputType": "X-Input-Type header distinguishes 'text' vs 'voice' turns; ASR-returned text is editable by the user before send (reviewer flow)",
+    "tts": "TTS output shaping NOT confirmed from bundles (expected to ride the same stream via voice_recorder / ai_speaking chunk fields aiSpeakingState); treat as unverified"
+  },
+  "what_is_scriptable": "grounded and scriptable today: the /api/generate/voice_tmpkey lookup (GET with session cookies + X-ID/X-Token) is a plain wire call. UNVERIFIED until live session: the exact mic trigger DOM, the real temp-key payload shape, and the voice_recorder chunk envelope. Everything from 'get a user to actually speak' onward is human territory.",
+  "output": { "handoff": "human uses mic on the real headed session; automation may later read the resulting conversation via hunyuan_list_conversations" },
+  "note": "No fabricated endpoints: only the inventory-proven surface appears above (/api/generate/voice_tmpkey, /api/chat/ voice_recorder chunks, X-Input-Type text|voice, mic composer UI). Full inventory: hunyuan-yuanbao/CAPABILITIES.md §6. Needs live validation to promote any part of this to an executable recipe.",
+  "stealth": "n/a for automation — this capability is human-assisted by design; if probed, HEADED + real profile + X-webdriver:0 only",
+  "sessionLock": "session.lock.json"
+}

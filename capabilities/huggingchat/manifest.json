@@ -1,0 +1,64 @@
+{
+  "id": "huggingchat",
+  "name": "HuggingChat (huggingface.co/chat)",
+  "url": "https://huggingface.co/chat",
+  "siteVersion": "0.20.0 (sveltekit base /chat; commit 5f34e1f, PUBLIC_LLM_ROUTER_ALIAS_ID omni)",
+  "capabilities": [
+    {
+      "id": "huggingchat_chat",
+      "name": "Chat stream",
+      "description": "Create conversation (POST /chat/conversation) + send prompt on the composer; NDJSON answer stream off POST /chat/conversation/{id} (Chunked ReadableStream, newline-delimited JSON events), resume via EventSource /chat/conversation/{id}/stream, stop via /stop-generating",
+      "method": "ui-path (trusted input + Enter, site's own send handler); full wire pinned in bundles",
+      "recipe": "recipes/huggingchat_chat.json"
+    },
+    {
+      "id": "huggingchat_conversations",
+      "name": "Conversation CRUD / history",
+      "description": "GET/POST/PATCH/DELETE /chat/api/v2/conversations(?p=), /conversations/{id}, /conversations/{id}/message/{messageId}, delete-all, import-share",
+      "method": "v2 REST over same-origin cookies",
+      "recipe": null
+    },
+    {
+      "id": "huggingchat_models",
+      "name": "Model catalog & picker",
+      "description": "GET /chat/api/v2/models (140 + omni router, live payload) and /models/{id}; activeModel + system prompt + tools/reasoning/artifacts overrides via /chat/settings and the conversation-create body",
+      "method": "v2 REST over same-origin cookies",
+      "recipe": null
+    },
+    {
+      "id": "huggingchat_settings",
+      "name": "Settings read/upsert",
+      "description": "GET /chat/api/v2/user/settings and debounced POST /chat/settings (streamingMode smooth|raw, customPrompts, toolsOverrides, artifactsOverrides, providerOverrides, reasoningOverrides)",
+      "method": "v2 REST over same-origin cookies",
+      "recipe": null
+    },
+    {
+      "id": "huggingchat_mcp",
+      "name": "MCP servers",
+      "description": "GET /chat/api/mcp/servers (base Web Search (Exa) + Hugging Face); enabled servers attached to each send (selectedMcpServerNames/selectedMcpServers)",
+      "method": "v2 REST over same-origin cookies + per-turn body field",
+      "recipe": null
+    }
+  ],
+  "transport": {
+    "chatSend": "POST https://huggingface.co/chat/conversation/{id} (multipart/form-data; data=<JSON>) -> 200 Chunked NDJSON event stream (verified in chunks/D_6jIJz0.js)",
+    "chatCreate": "POST https://huggingface.co/chat/conversation (JSON {model,preprompt,mlAssistant}) -> {conversationId} (verified in nodes/4.BaBAhJuN.js)",
+    "chatResume": "GET https://huggingface.co/chat/conversation/{id}/stream?messageId=&fromSeq= (EventSource; events 'update'/'end') (verified in nodes/5.Bktonmdl.js)",
+    "chatStop": "POST https://huggingface.co/chat/conversation/{id}/stop-generating (verified in nodes/5.Bktonmdl.js)",
+    "chatShare": "POST https://huggingface.co/chat/conversation/{id}/share -> {shareId}; link https://huggingface.co/chat/r/{shareId} (verified in chunks/D_6jIJz0.js)",
+    "settingsUpsert": "POST https://huggingface.co/chat/settings (full settings JSON, 300ms debounce) (verified in chunks/CZhNzXSe.js)",
+    "management": "GET/POST/PATCH/DELETE https://huggingface.co/chat/api/v2/{conversations,conversations/{id},conversations/{id}/message/{messageId},conversations/import-share,models,models/{id},models/old,user,user/settings,user/reports,user/billing-orgs,feature-flags,public-config,debug/config,export,spaces/deploy}, GET /chat/api/mcp/servers (verified in chunks/DVITWop-.js + SSR data-sveltekit-fetched payloads)"
+  },
+  "auth": {
+    "required": false,
+    "kind": "session-snapshot (same-origin cookies; no API token in client at all)",
+    "host": "huggingface.co",
+    "loginRequired": false,
+    "anonymousSupported": true,
+    "note": "Anonymous works (GET /chat/api/v2/user = null; 140 models + full chat flow reachable signed-out). Exact cookie set (hf-chat family) is server-set and NOT visible in client bundles - unverified statically; capture once with `ui2api profile capture \"https://huggingface.co/chat\" --login` and record snapshot hash in session.lock.json. 401 with /oauth authorization|has been revoked|requested scopes/ -> redirect /login?next=<path>",
+    "capturedAt": null
+  },
+  "builtinProfile": "huggingchat",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + SvelteKit bundle reading (~0.8MB: app dictionary, DVITWop-/D7aK-xnk/D_6jIJz0 chunks, nodes 4/5/11/12 + SSR data-sveltekit-fetched payloads); no browser launched"
+}

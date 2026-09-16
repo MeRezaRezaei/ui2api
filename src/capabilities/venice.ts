@@ -18,6 +18,17 @@
 //                                profile.json carries no model-picker selectors,
 //                                so an honest ok:false "selectors unverified"
 //                                is returned instead of guessing a catalog.
+//   venice_image / venice_video / venice_audio -> grounded REST media
+//                                capabilities (POST /api/v1/image/generate
+//                                flux-2-pro, /video/queue
+//                                veo3-full-text-to-video, /audio/queue
+//                                stable-audio-25) returned as honest ok:false —
+//                                executable only via direct REST with a Bearer
+//                                API key, but the runner's own auth path is the
+//                                web session's cookie 'session' -> token-mint
+//                                bearer hop, UNVERIFIED, and no VENICE_API_KEY
+//                                is provisioned here; not runnable until a live
+//                                capture confirms the auth flow.
 //
 // TRANSPORT GROUND TRUTH (CAPABILITIES.md / manifest.json, landing-bundle
 // analysis 2026-09-16 — VERIFIED):
@@ -138,6 +149,12 @@ export class VeniceCapabilities {
         return { ...base, ...(await this.listConversations(args)) };
       case "venice_model_list":
         return { ...base, ...this.modelList() };
+      case "venice_image":
+        return { ...base, ...this.imageGenerate() };
+      case "venice_video":
+        return { ...base, ...this.videoGenerate() };
+      case "venice_audio":
+        return { ...base, ...this.audioGenerate() };
       default:
         return { capability, ok: false, data: undefined, error: `unknown venice capability: ${capability}`, ...base };
     }
@@ -241,6 +258,63 @@ export class VeniceCapabilities {
         "model picker selectors unverified — capabilities/venice/profile.json has no model-picker DOM " +
         "candidate (only composer/answer selectors), and the logged-in /chat/v2 catalog is a lazy chunk " +
         "absent from the landing bundle graph; confirm the picker DOM on first live capture",
+    };
+  }
+
+  // --- venice_image / venice_video / venice_audio: grounded REST media
+  // capabilities that this runner cannot execute yet ---
+  // Ground truth (recipes + verified landing bundles): direct REST POSTs on
+  // api.venice.ai/api/v1 — /image/generate {model:'flux-2-pro', prompt, width,
+  // height}, /video/queue {model:'veo3-full-text-to-video', prompt},
+  // /audio/queue {model:'stable-audio-25', prompt} — with Bearer API-key auth.
+  // They are not executable from THIS runner: its auth path is the web
+  // session's cookie 'session' -> token-mint bearer hop, which is UNVERIFIED
+  // (chat-app chunks lazy-loaded), and no VENICE_API_KEY is provisioned here.
+  // Honest ok:false rather than fabricating a call until first live capture.
+  private imageGenerate(): VeniceCapabilityResult {
+    return {
+      capability: "venice_image",
+      ok: false,
+      method: "api-path (POST /api/v1/image/generate)",
+      data: undefined,
+      error:
+        "not executable yet — ground truth: POST https://api.venice.ai/api/v1/image/generate with " +
+        "{model:'flux-2-pro', prompt, width, height} + Bearer API key " +
+        "(recipes/venice_image.json, endpoint/body verified from landing bundles). The runner's auth path is " +
+        "the web session's cookie 'session' -> token-mint bearer hop, which is UNVERIFIED, and no " +
+        "VENICE_API_KEY is provisioned in the runner; confirm the auth flow on first live capture",
+    };
+  }
+
+  private videoGenerate(): VeniceCapabilityResult {
+    return {
+      capability: "venice_video",
+      ok: false,
+      method: "api-path (POST /api/v1/video/queue)",
+      data: undefined,
+      error:
+        "not executable yet — ground truth: POST https://api.venice.ai/api/v1/video/queue with " +
+        "{model:'veo3-full-text-to-video', prompt} + Bearer API key " +
+        "(recipes/venice_video.json, endpoint/body verified from landing bundles; async queue, poll/download " +
+        "endpoints to-verify). The runner's auth path is the web session's cookie 'session' -> token-mint " +
+        "bearer hop, which is UNVERIFIED, and no VENICE_API_KEY is provisioned in the runner; confirm the " +
+        "auth flow on first live capture",
+    };
+  }
+
+  private audioGenerate(): VeniceCapabilityResult {
+    return {
+      capability: "venice_audio",
+      ok: false,
+      method: "api-path (POST /api/v1/audio/queue)",
+      data: undefined,
+      error:
+        "not executable yet — ground truth: POST https://api.venice.ai/api/v1/audio/queue with " +
+        "{model:'stable-audio-25', prompt} + Bearer API key " +
+        "(recipes/venice_audio.json, endpoint/body verified from landing bundles; async queue, poll/download " +
+        "endpoints to-verify). The runner's auth path is the web session's cookie 'session' -> token-mint " +
+        "bearer hop, which is UNVERIFIED, and no VENICE_API_KEY is provisioned in the runner; confirm the " +
+        "auth flow on first live capture",
     };
   }
 

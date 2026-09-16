@@ -1,0 +1,14 @@
+{
+  "id": "chatgpt",
+  "name": "ChatGPT (chatgpt.com)",
+  "url": "https://chatgpt.com",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://chatgpt.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR)",
+  "composer": ["#prompt-textarea", "div[contenteditable=\"true\"]"],
+  "send": { "kind": "keyEnter" },
+  "answer": ["[data-message-author-role='assistant']", ".markdown"],
+  "newChat": "[aria-label=\"New chat\"], [aria-label*=\"New conversation\"]",
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "note": "Selectors COPIED verbatim from the builtin chatgpt profile (src/profile/profile.ts lines 96-108) — ground truth. UNVERIFIED — confirm on first live capture: SSR may render the composer as div[contenteditable=true] inside #prompt-textarea's ProseMirror node; answer=assistant turns carry data-message-author-role. Wire facts (backend-api endpoints, Bearer auth, SSE) come from JS-bundle analysis and did NOT launch a browser."
+}

@@ -1,0 +1,17 @@
+{
+  "capability": "copilot_chat",
+  "site": "copilot",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://copilot.microsoft.com", "note": "anonymous; no session required — temp session key issued server-side if the UI needs one" },
+    { "step": 2, "action": "dismiss", "onlyWhen": "consent/promo overlay present", "note": "Accept/Continue overlay dismissed via the profile dismiss selectors" },
+    { "step": 3, "action": "new-chat", "onlyWhen": "args.newChat", "note": "button[aria-label='New chat'] / data-testid='sidebar-new-conversation-nav-item'" },
+    { "step": 4, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into #userInput (placeholder 'Message Copilot', cap 10240 chars)" },
+    { "step": 5, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 6, "action": "read", "selector": "message blocks (answer selectors TBD from profile.json)", "until": "stable 2000ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = WebSocket wss://copilot.microsoft.com/c/api/chat?api-version=2 (out {event:'send',content:[...],mode:'chat'}; in appendText/replaceText until done; in-band 'challenge' answered with challengeResponse); the UI path drives the site's own JS so the protocol is handled by the page",
+  "stealth": "real anonymous session, trusted inputs, site's own send handler; expect Cloudflare Turnstile + hashcash challenge on first socket connect (clean-IP headless) — verify on live capture",
+  "sessionLock": "session.lock.json"
+}

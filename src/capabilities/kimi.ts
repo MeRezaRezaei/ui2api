@@ -118,6 +118,30 @@ export class KimiCapabilities {
         return this.listConversations(args);
       case "kimi_model_list":
         return this.modelList();
+      case "kimi_web_search":
+        return {
+          capability: "kimi_web_search",
+          ok: false,
+          data: undefined,
+          error:
+            "kimi_web_search flips the composer web-search switch (state key selectSearch) so the answer is grounded by live search; feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH=1, search{force}} on ChatService.Chat — but the toggle DOM selectors are UNVERIFIED candidates (inventory proves selectSearch in bundles, no live DOM class); confirm on first live capture",
+        };
+      case "kimi_file_upload":
+        return {
+          capability: "kimi_file_upload",
+          ok: false,
+          data: undefined,
+          error:
+            "kimi_file_upload is a wire-first REST multipart POST to https://notilo.kimi.com/apiv2-files/file/upload (FileService.Upload, kimi.gateway.file.v1) with parse tracking via GetFileParseProgress + ListChatFiles — but the multipart field name, response envelope, and composer attach UI selector are all UNVERIFIED; endpoint and auth grounded from JS-bundle inventory, confirm on first live capture",
+        };
+      case "kimi_long_context":
+        return {
+          capability: "kimi_long_context",
+          ok: false,
+          data: undefined,
+          error:
+            "kimi_long_context sets ChatRequestOptions.context_length (kimi.common.v1.ContextLength enum) on the existing ChatService.Chat stream — the composer length picker is driven by state key selectContextLength, but exact ContextLength enum codes and the toggle DOM selector are UNVERIFIED; confirm on first live capture",
+        };
       default:
         return { capability, ok: false, data: undefined, error: `unknown kimi capability: ${capability}` };
     }

@@ -34,6 +34,14 @@
       "recipe": "recipes/deepseek_chat.json"
     },
     {
+      "id": "deepseek_list_conversations",
+      "name": "List conversations",
+      "description": "Read the logged-in session's conversation list from the live DOM sidebar (a[href*='/chat/'] anchors; matches both /chat/<id> and /a/chat/s/<id> href shapes, static nav routes excluded). Honest current posture: DOM path reflects the current session only — the real wire RPC (POST /api/v0/chat_session/fetch_page for listing, GET /api/v0/chat/history_messages for message history) needs the localStorage userToken Bearer + PoW challenge headers only available inside a live headed session.",
+      "method": "ui-path (DOM sidebar a[href*='/chat/'] on the live page)",
+      "implementation": "openPage() + waitForDomain, then page.evaluate over a[href*='/chat/'] extracting the conversation id and innerText title, deduped by id, capped at 20. Wire RPC pending a live headed session capture (localStorage userToken + PoW-solved session).",
+      "recipe": null
+    },
+    {
       "id": "deepseek_reasoner",
       "name": "Reasoning / CoT mode (thinking toggle)",
       "description": "Toggle reasoning (CoT) on per request/session. Mechanism verified in bundles: thinking_enabled boolean in completion body; x-thinking-enabled:'1'|'0' + x-model-type headers on file uploads; per-session model_type passed on every completion; i18n 'Think before responding to solve reasoning problems' toggle tooltip. model_type id VALUES are server-driven from /api/v0/client/settings feature model_configs (: [{model_type,is_default,enabled,switchable,file_feature:{vision}}]); literal 'deepseek-reasoner'/'deepseek-chat' ids do NOT appear in bundles — resolve from a live /client/settings read before use.",

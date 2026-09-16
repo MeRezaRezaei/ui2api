@@ -1,0 +1,16 @@
+{
+  "site": "huggingface.co/chat",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "huggingface.co",
+    "localStorageKeys": [],
+    "cookieNote": "auth is server-set same-origin cookies (hf-chat family); exact names NOT visible in client bundles - record the real set on first capture",
+    "apiHost": "https://huggingface.co/chat",
+    "captureCommand": "ui2api profile capture \"https://huggingface.co/chat\" --login",
+    "targetDir": "data/huggingface.co/.session/state.json"
+  },
+  "note": "This package installs and runs from the built-in huggingchat profile; anonymous mode is verified working in the static payloads (GET /chat/api/v2/user = null, 140 models present). Anonymous chat needs no session snapshot. For signed-in features (billing/Pro credits, assistants, persistent history) capture once and record the snapshot hash + real cookie set here: loginRequired is false and login redirects to https://huggingface.co/login?next=<path> on 401-only when the error matches /oauth authorization|has been revoked|requested scopes/.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

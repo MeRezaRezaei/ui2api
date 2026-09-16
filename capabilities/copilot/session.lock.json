@@ -1,0 +1,15 @@
+{
+  "site": "copilot.microsoft.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "copilot.microsoft.com",
+    "localStorageKeys": ["hasBeenAuthenticated", "cmc-session", "auth0UserName"],
+    "apiHost": "https://copilot.microsoft.com/c/api",
+    "captureCommand": "ui2api profile capture \"https://copilot.microsoft.com\"",
+    "targetDir": "data/copilot.microsoft.com/.session/state.json"
+  },
+  "note": "Copilot runs anonymously (builtin profile default): a temporary session key is issued server-side via POST /c/api/user/sessions/temporary and passed to the chat socket as temporarySessionKey — no login or cookie secret required. Capture once to (a) verify answer-message DOM selectors against the current React UI, (b) confirm whether Cloudflare Turnstile/hashcash challenge blocks the first socket connect, (c) record the exact cookie set (expected: consent/MSCC + 1DS analytics only). localStorage keys above are referenced by the app (anonymous-mode keys may be session-only); the 6h temp-session key is not stored in localStorage. Optional MSAL sign-in swaps in BrowserFlow.accessToken for WS query + Authorization header.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

@@ -12,6 +12,24 @@
 //                                 hy_user/hy_token session cookies + the
 //                                 X-webdriver-free browser posture and is future
 //                                 work pending a live capture.
+//   hunyuan_deep_search       -> honest not-yet-live stub: deep-search session
+//                                 (scene ai_search_pro*, GET
+//                                 /api/inputguide/search/create, deep_search
+//                                 CoT chunks) is inventory-proven but the
+//                                 composer AI-search / deep-mode trigger is an
+//                                 UNVERIFIED candidate selector — ok:false until
+//                                 confirmed on a first live capture.
+//   hunyuan_document_qa       -> honest not-yet-live stub: document attach wire
+//                                 (/api/resource/genUploadInfo -> COS ->
+//                                 /api/resource/fileParse|asyncFileParse) is
+//                                 inventory-proven but the file-picker / attach
+//                                 DOM is UNVERIFIED — ok:false until confirmed on
+//                                 a first live capture.
+//   hunyuan_voice_mode        -> honest not-yet-live stub: mic voice input
+//                                 (voice_tmpkey + voice_recorder chunks) is NOT
+//                                 directly scriptable (recipe scriptable:false —
+//                                 needs a real mic + real speech + the anti-bot
+//                                 headed session) — ok:false, human-assisted.
 //
 // ANTI-BOT POSTURE (from CAPABILITIES.md / profile.json — every call must
 // remember it):
@@ -117,6 +135,12 @@ export class HunyuanCapabilities {
         return { ...base, ...(await this.chat(args)) };
       case "hunyuan_list_conversations":
         return { ...base, ...(await this.listConversations(args)) };
+      case "hunyuan_deep_search":
+        return { ...base, ...(await this.deepSearch(args)) };
+      case "hunyuan_document_qa":
+        return { ...base, ...(await this.documentQa(args)) };
+      case "hunyuan_voice_mode":
+        return { ...base, ...(await this.voiceMode(args)) };
       default:
         return { capability, ok: false, data: undefined, error: `unknown hunyuan capability: ${capability}`, ...base };
     }
@@ -189,6 +213,90 @@ export class HunyuanCapabilities {
     } finally {
       await this.teardownPage(page);
     }
+  }
+
+  // --- hunyuan_deep_search: honest not-yet-live stub ---
+  // Inventory-proven (bundles, not executed): deep mode = chat scene
+  // ai_search_pro (finance ai_search_pro_fin / DeepSeek ai_search_deepseek) sent
+  // on the turn; search-session provisioning via
+  // GET /api/inputguide/search/create; CoT streams over the same POST /api/chat/
+  // SSE as content[].type deep_search with step/process + per-step waits and
+  // searchGuid cards (tools google_web_search / paper_search / hunyuan_web_search
+  // render as deep-search CoT cards). NOT executable yet: the composer's
+  // AI-search entry / 联网-deep-mode trigger is only a CANDIDATE selector and the
+  // request bodies were never executed. Fabricating a toggle would break on the
+  // first live capture — confirm the exact trigger on a live session first.
+  private async deepSearch(args: Record<string, unknown>): Promise<HunyuanCapabilityResult> {
+    return {
+      capability: "hunyuan_deep_search",
+      ok: false,
+      method: "unavailable",
+      data: undefined,
+      error:
+        "Deep search builds an AI-search report: chat scene ai_search_pro (finance " +
+        "ai_search_pro_fin / DeepSeek ai_search_deepseek) with search-session provisioning via " +
+        "GET /api/inputguide/search/create; the CoT streams over the same POST /api/chat/ SSE " +
+        "stream as content[].type deep_search with step/process + per-step waits and searchGuid " +
+        "cards (tools google_web_search / paper_search / hunyuan_web_search render as deep-search " +
+        "CoT cards). NOT executable yet: the composer AI-search / 联网-deep-mode trigger is only a " +
+        "CANDIDATE selector and the request bodies were never executed during bundle analysis — " +
+        "confirm the exact toggle + selector on a first live capture to activate.",
+    };
+  }
+
+  // --- hunyuan_document_qa: honest not-yet-live stub ---
+  // Inventory-proven (bundles, not executed): attach ONE document per turn
+  // (pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv); wire =
+  // /api/resource/genUploadInfo -> COS write -> /api/resource/fileParse|
+  // asyncFileParse, then doc analysis rides the same /api/chat SSE stream as
+  // doc_percent/docDeepModeInfo/step chunks (deep-read modes
+  // TRANSLATION/SUMMARY/GUIDE/DEEP_SEARCH; mind-map
+  // GET /api/user/agent/doc/getMindMap). NOT executable yet: the file-picker /
+  // plus-panel attach DOM is an UNVERIFIED candidate — confirm the selector on a
+  // first live capture rather than fabricate it.
+  private async documentQa(args: Record<string, unknown>): Promise<HunyuanCapabilityResult> {
+    return {
+      capability: "hunyuan_document_qa",
+      ok: false,
+      method: "unavailable",
+      data: undefined,
+      error:
+        "Document Q&A attaches one document per turn (pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv): " +
+        "wire = /api/resource/genUploadInfo -> COS write -> /api/resource/fileParse|asyncFileParse, " +
+        "then the analysis rides the same POST /api/chat/ SSE stream as doc_percent / docDeepModeInfo / " +
+        "step chunks (deep-read modes TRANSLATION/SUMMARY/GUIDE/DEEP_SEARCH; mind-map via " +
+        "GET /api/user/agent/doc/getMindMap). NOT executable yet: the file-picker / attach-button " +
+        "DOM is only an UNVERIFIED candidate and the endpoints were validated from bundles but never " +
+        "executed — confirm the selector + wire on a first live capture to activate.",
+    };
+  }
+
+  // --- hunyuan_voice_mode: honest not-yet-live stub ---
+  // Recipe is scriptable:false — voice input is NOT directly scriptable by
+  // Playwright/CDP: it needs a real microphone, real speech, and the anti-bot
+  // headed session (X-webdriver:1 flag + Turing.js/QIMEI fingerprint);
+  // browser automation cannot feed the mic a clean synthetic signal through the
+  // site's ASR path without tripping ASR/anti-bot gates. Inventory-proven
+  // surface: GET /api/generate/voice_tmpkey (ASR/TTS SDK temp key), voice turns
+  // ride the same POST /api/chat/ SSE as content[].type voice_recorder
+  // (SPEAKING/STOPPING/SPLIT), X-Input-Type text|voice. UNVERIFIED until a
+  // live session: the exact mic-trigger DOM and the temp-key payload shape. So
+  // this is a human-assisted round-trip, not an automated one.
+  private async voiceMode(args: Record<string, unknown>): Promise<HunyuanCapabilityResult> {
+    return {
+      capability: "hunyuan_voice_mode",
+      ok: false,
+      method: "unavailable",
+      data: undefined,
+      error:
+        "Voice mode captures mic input on the composer: the ASR/TTS SDK temp key comes from " +
+        "GET /api/generate/voice_tmpkey, and voice turns ride the same POST /api/chat/ SSE stream " +
+        "as content[].type voice_recorder (statuses SPEAKING/STOPPING/SPLIT, X-Input-Type text|voice). " +
+        "NOT executable yet: the mic-trigger DOM and temp-key payload shape are UNVERIFIED, and the " +
+        "recipe is scriptable:false — it requires a real microphone + real speech plus the anti-bot " +
+        "headed session (X-webdriver:1 flag, Turing.js/QIMEI fingerprint), so it is a human-assisted " +
+        "round-trip pending a first live capture, not an automated one.",
+    };
   }
 
   private fail(capability: string, e: unknown): HunyuanCapabilityResult {

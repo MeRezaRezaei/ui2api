@@ -47,6 +47,20 @@
       "description": "POST https://api.venice.ai/api/v1/audio/queue with {model:'stable-audio-25', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/audio.",
       "method": "api-path (POST /api/v1/audio/queue, Bearer auth)",
       "recipe": "recipes/venice_audio.json"
+    },
+    {
+      "id": "venice_list_conversations",
+      "name": "Conversation history list",
+      "description": "List past chats from the live page's sidebar DOM (always mirrors the current logged-in session). The production wire API (api.venice.ai/api/v1, OpenAI-compatible) needs the session cookie 'session' -> token-mint bearer hop, which is UNVERIFIED (chat-app chunks lazy-loaded, absent from the landing bundle graph), so no direct-REST list call is built.",
+      "method": "dom.sidebar on /chat/v2 (same browser + session machinery as venice_chat)",
+      "recipe": null
+    },
+    {
+      "id": "venice_model_list",
+      "name": "Model list",
+      "description": "Enumerate available models. capabilities/venice/profile.json carries no model-picker DOM candidate (only composer/answer selectors), and the logged-in /chat/v2 model catalog is a lazy chunk absent from the landing bundle graph, so the runner returns an honest ok:false rather than guessing a catalog.",
+      "method": "dom.picker (unverified — no model-picker selectors in profile.json)",
+      "recipe": null
     }
   ],
   "auth": {

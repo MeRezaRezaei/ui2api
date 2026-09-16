@@ -1,0 +1,24 @@
+{
+  "capability": "huggingchat_chat",
+  "site": "huggingchat",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://huggingface.co/chat", "note": "blank-compose view; conversation is auto-created on first send (POST /chat/conversation, body {model,preprompt,mlAssistant}); optional session snapshot injected (data/huggingface.co/.session)" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "navigate to base URL OR invoke sidebar New Chat (unverified aria-label); jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into textarea[role=combobox]" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy; form submit handler), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[aria-label='Conversation messages']", "until": "stable 2000ms", "timeoutMs": 40000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = POST /chat/conversation/{id} multipart form-data -> NDJSON chunked stream (event types: status started|error|finished|keepAlive, stream{token}, finalAnswer{text,interrupted}, title, tool, file{sha,mime,name}, reasoning, routerMetadata{route,model}, elicitation, plan{steps}, budget{totalMicroUsd,spentMicroUsd,reservedMicroUsd}, turnState{serverNow}); the UI path drives the site's own JS so no wire reconstruction needed for the ui-drive, but the send body/event shape is pinned below",
+  "wire": {
+    "create": "POST https://huggingface.co/chat/conversation  JSON {\"model\":\"omni\",\"preprompt\":\"\",\"mlAssistant\":false} -> {\"conversationId\":\"<uuid>\",\"conversation\":{...}}",
+    "send": "POST https://huggingface.co/chat/conversation/{id}  multipart/form-data: files=<File mime;name>, data=<JSON {inputs,id(is_retry=false),is_continue=false,generationId,selectedMcpServerNames[],selectedMcpServers[]:[{name,url,headers}],timezone}>",
+    "events": "one JSON object per line (split on \\n); %-varies: stream{token} deltas; terminal = status:finished or finalAnswer",
+    "resume": "GET https://huggingface.co/chat/conversation/{id}/stream?messageId={mid}&fromSeq={seq}  (EventSource; 'update' event = one event-object, 'end' event = close)",
+    "stop": "POST https://huggingface.co/chat/conversation/{id}/stop-generating  JSON {generationId, seenContentLength} (retries 0/300/1000/3000ms)"
+  },
+  "wireVerified": "all endpoints and event union verified in bundles (chunks/D_6jIJz0.js Qw/vp/pp + Ar/Pa enums; nodes/4/5); live payloads verified via SSR data-sveltekit-fetched (models/settings/feature-flags)",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

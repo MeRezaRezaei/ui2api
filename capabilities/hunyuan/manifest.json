@@ -37,19 +37,22 @@
       "id": "hunyuan_list_conversations",
       "name": "Conversation history list",
       "description": "List/detail: GET /api/convs, /api/conv (+ /api/user/agent/conversation/list, /api/user/agent/conversation/v1/detail, /api/user/agent/session/list); rename/pin/clear/delete via /api/conv/title, /api/user/agent/conversation/*. Endpoints verified from bundles; DOM-sidebar fallback until live-verified on first capture.",
-      "method": "wire (real cookies + X-ID/X-Token headers), DOM-sidebar fallback"
+      "method": "wire (real cookies + X-ID/X-Token headers), DOM-sidebar fallback",
+      "recipe": "recipes/hunyuan_list_conversations.json"
     },
     {
       "id": "hunyuan_document_qa",
       "name": "Knowledge-base / document Q&A",
       "description": "Attach one document per turn (types per uploaderTypeList: pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv); wire = /api/resource/genUploadInfo -> COS write -> /api/resource/fileParse|asyncFileParse -> doc analysis rides the same /api/chat SSE stream as doc_percent/docDeepModeInfo/step chunks (deep-read modes TRANSLATION/SUMMARY/GUIDE/DEEP_SEARCH; mind-map GET /api/user/agent/doc/getMindMap).",
+      "method": "ui-path (attach document via file picker, then ask on the composer)",
       "recipe": "recipes/hunyuan_document_qa.json"
     },
     {
       "id": "hunyuan_voice_mode",
       "name": "Voice mode",
       "description": "Voice input via mic on the composer; ASR/TTS temp key GET /api/generate/voice_tmpkey; voice_recorder content chunks with SPEAKING/STOPPING/SPLIT statuses. Thin and chat-coupled; to be validated on a live session.",
-      "method": "ui-path (mic button — exact trigger to be verified on first live capture)"
+      "method": "ui-path (mic button — exact trigger to be verified on first live capture)",
+      "recipe": "recipes/hunyuan_voice_mode.json"
     }
   ],
   "auth": {

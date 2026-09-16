@@ -1,0 +1,25 @@
+{
+  "id": "huggingchat",
+  "name": "HuggingChat (huggingface.co/chat)",
+  "url": "https://huggingface.co/chat",
+  "loginRequired": false,
+  "loginHint": "may ask for sign-in; provide a session via `ui2api analyse https://huggingface.co/chat --login` if needed",
+  "composer": ["textarea[placeholder*='Ask']", ".ChatInput textarea", "textarea"],
+  "send": { "kind": "keyEnter" },
+  "answer": [".message.overflow-y-auto", "[data-testid=\"message\"]", ".chat-container .message"],
+  "newChat": "https://huggingface.co/chat (navigate to base; blank-compose view auto-creates on first send via POST /chat/conversation)",
+  "captureMs": 90000,
+  "stableMs": 2500,
+  "note": "HuggingChat capability package profile — mirrors the builtin profile exactly (src/profile/profile.ts lines 149-160). ",
+  "unverified": [
+    "composer selectors 1-2 ('textarea[placeholder*=Ask]', '.ChatInput textarea') and placeholder-free composer in build v0.20.0: no placeholder attribute is emitted; grounded v0.20 selector is 'textarea[role=\"combobox\"][aria-autocomplete=\"list\"]' (verified in chunks/D_6jIJz0.js static template)",
+    "answer selectors ('.message.overflow-y-auto', '[data-testid=\"message\"]', '.chat-container .message'): none appear in the v0.20 bundles; grounded v0.20 container is '[aria-label=\"Conversation messages\"]' (scoped .svelte-11kuu6h, holds '.prose.prose-sm' assistant blocks) — confirm on first live capture"
+  ],
+  "groundedSelectors": {
+    "composer": ["textarea[role=\"combobox\"][aria-autocomplete=\"list\"]"],
+    "send": "form > button[type=\"submit\"][name=\"submit\"][aria-label=\"Send message\"] (or Enter)",
+    "answer": ["[aria-label=\"Conversation messages\"]"],
+    "voice": "button[aria-label=\"Start voice recording\"] (transcriptionEnabled flag)",
+    "share": "button[aria-label=\"Share conversation\"]"
+  }
+}

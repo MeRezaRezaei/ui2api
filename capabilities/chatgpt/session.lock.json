@@ -1,0 +1,16 @@
+{
+  "site": "chatgpt.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "chatgpt.com",
+    "cookieNames": ["__Secure-oai-is", "__Secure-oai-employee-device"],
+    "apiHost": "https://chatgpt.com",
+    "authEndpoint": "/api/auth/session",
+    "captureCommand": "ui2api profile capture \"https://chatgpt.com\" --login",
+    "targetDir": "data/chatgpt.com/.session/state.json"
+  },
+  "note": "This package installs and runs from the built-in chatgpt profile plus a captured session snapshot of chatgpt.com. Bundles read the access token from the same-origin /api/auth/session response (Authorization: Bearer <accessToken>); token refresh is broadcast on a BroadcastChannel named auth-session (event access-token-refreshed-v1). provider-catalog classifies chatgpt-web / chatgpt-web-codex as cookie auth — unknown whether the session token lives in a cookie vs an httponly session; capture once headed and record the cookie/localStorage set in state.json. Selectors and SSE delta-event literal are unverified pending first live capture.",
+  "capturedAt": null,
+  "snapshotHash": null
+}
