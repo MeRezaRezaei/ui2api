@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { usingUserChrome } from "../runtime/browser.js";
 
 // --- Chat-site profiles: declarative "recipes" describing how to drive the web
@@ -268,6 +270,40 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
   throw new Error(
     `unknown AI site "${value}" — expected one of ${PROFILE_IDS.join(", ")} or a path to a *.json profile`
   );
+}
+
+/**
+ * Resolve a packaged per-site profile.json (capabilities/<site>/profile.json)
+ * robustly from ANY working directory and from an installed npm package, not
+ * just from the repo root. Runtime-equivalent to resolveProfile(), which is
+ * CWD-relative and breaks when the daemon is started elsewhere (or from the
+ * packaged tarball). Returns null when the packaged profile is absent.
+ */
+export function resolvePackagedProfile(siteId: string): ChatSiteProfile | null {
+  try {
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    // Module sits at <root>/src/profile/ or <root>/dist/profile/ — two levels
+    // up lands on the package root in both layouts (also covers symlinked
+    // installs via realpath matching).
+    const relRoots = new Set<string>();
+    for (const up of [2, 3]) {
+      let p = here;
+      for (let i = 0; i < up; i++) p = dirname(p);
+      relRoots.add(p);
+    }
+    for (const packageRoot of relRoots) {
+      const candidates = [
+        resolve(packageRoot, "capabilities", siteId, "profile.json"),
+        resolve(packageRoot, "src", "capabilities", siteId, "profile.json"),
+      ];
+      for (const p of candidates) {
+        if (existsSync(p)) return resolveProfile(p);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function listProfiles(): ChatSiteProfile[] {

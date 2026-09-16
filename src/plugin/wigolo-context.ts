@@ -434,6 +434,9 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
         );
       },
     },
+    // Wigolo-native contexts own their browser lifecycle via wigoloFetch;
+    // a no-op keeps the (optional) contract intact for typed callers.
+    async close() {},
   };
   return ctx;
 }

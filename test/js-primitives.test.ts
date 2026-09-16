@@ -65,6 +65,8 @@ test("js-level primitives stream the site's answer end to end (native engine)", 
         const msg = err instanceof Error ? err.message : String(err);
         if (died.test(msg) && attempt < 3) continue;
         throw err;
+      } finally {
+        await ctx.close?.().catch(() => {});
       }
     }
   } finally {
@@ -74,14 +76,15 @@ test("js-level primitives stream the site's answer end to end (native engine)", 
 
 test("paste delivers the text and fires the site's paste+input handlers", async () => {
   const site = await startControl();
+  const ctx: any = createContext({ dataDir: "/tmp/ui2api-e2e" }, { baseUrl: site.url, dataDir: "/tmp/ui2api-e2e" }) as any;
   try {
-    const ctx: any = createContext({ dataDir: "/tmp/ui2api-e2e" }, { baseUrl: site.url, dataDir: "/tmp/ui2api-e2e" }) as any;
     await ctx.dom.paste("#in", "pastetext");
     await ctx.dom.waitFor("#events", 1000);
     const events = (await ctx.dom.extract("text #events")) as string;
     assertStrict.ok(events.includes("PASTE:pastetext"), "site received the paste event with the text");
     assertStrict.ok(events.includes("INPUT"), "site received the input event (keyboard insert)");
   } finally {
+    await ctx.close?.().catch(() => {});
     site.close();
   }
 });
