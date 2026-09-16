@@ -19,7 +19,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } from "../profile/profile.js";
-import { listAccounts } from "../runtime/session-store.js";
+import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -133,6 +133,29 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const host = new URL(profile.url).host;
         return send(res, 200, { site: profile.id, host, accounts: listAccounts(dataDir, host) });
       }
+      // Capability reflection: the stored per-account fingerprint (models,
+      // tier, restrictions) captured by `ui2api profile capabilities`.
+      //   GET /capabilities?site=gemini&account=merezarezaei@gmail.com
+      if (req.method === "GET" && req.url?.startsWith("/capabilities")) {
+        const q = new URL(req.url, "http://localhost");
+        const site = q.searchParams.get("site") ?? "";
+        const account = q.searchParams.get("account") ?? "";
+        if (!site || !account) return send(res, 400, { error: "site and account are required" });
+        const profile = idFrom(site, profilesById);
+        const host = new URL(profile.url).host;
+        const slug = slugifyIdentity(account);
+        const stored = loadCapabilities(dataDir, host, slug);
+        if (!stored) {
+          return send(res, 200, {
+            site: profile.id,
+            host,
+            account,
+            probed: false,
+            hint: "run `ui2api profile capabilities <host> --account <email>` once to probe this account",
+          });
+        }
+        return send(res, 200, stored);
+      }
       if (req.method === "GET" && req.url === "/status") {
         return send(res, 200, { ok: true, pool: pool.status });
       }
@@ -148,9 +171,10 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // Identity-keyed account (email or vault slug). A dedicated worker
         // carries the requested account's snapshot; "default" = legacy path.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        const model = typeof body.model === "string" && body.model ? body.model : undefined;
         const worker = await pool.acquire(profile.id, account);
         try {
-          const result = await worker.driver.ask(prompt, { newChat });
+          const result = await worker.driver.ask(prompt, { newChat, ...(model ? { model } : {}) });
           await pool.release(worker);
           return send(res, 200, { ok: true, ...result });
         } catch (e) {

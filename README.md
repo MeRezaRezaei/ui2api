@@ -63,6 +63,13 @@ returns the result — no brittle screen-scraping.
   visible browser as the `ui2api` user), OS-wide Chrome-profile scanning with
   checkbox-style site import, and an identity-keyed multi-account session vault.
   See [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
+- **Capability reflection** — learn what a specific account can actually do on a
+  chat site (plan tier, available models, restriction walls) from what the site
+  itself shows: `ui2api profile capabilities <host> [--account email]` probes the
+  live session and stores a fingerprint per account; the daemon serves it at
+  `GET /capabilities?site=X&account=Y`; prompts report in-band restrictions
+  (`doneReason:"restricted"` + `restrictions[]`) and `--model NAME` selects a
+  model or fails explicitly when the account lacks it.
 - **LLM-assisted naming with offline fallback** — `--llm` uses a model to produce
   semantic tool names and task mappings; a deterministic heuristic fallback keeps
   the pipeline fully offline when no model is configured.

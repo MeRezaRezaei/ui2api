@@ -7,6 +7,7 @@
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives } from "../runtime/dom-primitives.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import { matchRestrictionMarkers, type RestrictionHit } from "../runtime/capability-probe.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -14,16 +15,23 @@ export interface PromptOptions {
   newChat?: boolean;
   timeoutMs?: number;
   stableMs?: number;
+  /** Request a specific model (id/name). Verified against the account's
+   *  observed model list; errors explicitly when unavailable. */
+  model?: string;
 }
 
 export interface PromptResult {
   answer: string;
   chunkCount: number;
-  doneReason: "stable" | "timeout" | "empty";
+  doneReason: "stable" | "timeout" | "empty" | "restricted";
   url: string;
   title: string;
   /** Source citations for query-driven sites (e.g. Google AI Mode), when any. */
   citations?: string[];
+  /** In-band restriction hits (upgrade wall, plan limit, login gate...). */
+  restrictions?: RestrictionHit[];
+  /** Current selected model when readable. */
+  model?: string;
 }
 
 function cap(s: string, n: number): string {
@@ -232,6 +240,13 @@ export class ChatDriver {
       }
     }
     await this.dismissOverlays();
+    // Model selection (capability reflection): when a specific model is
+    // requested, verify it against the account's observed model list and
+    // select it — or fail loudly instead of silently prompting on the wrong
+    // model. This is the direct answer to "someone has Pro, some don't".
+    if (opts.model) {
+      await this.selectModel(opts.model);
+    }
     const composer = this.profile.urlTemplate ? null : await this.firstVisible(this.profile.composer);
     if (!composer && !this.profile.urlTemplate) {
       if (!(await this.pageAlive())) {
@@ -279,7 +294,23 @@ export class ChatDriver {
       stableMs: opts.stableMs ?? this.profile.stableMs,
     });
     const answer = (observed.text ?? "").trim();
+    // Capability reflection, L2 (in-band): scan the page for restriction
+    // markers (upgrade walls, plan limits, login gates). When a marker hits we
+    // say so explicitly — a caller can fall back to another site/model instead
+    // of receiving a blind "empty" or a wall's text as the "answer".
+    const restrictions = await this.readRestrictions();
     if (!answer) {
+      if (restrictions.length > 0) {
+        return {
+          answer: "",
+          chunkCount: 0,
+          doneReason: "restricted",
+          url: observed.url,
+          title: observed.title,
+          restrictions,
+          ...(await this.readModel().then((m) => (m ? { model: m } : {}))),
+        };
+      }
       throw new Error(
         `no answer appeared on ${this.profile.id} within ${opts.timeoutMs ?? this.profile.captureMs}ms. ` +
           (this.profile.loginRequired
@@ -321,7 +352,155 @@ export class ChatDriver {
       url: observed.url,
       title: observed.title,
       ...(citations.length ? { citations } : {}),
+      ...(restrictions.length ? { restrictions } : {}),
+      ...(await this.readModel().then((m) => (m ? { model: m } : {}))),
     };
+  }
+
+  // --- Capability reflection helpers (L2 watch + L3 select) ---
+
+  /** Scan the page's visible text for the profile's restriction markers. */
+  private async readRestrictions(): Promise<RestrictionHit[]> {
+    const markers = this.profile.capability?.restrictionMarkers;
+    if (!markers?.length) return [];
+    try {
+      const text = await this.page!.evaluate(() => (document.body?.innerText ?? "").slice(0, 40000));
+      return matchRestrictionMarkers(text, markers);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Best-effort: current selected model name from the picker options. */
+  private async readModel(): Promise<string | null> {
+    const opts = this.profile.capability?.pickerOption;
+    if (!opts?.length) return null;
+    try {
+      return await this.page!.evaluate((sels: string[]) => {
+        for (const sel of sels) {
+          for (const el of document.querySelectorAll(sel)) {
+            const selected =
+              (el as HTMLElement).getAttribute?.("aria-selected") === "true" ||
+              /selected|checked|active/i.test((el as HTMLElement).className?.toString() ?? "");
+            if (selected) {
+              const name = ((el as HTMLElement).innerText || "").trim().split("\n")[0];
+              if (name) return name.slice(0, 80);
+            }
+          }
+        }
+        return null;
+      }, opts) as string | null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Model selection: require `model` to be in the account's observed list,
+   * open the picker and click it, then verify it took. Errors explicitly when
+   * the account lacks the model (e.g. Pro-only model on a free plan) — the
+   * caller can then fall back, never a silent wrong-model prompt.
+   */
+  private async selectModel(model: string): Promise<void> {
+    const cap = this.profile.capability;
+    const needters = cap?.pickerOpen?.length || cap?.pickerOption?.length;
+    if (!needters) {
+      throw new Error(`${this.profile.id}: model selection requested but the profile has no picker selectors`);
+    }
+    // Open the picker FIRST — the option rows only exist inside the open
+    // overlay (per verified gemini DOM: cdk-overlay-pane), so reading them
+    // before opening always yields an empty observed list.
+    if (cap?.pickerOpen?.length) {
+      try {
+        const trigger = cap.pickerOpen[0];
+        const loc = this.page!.locator(trigger).first();
+        await loc.waitFor({ state: "visible", timeout: 8000 });
+        await loc.click({ timeout: 4000 });
+        await this.page!.waitForTimeout(1500);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`${this.profile.id}: could not open the model picker (${msg})`);
+      }
+    }
+    const observed = await this.readObservedModels();
+    const want = model.toLowerCase();
+    const found = observed.find((m) => m.id.toLowerCase() === want || m.name.toLowerCase() === want);
+    if (!found) {
+      throw new Error(
+        `model "${model}" not available on this account (observed: [${observed.map((m) => m.id).join(", ")}])`
+      );
+    }
+    try {
+      const target = found.id !== found.name ? found.id : found.name;
+      // Click the matching option row.
+      let clicked = false;
+      for (const sel of cap?.pickerOption ?? []) {
+        try {
+          const row = this.page!.locator(sel).filter({
+            hasText: found.name.slice(0, 40),
+          });
+          if ((await row.count()) > 0) {
+            await row.first().click({ timeout: 4000 });
+            clicked = true;
+            break;
+          }
+        } catch {
+          // try next selector
+        }
+      }
+      if (!clicked) {
+        // Fall back: exact first-line text match on any visible option.
+        await this.page!.evaluate(
+          ([selList, name]) => {
+            for (const sel of selList) {
+              for (const el of document.querySelectorAll(sel)) {
+                const rowText = ((el as HTMLElement).innerText || "").trim();
+                const firstLine = rowText.split("\n")[0].trim();
+                const attrId = (el as HTMLElement).getAttribute?.("data-model-id") ?? "";
+                if (firstLine === name || attrId === name) {
+                  (el as HTMLElement).click();
+                  return true;
+                }
+              }
+            }
+            return false;
+          },
+          [cap?.pickerOption ?? [], target] as [string[], string]
+        );
+      }
+      await this.page!.waitForTimeout(500);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`${this.profile.id}: failed to select model "${model}" — ${msg}`);
+    }
+  }
+
+  /** Observed model list: DOM picker options (id/name), best-effort. */
+  private async readObservedModels(): Promise<Array<{ id: string; name: string }>> {
+    const opts = this.profile.capability?.pickerOption;
+    if (!opts?.length) return [];
+    try {
+      return (await this.page!.evaluate((sels: string[]) => {
+        const out: Array<{ id: string; name: string }> = [];
+        const seen = new Set<string>();
+        for (const sel of sels) {
+          for (const el of document.querySelectorAll(sel)) {
+            const name = ((el as HTMLElement).innerText || "").trim().split("\n")[0];
+            if (!name || name.length > 80 || seen.has(name)) continue;
+            seen.add(name);
+            const id =
+              (el as HTMLElement).getAttribute?.("data-model-id") ||
+              (el as HTMLElement).getAttribute?.("data-value") ||
+              (el as HTMLElement).id ||
+              name;
+            out.push({ id, name });
+          }
+        }
+        return out.slice(0, 24);
+      }, opts)) as Array<{ id: string; name: string }>;
+    } catch {
+      return [];
+    }
   }
 
   async close(): Promise<void> {

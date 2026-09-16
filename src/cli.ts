@@ -7,7 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
-import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts } from "./runtime/session-store.js";
+import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -54,6 +54,7 @@ interface Flags {
   account?: string;
   identity?: string;
   xhostAll?: boolean;
+  model?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -88,6 +89,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--account") f.account = argv[++i];
     if (argv[i] === "--identity") f.identity = argv[++i];
     if (argv[i] === "--xhost-all") f.xhostAll = true;
+    if (argv[i] === "--model") f.model = argv[++i];
   }
   return f;
 }
@@ -305,14 +307,14 @@ async function cmdPrompt(text: string, flags: Flags): Promise<void> {
   }
   if (!text?.trim()) {
     throw new Error(
-      "usage: ui2api prompt '<text>' [--site gemini|chatgpt|claude|copilot|perplexity|huggingchat] [--profile FILE] [--new] [--timeout-ms N] [--data-dir DIR] [--json]"
+      "usage: ui2api prompt '<text>' [--site gemini|chatgpt|claude|copilot|perplexity|huggingchat] [--profile FILE] [--new] [--model NAME] [--timeout-ms N] [--data-dir DIR] [--json]"
     );
   }
   const profile = resolveProfile(flags.site ?? flags.profile);
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
   const driver = new ChatDriver(profile, { dataDir, account: flags.account });
   try {
-    const r = await driver.ask(text, { newChat: flags.newChat, timeoutMs: flags.timeoutMs });
+    const r = await driver.ask(text, { newChat: flags.newChat, timeoutMs: flags.timeoutMs, ...(flags.model ? { model: flags.model } : {}) });
     if (flags.json) {
       console.log(JSON.stringify({ site: profile.id, account: flags.account ?? "default", ...r }, null, 2));
     } else {
@@ -420,6 +422,17 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     console.log(`  identity: ${captured.identity}`);
     console.log(`  snapshot: ${captured.snapshotPath}`);
     console.log(`  (data stored in ui2api user ${user})`);
+    // Capability reflection at capture end: probe what THIS account can do.
+    try {
+      const { listProfiles } = await import("./profile/profile.js");
+      const profile = listProfiles().find((p) => new URL(p.url).host === host || p.url.includes(host));
+      if (profile) {
+        const report = await probeAccountCapabilities(profile, captured.identity, dataDir);
+        console.log(`[ui2api] capability fingerprint for ${profile.id}: ${report.ok ? `ok (${report.models.length} models, tier: ${report.tier.value ?? "?"})` : `unreadable (${report.reason})`}`);
+      }
+    } catch (e) {
+      console.warn(`[ui2api] capability probe skipped: ${e instanceof Error ? e.message : e}`);
+    }
     return;
   }
 
@@ -430,6 +443,17 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     saveAccountSnapshot(dataDir, host, identity, session.snapshot, { source: "capture" });
     console.log(`[ui2api] profile captured for ${host} (identity: ${identity}):`);
     console.log(`  snapshot -> ${snapshotPath(dataDir, host)}`);
+    // Capability reflection at capture end — probe the fresh session.
+    try {
+      const { listProfiles } = await import("./profile/profile.js");
+      const profile = listProfiles().find((p) => new URL(p.url).host === host || p.url.includes(host));
+      if (profile) {
+        const report = await probeAccountCapabilities(profile, identity, dataDir);
+        console.log(`[ui2api] capability fingerprint for ${profile.id}: ${report.ok ? `ok (${report.models.length} models, tier: ${report.tier.value ?? "?"})` : `unreadable (${report.reason})`}`);
+      }
+    } catch (e) {
+      console.warn(`[ui2api] capability probe skipped: ${e instanceof Error ? e.message : e}`);
+    }
   } else {
     saveCookies(sessionPath(dataDir, host), session.cookies);
     saveSnapshot(snapshotPath(dataDir, host), session.snapshot);
@@ -539,6 +563,72 @@ async function cmdProfileList(host: string, flags: Flags): Promise<void> {
   console.log("Drive one with:  ui2api prompt '...' --site <id> --account <slug|email>");
 }
 
+/**
+ * Probe an account's capability fingerprint (models, tier, restrictions) from
+ * the LIVE page and store it next to the account snapshot in the vault.
+ *   ui2api profile capabilities gemini.google.com --account merezarezaei@gmail.com
+ */
+async function cmdProfileCapabilities(host: string, flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const { listProfiles } = await import("./profile/profile.js");
+  const profile = listProfiles().find(
+    (p) => p.url.includes(host) || p.id === host || new URL(p.url).host === host
+  );
+  if (!profile) throw new Error(`no site profile matches "${host}" (known: ${listProfiles().map((p) => p.id).join(", ")})`);
+  const siteHost = new URL(profile.url).host;
+  const accounts = listAccounts(dataDir, siteHost);
+  if (accounts.length === 0) {
+    throw new Error(`no identity-keyed accounts for ${siteHost} — capture one first (ui2api profile capture ${profile.url} [--assist])`);
+  }
+  // Resolve the requested account (email, slug, or the first available).
+  const account = accounts.find((a) => a.identity === flags.account || a.slug === flags.account) ?? accounts[0];
+  const report = await probeAccountCapabilities(profile, account.identity, dataDir);
+  const { capabilitiesPath } = await import("./runtime/session-store.js");
+  console.log(`[ui2api] capability fingerprint for ${profile.id} / ${account.identity}:`);
+  console.log(`  ${JSON.stringify(report, null, 2)}`);
+  console.log(`  saved -> ${capabilitiesPath(dataDir, new URL(profile.url).host, account.slug)}`);
+}
+
+/**
+ * Probe one account's capability fingerprint against the LIVE site and store
+ * it in the vault. Shared by `profile capabilities` and capture-time probing.
+ */
+async function probeAccountCapabilities(
+  profile: import("./profile/profile.js").ChatSiteProfile,
+  identity: string,
+  dataDir: string
+): Promise<import("./runtime/capability-probe.js").CapabilityReport> {
+  const siteHost = new URL(profile.url).host;
+  const snapshot = loadAccountSnapshot(dataDir, siteHost, identity);
+  if (!snapshot) throw new Error(`no snapshot for ${identity} on ${siteHost}`);
+
+  const { probeCapabilities } = await import("./runtime/capability-probe.js");
+  const { launchBrowser } = await import("./runtime/browser.js");
+  const { injectSnapshot, saveCapabilities } = await import("./runtime/session-store.js");
+
+  const browser = await launchBrowser(3, { headless: true });
+  try {
+    const context = await browser.newContext();
+    await context.addCookies((snapshot.cookies ?? []) as never[]);
+    await injectSnapshot(context, snapshot);
+    const page = await context.newPage();
+    await page.goto(profile.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Give the site a moment to hydrate the shell before reading.
+    await page.waitForTimeout(3000 + Math.floor(Math.random() * 1000));
+
+    const report = await probeCapabilities({
+      profile,
+      page: page as never,
+      account: identity,
+    });
+    const slug = slugifyIdentity(identity);
+    saveCapabilities(dataDir, siteHost, slug, report);
+    return report;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
 async function main(): Promise<void> {
   const [cmd, arg, ...rest] = process.argv.slice(2);
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
@@ -597,7 +687,11 @@ async function main(): Promise<void> {
         if (!rest[0]) throw new Error("usage: ui2api profile list <host> [--data-dir DIR]");
         return cmdProfileList(rest[0], flags);
       }
-      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | list <host>");
+      if (arg === "capabilities") {
+        if (!rest[0]) throw new Error("usage: ui2api profile capabilities <host> [--account email] [--data-dir DIR]");
+        return cmdProfileCapabilities(rest[0], flags);
+      }
+      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | list <host> | capabilities <host> [--account email]");
     }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);

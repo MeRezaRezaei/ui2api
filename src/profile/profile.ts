@@ -42,6 +42,16 @@ export interface ChatSiteProfile {
   // Selector(s) for the citations/sources block inside the answer (read as
   // link hrefs + text). Optional; only meaningful with urlTemplate.
   citations?: string[];
+  // Capability reflection (see src/runtime/capability-probe.ts): how to learn
+  // what THIS account can do on the site — tier badge, model picker, and the
+  // restriction markers to watch for during prompts. Selectors rot like the
+  // composer ones; patterns are case-insensitive substring matches.
+  capability?: {
+    tierSelectors?: string[];
+    pickerOpen?: string[];
+    pickerOption?: string[];
+    restrictionMarkers?: Array<{ kind: string; patterns: string[] }>;
+  };
 }
 
 export interface BuiltinProfiles {
@@ -61,6 +71,30 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     newChat: '[aria-label*="New chat"], [aria-label*="new chat"]',
     captureMs: 40000,
     stableMs: 2000,
+    // Capability reflection: learn what THIS account can actually do. These
+    // selectors are VERIFIED against a live Pro account (2026-09-16): tier via
+    // the sidebar avatar footer, models via the composer model picker which
+    // opens into a cdk-overlay-pane of gem-menu-item rows. The wire model
+    // catalog (otAQ7b) is grounded in src/capabilities/gemini-rpc.ts and is
+    // the preferred models source when probed from a logged-in page.
+    capability: {
+      tierSelectors: ["sidenav-mavatar-footer", "[class*='mavatar-footer']", "[aria-label*='Google Account:']"],
+      pickerOpen: [
+        "div.model-picker-container",
+        "[data-test-id='bard-mode-menu-button']",
+        "[data-test-id='model-picker']",
+      ],
+      pickerOption: [
+        ".cdk-overlay-pane gem-menu-item[role='menuitem']",
+        "gem-menu-item[role='menuitem']",
+        "[data-test-id='model-picker'] [role='option']",
+      ],
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade to", "get gemini", "try gemini", "pro features", "unlock with"] },
+        { kind: "limit", patterns: ["you've reached your limit", "limit reached", "rate limit", "too many requests"] },
+        { kind: "login", patterns: ["log in to get answers", "sign in to continue", "to continue, sign in"] },
+      ],
+    },
   },
   // Google AI Mode ("use Google from my AI"): one logged-in /search?q=…&udm=14
   // page load per query, answer + citations read off the SSR'd init data. No
