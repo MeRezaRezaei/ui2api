@@ -18,7 +18,7 @@
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
-import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { defaultSiteId, listProfiles, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
@@ -215,7 +215,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("kimi", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/kimi/profile.json");
+          profile = resolvePackagedProfile("kimi") ?? resolveProfile("capabilities/kimi/profile.json");
         }
         const shared = await pool.sharedBrowser();
         const caps = new KimiCapabilities(profile, { browser: shared, dataDir });
@@ -239,7 +239,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("hunyuan", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/hunyuan/profile.json");
+          profile = resolvePackagedProfile("hunyuan") ?? resolveProfile("capabilities/hunyuan/profile.json");
         }
         const shared = await pool.sharedBrowser();
         const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir });
@@ -262,7 +262,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("venice", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/venice/profile.json");
+          profile = resolvePackagedProfile("venice") ?? resolveProfile("capabilities/venice/profile.json");
         }
         const shared = await pool.sharedBrowser();
         const caps = new VeniceCapabilities(profile, { browser: shared, dataDir });

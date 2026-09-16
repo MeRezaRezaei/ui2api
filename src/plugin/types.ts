@@ -42,6 +42,8 @@ export interface Ui2ApiContext {
     ): Promise<{ text: string; chunkCount: number; url: string; title: string; doneReason: "stable" | "timeout" | "empty" }>;
     status(selector?: string): Promise<unknown>;
   };
+  /** Release any browser/context this context lazily launched. Idempotent. */
+  close(): Promise<void>;
 }
 export interface Ui2ApiPlugin {
   name: string; version: string; manifest: PluginManifest;

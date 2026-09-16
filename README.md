@@ -79,7 +79,8 @@ returns the result — no brittle screen-scraping.
 
 ## Quick start
 
-> **ui2api is not published to npm yet** — install from source:
+> **ui2api is not published to npm yet** — install from source until the first
+> release lands:
 
 ```bash
 git clone https://github.com/MeRezaRezaei/ui2api.git
@@ -108,7 +109,7 @@ Then connect any MCP/ACP client to the generated server and call tools like
 fixture and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 22 unit tests
+npm run test:unit   # 30 hermetic unit-test files (340+ tests) — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 

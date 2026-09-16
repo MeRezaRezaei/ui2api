@@ -38,9 +38,11 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
   const tools = new Map<string, ToolEntry>();
   const dataDir = deps.dataDir ?? defaultSitesDir();
   let page: any = null;
+  let browserRef: any = null;
   async function getPage(): Promise<any> {
     if (page) return page;
     const browser = await launchBrowser();
+    browserRef = browser;
     const ctx = await browser.newContext();
     try { const c = JSON.parse(readFileSync(sessionPath(dataDir, new URL(deps.baseUrl).host), "utf8")); if (Array.isArray(c)) await ctx.addCookies(c); } catch {}
     page = await ctx.newPage();
@@ -68,6 +70,15 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
     },
     http: { async fetch(url, init) { if (!sameOrigin(url, deps.baseUrl)) throw new Error(`SSRF guard: http ${url} cross-origin`); return fetch(url, init); } },
     dom: makeDomPrimitives(() => getPage()),
+    // Release the lazily-launched browser (owned by this context). Callers that
+    // create a context must close() it or the Chromium process leaks.
+    async close() {
+      if (browserRef) {
+        try { await browserRef.close(); } catch {}
+        browserRef = null;
+        page = null;
+      }
+    },
   };
   return ctx;
 }
