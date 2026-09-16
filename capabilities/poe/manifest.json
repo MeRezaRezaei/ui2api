@@ -4,17 +4,38 @@
   "site": "poe.com",
   "url": "https://poe.com",
   "description": "Quora's AI chat aggregator (many models behind one composer). Capability package drives the Poe composer and reads streamed answers off the page.",
-  "version": "0.1.0-scaffold",
+  "version": "0.2.0-analyzed",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
+  "date": "2026-09-16",
   "siteVersion": "to be recorded on first live capture",
+  "transport": {
+    "kind": "unknown",
+    "gate": "cloudflare-challenge",
+    "observed": "HTTP 403 'Just a moment…' (Cloudflare interstitial) on https://poe.com, https://www.poe.com, and /login with a Chrome-UA curl. Challenge page ships no JS bundle URLs (CSP locks connect-src to challenges.cloudflare.com), so no endpoints were observable statically.",
+    "candidates": [
+      "POST https://poe.com/api/gql_POST (GraphQL-ish, community-documented — UNVERIFIED, recall only)",
+      "SSE/WS server-push channel under /api/... (community-documented — UNVERIFIED, recall only)",
+      "CSRF token historically embedded in SPA boot payload (field 't'/formkey) — expect to extract on first live capture"
+    ],
+    "note": "Host is CONSTRAINED (no browser, static only). Real transport to be identified from DevTools network tab on first live capture; until then everything above candidates is not engineered against."
+  },
   "capabilities": [
     {
       "id": "poe_chat",
       "name": "Chat",
-      "description": "Send a prompt on the Poe composer; streamed answer read off the page. Composer/send/answer selectors and any RPC wire to be verified on first live capture.",
+      "description": "Send a prompt on the Poe composer; streamed answer read off the page.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/poe_chat.json"
+      "recipe": "recipes/poe_chat.json",
+      "implementation": {
+        "mode": "ui-path",
+        "readiness": "needs-live-capture",
+        "hints": [
+          "Transport is behind a Cloudflare challenge — a real logged-in Playwright session snapshot (storage-state, cookie p-b) is required before any network analysis or selector tuning; expect the challenge to appear for headless contexts.",
+          "On first live capture: record the DevTools network tab for a composer send; confirm the streaming channel (SSE vs WS vs polling) and whether gql_POST-style endpoints exist.",
+          "Composer/send/answer selectors in profile.json are generic candidates — confirm against real DOM before trusting read steps.",
+          "If a gql_POST + CSRF-t flow is confirmed, optionally add an rpc short-path capability; do not rely on community-recalled endpoints without wire evidence."
+        ]
+      }
     }
   ],
   "auth": {
@@ -23,14 +44,14 @@
     "host": "poe.com",
     "cookies": ["p-b"],
     "capture": "ui2api analyse https://poe.com --login",
-    "note": "provider-catalog.md (OmniRoute webSessionCredentials, poe-web): auth kind=cookie, credential='p-b'. The Poe app may serve from www.poe.com; exact cookie set beyond p-b to be verified on first live capture."
+    "note": "provider-catalog.md (OmniRoute webSessionCredentials, poe-web): auth kind=cookie, credential='p-b'. The Poe app may serve from www.poe.com; exact cookie set + domain beyond p-b to be verified on first live capture."
   },
   "permissions": [
     "requires a real logged-in poe.com session snapshot (cookie p-b)",
     "selectors are unverified candidates — confirm on first live capture (ui2api analyse https://poe.com --login)",
-    "no bundle analysis possible in this environment; endpoint/wire details to be verified on first live capture"
+    "poe.com is Cloudflare-walled: static bundle analysis returned only the challenge page (no JS bundles); transport/RPC details confirmed unverified and recorded as candidates"
   ],
   "builtinProfile": "poe (loaded from capabilities/poe/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped example packages + provider-catalog.md auth facts; no browser launched; everything else marked to be verified on first live capture"
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static probing only: curl of poe.com / www.poe.com / /login returned Cloudflare 'Just a moment…' 403 pages with no bundle URLs; no browser launched. Verified: the bot wall + the provider-catalog p-b auth fact. Everything else recorded honestly as to-verify-on-first-live-capture."
 }

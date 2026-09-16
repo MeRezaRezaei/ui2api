@@ -3,14 +3,14 @@
   "site": "grok",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://grok.com", "note": "session snapshot injected (data/grok.com/.session) — pending first live capture" },
+    { "step": 1, "action": "open", "url": "https://grok.com", "note": "session snapshot injected (data/grok.com/.session) — pending first live capture; grok.com's Cloudflare JSD gate (403 for non-browsers, confirmed 2026-09-16) is expected to clear only inside the headed browser" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
     { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
     { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
     { "step": 5, "action": "read", "selector": "[class*=\"message\"]", "until": "stable 2500ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture" }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "no wire endpoints documented for grok in capabilities/provider-catalog.md (auth-only entry: cookie sso/sso-rw); the UI path drives the site's own JS so no over-the-wire reconstruction is needed — endpoint shapes to be recorded on first live capture",
+  "rpc": "grok.com's wire transport is NOT observable from this host — all probes return Cloudflare 403 + JSD challenge (confirmed 2026-09-16), and the analyzable x.ai sibling SPA (marketing) contains no chat endpoints. The UI path drives the site's own JS so no wire reconstruction is needed to chat; the real send-message request path/stream format must be recorded on first headed live capture.",
   "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
   "sessionLock": "session.lock.json"
 }

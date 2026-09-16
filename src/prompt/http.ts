@@ -19,6 +19,8 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ChatPool } from "./pool.js";
 import { defaultSiteId, listProfiles, resolveProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
+import { KimiCapabilities } from "../capabilities/kimi.js";
+import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
 
 export interface PromptdOptions {
   port: number;
@@ -134,8 +136,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
       // Gemini capability surface: list/conversations/model-picker/search-toggle
-      // via the same logged-in browser machinery. Only gemini is wired so far —
-      // other sites' capability runners land with their packages.
+      // via the same logged-in browser machinery.
       if (req.method === "POST" && req.url === "/capability/gemini") {
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
@@ -146,6 +147,55 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // pool browser keeps the proven session AND avoids a second Chrome.
         const shared = await pool.sharedBrowser();
         const caps = new GeminiCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Kimi capability surface: chat / list_conversations (DOM) / model_list
+      // via the same logged-in browser machinery. Profile resolution: registry
+      // FIRST (kimi is now built-in), packaged-JSON fallback for servers started
+      // with an explicit --site allow-list that excludes it.
+      if (req.method === "POST" && req.url === "/capability/kimi") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("kimi", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/kimi/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new KimiCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Hunyuan / Yuanbao capability surface: chat + list_conversations (DOM).
+      // Same registry-first, packaged-JSON-fallback profile resolution. The
+      // runner's results carry the anti-bot (X-webdriver / headed-only) note.
+      if (req.method === "POST" && req.url === "/capability/hunyuan") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("hunyuan", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/hunyuan/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

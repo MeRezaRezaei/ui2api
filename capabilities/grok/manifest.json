@@ -3,24 +3,36 @@
   "name": "Grok (grok.com)",
   "site": "grok.com",
   "url": "https://grok.com",
-  "siteVersion": "SPA shell not analyzed (static scaffold); exact build pins to be recorded on first live capture",
-  "description": "Capability package for Grok's web chat at https://grok.com. Sends prompts through the site composer and reads streamed answers off the page. provider-catalog.md documents the auth surface only (grok-web: cookie kind, sso + sso-rw); no wire endpoints are documented there, so everything API-shaped is marked to be verified on first live capture.",
-  "version": "0.1.0-scaffold",
+  "description": "Capability package for Grok's web chat at https://grok.com. Sends prompts through the site composer and reads streamed answers off the page. STATIC ANALYSIS ONLY: grok.com is hard-blocked for non-browser clients at the Cloudflare WAF edge (403 JSD challenge), so the chat transport is UNVERIFIED and marked to-be-identified on first headed live capture. Auth surface (cookie kind, sso + sso-rw) is from capabilities/provider-catalog.md grok-web entry; sibling marketing SPA at x.ai was analyzable but contains no chat wire endpoints.",
+  "version": "0.1.1",
   "author": "ui2api capabilities",
-  "date": "2026-09-15",
+  "date": "2026-09-16",
+  "siteVersion": "grok.com: no HTML/bundles retrievable (Cloudflare WAF 403 block on all probed paths) — build pin unknown; sibling x.ai marketing SPA served a Next.js/Turbopack build (chunks under /_next/static/chunks/, dpl pin f5496767b0e65480015db0d425ea15a2380ba3ef)",
+  "transport": {
+    "type": "blocked-unknown",
+    "protocol": "UNKNOWN — grok.com answers plain-curl probes (all paths, both HTTP versions, Chrome+Safari UAs) with Cloudflare 'Sorry, you have been blocked' 403 + JS detection (JSD) challenge at /cdn-cgi/challenge-platform/scripts/jsd/main.js. No endpoint, payload shape, or streaming format is documented here because none was observable; NO endpoint names are fabricated.",
+    "baseUrl": "unknown",
+    "protoContext": "unknown — not reported because not observed",
+    "auth": {
+      "scheme": "cookie session (per capabilities/provider-catalog.md grok-web entry: kind cookie, credentialName 'sso + sso-rw')",
+      "verified": false,
+      "verifyPlan": "first headed live capture under ui2api analyse https://grok.com --login must record the real cookie set (names, Secure flags, expiry), confirm sso/sso-rw authenticate chat requests, and capture the send-message network call"
+    },
+    "streaming": "unknown — expected to be server-sent/fetch-stream once the JSD gate is passed, but NOT confirmed; record the actual response-stream format on first live capture"
+  },
   "capabilities": [
     {
       "id": "grok_chat",
       "name": "Chat stream",
-      "description": "Send a prompt on the grok.com composer; streamed answer read off the page. Exact RPC/selector details to be verified on first live capture.",
+      "description": "Send a prompt on the grok.com composer; streamed answer read off the page. UI-path only — grok.com's wire transport is unobservable from this host (Cloudflare WAF), so over-the-wire reconstruction is deferred to a headed capture. Composer/answer selectors and the captured URLs are to be verified on first live capture.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "recipe": "recipes/grok_chat.json"
     }
   ],
   "permissions": [
-    "session snapshot for grok.com (cookie sso + sso-rw per provider-catalog grok-web entry)",
-    "Playwright over CDP — trusted input only, no synthetic events",
-    "network scoped to https://grok.com and its api hosts (to be mapped on first live capture)"
+    "session snapshot for grok.com (cookie sso + sso-rw per provider-catalog grok-web entry — to be confirmed live)",
+    "Playwright over CDP — trusted input only, no synthetic events; must clear grok.com's Cloudflare JSD gate on first headed run",
+    "network scoped to https://grok.com and any api hosts revealed by the first live capture (currently unknown)"
   ],
   "auth": {
     "required": true,
@@ -28,9 +40,10 @@
     "host": "grok.com",
     "cookies": ["sso", "sso-rw"],
     "capture": "ui2api analyse https://grok.com --login",
-    "regionNote": "credential names from capabilities/provider-catalog.md grok-web entry (kind: cookie, credentialName \"sso + sso-rw\"); exact cookie set, expiry and any anti-bot headers to be confirmed on first live capture"
+    "regionNote": "credential names from capabilities/provider-catalog.md grok-web entry (kind: cookie, credentialName \"sso + sso-rw\"); NOT yet confirmed against a live grok.com session — bot-wall prevented any auth-surface observation",
+    "botWall": "grok.com returns Cloudflare 403 + JSD challenge for non-browser clients (2026-09-16 probe); expect the headed capture to be the first point where real cookie names/flags are observable"
   },
   "builtinProfile": "grok (loaded from capabilities/grok/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
-  "analyzed": "2026-09-15",
-  "analysisMethod": "static scaffold against shipped package examples + auth facts from capabilities/provider-catalog.md; no browser launched; all selectors/endpoint details marked to be verified on first live capture"
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static analysis only (no browser): curl probe matrix on grok.com (all blocked — Cloudflare JSD WAF), plus full-bundle read of the x.ai sibling marketing SPA (37 Next.js/Turbopack chunks, ~3.6 MB) which contains no chat endpoints; all grok.com transport/auth/selector details marked to-be-identified on first headed live capture"
 }

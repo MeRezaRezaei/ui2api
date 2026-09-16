@@ -1,0 +1,13 @@
+{
+  "capability": "venice_image",
+  "site": "venice",
+  "flow": "api-path — direct REST POST https://api.venice.ai/api/v1/image/generate with Bearer API key (VENICE_API_KEY); no browser needed",
+  "steps": [
+    { "step": 1, "action": "api", "url": "https://api.venice.ai/api/v1/image/generate", "method": "POST", "headers": { "Authorization": "Bearer <api-key>", "Content-Type": "application/json" }, "body": { "model": "flux-2-pro", "prompt": "args.prompt", "width": "args.width", "height": "args.height" }, "note": "endpoint + body VERIFIED from landing bundles; width/height defaults 1024x1024" },
+    { "step": 2, "action": "resolve-output", "note": "response carries generated image on media.venice.ai (or similar) — exact response shape to-verify on first live call" }
+  ],
+  "output": { "imageUrl": "string", "model": "string" },
+  "rpc": "VERIFIED endpoint/body: POST https://api.venice.ai/api/v1/image/generate, {model:'flux-2-pro', prompt, width, height}. Auth: Bearer API key. Alternative UI path at /studio/image (edit/upscale/remove-background) — selectors unverified. Job/response shape (url vs base64) to-verify.",
+  "stealth": "direct API call with a real Venice API key; indistinguishable from any platform API consumer",
+  "sessionLock": "session.lock.json"
+}

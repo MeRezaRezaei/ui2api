@@ -3,14 +3,14 @@
   "site": "perplexity",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://www.perplexity.ai", "note": "session snapshot injected (data/www.perplexity.ai/.session) — pending first live capture" },
+    { "step": 1, "action": "open", "url": "https://www.perplexity.ai", "note": "session snapshot injected (data/www.perplexity.ai/.session) — cookie __Secure-next-auth.session-token per provider-catalog; pending first live capture" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
     { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
     { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
-    { "step": 5, "action": "read", "selector": "[data-testid=\"answer\"]", "until": "stable 2500ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture" }
+    { "step": 5, "action": "read", "selector": "[data-testid=\"answer\"]", "until": "stable 2500ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — HTML shell Cloudflare-challenged statically, tune after first live capture" }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "no wire endpoints documented for perplexity in capabilities/provider-catalog.md (auth-only entry: cookie __Secure-next-auth.session-token); search focus-mode endpoints are NOT assumed — the UI path drives the site's own JS, endpoint shapes to be recorded on first live capture",
+  "rpc": "probe-verified (2026-09-16): NextAuth route group only — GET /api/auth/providers (apple/email/google/googleonetap/pplx-jwt-to-cookie/workos), /api/auth/csrf, /api/auth/session, /api/auth/signin->/auth/signin, /api/auth/callback/email 307; cookie __Secure-next-auth.session-token. Chat transport NOT verified: POST /api/chat, /socket.io/?EIO=4&transport=polling, /rest/chat, /api/config, /api/perplexity/model, /api/search all return 403 Cloudflare managed-challenge to curl (no bundle access). The UI path drives the site's own JS, so no wire reconstruction needed",
   "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
   "sessionLock": "session.lock.json"
 }

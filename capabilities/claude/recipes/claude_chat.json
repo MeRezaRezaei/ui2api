@@ -3,14 +3,15 @@
   "site": "claude",
   "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://claude.ai", "note": "session snapshot injected (data/claude.ai/.session) — pending first live capture" },
+    { "step": 1, "action": "open", "url": "https://claude.ai", "note": "session snapshot injected (data/claude.ai/.session); claude.ai is Cloudflare-gated — snapshot must be captured in a headed browser that solved the challenge (loginRequired)" },
     { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell" },
-    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into .ProseMirror (ProseMirror confirmed in bundles shared-3/shared-15)" },
     { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
-    { "step": 5, "action": "read", "selector": "[data-testid=\"assistant-message\"]", "until": "stable 2500ms", "timeoutMs": 90000, "note": "UNVERIFIED candidate selector — tune after first live capture" }
+    { "step": 5, "action": "read", "selector": "[data-testid=\"assistant-message\"]", "until": "stable 2500ms", "timeoutMs": 90000, "note": "selector confirmed in bundles (shared-7, shared-msg-1)" }
   ],
   "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
-  "rpc": "no wire endpoints documented for claude in capabilities/provider-catalog.md (auth-only entry: cookie sessionKey); the UI path drives the site's own JS so no over-the-wire reconstruction is needed — endpoint shapes to be recorded on first live capture",
+  "rpc": "claude.ai wire is SSE over cookie auth (accept text/event-stream, credentials:include, anthropic-version 2023-06-01), conversation-scoped under /api/organizations/{org}/chat_conversations/{conv}/… ; the exact message-send POST was NOT recovered in the 2026-09 static bundle pass (classic …/completion absent) — record the URL+body from the first live network log. UI path drives the site's own handler, so no wire reconstruction is required to send.",
+  "streaming_api": "SSE event types observed in bundles: Ping/MessageStart/MessageDelta/MessageStop/ContentBlockStart/ContentBlockDelta/Error; streams are resumable (resume_token, sse_recovered)",
   "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
   "sessionLock": "session.lock.json"
 }
