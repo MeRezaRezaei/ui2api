@@ -32,7 +32,8 @@ describe("chat-site profiles (MVP: use AI sites for doing prompts)", () => {
     }
     for (const p of listProfiles()) {
       assert.ok(/^https:\/\//.test(p.url), `${p.id}.url must be https`);
-      assert.ok(Array.isArray(p.composer) && p.composer.length > 0, `${p.id}.composer`);
+      // urlTemplate profiles (google-ai-search) are composer-less by design.
+      if (!p.urlTemplate) assert.ok(Array.isArray(p.composer) && p.composer.length > 0, `${p.id}.composer`);
       assert.ok(Array.isArray(p.answer) && p.answer.length > 0, `${p.id}.answer`);
       assert.ok(p.id && p.name, `${p.id} must have id+name`);
     }

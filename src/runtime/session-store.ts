@@ -294,3 +294,32 @@ export function loadAccountSnapshot(
   }
   return loadSnapshot(snapshotPath(sitesDir, h));
 }
+
+// --- Capability reflection storage: capabilities.json next to each account ---
+
+export function capabilitiesPath(sitesDir: string, host: string, slug: string): string {
+  return resolve(accountDir(sitesDir, host, slug), "capabilities.json");
+}
+
+/** Save the account's capability fingerprint (report from capability-probe). */
+export function saveCapabilities(
+  sitesDir: string,
+  host: string,
+  slug: string,
+  report: unknown
+): void {
+  const dir = accountDir(sitesDir, host, slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(capabilitiesPath(sitesDir, host, slug), JSON.stringify(report, null, 2));
+}
+
+/** Load the account's stored capability fingerprint. Never throws. */
+export function loadCapabilities(sitesDir: string, host: string, slug: string): unknown | null {
+  try {
+    const p = capabilitiesPath(sitesDir, host, slug);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+}
