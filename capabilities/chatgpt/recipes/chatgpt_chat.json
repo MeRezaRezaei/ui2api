@@ -1,0 +1,16 @@
+{
+  "capability": "chatgpt_chat",
+  "site": "chatgpt",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, SSE-streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://chatgpt.com", "note": "session snapshot injected (data/chatgpt.com/.session); may land on a consent/auth interstitial first run — click through, then proceed" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "selector [aria-label=\"New chat\"]; jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into #prompt-textarea (fallback div[contenteditable=true])" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[data-message-author-role='assistant']", "until": "stable 2500ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = POST /backend-api/f/conversation (SSE, text/event-stream; events seen: stream_start, status_message, conversation_id, turn_complete; chunk-delta event literal composed dynamically — confirm on live capture). Request fields (bundle): model_slug, model_slug_advanced, chatreq_token (optional), client_tools, history_and_training_disabled, conversation_mode {kind: PrimaryAssistant|GizmoInteraction, gizmo_id}, parent_message_id. Auth: Authorization: Bearer <accessToken> + csrfToken, session seeded via /api/auth/session. The UI path drives the site's own JS so no proto reconstruction needed.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

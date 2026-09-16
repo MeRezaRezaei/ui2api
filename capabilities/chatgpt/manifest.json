@@ -1,0 +1,68 @@
+{
+  "id": "chatgpt",
+  "name": "ChatGPT (chatgpt.com)",
+  "url": "https://chatgpt.com",
+  "siteVersion": "prod-5b8d5dfe2eea7423e6e12834a673d2dfc6b339cc (data-build, page SSR) / data-seq 10817430 / cluster unified-193",
+  "capabilities": [
+    {
+      "id": "chatgpt_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer; SSE-streamed answer off the page (POST /backend-api/f/conversation, text/event-stream)",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/chatgpt_chat.json"
+    },
+    {
+      "id": "chatgpt_conversation_crud",
+      "name": "Conversation CRUD + history",
+      "description": "List/get/rename/delete conversations via /backend-api/conversation/* (endpoint literals in bundle; live shapes to verify)",
+      "method": "in-page fetch (Bearer access token + csrfToken) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatgpt_web_search",
+      "name": "Web search / tools toggle",
+      "description": "web_search + cloud_browser tool flags feed client_tools of the conversation request (flag literals in bundle)",
+      "method": "composer-sidebar toggle (site UI); exact tool-shape to-verify",
+      "recipe": null
+    },
+    {
+      "id": "chatgpt_upload_attach",
+      "name": "File upload / Estuary",
+      "description": "Attachment + artifact content via /backend-api/estuary/content and /backend-api/estuary/upload_content_bytes (upload_url_expiry, direct_azure/direct_aws strategies)",
+      "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "chatgpt_artifacts",
+      "name": "Artifacts / Canvas (Canmore)",
+      "description": "window.CanmoreNative hook + artifact_* message fields; /conversation/{id}/textdocs endpoint",
+      "method": "site iframe/artifact-mode (read DOM evidence in bundle)",
+      "recipe": null
+    },
+    {
+      "id": "chatgpt_gpts",
+      "name": "GPTs (custom assistants)",
+      "description": "conversation_mode { kind: GizmoInteraction, gizmo_id } + model_slug on custom GPTs",
+      "method": "ui-path (site picker) — payload field verified, live walk to verify",
+      "recipe": null
+    },
+    {
+      "id": "chatgpt_voice",
+      "name": "Voice transcription / input",
+      "description": "/backend-api/transcribe endpoint literal; voice dictation UI",
+      "method": "in-page fetch/UI — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "chatgpt.com",
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "note": "provider-catalog: chatgpt-web kind=cookie (Playwright storage-state JSON), chatgpt-web-codex kind=cookie (full ChatGPT Cookie header). Bundles: session from same-origin /api/auth/session -> Authorization: Bearer <accessToken>; token refresh via BroadcastChannel auth-session / access-token-refreshed-v1; cookies seen: __Secure-oai-is, __Secure-oai-employee-device. Bootstrap authStatus=logged_out on anonymous curl. Capture once headed, then fill session.lock.json."
+  },
+  "builtinProfile": "chatgpt",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 15 JS bundles (~13MB) + SSR client-bootstrap JSON; no browser launched"
+}

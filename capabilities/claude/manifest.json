@@ -15,6 +15,30 @@
       "description": "Send a prompt on the claude.ai composer (ProseMirror, confirmed in bundles); streamed answer read off [data-testid=\"assistant-message\"] nodes (confirmed in bundles shared-7/shared-msg-1). Wire takes the site's own send handler (src/profile/profile.ts built-in claude profile); raw send endpoint pending first live network log.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "recipe": "recipes/claude_chat.json"
+    },
+    {
+      "id": "claude_list_conversations",
+      "name": "List conversations",
+      "description": "Read the conversation list from the live page's own sidebar DOM (anchors under /chat/<uuid> and /conversation/<uuid>, deduped, capped at 20). Honest rpcNote: the production wire API — GET/PUT /api/organizations/{org}/chat_conversations/{conv} (+?rendering_mode=raw) and GET …/queued_message poll — is future work pending a live, headed session capture (sessionKey cookie past the Cloudflare/hCaptcha gate, orgUuid). DOM sidebar always reflects the current logged-in session; query filter is not available on the DOM path.",
+      "method": "dom.sidebar (wire GET/PUT …/chat_conversations/{conv} pending live capture)"
+    },
+    {
+      "id": "claude_extended_thinking",
+      "name": "Extended thinking",
+      "description": "Enable claude.ai extended_thinking mode. Honest best-effort only: the extended_thinking flag is confirmed in bundles (b-shared-0/b-shared-13) but the profile has no grounded 'thinking' toggle selector — runner returns ok:false with the reasoning spelled out, never a fabricated selector. Request-level mapping unverified until a live capture names the UI affordance.",
+      "method": "not implemented (ok:false) — flag bundle-grounded, selector unverified"
+    },
+    {
+      "id": "claude_artifacts",
+      "name": "Artifacts / CCR sandbox",
+      "description": "Enable claude.ai artifacts. Honest ok:false: the artifacts/CCR sandbox surface exists in bundles (anthropic.claude.usercontent.sandbox.ClaudeCompletionRequest/Response) but the UI selector is unverified — no fabricated selectors; revisit on a live capture.",
+      "method": "not implemented (ok:false) — sandbox bundle-grounded, UI selector unverified"
+    },
+    {
+      "id": "claude_web_search",
+      "name": "Web search",
+      "description": "Toggle the in-chat web_search tool. Honest ok:false: web_search tool references are in the bundles (b-shared-0 et al., six refs) but no toggle selector or request-level mapping is verified — no fabricated selectors; request-level mapping pending live capture.",
+      "method": "not implemented (ok:false) — tool bundle-grounded, selector unverified"
     }
   ],
   "permissions": [

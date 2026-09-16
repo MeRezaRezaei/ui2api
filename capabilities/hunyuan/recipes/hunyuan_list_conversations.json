@@ -1,0 +1,20 @@
+{
+  "capability": "hunyuan_list_conversations",
+  "site": "hunyuan",
+  "flow": "wire (GET /api/convs with real session cookies + X-ID/X-Token headers) with DOM-sidebar fallback",
+  "endpoint": "GET https://yuanbao.tencent.com/api/convs",
+  "rpc": {
+    "method": "GET /api/convs (API_CONV_LIST) for the conversation list; GET /api/conv (API_CONV_DETAIL) for per-conversation detail. Agent-scoped variants: GET /api/user/agent/conversation/list + /api/user/agent/conversation/v1/detail; sessions: GET /api/user/agent/session/list. Management side-ends (same family): rename /api/conv/title, delete /api/conv/delete, clear /api/convs/clear.",
+    "auth": "hy_user + hy_token domain session cookies (Cookie header) asserted by the API server; X-ID (userId) + X-Token (session token) request headers on the axios calls; credentials 'include'/withCredentials. The SPA never writes these cookies in bundle code — replay the captured real session cookie set, do not mint them.",
+    "note": "each message id splits on '_' into '{conversationId}_{...}' (index page) — use that to join list entries to per-message history"
+  },
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://yuanbao.tencent.com/", "note": "session snapshot injected (data/yuanbao.tencent.com/.session) — hy_user/hy_token cookies; pending first live capture" },
+    { "step": 2, "action": "rpc", "note": "GET /api/convs with the real cookies + X-ID/X-Token headers -> map response rows to [{id, title, updatedAt, …}]; fall back to /api/user/agent/conversation/list if the convs endpoint shape drifts" },
+    { "step": 3, "action": "fallback", "note": "if the wire is blocked (X-webdriver 1, Turing.js/QIMEI, login wall): read the conversation sidebar DOM (links into /chat/*) -> [{id, title}] — selectors to be pinned on first live capture" }
+  ],
+  "output": { "conversations": "array", "via": "wire|dom-sidebar" },
+  "known": "Endpoints grounded from the bundle inventory (hunyuan-yuanbao CAPABILITIES.md §5) but NOT executed during analysis — TO BE VERIFIED on first live capture; exact /api/convs response shape unknown until then. HEADED session required (X-webdriver: 1 flags headless).",
+  "stealth": "real logged-in session cookies (hy_user/hy_token), real X-ID/X-Token headers, read-only GETs; HEADED + real profile required",
+  "sessionLock": "session.lock.json"
+}

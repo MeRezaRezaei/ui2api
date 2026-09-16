@@ -1,0 +1,22 @@
+{
+  "capability": "kimi_file_upload",
+  "site": "kimi",
+  "flow": "wire-first (REST multipart POST /apiv2-files/file/upload with Bearer access_token) with composer-attach UI fallback",
+  "endpoint": "POST https://notilo.kimi.com/apiv2-files/file/upload",
+  "rpc": {
+    "method": "REST multipart: POST /apiv2-files/file/upload (baseURL '/apiv2-files', data: formData, method 'POST', timeout 0, responseType 'text') — returns the uploaded file id; lightweight same-origin sibling POST /file/upload_simple. Proto mirror: kimi.gateway.file.v1.FileService.Upload (client-streaming). Parse tracking: kimi.gateway.file.v1.FileService.GetFileParseProgress + kimi.gateway.chat.v1.ChatService.ListChatFiles.",
+    "auth": "Authorization: Bearer <localStorage access_token> plus x-msh-version (2.2.0) / x-msh-platform / x-msh-device-id / x-msh-session-id / X-Traffic-Id / R-Timezone; x-msh-shield-data (TrustDecision blackbox from window._fmOpt.getinfo()) is OPTIONAL on the request — page-injected, may be required once abuse signals appear. Do NOT fabricate it; read it off the page if a request fails auth.",
+    "response": "text response carrying the uploaded file id; FileMeta/FileBlob structured fields on the proto side; image blobs served from https://kimi-img.moonshot.cn",
+    "errors": "parse failures assert REASON_KIMI_FILE_PARSE_JOB_FAIL / REASON_KIMI_FILE_MODERATION_FAIL — surface these to the caller as file-specific, not chat errors"
+  },
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.kimi.com", "note": "session snapshot injected (data/www.kimi.com/.session) — localStorage access_token replay as Bearer; no cookies involved" },
+    { "step": 2, "action": "api", "method": "POST", "url": "https://notilo.kimi.com/apiv2-files/file/upload", "note": "page-side fetch with formData (field name TBD — capture on first live run), responseType 'text', Bearer + x-msh-* headers; returns file id. Multiple files: repeat or use FileService.Upload client-streaming once frame layout is captured." },
+    { "step": 3, "action": "verify", "note": "kimi.gateway.file.v1.FileService.GetFileParseProgress + ChatService.ListChatFiles confirm the file parsed and is bound to the chat; REASON_KIMI_FILE_PARSE_JOB_FAIL / REASON_KIMI_FILE_MODERATION_FAIL mean the turn must not be sent" },
+    { "step": 4, "action": "fallback", "note": "if the wire envelope is rejected (auth/shield gates): composer attach UI via input[type=file] — CANDIDATE selector only, Attach UI DOM unverified; drive the site's own picker on first live capture" }
+  ],
+  "output": { "fileId": "string", "parseStatus": "parsed|parsing|failed|moderation_failed", "via": "wire|composer-ui" },
+  "known": "REST endpoint+method+formData+responseType grounded from the JS-bundle inventory (kimi CAPABILITIES.md §3); exact multipart field name, response envelope, and the composer attach DOM are UNVERIFIED until first live capture. The UI path (step 4) currently lacks a verified selector — prefer wire.",
+  "stealth": "real session (localStorage access_token), page-side fetch (same fetch stack the SPA uses), no synthetic input events; TrustDecision (x-msh-shield-data) + VolcanoEngine remain active on the page",
+  "sessionLock": "session.lock.json"
+}

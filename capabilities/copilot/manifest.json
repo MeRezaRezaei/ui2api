@@ -1,0 +1,61 @@
+{
+  "id": "copilot",
+  "name": "Microsoft Copilot (copilot.microsoft.com)",
+  "url": "https://copilot.microsoft.com",
+  "siteVersion": "cmc (surface) / 10f62a4-prod (errorReportConfig version); bundles entry-ssr-j2VGbmp2.js, vendor-DnpqayAT.js, msal-baCNE5FO.js",
+  "transport": {
+    "kind": "websocket",
+    "url": "wss://copilot.microsoft.com/c/api/chat?api-version=2&clientSessionId=...&features=...&setflight=...",
+    "protocol": "JSON text frames; out {event:'send',conversationId,content:[...],mode:'chat'|'research'}; in {event:'appendText'/'replaceText'/'done'/'challenge'/...}; heartbeat {event:'ping'}/{event:'pong'}",
+    "status": "verified (static bundles); wire handshake + challenge outcome to-confirm-live",
+    "note": "The ui2api ChatDriver sends via the site's own UI path (type + Enter on #userInput); the WS described here is what that UI drives and is the floor-truth for a future raw transport."
+  },
+  "capabilities": [
+    {
+      "id": "copilot_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt on the composer (#userInput, Enter); streamed answer appends in-page. Underlying wire = WebSocket /c/api/chat (event:send → appendText/replaceText ... done) — verified in bundles",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/copilot_chat.json"
+    },
+    {
+      "id": "copilot_search_mode",
+      "name": "Web search / grounding mode",
+      "description": "Composer chat mode 'search' (Bing) — grounded answers with citation events on the wire",
+      "method": "ui-mode toggle (wire mode map verified: 'cs' → search)",
+      "recipe": null
+    },
+    {
+      "id": "copilot_thinking_mode",
+      "name": "Think deeper (reasoning) mode",
+      "description": "Composer chat mode 'Think deeper' — reasoning tokens via chainOfThought events",
+      "method": "ui-mode toggle (wire mode map verified: 'td' → reasoning)",
+      "recipe": null
+    },
+    {
+      "id": "copilot_history",
+      "name": "Conversation history / persistence",
+      "description": "REST /c/api/conversations CRUD + /conversations/{id}/history?api-version=2; autotitle via titleUpdate events",
+      "method": "in-page REST (api-version=2; Authorization Bearer when authed)",
+      "recipe": null
+    },
+    {
+      "id": "copilot_image_gen",
+      "name": "Image generation (Imagine)",
+      "description": "Image gen over the chat socket (generatingImage/imageGenerated events) with /imagine gallery; Bing Image Creator pipeline",
+      "method": "ui-path + in-band WS events (pipeline verified, endpoint to-confirm-live)",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": false,
+    "kind": "anonymous-temporary-session",
+    "host": "copilot.microsoft.com",
+    "endpoint": "POST /c/api/user/sessions/temporary -> {sessionKey} (TTL 6h)",
+    "note": "Anonymous flows use a temporary session key (socket query temporarySessionKey + header X-Copilot-TemporarySessionKey). Optional MSAL sign-in (login.microsoftonline.com consumers/organizations) adds accessToken to the WS query and Authorization header. Cookies for consent/MSCC only; exact cookie set captured at first live capture.",
+    "antiBot": "Cloudflare Turnstile (in-band challenge event) + hashcash SHA-256 proof-of-work; first socket connect on a clean IP likely requires answering the challenge"
+  },
+  "builtinProfile": "copilot",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + JS-bundle reading (4 bundles, ~2.8 MB: entry-ssr 1.57MB + vendor 0.88MB + msal 0.37MB + hashcash worker 1KB); no browser launched; host returned full SSR HTML (not bot-walled)"
+}

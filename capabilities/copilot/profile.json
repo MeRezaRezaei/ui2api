@@ -1,0 +1,15 @@
+{
+  "id": "copilot",
+  "name": "Microsoft Copilot (copilot.microsoft.com)",
+  "url": "https://copilot.microsoft.com",
+  "loginRequired": false,
+  "loginHint": "anonymous — no sign-in; temporary session key is issued server-side (POST /c/api/user/sessions/temporary)",
+  "composer": ["#userInput", "textarea[name='userInput']", "textarea[placeholder*='Ask']", "textarea"],
+  "send": { "kind": "keyEnter" },
+  "answer": ["[data-content=\"ai-message\"]", ".ac-textBlock", ".content-ai", "[data-message-type=\"text\"]"],
+  "dismiss": ["button[aria-label*=\"Accept\"]", "button[id*=\"accept\"]", "button[aria-label*=\"Continue\"]", "#c-accept"],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "captureStatus": "unverified — confirm on first live capture",
+  "note": "Selectors copied verbatim from the builtin copilot profile (src/profile/profile.ts lines 122-135). Static SSR confirms ONLY the composer part: <textarea id=\"userInput\" placeholder=\"Message Copilot\"> wraps data-testid=\"composer-input\"; send = Enter (keyEnter), new chat = button[aria-label=\"New chat\"] / data-testid=\"sidebar-new-conversation-nav-item\". The answer/dismiss selectors predate the current React message UI and were NOT found in the current bundles/SSR (current message DOM uses message-part blocks wired to WS appendText/replaceText events) — flag and re-verify on the first live capture."
+}
