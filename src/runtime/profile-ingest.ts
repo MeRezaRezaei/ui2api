@@ -357,6 +357,18 @@ function readCookiesFor(
   }
 }
 
+// Chrome encodes literal string keys/values in localStorage LevelDB with a
+// leading \x01 marker byte and stores values JSON-serialized ("foo" for a plain
+// string), so we strip the marker and JSON-parse quoted values to recover the
+// page-visible key/value. Exported for tests; pure.
+export function decodeLocalStorageValue(raw: string): string {
+  let s = raw.charCodeAt(0) === 0x01 ? raw.slice(1) : raw; // strip literal marker
+  if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
+    try { return JSON.parse(s) as string; } catch { /* keep raw */ }
+  }
+  return s;
+}
+
 // Best-effort localStorage read: copy the LevelDB dir, open, group by origin.
 // Keys look like `_<origin>\x00<key>` (or `<origin>\x00<key>`).
 // Scoped to `origin` only — auth tokens, not the whole store.
@@ -391,7 +403,11 @@ async function readLocalStorageFor(profileDir: string, origin: string): Promise<
               if (nul < 0) continue;
               if (body.slice(0, nul) !== origin) continue;
               if (!Buffer.isBuffer(v) || v.length === 0) continue;
-              out.push([body.slice(nul + 1), v.toString("utf8")]);
+              const value = v.toString("utf8");
+              const entryKey = decodeLocalStorageValue(body.slice(nul + 1));
+              const entryValue = decodeLocalStorageValue(value);
+              if (!entryKey) continue;
+              out.push([entryKey, entryValue]);
             }
           } catch {
             // iterator died (dir locked-ish) — what we got is still useful

@@ -14,6 +14,7 @@ import {
   decryptCookieValue,
   derivePeanutsKey,
   deriveKeysFromLocalState,
+  decodeLocalStorageValue,
   expiresUtcToEpoch,
   cookieRowToPlaywrightCookie,
   ingestProfile,
@@ -84,6 +85,21 @@ test("expiresUtcToEpoch converts Chrome FILETIME microseconds to epoch ms", () =
   const epoch = 1700000000000; // 2023-11-14T22:13:20Z
   const filetimeUs = BigInt(epoch) * 1000n + 11644473600000000n; // epoch µs + 1601→1970 µs
   assert.equal(expiresUtcToEpoch(filetimeUs), epoch);
+});
+
+test("decodeLocalStorageValue strips Chrome's \\x01 literal marker and JSON quotes", () => {
+  // Chrome stores literal string keys/values with a leading 0x01 marker byte
+  // and values JSON-serialized — replaying those raw breaks injection.
+  assert.equal(decodeLocalStorageValue("\u0001oai-did"), "oai-did");
+  assert.equal(decodeLocalStorageValue('\u0001"c8a53cda-e1b8-43ba-9a9b-7fce9fcb24aa"'), "c8a53cda-e1b8-43ba-9a9b-7fce9fcb24aa");
+  // JSON objects are stored as-is (no outer quotes to strip)
+  assert.equal(decodeLocalStorageValue('{"state":{"mode":1},"version":0}'), '{"state":{"mode":1},"version":0}');
+  // Plain values pass through untouched
+  assert.equal(decodeLocalStorageValue("true"), "true");
+  // No marker, no quotes → unchanged
+  assert.equal(decodeLocalStorageValue("plain-key"), "plain-key");
+  // Marker with quoted empty string
+  assert.equal(decodeLocalStorageValue('\u0001""'), "");
 });
 
 test("cookieRowToPlaywrightCookie maps the real Chrome schema", () => {

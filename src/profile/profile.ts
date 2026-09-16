@@ -99,7 +99,7 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     url: "https://chatgpt.com",
     loginRequired: true,
     loginHint: "sign in once via `ui2api analyse https://chatgpt.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR)",
-    composer: ["#prompt-textarea", 'div[contenteditable="true"]'],
+    composer: ["#prompt-textarea", "textarea#mobile-composer-prompt", 'div[contenteditable="true"]'],
     send: { kind: "keyEnter" },
     answer: ["[data-message-author-role='assistant']", ".markdown"],
     newChat: '[aria-label="New chat"], [aria-label*="New conversation"]',
