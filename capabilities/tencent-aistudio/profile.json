@@ -1,0 +1,52 @@
+{
+  "id": "tencent-aistudio",
+  "name": "Tencent AI Studio (aistudio.tencent.com)",
+  "url": "https://aistudio.tencent.com",
+  "loginRequired": true,
+  "loginHint": "VERIFIED auth path (from bundle analysis): iOA QR code scan login via POST /api/oalogin + /api/getuserinfo; server sets session cookies (likely hy_user + hy_token, same Tencent Hunyuan umbrella as yuanbao.tencent.com — exact names TO CONFIRM on live capture). Capture once: ui2api profile capture \"https://aistudio.tencent.com\" --login → replay data/aistudio.tencent.com/.session",
+  "composer": [
+    "div[contenteditable=\"true\"]",
+    "textarea",
+    "[class*=\"chat-input\"] textarea",
+    "[class*=\"input-box\"] textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[class*=\"message-content\"]",
+    "[class*=\"answer\"]",
+    "[class*=\"response-text\"]",
+    "[class*=\"chat-content\"]"
+  ],
+  "newChat": [
+    "[class*=\"new-chat\"]",
+    "[aria-label*=\"新对话\"]",
+    "[aria-label*=\"New chat\"]",
+    "a[href=\"/chat/HunyuanDefault\"]"
+  ],
+  "dismiss": [
+    "button[aria-label*=\"关闭\"], button[aria-label*=\"Close\"]",
+    "[class*=\"login-modal\"] button[class*=\"close\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "selectorNotes": {
+    "composer": [
+      "unverified — SPA renders React + TDesign into <div id='app'>; bundles prove chat send exists (POST /api/new-portal/chat/{chatId} with prompt/model/options payload) but give no DOM class for the composer; confirm on first live capture",
+      "unverified — textarea candidate (generic); the payload builder shows prompt text is the user input, but the exact DOM entry point is unknown",
+      "unverified — generic chat-input class candidate; TDesign components typically use .t-textarea or .t-input; confirm on first live capture"
+    ],
+    "answer": [
+      "unverified — stream chunks parsed by JSON.parse(e.data) with type → HYCSpeechType mapping; the rendered DOM for text/card/search results is React-rendered from those chunks; no proven CSS class in the bundles; confirm on first live capture",
+      "unverified — [class*='answer'] generic candidate; confirm on first live capture",
+      "unverified — [class*='response-text'] generic candidate; confirm on first live capture",
+      "unverified — [class*='chat-content'] generic candidate; confirm on first live capture"
+    ],
+    "newChat": [
+      "unverified — route /chat/HunyuanDefault is the default chat page (proven by bundle pathname checks); new-chat button exists somewhere in the sidebar; exact selector not proven by bundles; confirm on first live capture"
+    ],
+    "dismiss": [
+      "unverified — iOA login modal overlay candidate; confirm on first live capture"
+    ]
+  },
+  "note": "SCAFFOLD — auth facts (iOA/QR scan, Cookie-based, credentials:include) and the API endpoint map come from CAPABILITIES.md bundle analysis and are verified; every DOM selector above is an UNVERIFIED candidate to be confirmed on the first live capture (data/aistudio.tencent.com/.session). Anti-bot: enterprise Tencent Cloud monitoring (galileotelemetry, traceId) + iOA session cookies — drive the site's own UI, no synthetic clicks."
+}

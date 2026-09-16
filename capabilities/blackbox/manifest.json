@@ -1,0 +1,43 @@
+{
+  "id": "blackbox",
+  "name": "Blackbox AI (www.blackbox.ai)",
+  "url": "https://www.blackbox.ai",
+  "siteVersion": "Next.js App Router + Turbopack (/_ next/static/immutable/chunks/*.js). Anonymous root = B2B marketing site (\"Blackbox: The high-trust platform for frontier inference\"); /chat = 404; app.blackbox.ai 302 -> www.blackbox.ai. Consumer chat SPA is code-split behind login and NOT present in the statically-served module graph",
+  "transport": {
+    "type": "web-app (spa)",
+    "consumerChat": "NOT statically reachable — anonymized HTML+chunks ship marketing/framework JS only; composer/streaming module graph loads at runtime after login; real chat URL + wire TBD on first live (headed) capture",
+    "inferenceApi": {
+      "completions": "POST https://enterprise.blackbox.ai/chat/completions (OpenAI-compatible; Bearer sk-*; literal in 6.js terminal demo)",
+      "streaming": "GET https://enterprise.blackbox.ai/enc/<model>/message_stream (SSE-style legacy 'enc' path; literal message_stream in 6.js)",
+      "models": "nvidia/nemotron-3.5-lightning, nvidia/nemotron-3-ultra-550b-a55b (plus deepseek/llama/mistral/qwen marketing literals)",
+      "proxyModes": "encrypted: bbenc/<model> via e2ee-proxy-1 (cc_proxy) vs plaintext: <model> via api-proxy-1 (api_proxy)"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "blackbox_chat",
+      "name": "Chat stream (composer)",
+      "description": "Send a prompt on the composer and read the streamed answer off the page. UNVERIFIED transport: the chat SPA's module graph is not present in the static HTML/JS (login-gated, code-split) — composer/send/answer DOM and the exact chat wire must be confirmed on the first live capture",
+      "method": "ui-path (site's own composer + send handler)",
+      "recipe": "recipes/blackbox_chat.json"
+    },
+    {
+      "id": "blackbox_inference_api",
+      "name": "Inference API (OpenAI-compatible + enc stream)",
+      "description": "Verified (static) API surface: POST https://enterprise.blackbox.ai/chat/completions and SSE path /enc/<model>/message_stream. Live request/response shapes to verify — endpoint literals seen only in the marketing terminal demo (6.js), not yet exercised",
+      "method": "in-page fetch or direct API — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "www.blackbox.ai",
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "note": "provider-catalog: blackbox-web kind=cookie, credentialName __Secure-authjs.session-token (AuthJS/NextAuth-style). NOT bundle-verified: zero auth literals (authjs/session-token/csrf) appear in any of the 14 statically-served chunks — the auth module is server-side / lazy-loaded. /login (200, 224KB) is a JS client form (button.blackbox-authsubmit) with no exposed SSO/endpoint strings. Capture once headed, record the real cookie/localStorage set, then fill session.lock.json."
+  },
+  "builtinProfile": "blackbox",
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 14 JS bundles (~1MB incl. 3 login-page chunks) + SSR HTML of / and /login; no browser launched"
+}

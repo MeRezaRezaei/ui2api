@@ -1,0 +1,29 @@
+{
+  "id": "copilot-m365",
+  "name": "Microsoft Copilot for M365 (copilot.cloud.microsoft — Harmony app)",
+  "url": "https://copilot.cloud.microsoft",
+  "loginRequired": true,
+  "loginHint": "Entra ID (Microsoft Entra) sign-in only — MSA/consumer accounts are blocked (blockMsaFed:true). Login redirect chain observed: /login -> /loginv2 -> https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=4765445b-32c6-49b0-83e6-1d93765276ca&redirect_uri=https%3A%2F%2Fcopilot.cloud.microsoft%2Flandingv2&response_type=code%20id_token&scope=openid%20profile%20offline_access%20https%3A%2F%2Fm365.cloud.microsoft%2Fv2%2FM365Copilot.Read.All&response_mode=form_post. OIDC callback is form_post to /landingv2 (ASP.NET Core session cookies .AspNetCore.*, OH.SID). Capture requires a real M365 work/school Entra session — there is no anonymous path.",
+  "composer": [
+    "[data-testid=\"composer-input\"]",
+    "textarea[placeholder*=\"Message\"]",
+    "textarea"
+  ],
+  "send": {
+    "kind": "keyEnter"
+  },
+  "answer": [
+    "[data-content=\"ai-message\"]",
+    ".ac-textBlock",
+    ".content-ai",
+    "[data-message-type=\"text\"]"
+  ],
+  "dismiss": [
+    "button[aria-label*=\"Accept\"]",
+    "button[aria-label*=\"Continue\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2000,
+  "captureStatus": "unverified — ALL selectors UNVERIFIED (chat DOM is behind the Entra auth wall and was never observed; copied from consumer copilot profile as candidates only)",
+  "note": "This M365 surface is hard-gated by Entra ID; the post-auth chat SPA and its DOM were NOT observable via static analysis, so every selector here is a flagged candidate (inherited from the consumer copilot profile, likely WRONG for this app). Must be re-verified on the first authenticated live capture. auth: kind token/cookie in provider-catalog = 'access_token + chathubPath' — consistent with an Entra-issued token driving a chat backend, to be confirmed live."
+}

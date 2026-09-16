@@ -24,6 +24,9 @@ import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
 import { VeniceCapabilities } from "../capabilities/venice.js";
 import { DeepSeekCapabilities } from "../capabilities/deepseek.js";
 import { ClaudeCapabilities } from "../capabilities/claude.js";
+import { ChatGPTCapabilities } from "../capabilities/chatgpt.js";
+import { CopilotCapabilities } from "../capabilities/copilot.js";
+import { HuggingChatCapabilities } from "../capabilities/huggingchat.js";
 
 export interface PromptdOptions {
   port: number;
@@ -269,6 +272,72 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
         const shared = await pool.sharedBrowser();
         const caps = new ClaudeCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // ChatGTP capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
+      if (req.method === "POST" && req.url === "/capability/chatgpt") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("chatgpt", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/chatgpt/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new ChatGPTCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Copilot capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
+      if (req.method === "POST" && req.url === "/capability/copilot") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("copilot", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/copilot/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new CopilotCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // HuggingChat capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
+      if (req.method === "POST" && req.url === "/capability/huggingchat") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("huggingchat", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/huggingchat/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new HuggingChatCapabilities(profile, { browser: shared, dataDir });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

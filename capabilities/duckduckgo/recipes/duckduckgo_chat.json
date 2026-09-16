@@ -1,0 +1,46 @@
+{
+  "capability": "duckduckgo_chat",
+  "site": "duckduckgo",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, SSE-streamed answer",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "No session snapshot needed — anonymous chat. duckduckgo.com/?ia=chat redirects here (302). If the DDG account onboarding modal appears, click through (dismiss selector)."
+    },
+    {
+      "step": 2,
+      "action": "new-chat",
+      "onlyWhen": "args.newChat",
+      "note": "jittered 600-1300ms human dwell; New Chat button (DUCKCHAT_NEW_CHAT_BUTTON); selector unverified"
+    },
+    {
+      "step": 3,
+      "action": "type",
+      "input": "args.prompt",
+      "note": "trusted keyboard.insertText into composer (textarea or contenteditable). Selector unverified — confirm on first live capture."
+    },
+    {
+      "step": 4,
+      "action": "send",
+      "note": "Enter (keyEnter strategy), 50-200ms gate"
+    },
+    {
+      "step": 5,
+      "action": "read",
+      "selector": "[class*=\"message\"][class*=\"assistant\"]",
+      "until": "stable 2000ms",
+      "timeoutMs": 45000,
+      "note": "answer selector UNVERIFIED — SSE stream delivers text via JSON frames with action:success, role:assistant. The DOM rendering class is module-hashed; confirm on first live capture."
+    }
+  ],
+  "output": {
+    "answer": "string",
+    "chunkCount": "number",
+    "doneReason": "stable|timeout|empty"
+  },
+  "rpc": "underlying wire = POST /duckchat/v1/chat (SSE, text/event-stream; frames: JSON {action:success/error} + markers [PING]/[DONE]/[CHAT_TITLE]/[FIXED_COST_WINDOW_USAGE]/[STOP_REASON]/[LIMIT_*]/[ADS:{windowID}]/[SUMMARY_*]). VQD token obtained from GET /duckchat/v1/status (x-vqd-accept:1) and refreshed per-response. Request body: {model, messages[{role,content[{type,text|image,file}]}], metadata{toolChoice}, reasoningEffort, canUseWebSearch, canUploadFiles, ...}. Auth: anonymous (VQD token from status header); DDG account optional (internal_duckchat_user cookie). The UI path drives the site's own JS so no VQD token extraction needed.",
+  "stealth": "real session (anonymous — no capture needed), trusted inputs, site's own send handler — indistinguishable from the user typing; VQD token obtained by the app at runtime",
+  "sessionLock": "session.lock.json"
+}

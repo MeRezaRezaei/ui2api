@@ -1,0 +1,129 @@
+{
+  "name": "doubao",
+  "displayName": "豆包 (Doubao)",
+  "url": "https://www.doubao.com/chat/",
+  "provider": "doubao",
+  "status": "awaiting-capture",
+  "loginRequired": true,
+  "transport": {
+    "api": {
+      "baseUrl": "https://www.doubao.com",
+      "method": "POST",
+      "contentType": "application/json",
+      "commonHeaders": {
+        "Agw-Js-Conv": "str"
+      }
+    },
+    "chatCompletion": {
+      "endpoint": "/samantha/chat/completion",
+      "method": "POST",
+      "contentType": "application/json",
+      "streaming": "SSE (onMessage handler)",
+      "credentials": "same-origin",
+      "headers": {
+        "Agw-Js-Conv": "str"
+      }
+    },
+    "messageStreaming": {
+      "endpoint": "/alice/message/stream_call_bot",
+      "method": "POST",
+      "bodyKey": "payload"
+    },
+    "webSocket": {
+      "url": "wss://www.doubao.com/ws/v2",
+      "protocol": "pbbp2",
+      "params": {
+        "fpID": "wsProductId from im/launch config",
+        "accessKey": "wsAccessKey from im/launch config",
+        "aID": "wsAppId from im/launch config",
+        "ttwID": "ttwid cookie value",
+        "version_code": "from config",
+        "device_platform": "web"
+      }
+    }
+  },
+  "features": {
+    "chat": {
+      "enabled": true,
+      "endpoints": [
+        "/samantha/chat/completion",
+        "/alice/message/stream_call_bot",
+        "/alice/message/list/v2",
+        "/alice/message/pre_handle_v2"
+      ]
+    },
+    "conversations": {
+      "enabled": true,
+      "endpoints": [
+        "/alice/conversation/list",
+        "/alice/conversation/info",
+        "/im/conversation/batch_get"
+      ]
+    },
+    "imageGeneration": {
+      "enabled": true,
+      "endpoints": [
+        "/alice/aippt/gen_images",
+        "/alice/aippt/search_images",
+        "/alice/aippt/images/ai_edit_prompts/sse"
+      ]
+    },
+    "audioVoice": {
+      "enabled": true,
+      "endpoints": [
+        "/alice/audio/launch",
+        "/alice/audio/conf_detail",
+        "/alice/audio/conf_create_bot_voice",
+        "/alice/user_voice/clone",
+        "/alice/audio/social/get_audio_url"
+      ]
+    },
+    "deepResearch": {
+      "enabled": true,
+      "endpoints": [
+        "/alice/message/deep_research/get",
+        "/alice/message/deep_research/retry",
+        "/alice/message/deep_research/share"
+      ]
+    },
+    "codeInterpreter": {
+      "enabled": true,
+      "features": [
+        "office-tool-local",
+        "chunk-stream"
+      ]
+    },
+    "canvas": {
+      "enabled": true
+    },
+    "writing": {
+      "enabled": true,
+      "endpoints": [
+        "/alice/writing/docs/list",
+        "/alice/writing/styles/list",
+        "/alice/writing/auth/gen_url"
+      ]
+    }
+  },
+  "auth": {
+    "method": "cookie",
+    "cookieNames": [
+      "sessionid",
+      "ttwid",
+      "s_v_web_id"
+    ],
+    "loginEndpoints": [
+      "https://accounts.doubao.com",
+      "https://accounts.feishu.cn"
+    ],
+    "antiBot": {
+      "library": "byted_acrawler",
+      "headers": [
+        "X-Bogus",
+        "X-MS-STUB"
+      ],
+      "openclawSignature": true
+    }
+  },
+  "id": "doubao"
+}

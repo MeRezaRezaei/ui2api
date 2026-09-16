@@ -1,0 +1,16 @@
+{
+  "site": null,
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": null,
+    "cookieNames": [],
+    "apiHost": null,
+    "authEndpoint": null,
+    "captureCommand": null,
+    "targetDir": null
+  },
+  "note": "DEAD END: No AI chat product found at any tinycms domain. Cannot define session capture requirements. OmniRoute catalog lists tinycms-web as kind=token with credentialName=app-config-uuid (placeholder=R...) and storageKeys [apiKey, token, uuid, app-config-uuid], but no live product exists to capture a session from. 13 domains probed (cc, app, com, io, ai, net, chat, com.cn, cn, tiny-cms.com); tinycms.xyz is a Chinese foreign-trade CMS docs site (not AI chat).",
+  "capturedAt": null,
+  "snapshotHash": null
+}

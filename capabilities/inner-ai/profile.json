@@ -1,0 +1,20 @@
+{
+  "id": "inner-ai",
+  "name": "Inner AI (app.innerai.com)",
+  "url": "https://app.innerai.com",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://app.innerai.com --login` (login UI: https://platform.innerai.com/login.html — inputs #email, #password + Google/Microsoft/Apple buttons), or reuse your real Chrome profile (UI2API_USER_DATA_DIR). Capture cookies token/email/deviceId.",
+  "composer": [
+    "[contenteditable='true'], textarea, div[role='textbox']",
+    "[data-cy~='composer'], textarea[placeholder]"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[data-message-role='assistant']",
+    "[class*='message'][class*='assistant'], main p"
+  ],
+  "newChat": "[aria-label~='new'][aria-label~='chat'], button[aria-label*='Nova']",
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED selectors — the app is a hashed CSS-modules React SPA (single 16MB Vite bundle, mount #root) so no stable class names can be extracted statically. Candidates above are generic role/generic-attribute patterns to confirm on first live capture; wires (platformapi endpoints, USER-TOKEN headers, Centrifuge WS) are bundle-verified. Login inputs #email/#password on platform.innerai.com/login.html ARE verified from the login HTML."
+}

@@ -1,0 +1,16 @@
+{
+  "site": "www.blackbox.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.blackbox.ai",
+    "cookieNames": ["__Secure-authjs.session-token"],
+    "apiHost": "https://www.blackbox.ai",
+    "authEndpoint": null,
+    "captureCommand": "ui2api profile capture \"https://www.blackbox.ai\" --login",
+    "targetDir": "data/www.blackbox.ai/.session/state.json"
+  },
+  "note": "Provider-catalog classifies blackbox-web as cookie auth with credentialName __Secure-authjs.session-token (AuthJS/NextAuth-style) — this comes from the catalog, NOT from bundle analysis: zero auth literals (authjs/session-token/csrf) exist in the 14 statically-served chunks. Critical caveat for the capturing agent: an anonymous fetch of / serves the B2B marketing site and /chat 404s, so the captured state.json must record the REAL logged-in chat URL and its DOM. Check both document.cookie and localStorage in state.json; catalogue the true chat route before trusting profile.json selectors.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

@@ -1,0 +1,16 @@
+{
+  "capability": "zenmux_chat",
+  "site": "zenmux",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://zenmux.com", "note": "DEAD-END as of 2026-09-16: HTTPS :443 times out, HTTP serves an empty parked shell. Recipe is schema-compatible but will NOT run until the origin serves an app again." },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "jittered 600-1300ms human dwell; selector UNVERIFIED (no live DOM to match)" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText; composer selector UNVERIFIED placeholder" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[class*=\"assistant\"], [class*=\"message\"]", "until": "stable 2000ms", "timeoutMs": 60000, "note": "answer selector UNVERIFIED placeholder — re-derive from the live app before trusting output" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "UNKNOWN — domain parked, no app bundles to analyze. Catalog treats zenmux-free as a free tier of a proxy/aggregator (kind=cookie, 'Cookie header (full)'), which usually implies an OpenAI-compatible surface (e.g. /v1/chat/completions, SSE). NOT observed this run — do not treat as fact. Re-run static bundle analysis if/when the site returns; the UI path drives the site's own JS so no proto reconstruction would be needed.",
+  "stealth": "unassessable while parked — would otherwise be: real session (cookie), trusted inputs, site's own send handler",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,16 @@
+{
+  "capability": "v0_chat",
+  "site": "v0",
+  "flow": "ui-path (ChatDriver) — ProseMirror composer insertText + Enter, newline-delimited-JSON streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://v0.app/chat", "note": "session snapshot injected (data/v0.app/.session); unauthenticated visitors are redirected to /api/auth/login?next=... — click through the GitHub/Vercel OAuth, then proceed" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "selector [data-slot=\"new-chat-button\"], [aria-label=\"Start new chat\"]; jittered 600-1300ms human dwell (both UNVERIFIED)" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into .ProseMirror[contenteditable=\"true\"] (bundle-derived ProseMirror composer; fallback [contenteditable=\"true\"])" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy) — bundle keydown handler preventDefaults + submits on 'Enter'; 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[data-testid=\"message\"][role=\"listitem\"] [data-message-content]", "until": "stable 2500ms", "timeoutMs": 90000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire = POST /chat/api/chat with Accept: text/event-stream; response body is newline-delimited JSON, each line JSON.parsed and reduced client-side into the assistant message; transport wrapper events type=message|error|complete; LLM failures surface as finishReason provider_server_error[:<category>] / retry_provider_server_error[:<category>]. Resume: GET /chat/api/chat/resume?messageId=; probe: HEAD /chat/api/chat/resume/ping; latest: GET /api/chat/chat/latest?chatId=&lastSyncedAt=. Request body (bundle): chatId, messageId, messageContent {version:1, parts:[{type:'mdx', content}]}, modelConfiguration {modelId default 'v0-max', imageGenerations, thinking}, userMessageType 'message', isNew, permissionsMode 'full', attachments[], projectId, optional programmatic/sandbox{enabled}/shouldCreatePR. Response header x-v0-user-message-id = created user message id. Auth: same-origin __vercel_session cookie (provider-catalog); no Authorization bearer. The UI path drives the site's own JS, so no per-line event schema reconstruction is needed beyond what is listed.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

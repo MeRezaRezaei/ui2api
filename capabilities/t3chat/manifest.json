@@ -1,0 +1,108 @@
+{
+  "id": "t3chat",
+  "name": "t3.chat (t3.chat)",
+  "site": "t3.chat",
+  "url": "https://t3.chat",
+  "description": "Open-source LLM aggregator web app by t3-oss (Theo Browne) — single chat UI routing prompts to multiple LLM backends (Claude, GPT, Gemini, Llama, etc.) via Convex backend. Protected by Vercel Security Checkpoint bot wall; all findings are catalog/third-party derived, NOT from live site bundles.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "BOT-WALLED — zero live bundles recovered (Vercel Security Checkpoint 429 on all paths). github.com/t3-oss/t3-chat 404. Third-party clones (TGlide/thom-chat, TomDoesTech/t3-chat, shaltielshmid/NotT3Chat, lulkebit/t3-cloneathon, heymaaz/t3.chat.cloneathon) confirm Convex + Next.js stack. provider-catalog.md lines 53 + 83 provide the only auth facts (convex-session-id cookie + token).",
+  "transport": {
+    "type": "unknown-from-static-analysis",
+    "protocol": "UNVERIFIED — clone repos suggest Convex real-time subscriptions (WebSocket via wss://*.convex.cloud) for live streaming + Convex mutations/queries for CRUD. The live site may alternatively use Vercel AI SDK streaming (POST /api/chat returning text/event-stream). Cannot determine which path without bundles.",
+    "baseUrl": "UNVERIFIED — Convex deployment URL unknown; clone repos use *.convex.cloud endpoints. Live site may also expose /api/* Next.js routes.",
+    "convex": {
+      "backend": "UNVERIFIED — confirmed only by provider-catalog credentialName 'convex-session-id' and third-party clone Convex schema definitions",
+      "hostHint": "*.convex.cloud (standard Convex deployment pattern)",
+      "appHint": "unknown — Convex app id not recoverable without live page"
+    },
+    "auth": {
+      "scheme": "UNVERIFIED — two modes documented by provider-catalog: (1) cookie: 'convex-session-id + Cookie header' (t3-web), (2) token: 'token' bearer (t3-chat-web)",
+      "tokenOrigin": "UNKNOWN — no localStorage keys, no cookie names, no JWT structure recovered from bundles",
+      "loginFlow": "UNKNOWN — clone repos use Convex Auth or Clerk; live site's auth provider unknown"
+    },
+    "headers": {
+      "note": "UNVERIFIED — standard Convex headers likely include convex-client-version, x-convex-request-id; live header set unknown without bundles"
+    },
+    "streaming": "UNVERIFIED — Convex subscriptions (WebSocket) or Vercel AI SDK (HTTP streaming); cannot determine without live capture"
+  },
+  "capabilities": [
+    {
+      "id": "t3chat_chat",
+      "name": "Chat stream",
+      "description": "Send a prompt via the chat composer; streamed answer from the selected LLM backend (Convex mutation or /api/chat route — wire path UNKNOWN)",
+      "method": "ui-path (trusted input + Enter, site's own send handler) — UNVERIFIED",
+      "implementation": "UNVERIFIED — clone repos suggest a Convex mutation (e.g. api.chat.send) invoked from the React component on submit; streaming response delivered via Convex subscription or HTTP stream. The site's own JS drives the flow; no RPC payloads recovered. Confirm on first live capture.",
+      "recipe": "recipes/t3chat_chat.json"
+    },
+    {
+      "id": "t3chat_model_switch",
+      "name": "Model / provider switching",
+      "description": "Select which LLM backend to use (Claude, GPT, Gemini, Llama, etc.) via the model picker dropdown",
+      "method": "ui-picker (UNVERIFIED selector) — select the desired model before or during chat",
+      "implementation": "UNVERIFIED — public discourse and clone repos confirm multi-model support; no DOM selectors, state keys, or API payloads recovered from the live site bundles. The model selection likely persists in Convex chat state or is passed per-request. Confirm on first live capture.",
+      "recipe": null
+    },
+    {
+      "id": "t3chat_conversation_crud",
+      "name": "Conversation CRUD + history",
+      "description": "List/get/rename/delete conversations — Convex-backed (chats table in clone repos)",
+      "method": "in-page Convex queries (UNVERIFIED) or DOM sidebar read",
+      "implementation": "UNVERIFIED — clone repos define Convex functions chat.list, chat.get, chat.delete, message.list. Live site may use the same or different Convex function names. No payloads verified.",
+      "recipe": null
+    },
+    {
+      "id": "t3chat_file_upload",
+      "name": "File / image upload",
+      "description": "Attach files or images to a chat (UNVERIFIED — clone repos suggest Convex Blob storage or Vercel Blob)",
+      "method": "composer attach UI (UNVERIFIED selector)",
+      "implementation": "UNVERIFIED — no evidence from static analysis. Clone repos show file upload via Convex actions with Blob storage. Confirm on first live capture.",
+      "recipe": null
+    },
+    {
+      "id": "t3chat_model_list",
+      "name": "Model picker read",
+      "description": "Read available models from the model picker DOM — UNVERIFIED selectors",
+      "method": "dom.picker (unverified selectors)",
+      "implementation": "UNVERIFIED — no DOM class or state key proven by bundles. Public knowledge: supports Claude 3.5/4, GPT-4o/4, Gemini Pro/Ultra, Llama 3, Mistral, etc. Confirm picker structure on first live capture.",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "t3.chat",
+    "apiHost": "UNVERIFIED — likely Convex deployment (*.convex.cloud) plus t3.chat/api/*",
+    "documentedAuthModes": [
+      {
+        "mode": "cookie",
+        "credentialName": "convex-session-id + Cookie header",
+        "source": "provider-catalog.md line 53 (t3-web entry)"
+      },
+      {
+        "mode": "token",
+        "credentialName": "token",
+        "source": "provider-catalog.md line 83 (t3-chat-web entry)"
+      }
+    ],
+    "capture": "ui2api profile capture \"https://t3.chat\" --login",
+    "note": "Auth facts are SOLELY from provider-catalog (harvested from open-source repo, 2026-09-15). No JWT structure, refresh flow, cookie list, or localStorage keys recovered from the live site. Vercel Security Checkpoint bot wall blocks all non-browser access. Capture once headed, then record the full cookie/localStorage set."
+  },
+  "permissions": [
+    "requires a real logged-in t3.chat session snapshot",
+    "Vercel Security Checkpoint blocks all non-browser requests — must use real browser or UI2API_USER_DATA_DIR",
+    "No anti-bot tokens beyond Vercel challenge seen in static analysis (but bot wall IS the anti-bot)"
+  ],
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "attempted static curl (bot-walled: 429 Vercel Security Checkpoint on all paths including /_next/*, /api/*, /); provider-catalog entries (lines 53 + 83) as sole auth source; third-party clone repos (GitHub search, NOT ground truth) for tech-stack corroboration; github.com/t3-oss/t3-chat verified 404",
+  "knownLimitations": [
+    "ZERO live site bundles recovered — Vercel Security Checkpoint (JS challenge) blocks all curl UA access",
+    "github.com/t3-oss/t3-chat does NOT exist publicly (404) — cannot corroborate any wire details from the canonical repo",
+    "All selectors in profile.json are completely unverified scaffold guesses — confirm every one on first live capture",
+    "Transport type is UNKNOWN — could be Convex WebSocket subscriptions, Vercel AI SDK HTTP streaming, or a hybrid; cannot determine without live browser capture",
+    "Model switching is probable but NO evidence of the picker's DOM structure, model ID format, or how the selection is passed to the backend",
+    "File upload capability is a guess based on clone repos — NO evidence on the live site"
+  ]
+}

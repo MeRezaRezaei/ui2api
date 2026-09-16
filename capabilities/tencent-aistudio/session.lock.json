@@ -1,0 +1,16 @@
+{
+  "site": "aistudio.tencent.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "aistudio.tencent.com",
+    "cookieNames": ["likely hy_user + hy_token (hypothesis — exact names to verify on live capture)"],
+    "apiHost": "https://aistudio.tencent.com",
+    "authEndpoint": "/api/oalogin",
+    "captureCommand": "ui2api profile capture \"https://aistudio.tencent.com\" --login",
+    "targetDir": "data/aistudio.tencent.com/.session/state.json"
+  },
+  "note": "This package installs and runs from the profile plus a captured session snapshot of aistudio.tencent.com; real auth is Cookie-based (iOA QR scan / WeChat login → server sets session cookies). provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). The SPA uses credentials:'include' on every request; the X-Token/X-ID/Space-Id headers are injected only in miniprogram/openapi contexts (not the primary web path). Exact cookie names are hypotheses based on yuanbao.tencent.com overlap; capture once headed and record the cookie set in state.json. All DOM selectors are unverified pending first live capture.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

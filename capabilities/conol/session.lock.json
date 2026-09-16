@@ -1,0 +1,19 @@
+{
+  "site": "conol.ai",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "conol.ai",
+    "cookieNames": ["__Secure-better-auth.session_token"],
+    "betterAuthVersion": "1.6.16",
+    "authPlugin": "passkey (WebAuthn)",
+    "apiHost": "https://conol.ai",
+    "authEndpoint": "/api/auth/get-session",
+    "signOutEndpoint": "/api/auth/sign-out",
+    "captureCommand": "ui2api profile capture \"https://conol.ai\" --login",
+    "targetDir": "data/conol.ai/.session/state.json"
+  },
+  "note": "This package installs and runs from the profile plus a captured session snapshot of conol.ai. Auth is passkey-only via better-auth v1.6.16 (WebAuthn): no email/password, no Google OAuth. Cookie: __Secure-better-auth.session_token. Session check: GET /api/auth/get-session returns null when unauthed, session JSON when authed. The SPA app is fully client-rendered behind session -- capture once headed after passkey auth, then record the cookie set + app chunk URLs in state.json. Passkey registration is a browser-native ceremony (WebAuthn navigator.credentials.create) and cannot be scripted.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

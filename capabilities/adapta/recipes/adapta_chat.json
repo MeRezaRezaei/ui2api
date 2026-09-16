@@ -1,0 +1,16 @@
+{
+  "capability": "adapta_chat",
+  "site": "adapta",
+  "flow": "DEAD-END — no live product at adapta.app (parked DonDominio domain). This recipe is a schema-parity placeholder for gemini_chat.json and is inoperable until the real adapta domain/brand is identified and the selectors are derived from an actual page load.",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://adapta.app", "note": "would inject session snapshot (data/adapta.app/.session); currently serves a registrar parking page, 443 refused" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "selector null — no chat DOM exists; jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText; composer selector null (unverified)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": null, "until": "stable 2500ms", "timeoutMs": 60000 }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "Unknown — no app JS bundles exist to extract endpoints from (parking page ships only /js/searchlinks.js + /css/*). Guide once re-identified: capture the wire shape (SSE/WS/stream-delta), model literals, and feature flags from the real product's bundles, then replace this field.",
+  "stealth": "whatever the real product requires — no facts from the parked domain are transferable; derive send/stream behavior from the site's own JS on first live capture",
+  "sessionLock": "session.lock.json"
+}

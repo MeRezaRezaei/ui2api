@@ -1,0 +1,8 @@
+{
+  "site": "manus",
+  "note": "manus.im static-analysis package (no bot wall). Capture via `ui2api analyse https://manus.im --login`; needs cookies + localStorage (manus_session / *_session / manus_account).",
+  "capturedAt": null,
+  "cookieCount": null,
+  "locked": false,
+  "status": "awaiting-capture"
+}

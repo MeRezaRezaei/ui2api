@@ -1,0 +1,46 @@
+{
+  "id": "zenmux",
+  "name": "ZenMux (zenmux.com) — free proxy/aggregator tier",
+  "url": "https://zenmux.com",
+  "description": "DEAD-END PACKAGE: provider-catalog lists zenmux-free as kind=cookie (full Cookie header) — free tier of a proxy/aggregator chat front. Static probe 2026-09-16 found the domain parked: HTTPS :443 times out, HTTP serves a 94-byte empty shell (meta name=\"revised\" content=\"1.1.7\"), identical to the 2026-06-14 Wayback snapshot. No app, no JS bundles, no endpoint/streaming/auth facts. Scaffold shipped for tracking; dormant until the origin returns.",
+  "version": "0.1.0",
+  "author": "ui2api capability package",
+  "date": "2026-09-16",
+  "siteVersion": "unknown — parked shell only (meta revised=1.1.7 is a parking marker, not an app version)",
+  "transport": {
+    "type": "unknown",
+    "protocol": "UNVERIFIED — catalog implies an OpenAI-compatible proxy/aggregator tier (e.g. /v1/chat/completions) but no live origin to confirm; nothing observed",
+    "baseUrl": null,
+    "streaming": "UNKNOWN — SSE presumed for an OpenAI-compatible tier, unconfirmed",
+    "auth": {
+      "scheme": "catalog: cookie (full Cookie header replayed); exact cookie name/domain UNKNOWN and unverifiable against a dead origin"
+    },
+    "honesty": "All transport/facts are UNKNOWN because the domain serves no application — fields left null/UNKNOWN rather than fabricated."
+  },
+  "capabilities": [
+    {
+      "id": "zenmux_chat",
+      "name": "Chat",
+      "description": "Composer send + streamed answer — exact wire UNKNOWN; dormant scaffold awaiting domain revival",
+      "method": "ui-path placeholder — selectors UNVERIFIED, recipe schema-compatible, will not run against a dead origin",
+      "implementation": "NOT INVESTIGABLE — no app/bundles served. If/once the site returns, re-run static bundle analysis to recover the real chat endpoint, transport, auth cookie and model list, then promote this capability.",
+      "recipe": "recipes/zenmux_chat.json",
+      "status": "dormant"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "cookie",
+    "host": "zenmux.com",
+    "apiHost": null,
+    "capture": "ui2api profile capture \"https://zenmux.com\" --login",
+    "note": "provider-catalog: zenmux-free kind=cookie, credential 'Cookie header (full)'. loginRequired kept true per catalog, but the origin is parked (HTTPS dead, HTTP empty shell) — the capture command will fail until the domain serves an app again. No cookie names are known from any source."
+  },
+  "permissions": [
+    "requires a live zenmux.com origin to even begin — currently parked (CSC registrar DNS 165.160.13.20/.15.20, MX custmx.cscdns.net)",
+    "cookie auth per catalog; re-capture full Cookie header once live"
+  ],
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl probe (Chrome UA) of zenmux.com / www / app + Wayback 2026-06-14 snapshot comparison; NO JS bundles available to analyze; no browser launched"
+}

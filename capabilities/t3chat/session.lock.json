@@ -1,0 +1,17 @@
+{
+  "site": "t3.chat",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "t3.chat",
+    "cookieNames": ["convex-session-id"],
+    "note": "UNVERIFIED — convex-session-id documented by provider-catalog.md line 53 (t3-web entry). Additional cookies likely exist (session, auth tokens) but cannot be enumerated without a live browser capture.",
+    "apiHost": "UNVERIFIED — likely Convex deployment (*.convex.cloud); t3.chat also has /api/* Next.js routes",
+    "authEndpoint": "UNVERIFIED — possibly /api/auth/session or Convex auth query",
+    "captureCommand": "ui2api profile capture \"https://t3.chat\" --login",
+    "targetDir": "data/t3.chat/.session/state.json"
+  },
+  "note": "This package installs and runs from the profile plus a captured session snapshot of t3.chat. The convex-session-id cookie (provider-catalog.md line 53) is the confirmed session credential. Vercel Security Checkpoint blocks all non-browser access — the capture command must use a real browser (Playwright headed or UI2API_USER_DATA_DIR with Chrome). The github.com/t3-oss/t3-chat repo is 404; no bundle analysis was possible. Selectors and wire details are completely unverified scaffold guesses.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

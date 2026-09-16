@@ -1,0 +1,14 @@
+{
+  "site": "aistudio.xiaomimimo.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "aistudio.xiaomimimo.com",
+    "cookieNames": ["session"],
+    "captureCommand": "ui2api profile capture \"https://aistudio.xiaomimimo.com\" --login",
+    "targetDir": "data/aistudio.xiaomimimo.com/.session/state.json"
+  },
+  "note": "provider-catalog.md line 89: xiaomimimo-web kind=cookie, credentialName=session → expected cookie literally named 'session' (Playwright storage-state JSON). UNVERIFIED — catalog-derived only; MiMo Studio (aistudio.xiaomimimo.com) was publicly DNS-pinned to 127.0.0.1 during this analysis (2026-09-16, DNSPod A-record TTL 600) so no live cookie could be observed. Login is deep-linked by the platform console (platform.xiaomimimo.com) via GET aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=<path>. Re-check aistudio.xiaomimimo.com reachability with `getent hosts` and `curl -sL https://aistudio.xiaomimimo.com/ -o /dev/null -w '%{http_code}'`; if routable, capture once headed via the command above, then record snapshot hash + date here.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

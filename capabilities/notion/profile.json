@@ -1,0 +1,14 @@
+{
+  "id": "notion",
+  "name": "Notion AI (www.notion.so)",
+  "url": "https://www.notion.so",
+  "loginRequired": true,
+  "loginHint": "sign in once via `ui2api analyse https://www.notion.so --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR)",
+  "composer": ["textarea", "[contenteditable='true']"],
+  "send": { "kind": "keyEnter" },
+  "answer": ["[data-block-id]", "[role='listitem']"],
+  "newChat": "https://www.notion.so/ai",
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "note": "NO BROWSER WAS LAUNCHED — selectors are best-effort tags derived from component names (AIChat, AIChatStore, AiBlock) and the /ai route only. UNVERIFIED — confirm on first live capture: the AI composer is likely a textarea or contenteditable inside the AIChat overlay; answer blocks carry data-block-id. Placeholders above will suffice only for the first capture run — update immediately after."
+}

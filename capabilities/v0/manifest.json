@@ -1,0 +1,82 @@
+{
+  "id": "v0",
+  "name": "v0 by Vercel (v0.app)",
+  "url": "https://v0.app",
+  "siteVersion": "host v0.app (SSR over /chat-static/_next/static/immutable/chunks, Turbopack build); v0.dev 301-redirects here; homepage title 'v0 by Vercel - Build Full-Stack Web Apps with AI'",
+  "capabilities": [
+    {
+      "id": "v0_chat",
+      "name": "Chat stream",
+      "description": "Composer send via POST /chat/api/chat (Accept text/event-stream, body parsed as newline-delimited JSON reduced into assistant message state; resume via GET /chat/api/chat/resume?messageId=, probe HEAD resume/ping). Request body: messageContent MdX parts, modelConfiguration {modelId, imageGenerations, thinking}, attachments, sandbox, permissionsMode",
+      "method": "ui-path (ProseMirror composer + Enter, site's own send handler) — WIRE-VERIFIED / LIVE-SHAPE-TO-VERIFY",
+      "recipe": "recipes/v0_chat.json"
+    },
+    {
+      "id": "v0_chat_history",
+      "name": "Chat history / favorites / latest",
+      "description": "GET /chat/api/history, GET /chat/api/favorites, GET /api/chat/chat/latest?chatId=&lastSyncedAt=, GET /api/v2/chats/:chatId (JSON)",
+      "method": "in-page fetch (same-origin cookie) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_agent_workspace",
+      "name": "Agent workspace / build VM",
+      "description": "Build sandbox lifecycle: /chat/api/vm/status|git|actions/recreate|actions/run-pipeline, /api/v2/internal/chats/:chatId/agent-workspace/* (acquire, browser, code-server, preview-intents, projects/:id/diff, services/:name/logs), [ws-console] WebSocket log stream",
+      "method": "in-page fetch/WS — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_artifact_preview",
+      "name": "Artifact preview (generated UI frames)",
+      "description": "Preview plumbing verified: GET /chat/api/chat/frame-token?cid=&vid=&bid=&tcid= (frame session token), /chat/api/chat/leaf, /chat/api/chat/download?url=. Whether AI-generated preview artifacts are visible/readable in an automated capture is NOT yet confirmed",
+      "method": "site frame/iframe (code evidence only) — TO-VERIFY on first live capture",
+      "recipe": null
+    },
+    {
+      "id": "v0_deployments",
+      "name": "Deployments & publishing",
+      "description": "POST /api/v2/internal/deployments/ and POST /api/v2/internal/chats/:chatId/publish — SSE text/event-stream with verified object schemas (publish.progress/publish.result, deployment.progress/deployment.log/deployment.created, error); logs/errors/screenshot getters per deployment",
+      "method": "in-page fetch (SSE) — WIRE-VERIFIED / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_image_generation",
+      "name": "Image generation",
+      "description": "imageGenerations boolean + imageGeneration:{modelId} on the chat payload; reasoning-effort enum none|minimal|low|medium|high|max|xhigh; catalog GET /api/v2/internal/image-models",
+      "method": "field-verified (request schema) — LIVE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_voice_input",
+      "name": "Voice transcription",
+      "description": "POST /api/chat/transcribe (audio -> text input)",
+      "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_integrations_mcp",
+      "name": "Integrations / MCP",
+      "description": "/api/chat/integrations/oauth/{discover,initiate}, slack-mcp/authorize, figma/*, snowflake/oauth, mcp/permissions; /api/v2/mcp-servers",
+      "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "v0_git_sync",
+      "name": "GitHub connection / git sync",
+      "description": "/chat/api/git/connect|reconnect|create-branch|reset-deleted-branch, /api/v2/internal/github/:namespace/:repo(/branches), /api/v2/internal/chats/:chatId/git-connection|repository-link/reset",
+      "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "v0.app",
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "note": "provider-catalog: v0-vercel-web kind=cookie credentialName=__vercel_session. Login redirects to /api/auth/login?next=<path> (GitHub/Vercel OAuth branding on the landing page); POST /api/auth/update exists. Chat/API calls are same-origin; NO document.cookie writes or Authorization Bearer literals in the app bundles (cookies are httpOnly/browser-managed — exact cookie set to be recorded from a live session). Requests carry a `scope` (team/project slug) arg on many endpoints; artifacts/frames additionally gated by a token from /chat/api/chat/frame-token. Capture once headed, then fill session.lock.json."
+  },
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + 9 JS bundles (~4.8MB) + SSR page (v0.dev -> v0.app redirect resolved); no browser launched"
+}

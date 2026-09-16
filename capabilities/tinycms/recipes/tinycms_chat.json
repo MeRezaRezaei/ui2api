@@ -1,0 +1,19 @@
+{
+  "capability": "tinycms_chat",
+  "site": "tinycms",
+  "status": "dead-end",
+  "flow": "N/A — no AI chat product found at any tinycms domain",
+  "steps": [
+    {
+      "step": 1,
+      "action": "navigate",
+      "target": "https://tinycms.invalid",
+      "note": "dead-end — no live product; scaffold for structural completeness only"
+    }
+  ],
+  "output": null,
+  "rpc": "N/A",
+  "stealth": "N/A",
+  "sessionLock": "session.lock.json",
+  "note": "DEAD END: OmniRoute catalog entry tinycms-web (kind=token, credentialName=app-config-uuid, placeholder=R...) could not be resolved to a live AI chat product. 13 domains probed; tinycms.xyz is a CMS docs site, all others dead. Recipe scaffolded for structural completeness only."
+}

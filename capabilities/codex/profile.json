@@ -1,0 +1,21 @@
+{
+  "id": "codex",
+  "name": "ChatGPT Codex (chatgpt.com/codex)",
+  "url": "https://chatgpt.com/codex",
+  "loginRequired": true,
+  "loginHint": "reuse the chatgpt.com login (same host/cookie jar): sign in once via `ui2api analyse https://chatgpt.com/codex --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR). provider-catalog lists chatgpt-web-codex as cookie auth (full ChatGPT Cookie header).",
+  "composer": [
+    "[data-testid=\"composer\"], [class*=\"codex-composer\"], textarea[placeholder]",
+    "#prompt-textarea"
+  ],
+  "send": {
+    "kind": "keyEnter"
+  },
+  "answer": [
+    "[data-testid=\"task-message\"], [data-message-author-role='assistant'], [class*=\"task-turn\"], [class*=\"wham-turn\"]"
+  ],
+  "newChat": "[aria-label=\"New task\"], [aria-label*=\"New textarea\"], a[href=\"/codex/cloud/tasks/new\"], button[aria-label*=\"new task\"]",
+  "captureMs": 120000,
+  "stableMs": 2500,
+  "note": "UNVERIFIED — confirm on first live capture: the logged-out /codex fetch returned only the Contentful marketing page, so NO Codex app DOM was observed this run (browser not allowed). Composer/answer/newChat selectors above are CANDIDATE placeholders inferred from the Codex task UX (task dashboard + composer) and shared chatgpt DOM conventions; the wham codex app is a separate auth-gated SPA surface from plain chat (#prompt-textarea ship a fallback). loginRequired true; login reuses chatgpt.com. Wire facts (POST /backend-api/wham/tasks, SSE /backend-api/tasks/{id}/stream, Bearer + Sentinel tokens, feature gates wham_access/codex_only) come from JS-bundle analysis and did NOT launch a browser."
+}

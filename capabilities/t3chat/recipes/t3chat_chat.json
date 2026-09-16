@@ -1,0 +1,16 @@
+{
+  "capability": "t3chat_chat",
+  "site": "t3chat",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://t3.chat", "note": "session snapshot injected (data/t3.chat/.session); Vercel Security Checkpoint may block on first visit — must pass the JS challenge. If checkpoint persists, retry with UI2API_USER_DATA_DIR Chrome profile." },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "UNVERIFIED selector — sidebar 'New chat' button (jittered 600-1300ms dwell); confirm on first live capture" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "UNVERIFIED composer — trusted keyboard.insertText into composer candidate (textarea or contenteditable div); confirm selector on first live capture" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[data-testid*=\"message\"]", "until": "stable 2500ms", "timeoutMs": 60000, "note": "UNVERIFIED answer selector — confirm on first live capture; answer likely rendered as markdown in a message container" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "UNVERIFIED — Vercel Security Checkpoint blocked all static curl to t3.chat (HTTP 429 on all paths). No JS bundles were recovered. Wire is likely either: (1) Convex mutation (api.chat.send → Convex server → LLM provider) with streaming via Convex subscription (WebSocket), or (2) POST /api/chat (Vercel AI SDK) returning text/event-stream with JSON delta chunks. provider-catalog.md documents auth as cookie (convex-session-id + Cookie header) and token. No RPC payloads, proto layouts, or event types verified on the wire. The UI path below drives the SPA's own JS; a later incarnation may call the API directly once the live wire is captured.",
+  "stealth": "real session (convex-session-id cookie), trusted inputs, site's own send handler — indistinguishable from the user typing; bypasses Vercel Security Checkpoint by using a real browser session",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,51 @@
+{
+  "id": "t3chat",
+  "name": "t3.chat (t3.chat)",
+  "url": "https://t3.chat",
+  "loginRequired": true,
+  "loginHint": "VERIFICATION REQUIRED — Vercel Security Checkpoint blocks all non-browser access. Auth documented as cookie-based (convex-session-id + Cookie header per provider-catalog.md line 53) with Convex backend. Capture once: ui2api profile capture \"https://t3.chat\" --login → record full cookie set + any localStorage keys. The convex-session-id cookie is the primary session credential.",
+  "composer": [
+    "UNVERIFIED-SCAFFOLD — every selector below is a guess; confirm all on first live capture",
+    "textarea",
+    "div[contenteditable=\"true\"][role=\"textbox\"]",
+    "[data-testid*=\"chat-input\"]",
+    "form textarea, form [contenteditable]"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "UNVERIFIED-SCAFFOLD — no DOM class proven by bundles (none recovered); confirm on first live capture",
+    "[data-testid*=\"message\"]",
+    "[class*=\"markdown\"]",
+    "[class*=\"response\"]",
+    "[class*=\"answer\"]"
+  ],
+  "newChat": [
+    "UNVERIFIED-SCAFFOLD — confirm on first live capture",
+    "[aria-label*=\"New chat\"], [aria-label*=\"new conversation\"]",
+    "button:has-text(\"New chat\"), a[href=\"/\"]"
+  ],
+  "modelPicker": [
+    "UNVERIFIED-SCAFFOLD — clone repos show a model selector dropdown; live DOM unknown",
+    "[data-testid*=\"model\"]",
+    "[aria-label*=\"model\"], [aria-label*=\"Model\"]",
+    "select[name*=\"model\"]"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "selectorNotes": {
+    "composer": [
+      "UNVERIFIED — clone repos (TGlide/thom-chat, shaltielshmid/NotT3Chat) show a textarea or contenteditable div; the live site's actual composer element is unknown — Vercel bot wall prevents any DOM inspection",
+      "The Convex-powered chat UI likely renders a standard form with a textarea; contenteditable is possible if the site uses a rich-text editor (e.g., Tiptap/ProseMirror). No evidence either way."
+    ],
+    "answer": [
+      "UNVERUSED — no answer-container class proven; clone repos use standard markdown rendering containers. Confirm on first live capture."
+    ],
+    "newChat": [
+      "UNVERIFIED — standard pattern for chat apps; clone repos show a sidebar with new-chat button. Confirm on first live capture."
+    ],
+    "modelPicker": [
+      "UNVERIFIED — clone repos (e.g. NotT3Chat) show a model dropdown at the top of the chat; live DOM completely unknown. Confirm on first live capture."
+    ]
+  },
+  "note": "SCAFFOLD-ONLY — t3.chat is behind Vercel Security Checkpoint (HTTP 429 on all curl requests including /_next/*, /api/*, /trpc/*). The canonical repo github.com/t3-oss/t3-chat returns 404. provider-catalog.md lines 53 + 83 document auth as cookie (convex-session-id + Cookie header) and token respectively. Every DOM selector above is an unverified guess — the live site has not been accessed and no bundles were recoverable. Anti-bot: Vercel Security Checkpoint uses a JavaScript challenge via obfuscated worker script + mouse-event telemetry; requires a real browser session to bypass."
+}

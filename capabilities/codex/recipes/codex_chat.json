@@ -1,0 +1,16 @@
+{
+  "capability": "codex_chat",
+  "site": "chatgpt-web-codex",
+  "flow": "ui-path (ChatDriver) — composer insertText + send on the Codex task composer, streamed task output",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://chatgpt.com/codex", "note": "session snapshot injected (data/chatgpt.com/.session codex variant); logged-out renders the marketing page — must be signed in; may land on consent/interstitial first run — click through, then proceed" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "Codex SPA 'New task' affordance — selector UNVERIFIED (confirm on first live capture); jittered 600-1300ms human dwell" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into the codex task composer (candidate selectors in profile.json; fallback #prompt-textarea only if codex renders the shared composer)" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[data-testid=\"task-message\"], [data-message-author-role='assistant'], [class*=\"task-turn\"]", "until": "stable 2500ms", "timeoutMs": 120000 }
+  ],
+  "output": { "answer": "string", "taskId": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "underlying wire (bundle-verified, not live-captured): task create = POST /backend-api/wham/tasks with body {new_task:{environment_id, branch, run_environment_in_qa_mode}, input_items:[{type:message, role:user, content:[{content_type:text, text}]}]}, plus Sentinel chat-requirements token generated for mode 'codex_create_task_turn' (headers OpenAI-Sentinel-Token / OpenAI-Sentinel-Turnstile-Token / OpenAI-Sentinel-Proof-Token / OAI-Telemetry). Turn progress streams over SSE: GET /backend-api/tasks/{task_id}/stream?parent_conversation_id=&message_id= (text/event-stream, [DONE] terminator, last-event-id replay); each data line is JSON with task_status | final_message | row | title (row types website_open/summary/search/python_analysis/file_open…). Auth: Authorization: Bearer <accessToken> seeded from /api/auth/session, same chatgpt.com jar. Codex SPA routes + full /wham/* REST inventory: CAPABILITIES.md. Selectors + live payload shapes UNVERIFIED — first live capture rules the DOM; ui-path drives the site's own JS so no proto reconstruction needed.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

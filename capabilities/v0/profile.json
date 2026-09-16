@@ -1,0 +1,14 @@
+{
+  "id": "v0",
+  "name": "v0 by Vercel (v0.app)",
+  "url": "https://v0.app/chat",
+  "loginRequired": true,
+  "loginHint": "v0 requires a Vercel/GitHub login (redirects to /api/auth/login?next=...). Sign in once via `ui2api analyse https://v0.app/chat --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR)",
+  "composer": [".ProseMirror[contenteditable=\"true\"]", "[contenteditable=\"true\"]"],
+  "send": { "kind": "keyEnter" },
+  "answer": ["[data-testid=\"message\"][role=\"listitem\"] [data-message-content]", "[data-message-content]"],
+  "newChat": "[data-slot=\"new-chat-button\"], [aria-label=\"Start new chat\"]",
+  "captureMs": 90000,
+  "stableMs": 2500,
+  "note": "Selectors FLAGGED \"unverified — confirm on first live capture\". Derived from JS-bundle DOM evidence only (no browser launched): the composer is a ProseMirror editor node (.ProseMirror with contenteditable=true; bundle sets t.contenteditable=String(e.editable)); assistant rows render with data-testid='message' + role='listitem' and the content wrapper carries data-message-content (also used by [&>[data-message-content]>p:first-child]); user-message ids render as id=user-message-${id}; new-chat button has data-slot='new-chat-button'; Enter-to-send confirmed by a bundle keydown handler ('Enter'===e.key?preventDefault+submit). Wire facts (POST /chat/api/chat NDJSON stream, __vercel_session cookie per provider-catalog, /api/auth/login?next redirects) come from JS-bundle analysis. Live DOM may differ inside the post-login /chat SPA."
+}

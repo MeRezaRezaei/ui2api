@@ -1,0 +1,16 @@
+{
+  "capability": "xiaomimimo_chat",
+  "site": "xiaomimimo",
+  "flow": "ui-path (ChatDriver) — composer insertText + Enter, streamed answer",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://aistudio.xiaomimimo.com", "note": "session snapshot injected (data/aistudio.xiaomimimo.com/.session). HOST UNREACHABLE this run — DNS A-record pinned to 127.0.0.1 publicly (DNSPod, TTL 600). Verify reachability first. Login is deep-linked by the platform console via GET open-apis/v1/genLoginUrl?currentPath=<path>; QR auth (WeChat/Alipay/Feishu) patterns seen in console i18n. Cookie expected under name 'session' per provider-catalog" },
+    { "step": 2, "action": "new-chat", "onlyWhen": "args.newChat", "note": "selector UNVERIFIED — no DOM evidence; aistudio host unreachable; update selector after first live capture" },
+    { "step": 3, "action": "type", "input": "args.prompt", "note": "trusted keyboard.insertText into composer; selector UNVERIFIED — see profile.json selectorNotes" },
+    { "step": 4, "action": "send", "note": "Enter (keyEnter strategy), 50-200ms gate" },
+    { "step": 5, "action": "read", "selector": "[class*=\"answer\"], [class*=\"response\"]", "until": "stable 2500ms", "timeoutMs": 60000, "note": "selector UNVERIFIED — aistudio unreachable; answer container could not be grounded; confirm on first live capture" }
+  ],
+  "output": { "answer": "string", "chunkCount": "number", "doneReason": "stable|timeout|empty" },
+  "rpc": "NOT OBSERVED — MiMo Studio chat wire transport (SSE vs WebSocket vs Connect-protobuf vs long-poll) and chat endpoints could not be captured this run (aistudio.xiaomimimo.com publicly DNS-pinned to 127.0.0.1). Known from platform console: login gate GET aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl, analytics event console_studio_chat_click. Known API siblings: api.xiaomimimo.com/v1 (OpenAI chat-completions shape, 401-verified), api.xiaomimimo.com/anthropic. The UI path drives the site's own JS; re-run analysis once aistudio is routable to ground the actual wire.",
+  "stealth": "real session, trusted inputs, site's own send handler — indistinguishable from the user typing",
+  "sessionLock": "session.lock.json"
+}

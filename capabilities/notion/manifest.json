@@ -1,0 +1,54 @@
+{
+  "id": "notion",
+  "name": "Notion AI (www.notion.so)",
+  "url": "https://www.notion.so",
+  "siteVersion": "app bundles under /_assets/ (rolldown/webpack-style monolith); analyzed 2026-09-16",
+  "capabilities": [
+    {
+      "id": "notion_chat",
+      "name": "Notion AI chat",
+      "description": "Open /ai (or a workspace page's Notion AI) and send a prompt; answer renders in the AI chat thread. Same-origin eventName-RPC transport (POST /api/v3/<eventName>) with model orange-mousse; streaming transport UNVERIFIED.",
+      "method": "ui-path (trusted input + Enter, site's own send handler)",
+      "recipe": "recipes/notion_chat.json"
+    },
+    {
+      "id": "notion_qna",
+      "name": "Workspace Q&A",
+      "description": "Ask across connected workspace sources on /ai (Q&A model orange-mousse, promptCategory filter); exact request body NOT statically recoverable — live shape to verify.",
+      "method": "ui-path — ROUTE/FLAG-VERIFIED / LIVE-SHAPE-TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "notion_ai_commands",
+      "name": "In-page AI commands",
+      "description": "Inline AI commands (Improve writing, Summarize, etc.) on workspace pages; ai_writer / create_form / db_agent settings tabs — flag literals in bundle, exact command list TO-VERIFY.",
+      "method": "site UI toggle (ai_writer flag); live command set TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "notion_ai_search",
+      "name": "AI search tool",
+      "description": "injectSearchTool flag / targetConfig types=[search, researcher] / promptCategory=deep_research — grounded flags, live search flow TO-VERIFY.",
+      "method": "ui-path (targetConfig + injectSearchTool); live walk TO-VERIFY",
+      "recipe": null
+    },
+    {
+      "id": "notion_ai_connectors",
+      "name": "QnA source connectors",
+      "description": "Manage external source ingestions (google_drive_qna_ingestion, jira_qna_ingestion_v2, github_qna, gmail_ai_connector, etc.) under aicustomagents/aiconnectors* — connector map grounded in bundle, UI shapes TO-VERIFY.",
+      "method": "site settings UI (aicustomagents/aiconnectors*); live shapes TO-VERIFY",
+      "recipe": null
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "www.notion.so",
+    "capturedAt": null,
+    "snapshotHashPrefix": null,
+    "note": "provider-catalog: notion-web kind=cookie (token_v2 required; optional space_id, notion_browser_id). Bundles: token_v2 read via getCookieWithoutPermissionCheck; api:{http:'/api/v3'} (module 96265); /api/v3/authValidate literal confirms same-origin cookie auth (no Bearer token observed). Capture once headed, then fill session.lock.json. getAnswer/enrichedAIGenerate NOT in downloadable bundles — live capture needed to recover the chat-request method."
+  },
+  "builtinProfile": null,
+  "analyzed": "2026-09-16",
+  "analysisMethod": "static curl + ~30 JS bundles under /_assets/ (~8 MB) + nt.html/nt-login.html app shells; no browser launched"
+}

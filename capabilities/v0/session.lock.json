@@ -1,0 +1,16 @@
+{
+  "site": "v0.app",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "v0.app",
+    "cookieNames": ["__vercel_session"],
+    "apiHost": "https://v0.app",
+    "authEndpoint": "/api/auth/login?next=/",
+    "captureCommand": "ui2api profile capture \"https://v0.app/chat\" --login",
+    "targetDir": "data/v0.app/.session/state.json"
+  },
+  "note": "This package installs and runs from the profile plus a captured session snapshot of v0.app. Provider-catalog classifies v0-vercel-web as cookie auth (credentialName __vercel_session); the bundles never touch document.cookie (httpOnly, browser-managed) and chat calls are same-origin, so capture once headed and record the live cookie set + OAuth redirect chain in state.json. v0.dev 301-redirects to v0.app. Chat wire = POST /chat/api/chat (Accept text/event-stream, NDJSON body). Selectors and NDJSON per-line event schema unverified pending first live capture.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

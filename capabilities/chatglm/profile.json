@@ -1,0 +1,63 @@
+{
+  "id": "chatglm",
+  "name": "ChatGLM / Zhipu AI",
+  "hosts": ["chatglm.cn", "chat.z.ai"],
+  "loginRequired": true,
+  "loginHint": "Z.ai: GET /api/v1/auths/ → session.token → localStorage.token = T.token; login route /auth?action=signup. Capture once: ui2api profile capture \"https://chat.z.ai\" --login → replay data/chat.z.ai/.session.  chatglm.cn: cookie chatglm_token + chatglm_refresh_token (domain .chatglm.cn); refresh POST /chatglm/user-api/user/refresh (Bearer refresh_token). Capture once: ui2api profile capture \"https://chatglm.cn\" --login → replay data/chatglm.cn/.session.",
+  "composer": {
+    "chatglm.cn": [
+      "div[contenteditable='true']",
+      "textarea[placeholder*='输入']",
+      "textarea[placeholder*='给清言发消息']",
+      "div.detail-container [contenteditable]"
+    ],
+    "chat.z.ai": [
+      "div[contenteditable='true'][role='textbox']",
+      "textarea[placeholder*='Message']",
+      "textarea[placeholder*='Ask anything']",
+      "#chat-input textarea"
+    ]
+  },
+  "send": { "kind": "keyEnter" },
+  "answer": {
+    "chatglm.cn": [
+      "[class*='message-content']",
+      "[class*='markdown-body']",
+      "[class*='answer']"
+    ],
+    "chat.z.ai": [
+      ".markdown.prose",
+      "[class*='message-content']",
+      ".chat-message .response",
+      "div[class*='answer']"
+    ]
+  },
+  "newChat": {
+    "chatglm.cn": "[class*='new-chat'], [aria-label*='新对话'], [class*='create-conversation']",
+    "chat.z.ai": "[aria-label*='New Chat'], [aria-label*='new chat'], button:has(svg[viewBox]):first-child"
+  },
+  "dismiss": [
+    "button[aria-label*='关闭'], button[aria-label*='Close']",
+    "button[aria-label*='登录'], button[aria-label*='Sign in']"
+  ],
+  "captureMs": 60000,
+  "stableMs": 2500,
+  "selectorNotes": {
+    "composer": [
+      "UNVERIFIED — chatglm.cn: SPA renders a rich-text composer (div[contenteditable]) inside .detail-container; placeholder text not proven by bundles; confirm on first live capture",
+      "UNVERIFIED — chat.z.ai: Open WebUI-style textarea/div with contenteditable; DOM class not proven by the SPA code (Svelte component renders dynamic DOM); confirm on first live capture"
+    ],
+    "answer": [
+      "UNVERIFIED — chatglm.cn: answer class references from CSS patterns in bundle (.detail-container .glm-4-conversation-gap) are layout-related, not the message container; confirm on first live capture",
+      "UNVERIFIED — chat.z.ai: Open WebUI convention is div.markdown.prose; bundle renders Svelte components with dynamic classes; confirm on first live capture"
+    ],
+    "newChat": [
+      "UNVERIFIED — chatglm.cn: sidebar create button; not traced to DOM class; confirm on first live capture",
+      "UNVERIFIED — chat.z.ai: new-chat button in Svelte SPA; confirm on first live capture"
+    ],
+    "dismiss": [
+      "UNVERIFIED — sign-in / close overlay candidates; confirm on first live capture"
+    ]
+  },
+  "note": "SCAFFOLD — Auth facts (zh: cookie chatglm_token; intl: localStorage.token) and API surfaces come from CAPABILITIES.md bundle analysis and are verified; every DOM selector above is an UNVERIFIED candidate to be confirmed on the first live capture (data/{host}/.session). Anti-bot: both sites use no client-side fingerprinting SDK; drive the site's own UI, no synthetic clicks."
+}
