@@ -84,6 +84,45 @@ function headlessDefault(): boolean {
   return process.env.UI2API_HEADED !== "1";
 }
 
+// Normalize a ListConversations payload — [hasMore, totalCount, [conversations]]
+// — into a stable shape while keeping the raw payload readable. Missing/trailing
+// fields are tolerated (returned as their defaults, never throwing).
+export interface ListConversationsShape {
+  hasMore?: boolean;
+  totalCount?: number;
+  conversations: unknown[];
+  raw: unknown;
+}
+
+export function mapListConversations(d: unknown): ListConversationsShape {
+  const shape: ListConversationsShape = {
+    raw: d,
+    conversations: [],
+  };
+  if (Array.isArray(d) && (d.length === 0 || d[0] === false || d[0] === true)) {
+    shape.hasMore = d[0] === true;
+    if (typeof d[1] === "number") shape.totalCount = d[1];
+    if (Array.isArray(d[2])) shape.conversations = d[2] as unknown[];
+  }
+  return shape;
+}
+
+// Real model entry: [schemaId, displayName, tagline, [flags...], 1, null,
+// [modelHashes...], ...]. False positives are the nested modelHashes arrays —
+// all-hex names with NO 4th array element. Exported (pure) so the catalog scan
+// can be unit-tested hermetically.
+export function isModelEntry(obj: unknown): obj is readonly [string, string, string, ...unknown[]] {
+  if (!Array.isArray(obj)) return false;
+  return (
+    obj.length >= 4 &&
+    typeof obj[0] === "string" &&
+    typeof obj[1] === "string" &&
+    typeof obj[2] === "string" &&
+    obj[0].length > 6 &&
+    (Array.isArray(obj[3]) || !/^[0-9a-f]{10,}$/i.test(obj[1]))
+  );
+}
+
 export class GeminiCapabilities {
   private browser?: Browser;
   private ownsBrowser: boolean;
@@ -194,16 +233,7 @@ export class GeminiCapabilities {
       if (rpc.ok && rpc.data != null) {
         // ListConversations returns [hasMore, totalCount, [conversations]] —
         // normalize into a stable API shape while keeping the raw payload.
-        const d = rpc.data as unknown;
-        const shape: { hasMore?: boolean; totalCount?: number; conversations: unknown[]; raw: unknown } = {
-          raw: d,
-          conversations: [],
-        };
-        if (Array.isArray(d) && (d.length === 0 || d[0] === false || d[0] === true)) {
-          shape.hasMore = d[0] === true;
-          if (typeof d[1] === "number") shape.totalCount = d[1];
-          if (Array.isArray(d[2])) shape.conversations = d[2] as unknown[];
-        }
+        const shape = mapListConversations(rpc.data);
         return {
           capability: "gemini_list_conversations",
           ok: true,
@@ -267,14 +297,7 @@ export class GeminiCapabilities {
             // Real model entry: [schemaId, displayName, tagline, [flags...],
             // 1, null, [modelHashes...], ...]. False positives are the nested
             // modelHashes arrays — all-hex names with NO 4th array element.
-            if (
-              obj.length >= 4 &&
-              typeof obj[0] === "string" &&
-              typeof obj[1] === "string" &&
-              typeof obj[2] === "string" &&
-              obj[0].length > 6 &&
-              (Array.isArray(obj[3]) || !/^[0-9a-f]{10,}$/i.test(obj[1]))
-            ) {
+            if (isModelEntry(obj)) {
               models.push({ id: obj[0], name: obj[1], tagline: obj[2] });
             }
             for (const el of obj) scan(el);
