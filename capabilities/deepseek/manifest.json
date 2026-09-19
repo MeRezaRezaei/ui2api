@@ -61,9 +61,9 @@
   "permissions": [
     "requires a real logged-in chat.deepseek.com session snapshot (localStorage userToken; also preserves settingsJwt + __appKit_userInfo)",
     "chat/completion targets carry a PoW header — page (Playwright) solves it invisibly; raw-call automation would need the miner",
-    "composer/send/answer selectors are still unverified candidates — confirm on first live capture (ui2api analyse https://chat.deepseek.com --login)"
+    "composer/send/answer selectors verified live 2026-09-18 (ChatDriver round-trip answered on chat.deepseek.com with localStorage userToken session)"
   ],
-  "builtinProfile": "deepseek (loaded from capabilities/deepseek/profile.json — not yet registered as a built-in in src/profile/profile.ts)",
+  "builtinProfile": "deepseek (registered built-in in src/profile/profile.ts; session locked 2026-09-18)",
   "analyzed": "2026-09-16",
   "analysisMethod": "static analysis of 2 real bundles (fe-static.deepseek.com/chat/static/: default-vendors.73c732e189.js, main.39d5f46438.js) recovered despite AWS WAF wall on the HTML entry (SPA HTML served from /api/v0/users/me). All endpoints/headers/SSE names verified as literal strings in main bundle. No browser launched; DOM selectors + model id values + PoW algorithm remain to-verify."
 }

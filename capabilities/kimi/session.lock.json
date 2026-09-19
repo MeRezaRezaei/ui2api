@@ -1,15 +1,15 @@
 {
-  "site": "www.kimi.com",
-  "locked": false,
-  "status": "awaiting-capture",
-  "requiredSession": {
-    "host": "www.kimi.com",
-    "localStorageKeys": ["access_token", "refresh_token", "msh_user_id"],
-    "apiHost": "https://notilo.kimi.com",
-    "captureCommand": "ui2api profile capture \"https://www.kimi.com\" --login",
-    "targetDir": "data/www.kimi.com/.session/state.json"
+  "site": "www.kimi.ai",
+  "locked": true,
+  "status": "locked",
+  "snapshot": {
+    "path": "data/www.kimi.ai/.session/state.json",
+    "sha256Prefix": "4dbb3bca3b285c42fc80db4ed324dac3",
+    "capturedAt": "2026-09-18T14:42:47Z",
+    "cookies": 5,
+    "localStorageKeys": ["access_token", "refresh_token", "msh_user_id", "volcano-token-info", "msh_user_subscription_data"],
+    "evidence": "5 cookies (cf_bm, _ga, theme) + 36 localStorage entries incl. access_token/refresh_token/msh_user_id (localStorage Bearer auth per bundle analysis)"
   },
-  "note": "This package installs and runs from the profile plus a captured session snapshot of www.kimi.com; real auth is localStorage access_token (Bearer) replayed against notilo.kimi.com/apiv2. Capture once, then session.lock.json records the snapshot hash + date. Exact cookie set TBD — tokens live in localStorage, not cookies.",
-  "capturedAt": null,
-  "snapshotHash": null
+  "note": "Locked session: auth = localStorage access_token (Bearer) replayed against notilo.kimi.com/apiv2; refresh_token + msh_user_id preserved. Session captured from live Chrome via ingest.",
+  "captureCommand": "npx tsx src/cli.ts profile ingest www.kimi.ai"
 }

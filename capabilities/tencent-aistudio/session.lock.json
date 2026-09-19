@@ -1,16 +1,15 @@
 {
-  "site": "aistudio.tencent.com",
-  "locked": false,
-  "status": "awaiting-capture",
-  "requiredSession": {
-    "host": "aistudio.tencent.com",
-    "cookieNames": ["likely hy_user + hy_token (hypothesis — exact names to verify on live capture)"],
-    "apiHost": "https://aistudio.tencent.com",
-    "authEndpoint": "/api/oalogin",
-    "captureCommand": "ui2api profile capture \"https://aistudio.tencent.com\" --login",
-    "targetDir": "data/aistudio.tencent.com/.session/state.json"
+  "site": "aistudio.tencent.ai",
+  "locked": true,
+  "status": "locked",
+  "snapshot": {
+    "path": "data/aistudio.tencent.ai/.session/state.json",
+    "sha256Prefix": "907fcb15d7aac22e49111efa8af619c3",
+    "capturedAt": "2026-09-18T14:42:47Z",
+    "cookies": 3,
+    "localStorageKeys": ["hyUserName", "hy-space-id", "lang", "AEGIS_ID", "__BEACON_deviceId"],
+    "evidence": "3 cookies (hunyuan_source, hunyuan_token, hunyuan_user on .tencent.ai) + 18 localStorage entries; VERIFIED cookie names are hunyuan_token + hunyuan_user (Tencent Hunyuan umbrella), NOT hy_user/hy_token"
   },
-  "note": "This package installs and runs from the profile plus a captured session snapshot of aistudio.tencent.com; real auth is Cookie-based (iOA QR scan / WeChat login → server sets session cookies). provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). The SPA uses credentials:'include' on every request; the X-Token/X-ID/Space-Id headers are injected only in miniprogram/openapi contexts (not the primary web path). Exact cookie names are hypotheses based on yuanbao.tencent.com overlap; capture once headed and record the cookie set in state.json. All DOM selectors are unverified pending first live capture.",
-  "capturedAt": null,
-  "snapshotHash": null
+  "note": "Locked session: cookie auth = hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai domain; confirmed live from Chrome. SPA uses credentials:'include' on every request; X-Token/X-ID headers are miniprogram/openapi-only. DOM selectors still unverified — see profile.json selectorNotes.",
+  "captureCommand": "npx tsx src/cli.ts profile ingest aistudio.tencent.ai"
 }

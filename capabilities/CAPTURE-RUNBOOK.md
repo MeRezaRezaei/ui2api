@@ -131,24 +131,29 @@ snapshot must preserve for auth (from `CAPABILITIES.md` + `session.lock.json`).
   `status:"locked"` with the hash + `capturedAt` (lock authoring is separate; there is
   no auto-edit — update the lock file by hand, mirroring the gemini one).
 
-### kimi — runner wired, waiting on session  ⭐ capture first
-- Package dir: `capabilities/kimi/`. Status: inventory + package + runner
-  (`src/capabilities/kimi.ts`, `/capability/kimi` wired in `src/prompt/http.ts`).
-- Host: `www.kimi.com` → `data/www.kimi.com/.session/state.json`.
-- **Storage that must be preserved: localStorage, not cookies.** Auth is the
-  localStorage keys `access_token`, `refresh_token`, `msh_user_id`; the token is replayed
-  as `Authorization: Bearer <access_token>` (+ `x-msh-shield-data` TrustDecision blackbox)
-  against `https://notilo.kimi.com/apiv2` (Connect/protobuf). The exact cookie set is
-  secondary — `session.lock.json` notes "tokens live in localStorage, not cookies".
-- What to do in the browser: sign in at `www.kimi.com` (SMS/QR/third-party — no bot-wall
-  was hit on static probes); land on the chat UI with history visible; press Enter.
-- Command:
-  ```bash
-  node --import tsx src/cli.ts profile capture "https://www.kimi.com"
-  ```
-- Expected after-capture: lock file records localStorage keys
-  `access_token/refresh_token/msh_user_id`; `/capability/kimi` chat + list_conversations
-  (DOM sidebar) return live results. `model_list`/RPC list_conversations stay "future work".
+### ✅ kimi — CAPTURED + VERIFIED (2026-09-18), do not re-capture
+- Package dir: `capabilities/kimi/`. Status: ✅ inventory + package + runner
+  (`src/capabilities/kimi.ts`, `/capability/kimi` wired in `src/prompt/http.ts`) +
+  **session locked + live round-trip verified**.
+- Host: **`www.kimi.ai`** (the live product host — the runbook's original
+  `www.kimi.com` is a redirect shell) → `data/www.kimi.ai/.session/state.json`.
+- **Storage: localStorage, not cookies.** Auth keys `access_token`, `refresh_token`,
+  `msh_user_id`; token replayed as `Authorization: Bearer <access_token>`
+  (+ `x-msh-shield-data` TrustDecision blackbox) against `https://notilo.kimi.com/apiv2`
+  (Connect/protobuf). Captured lock: 5 cookies / 36 localStorage keys incl. all three.
+- Capture command recorded in its lock: `npx tsx src/cli.ts profile ingest www.kimi.ai`
+  (offline read of live Chrome profile — same snapshot the headed `capture` flow writes).
+- **Answer selector — verified live, thinking-block-safe:** the driver picks the
+  *longest* matching element text, and the thinking block also matches generic
+  `.markdown`, so the answer selector must isolate the FINAL block:
+  `.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown`
+  (last rollup part directly before `toolcall-rollup__tail` = the answer; thinking lives
+  in `toolcall-content-text`/`toolcall-flow`/earlier rollup parts). Same fix applied to
+  `src/profile/profile.ts` builtin AND `capabilities/kimi/profile.json`.
+- Evidence on file: live ChatDriver round-trip answered without thinking leakage
+  (`--site kimi` → clean answer, e.g. "ANSWER 391" for a 17×23 solve prompt).
+- **No action needed.** `model_list`/RPC list_conversations stay "future work" per the
+  manifest (list_conversations via DOM sidebar already live).
 
 ### hunyuan-yuanbao — runner wired, HEADED-ONLY  ⭐ capture second
 - Package dir: `capabilities/hunyuan/` (package id `hunyuan`; product `yuanbao.tencent.com`).
@@ -175,6 +180,36 @@ snapshot must preserve for auth (from `CAPABILITIES.md` + `session.lock.json`).
   (SSE-over-XHR); lock file records `hy_user`/`hy_token`; headed-only caveat persists in
   every runner result.
 
+### tencent-aistudio — CAPTURED (2026-09-18); HEADED-ONLY, selectors still candidates
+- Package dir: `capabilities/tencent-aistudio/`. Status: ✅ grounded (package) +
+  **session locked**; DOM selectors pending a clean headed round-trip.
+- Host: **`aistudio.tencent.ai`** (the live host; the runbook's original
+  `aistudio.tencent.com` is not where the session lives) → `data/aistudio.tencent.ai/.session/state.json`.
+- **Storage: cookies, VERIFIED.** The web session is cookie-auth via
+  `hunyuan_token` + `hunyuan_user` + `hunyuan_source` on the `.tencent.ai` domain
+  (Tencent Hunyuan umbrella cookies — NOT the hypothesized `hy_user`/`hy_token`).
+  Captured lock: 3 cookies, all three present.
+- **Anti-bot — VERIFIED: Tencent Cloud EdgeOne blocks headless Chromium with
+  `HTTP 567 Restricted Access`** (even with stealth flags). A **headed real Chrome
+  under Xvfb passes** and renders the chat UI ("Hy AI Studio", composer
+  `div[contenteditable="true"]` present). **=> capture and runtime are headed /
+  real-profile ONLY** (mirrors hunyuan-yuanbao; see `docs/STEALTH.md`).
+- What to do: headed real Chrome (your already-cleared Chrome via
+  `UI2API_CHROME=1` + `UI2API_USER_DATA_DIR=…`, or bundled Chromium under
+  `xvfb-run`/`Xvfb`), complete iOA QR (`POST /api/oalogin`) or WeChat login, land on
+  the chat UI, send one test prompt, press Enter.
+- Command (lock recorded the ingest form; a headed capture writes the same snapshot to
+  `data/aistudio.tencent.ai/.session/state.json`):
+  ```bash
+  DISPLAY=:97 UI2API_HEADED=1 UI2API_CHROME=1 \
+    node --import tsx src/cli.ts profile capture "https://aistudio.tencent.ai"
+  ```
+- Current gap (2026-09-18): capture done and site *renders* headed, but the ChatDriver
+  round-trip has not produced an answer — answer/send selectors for the "Hy AI Studio"
+  DOM are still candidates (see `tencent-aistudio/CAPABILITIES.md` §to-verify).
+  Finish: probe the live page DOM for composer/answer/send classes, then update
+  `src/profile/profile.ts` builtin + `capabilities/tencent-aistudio/profile.json`.
+
 ### venice — grounded package (REST), no runner yet
 - Package dir: `capabilities/venice/`. Status: ✅ grounded (endpoints verified statically).
   Transport is plain **OpenAI-compatible REST on `https://api.venice.ai/api/v1`**
@@ -194,30 +229,25 @@ snapshot must preserve for auth (from `CAPABILITIES.md` + `session.lock.json`).
   "recipe present, **to verify on live session**" until a captured network log confirms
   the mint + SSE shapes (`venice/CAPABILITIES.md` §8).
 
-### deepseek — grounded, localStorage + AWS WAF/PoW
-- Package dir: `capabilities/deepseek/`. Status: ✅ grounded (bundles verified).
+### ✅ deepseek — CAPTURED + VERIFIED (2026-09-18), do not re-capture
+- Package dir: `capabilities/deepseek/`. Status: ✅ grounded + runner +
+  **session locked + live round-trip verified**.
 - Host: `chat.deepseek.com` → `data/chat.deepseek.com/.session/state.json`.
-- **Storage that must be preserved: localStorage `userToken`→`Authorization: Bearer`,**
-  plus `settingsJwt` (`x-settings-token`) and `__appKit_userInfo`. The static shell on
-  `/` is behind an **AWS WAF JS challenge** (`x-amzn-waf-action: challenge`; also
-  `cf_*`-style `awsChallenge`/`awsCaptcha` detection), so the captured cookies/state must
-  let an injected context pass the WAF, and chat needs the **PoW** (`POST
-  /api/v0/chat/create_pow_challenge` → `X-DS-PoW-Response`) — PoW solving lives in an
-  async chunk and is not reverse-engineered yet.
+- **Storage: localStorage `userToken`→`Authorization: Bearer`**, plus `settingsJwt`
+  (`x-settings-token`) and `__appKit_userInfo`. Captured lock: 5 cookies / 31 localStorage
+  keys incl. `userToken`. Capture command in lock: `npx tsx src/cli.ts profile ingest chat.deepseek.com`
+  (offline read of live Chrome — the WAF-challenged shell makes a headed `capture`
+  round-trip fragile; ingest preserves the already-passed WAF context).
+- The static shell on `/` is behind an **AWS WAF JS challenge**
+  (`x-amzn-waf-action: challenge`), so captures need the WAF-passing context; chat needs
+  the **PoW** (`POST /api/v0/chat/create_pow_challenge` → `X-DS-PoW-Response`) — the page
+  (Playwright) solves it invisibly, raw-call automation would need the miner.
 - Login method: **SMS / email-OTP only** (`/v0/users/login_by_mobile_sms`,
-  `/v0/users/register_by_mobile`); no password path found — password existence *to probe
-  live on first capture*.
-- What to do in the browser: `https://chat.deepseek.com` → login by phone **OTP** → land
-  on the chat UI → send one test prompt → press Enter.
-- Command:
-  ```bash
-  node --import tsx src/cli.ts profile capture "https://chat.deepseek.com"
-  ```
-  If the WAF blocks even the headed bundled Chromium, use `UI2API_USER_DATA_DIR` (your
-  already-cleared Chrome) or `profile ingest` against your Chrome profile dir (offline).
-- Expected after-capture: lock records `userToken` (kind `token`); DOM sidebar
-  (`src/capabilities/deepseek.ts`) reflects the session. Full `/api/v0/chat/completion`
-  replay stays gated on PoW capture — *verify on live session*.
+  `/v0/users/register_by_mobile`).
+- Evidence on file: live ChatDriver round-trip on `chat.deepseek.com` with the
+  localStorage `userToken` session (`--site deepseek prompt` → clean answer).
+- **No action needed.** Full `/api/v0/chat/completion` raw replay stays gated on PoW
+  capture — the UI round-trip works regardless.
 
 ### claude — grounded, Cloudflare/hCaptcha-gated HTML but public bundles
 - Package dir: `capabilities/claude/`. Status: ✅ grounded (22 bundles from the public

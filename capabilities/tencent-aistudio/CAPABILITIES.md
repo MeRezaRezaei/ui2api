@@ -193,11 +193,13 @@ Main app bundle: `hy-web__e62837fa9ff77f96314a.js` (~7.6 MB); route/feature bund
 **To verify on first live (headed) capture:**
 1. Stream wire framing — how JSON chunks are delimited in the response body (no `text/event-stream`
    literal; delivery mechanism is fetch/XHR with onProgress/onStateChange; exact byte framing unknown).
-2. Exact cookie names set on `aistudio.tencent.com` after login (`hy_user` + `hy_token` are
-   a hypothesis based on yuanbao.tencent.com overlap — could differ).
+2. ~~Exact cookie names after login~~ **RESOLVED (2026-09-18 live capture): the session is
+   cookie-auth via `hunyuan_token` + `hunyuan_user` + `hunyuan_source` on the `.tencent.ai`
+   domain — Tencent Hunyuan umbrella cookies, NOT the hypothesized `hy_user`/`hy_token`.**
 3. DOM selectors for composer, answer container, new-chat button, model picker —
    the SPA renders into `<div id="app"></div>` with TDesign components; no DOM class strings
-   proven by bundles.
+   proven by bundles. (Composer observed headed: `div[contenteditable="true"]` present on
+   `aistudio.tencent.ai` under Xvfb + real Chrome; answer selectors still candidates.)
 4. `/api/new-portal/config` response shapes — which flags drive web-search/deep-think toggles.
 5. Live model picker ↔ `model` request-field mapping (exact picker-to-payload correlation).
 6. `coder`/`runCode` feature — exact sandbox invocation endpoint and execution-environment type.
@@ -206,12 +208,13 @@ Main app bundle: `hy-web__e62837fa9ff77f96314a.js` (~7.6 MB); route/feature bund
 
 ## 14. Bot-wall outcome
 
-- **No bot wall hit** on static fetch: plain curl with Chrome UA returned the full SPA HTML
-  (200, 3209 bytes; clean app shell, no challenge, no interstitial) and all 5 bundles served
-  normally from `cdn-portal.hunyuan.tencent.com/public/`.
-- The site has enterprise-grade Tencent Cloud anti-bot infrastructure (monitoring, traceId,
-  `galileotelemetry.tencent.com`). Expect CAPTCHA / iOA-gated challenges once
-  headless-automation signals appear — no client obstacle observed at the static layer.
+- **Bot-wall outcome — UPDATED (2026-09-18):** static fetch (curl + Chrome UA) returns the SPA
+  HTML cleanly, but **headless Playwright browsers are blocked by Tencent Cloud EdgeOne
+  (`HTTP 567 Restricted Access`)**. A **headed real Chrome under Xvfb passes** and renders the
+  chat UI (composer present). The site also has enterprise-grade Tencent Cloud anti-bot
+  infrastructure (monitoring, traceId, `galileotelemetry.tencent.com`). => **HEADED / real-profile
+  browser ONLY for capture and runtime** (mirrors `capabilities/hunyuan/CAPABILITIES.md` §9 and
+  `docs/STEALTH.md` verdict).
 
 ## 15. Suggested ui2api capability list (id, one-line description)
 

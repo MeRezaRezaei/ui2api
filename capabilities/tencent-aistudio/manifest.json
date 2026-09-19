@@ -1,8 +1,8 @@
 {
   "id": "tencent-aistudio",
-  "name": "Tencent AI Studio (aistudio.tencent.com)",
-  "site": "aistudio.tencent.com",
-  "url": "https://aistudio.tencent.com",
+  "name": "Tencent AI Studio (aistudio.tencent.ai)",
+  "site": "aistudio.tencent.ai",
+  "url": "https://aistudio.tencent.ai",
   "description": "Tencent Hy AI Studio — developer/professional Hunyuan assistant: chat with streaming, deep search, deep thought/reasoning, image/video/3D generation, code execution, file upload + doc QA, TTS/ASR, podcast, translation, AI agent roles. Under the Tencent Hunyuan umbrella (yuanbao.tencent.com is the consumer surface; already covered by capabilities/hunyuan).",
   "version": "0.1.0",
   "author": "ui2api capability package",
@@ -11,7 +11,7 @@
   "transport": {
     "type": "http-rest-streaming",
     "protocol": "HTTP POST; responses parsed as per-chunk JSON objects (NOT standard SSE — no text/event-stream literal found); exact byte framing to verify on live capture",
-    "baseUrl": "https://aistudio.tencent.com",
+    "baseUrl": "https://aistudio.tencent.ai",
     "chatEndpoint": "POST /api/new-portal/chat/{chatId}",
     "chatEndpointContinuation": "POST /api/new-portal/user/agent/conversation/continue",
     "chatEndpointRepeat": "POST /api/new-portal/chat/repeat/{chatId}",
@@ -130,24 +130,24 @@
   "auth": {
     "required": true,
     "kind": "session-snapshot",
-    "host": "aistudio.tencent.com",
-    "apiHost": "https://aistudio.tencent.com",
+    "host": "aistudio.tencent.ai",
+    "apiHost": "https://aistudio.tencent.ai",
     "catalogRef": "tencent-aistudio-web, kind: cookie, credentialName: Cookie header (full)",
     "loginFlows": [
       "iOA (Tencent enterprise SSO) — QR code scan (二维码) + WeChat login via POST /api/oalogin",
       "WeChat — direct login (UI button)",
       "Access check: POST /api/getuserinfo returns user profile; 403 → re-auth"
     ],
-    "cookieNames": ["likely hy_user + hy_token (hypothesis based on yuanbao.tencent.com overlap — to verify on live capture)"],
-    "capture": "ui2api profile capture \"https://aistudio.tencent.com\" --login",
-    "note": "provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). Exact cookie names are hypotheses; the SPA uses credentials:'include' on all requests and may rely on httpOnly cookies set by Tencent's SSO. X-Token/X-ID/Space-Id headers are injected for miniprogram mode only (not the primary web path). Capture once headed, then fill session.lock.json."
+    "cookieNames": ["hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai — VERIFIED on live capture 2026-09-18 (NOT hy_user/hy_token)"],
+    "capture": "ui2api profile capture \"https://aistudio.tencent.ai\" --login",
+    "note": "provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). VERIFIED: the web session is cookie-auth via hunyuan_token + hunyuan_user + hunyuan_source (Tencent Hunyuan umbrella cookies) on the .tencent.ai domain. HEADED session required — Tencent Cloud EdgeOne blocks headless (HTTP 567 Restricted Access). X-Token/X-ID/Space-Id headers are injected for miniprogram mode only (not the primary web path)."
   },
   "permissions": [
-    "requires a real logged-in Tencent iOA / WeChat session (Cookie header for aistudio.tencent.com)",
-    "anti-bot: enterprise Tencent Cloud monitoring + galileotelemetry + traceId on all requests — no synthetic inputs, use the site's own JS paths",
+    "requires a real logged-in Tencent iOA / WeChat session (Cookie header for aistudio.tencent.ai)",
+    "anti-bot: Tencent Cloud EdgeOne WAF (HTTP 567 block on headless) + galileotelemetry + traceId on all requests — HEADED / real-profile browser ONLY; no synthetic inputs, use the site's own JS paths",
     "iOA login expired flow: '/_logout/?url=...' redirect; re-login required on 401/403"
   ],
   "builtinProfile": "tencent-aistudio",
   "analyzed": "2026-09-16",
-  "analysisMethod": "static curl + 5 JS bundles (~12.6 MB, hy-web 7.6 MB + index 4 MB + utils + monitor + runtime); no browser launched; no wire payloads verified"
+  "analysisMethod": "static curl + 5 JS bundles (~12.6 MB, hy-web 7.6 MB + index 4 MB + utils + monitor + runtime); session captured 2026-09-18 (hunyuan_token/hunyuan_user VERIFIED); DOM selectors still candidates pending a clean headed live round-trip"
 }

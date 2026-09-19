@@ -1,14 +1,15 @@
 {
   "site": "chat.deepseek.com",
-  "locked": false,
-  "status": "awaiting-capture",
-  "requiredSession": {
-    "host": "chat.deepseek.com",
-    "credentials": { "kind": "token", "name": "userToken" },
-    "captureCommand": "ui2api analyse https://chat.deepseek.com --login",
-    "targetDir": "data/chat.deepseek.com/.session/state.json"
+  "locked": true,
+  "status": "locked",
+  "snapshot": {
+    "path": "data/chat.deepseek.com/.session/state.json",
+    "sha256Prefix": "b88c38aa06b4f1b4fa751f54509d5098",
+    "capturedAt": "2026-09-18T14:42:47Z",
+    "cookies": 5,
+    "localStorageKeys": ["userToken", "settingsJwt", "__appKit_userInfo", "thinkingEnabled", "searchEnabled", "deepseek-device-id:chat", "ds_session_id"],
+    "evidence": "5 cookies (incl. ds_session_id, aws-waf-token) + 31 localStorage entries (userToken, settingsJwt, __appKit_userInfo) captured from live Chrome"
   },
-  "note": "NO live capture yet. Bundle-verified: userToken is a localStorage key replayed as Authorization: Bearer <userToken>; snapshot must preserve localStorage (userToken, settingsJwt, __appKit_userInfo) and the cookies/state needed to pass the AWS WAF JS challenge on /. Auth per provider-catalog.md: token 'userToken' (deepseek-web). Capture once, then this lock file records the snapshot hash + date.",
-  "capturedAt": null,
-  "snapshotHash": null
+  "note": "Locked session: userToken replays as Authorization: Bearer; AWS WAF token + ds_session_id cookies preserved. Snapshot injected into fresh browser contexts for ChatDriver UI path.",
+  "captureCommand": "npx tsx src/cli.ts profile ingest chat.deepseek.com"
 }
