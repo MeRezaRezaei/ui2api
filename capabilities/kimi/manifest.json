@@ -4,7 +4,7 @@
   "site": "www.kimi.ai",
   "url": "https://www.kimi.ai",
   "description": "Kimi AI assistant web app — chat with streaming answers, in-chat internet search, file/image upload, long-context mode. .cn mirror: kimi.moonshot.cn (login host login.moonshot.cn); canonical is www.kimi.ai.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "ui2api capability package",
   "date": "2026-09-15",
   "siteVersion": "Connect RPC on notilo.kimi.com/apiv2 — 411 methods / 45 protobuf services decoded from 99 JS bundles (~12MB); chat = ChatService.Chat (server-stream), search = kimi.chat.v1.Tool.Search{force} + search.v2.SearchService, files = POST /apiv2-files/file/upload",
@@ -41,27 +41,27 @@
     {
       "id": "kimi_web_search",
       "name": "Web search toggle (in-chat internet mode)",
-      "description": "Flip the composer web-search switch so the answer is grounded by live search (feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat)",
-      "method": "ui-toggle (composer Search / Web-access switch)",
-      "implementation": "In-chat search is a tool on the chat RPC: Tool{type:kimi.common.v1.ToolType.TOOL_TYPE_SEARCH=1, search{force}}. Per-message citations via ChatService.GetSearchCitation{chat_id,message_id} + GetToolBlock; dedicated backend search.v2.SearchService.{Search, SearchImage, SearchSaas, SerpSaas, Highlight, Rerank, Url2Text, GetPdfMeta} exists but is NOT what the composer switch drives. Toggle DOM unverified.",
+      "description": "Flip the composer web-search switch so the answer is grounded by live search (feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat). VERIFIED LIVE 2026-09-19: triggered via the toolkit drawer — [data-testid='toolkit-trigger-btn'] opens it, then click button.toolkit-item 'Web Search'; pre-boot clicks dropped → openToolkitItem() polls/re-clicks the trigger up to 15s.",
+      "method": "ui-toggle (toolkit drawer Web Search) — LIVE-VERIFIED 2026-09-19",
+      "implementation": "openToolkitItem(page, 'Web Search'): click [data-testid='toolkit-trigger-btn'], wait for button.toolkit-item rows (re-click trigger when none render), click the matching row, close toolkit. In-chat search is a tool on the chat RPC (Tool{type:TOOL_TYPE_SEARCH, search{force}}); per-message citations via ChatService.GetSearchCitation + GetToolBlock.",
       "recipe": "recipes/kimi_web_search.json"
     },
     {
       "id": "kimi_list_conversations",
       "name": "Conversation history list",
-      "description": "List past chats (ChatService.ListChats / ListMessages); DOM sidebar fallback",
-      "method": "in-page Connect RPC or DOM sidebar read",
-      "implementation": "ChatService.ListChats (kimi.gateway.chat.v1, mirrored in kimi.chat.v1) returns kimi.chat.v1.Chat{id, name, labels, pinned, last_request, status, model, timestamps}; chat brief = ChatBrief{id,name,labels}. No thread-search RPC exists in the inventory — client-side filter on ListChats or sidebar DOM. Payload layout to be verified on first live capture.",
+      "description": "List past chats (ChatService.ListChats / ListMessages). VERIFIED LIVE 2026-09-19: sidebar DOM read returns 15 real conversations via a.next-sidebar-history-item__link (fallback a[href^='/chat/']), href /chat/<uuid>?chat_enter_method=history — page.waitForSelector({timeout:15000}) replaces the fixed 3s wait (raced cold boot).",
+      "method": "ui-path (DOM sidebar read) — LIVE-VERIFIED 2026-09-19; wire ListChats RPC still needs protobuf framing",
+      "implementation": "openPage() → wait a.next-sidebar-history-item__link (15s) → page.evaluate extracting {id (uuid from href), title (innerText)} deduped, capped at 20. Wire equivalent ChatService.ListChats (kimi.gateway.chat.v1) documented in CAPABILITIES.md §4; payload layout to be verified on a future live capture.",
       "recipe": "recipes/kimi_list_conversations.json"
     },
     {
       "id": "kimi_file_upload",
       "name": "File / image upload support",
-      "description": "Attach documents or images to a chat — REST multipart POST /apiv2-files/file/upload (FileService.Upload) with parse tracking (GetFileParseProgress, ListChatFiles)",
-      "method": "in-page REST multipart (Bearer access_token) or composer attach UI",
-      "implementation": "POST https://notilo.kimi.com/apiv2-files/file/upload (multipart formData, responseType text) + lightweight POST /file/upload_simple; kimi.gateway.file.v1.FileService.Upload (client-streaming), GetFileParseProgress, ChatService.ListChatFiles; image blob host https://kimi-img.moonshot.cn. Parse errors REASON_KIMI_FILE_PARSE_JOB_FAIL / REASON_KIMI_FILE_MODERATION_FAIL. Attach UI DOM unverified; recipe pending first live capture.",
+      "description": "Attach documents or images to a chat — REST multipart POST /apiv2-files/file/upload (FileService.Upload) with parse tracking (GetFileParseProgress, ListChatFiles). VERIFIED LIVE 2026-09-19 via the composer attach UI: label.toolkit-item 'Add files & images' wraps hidden input[type='file'].hidden-input; attach via setInputFiles on the input (Playwright filechooser event NEVER fires on this UI). Attachment chip confirmed: 'kimi-attach-test / TXT / 52 Bytes'.",
+      "method": "ui-path (composer attach UI) — LIVE-VERIFIED 2026-09-19",
+      "implementation": "openToolkitItem('Add files & images') → page.locator('input[type=file]').setInputFiles(path) (NOT filechooser). Wire: POST https://notilo.kimi.com/apiv2-files/file/upload (multipart, responseType text) + lightweight POST /file/upload_simple; kimi.gateway.file.v1.FileService.Upload (client-streaming), GetFileParseProgress, ChatService.ListChatFiles; image blob host https://kimi-img.moonshot.cn.",
       "recipe": "recipes/kimi_file_upload.json",
-      "notes": "Upload flow details to be verified on first live capture; recipe shipped (wire-first /apiv2-files/file/upload, attach-UI fallback unverified)"
+      "notes": "Upload flow VERIFIED live 2026-09-19 (attach UI path); wire-first /apiv2-files/file/upload recipe retained for future direct-RPC use"
     },
     {
       "id": "kimi_long_context",
@@ -75,9 +75,9 @@
     {
       "id": "kimi_model_list",
       "name": "Model picker read",
-      "description": "Read the available models from the model picker DOM (selectModelEntry state key + GetAvailableModels RPC proven in bundles)",
-      "method": "dom.picker (unverified selectors)",
-      "implementation": "DOM read of the model picker rendered by the SPA. Selectors are UNVERIFIED candidates ([class*='model-picker'] [role='option'], [data-model-id], etc.) — inventory proves selectModelEntry state key + GetAvailableModels RPC but no live DOM class; confirm on first live capture. Returns {id, name, selected} per model, or ok:false when the picker is not straightforward on this render.",
+      "description": "Read the available models from the model picker DOM (selectModelEntry state key + GetAvailableModels RPC proven in bundles). VERIFIED LIVE 2026-09-19: click [data-testid='model-select-trigger'] → read button.model-item rows (name = first innerText line), selected flagged via .checked class; Escape closes. Live read returned: K3, K3 Swarm, K2.8, Instant (selected).",
+      "method": "dom.picker — LIVE-VERIFIED 2026-09-19",
+      "implementation": "page.locator('[data-testid=\"model-select-trigger\"]').click() → wait button.model-item → evaluate rows {id:null, name: first line, selected: contains '.checked'} → Escape to close. Returns {model, selected} per row.",
       "recipe": null
     }
   ],
@@ -97,5 +97,5 @@
   ],
   "builtinProfile": "kimi",
   "analyzed": "2026-09-15",
-  "analysisMethod": "static JS-bundle analysis (see CAPABILITIES.md — 99 bundles / ~12MB, 411 RPC methods / 45 services); session captured + chat round-trip live-verified 2026-09-18 (answer selector grounded: .toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown excludes the thinking block)"
+  "analysisMethod": "static JS-bundle analysis (see CAPABILITIES.md — 99 bundles / ~12MB, 411 RPC methods / 45 services); session captured + chat round-trip live-verified 2026-09-18 (answer selector grounded: .toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown excludes the thinking block). LIVE-VERIFIED 2026-09-19: list_conversations, model_list, web_search, file_upload UI paths (runner runs, proofs PASS 14098) against locked session 2026-09-18T14:42:47Z."
 }

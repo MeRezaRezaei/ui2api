@@ -1,0 +1,15 @@
+{
+  "siteId": "kimi",
+  "site": "www.kimi.ai",
+  "name": "Kimi AI (www.kimi.ai)",
+  "url": "https://www.kimi.ai",
+  "siteVersion": "SPA on www.kimi.ai; Connect RPC on notilo.kimi.com/apiv2 — 411 methods / 45 protobuf services decoded from 99 JS bundles (~12MB)",
+  "version": "0.2.0",
+  "status": "active",
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own Kimi AI (www.kimi.ai) sessions to chat, use in-chat web search, upload files, list conversations, and read the model picker with my account.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "reviewed",
+  "publishedAt": "2026-09-19"
+}

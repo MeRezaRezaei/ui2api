@@ -25,6 +25,7 @@ import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
 import { VeniceCapabilities } from "../capabilities/venice.js";
 import { DeepSeekCapabilities } from "../capabilities/deepseek.js";
+import { TencentAistudioCapabilities } from "../capabilities/tencent-aistudio.js";
 import { ClaudeCapabilities } from "../capabilities/claude.js";
 import { ChatGPTCapabilities } from "../capabilities/chatgpt.js";
 import { CopilotCapabilities } from "../capabilities/copilot.js";
@@ -290,6 +291,31 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
         const shared = await pool.sharedBrowser();
         const caps = new DeepSeekCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Tencent AI Studio capability surface: chat (verified HEADED-only path —
+      // EdgeOne blocks headless) + documented-but-unverified wire caps. The
+      // ChatDriver path enforces the headed/real-Chrome posture itself.
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/tencent-aistudio") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("tencent-aistudio", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/tencent-aistudio/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new TencentAistudioCapabilities(profile, { browser: shared, dataDir });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

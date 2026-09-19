@@ -95,26 +95,44 @@ Bench rule: **every browser launch must go through `launchBrowser()`** in
 `src/runtime/browser.ts` (single seam for headless/headed/chrome/attach
 resolution + stealth posture). Never `launch()` a browser ad-hoc.
 
-## Site status (2026-09-18)
+## Site status (2026-09-19)
 
 - **Builtin profiles** (`src/profile/profile.ts`): gemini, chatgpt, claude,
   copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more.
 - **Session-locked + live-verified round-trips**:
   - `deepseek` (chat.deepseek.com) — localStorage `userToken` Bearer auth;
-    AWS WAF + PoW; verified answering.
+    AWS WAF + PoW; verified answering (proof PASS 11462, 2026-09-19). Full
+    surface verified: `deepseek_reasoner` + `deepseek_web_search` are REAL
+    composer toggles (`div.ds-toggle-button:has-text("DeepThink"/"Search")`,
+    state class `ds-toggle-button--selected`) feeding `thinking_enabled` /
+    `search_enabled`; `deepseek_list_conversations` reads sidebar
+    `a[href*='/chat/']` (both `/chat/<id>` and `/a/chat/s/<uuid>` shapes).
   - `kimi` (www.kimi.ai) — localStorage `access_token` Bearer on
-    notilo.kimi.com/apiv2; verified answering. **Selector gotcha**: the driver
-    picks the LONGEST matching element text, and Kimi's thinking block also
-    matches `.markdown` — the answer selector
+    notilo.kimi.com/apiv2; verified answering (proof PASS 13965, 2026-09-19).
+    **Selector gotcha**: the driver picks the LONGEST matching element text,
+    and Kimi's thinking block also matches `.markdown` — the answer selector
     `.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown`
-    exists specifically to exclude thinking.
+    exists specifically to exclude thinking. Full surface verified:
+    `kimi_list_conversations` (sidebar `a.next-sidebar-history-item__link`),
+    `kimi_model_list` (`[data-testid="model-select-trigger"]` →
+    `button.model-item`), `kimi_web_search` (toolkit
+    `[data-testid="toolkit-trigger-btn"]` → `button.toolkit-item`), and
+    `kimi_file_upload` (`label.toolkit-item` wrapping hidden
+    `input[type="file"]` — use `setInputFiles`, filechooser never fires).
   - `gemini` (gemini.google.com) — verified earlier; do not re-capture.
-- **Session-locked, selectors pending**: `tencent-aistudio`
+- **Session-locked + chat verified (headed/real-Chrome only)**: `tencent-aistudio`
   (aistudio.tencent.ai). Cookies verified (`hunyuan_token`/`hunyuan_user`/
   `hunyuan_source` on `.tencent.ai`); **Tencent Cloud EdgeOne blocks headless
   Chromium (HTTP 567) — headed / real-profile ONLY** (mirrors
-  `capabilities/hunyuan`). A headed real Chrome under Xvfb renders the site but
-  the prompt round-trip is not yet clean — finish before claiming it works.
+  `capabilities/hunyuan`). Chat round-trip VERIFIED (proof PASS 6916, 2026-09-19):
+  composer `textarea.t-textarea__inner` ("Ask me anything"), answer
+  `.agent-chat__bubble--ai .hyc-content-md` → `.hyc-common-markdown`, completion
+  marker "Completed". Cold-boot gotcha: sends typed before ~5–8s are silently
+  dropped — `preComposeDelayMs: 8000` in the profile. Runner wired
+  (`src/capabilities/tencent-aistudio.ts` + `/capability/tencent-aistudio`);
+  History drawer renders NO anchor list → conversation CRUD stays honest
+  ok:false; remaining capabilities wire-mapped, DOM-unverified (never claim
+  verified without a live round-trip).
 - **Walled / scaffold / dead-end** inventory lives in `capabilities/README.md`
   (poe, grok, perplexity, t3chat, blackbox, adapta, zenmux, …). Be honest about
   status: never claim a capability is verified without a live round-trip.

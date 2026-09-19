@@ -9,6 +9,7 @@ import { KimiCapabilities } from "../src/capabilities/kimi.js";
 import { HunyuanCapabilities } from "../src/capabilities/hunyuan.js";
 import { VeniceCapabilities } from "../src/capabilities/venice.js";
 import { DeepSeekCapabilities } from "../src/capabilities/deepseek.js";
+import { TencentAistudioCapabilities } from "../src/capabilities/tencent-aistudio.js";
 import { ClaudeCapabilities } from "../src/capabilities/claude.js";
 import { ChatGPTCapabilities } from "../src/capabilities/chatgpt.js";
 import { GeminiCapabilities } from "../src/capabilities/gemini.js";
@@ -85,6 +86,13 @@ const RUNNERS: RunnerDef[] = [
     manifestPath: u("../capabilities/deepseek/manifest.json"),
     sourcePath: u("../src/capabilities/deepseek.ts"),
     make: (p) => new DeepSeekCapabilities(p),
+  },
+  {
+    id: "tencent-aistudio",
+    profilePath: u("../capabilities/tencent-aistudio/profile.json"),
+    manifestPath: u("../capabilities/tencent-aistudio/manifest.json"),
+    sourcePath: u("../src/capabilities/tencent-aistudio.ts"),
+    make: (p) => new TencentAistudioCapabilities(p),
   },
   {
     id: "claude",
@@ -199,7 +207,11 @@ for (const def of RUNNERS) {
     assert.ok(dispatch.length > 0, `no case labels parsed from ${def.sourcePath}`);
     assert.ok(manifestIds.length > 0, `manifest ${def.manifestPath} lists no capabilities`);
     for (const label of dispatch) {
-      assert.match(label, new RegExp(`^${def.id}_[a-z_]+$`),
+      // Site ids with a hyphen (e.g. "tencent-aistudio") still use UNDERSCORES
+      // in their capability ids (tencent_aistudio_chat) — accept both
+      // separators in the runner prefix so the convention check stays honest.
+      const prefix = def.id.replace(/-/g, "[-_]");
+      assert.match(label, new RegExp(`^${prefix}_[a-z_]+$`),
         `case label "${label}" does not follow ${def.id}_ naming convention`);
     }
 

@@ -4,7 +4,7 @@
   "site": "aistudio.tencent.ai",
   "url": "https://aistudio.tencent.ai",
   "description": "Tencent Hy AI Studio — developer/professional Hunyuan assistant: chat with streaming, deep search, deep thought/reasoning, image/video/3D generation, code execution, file upload + doc QA, TTS/ASR, podcast, translation, AI agent roles. Under the Tencent Hunyuan umbrella (yuanbao.tencent.com is the consumer surface; already covered by capabilities/hunyuan).",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "ui2api capability package",
   "date": "2026-09-16",
   "siteVersion": "SPA on aistudio.tencent.com; API routes /api/new-portal/* (5 JS bundles ~12.6 MB; hy-web main 7.6 MB); chat = POST /api/new-portal/chat/{chatId} with JSON stream; auth = iOA/QR scan cookie-based",
@@ -49,9 +49,9 @@
     {
       "id": "tencent_aistudio_chat",
       "name": "Chat stream",
-      "description": "Send a prompt on the composer; streamed answer via POST /api/new-portal/chat/{chatId} (JSON chunk parsing)",
-      "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "implementation": "POST https://aistudio.tencent.com/api/new-portal/chat/{chatId}; body = {model, prompt, options, plugin, searchDeepMode, aiRoleClone, ...}; response = JSON chunks parsed by JSON.parse(e.data) with type field → HYCSpeechType mapping; 15 min timeout (9e5 ms). generate/id endpoint needed to create chatId; conversation continue for multi-turn.",
+      "description": "Send a prompt on the composer; streamed answer via POST /api/new-portal/chat/{chatId} (JSON chunk parsing). VERIFIED LIVE 2026-09-19: proof round-trips PASS (13717, 12, 72 — 'Reply with ONLY the number') on headed real Chrome + injected snapshot.",
+      "method": "ui-path (trusted input + Enter, site's own send handler) — LIVE-VERIFIED 2026-09-19",
+      "implementation": "DOM path (what is live-verified): composer textarea.t-textarea__inner (placeholder 'Ask me anything', TDesign) → dom.type focus+insertText+Enter → answer streams into .agent-chat__bubble--ai .hyc-content-md (markdown body .hyc-common-markdown), completion marker 'Completed'. preComposeDelayMs 8000 (cold boot: sends typed before ~5-8s are silently dropped). Wire: POST https://aistudio.tencent.ai/api/new-portal/chat/{chatId}; body = {model, prompt, options, plugin, searchDeepMode, aiRoleClone, ...}; response = JSON chunks parsed by JSON.parse(e.data) with type field → HYCSpeechType mapping; generate/id endpoint needed to create chatId; conversation continue for multi-turn.",
       "recipe": "recipes/tencent_aistudio_chat.json"
     },
     {
@@ -73,9 +73,9 @@
     {
       "id": "tencent_aistudio_conversation_crud",
       "name": "Conversation CRUD + history",
-      "description": "List/get/rename/delete conversations via /api/new-portal/ endpoints + generate/id + continue",
-      "method": "in-page fetch (credentials: include) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "implementation": "POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue. Response shapes to verify.",
+      "description": "List/get/rename/delete conversations via /api/new-portal/ endpoints + generate/id + continue. CURRENT POSTURE (2026-09-19, honest): the History entry (div.layout-menu__menu-history) renders NO anchor list on this revision — a DOM conversation-list selector is unverified, so the runner returns ok:false with mechanism notes until a live History capture.",
+      "method": "in-page fetch (credentials: include) — endpoints VERIFIED in bundles; DOM/list path UNVERIFIED",
+      "implementation": "POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue. Response shapes to verify on a live History capture.",
       "recipe": null
     },
     {
@@ -149,5 +149,5 @@
   ],
   "builtinProfile": "tencent-aistudio",
   "analyzed": "2026-09-16",
-  "analysisMethod": "static curl + 5 JS bundles (~12.6 MB, hy-web 7.6 MB + index 4 MB + utils + monitor + runtime); session captured 2026-09-18 (hunyuan_token/hunyuan_user VERIFIED); DOM selectors still candidates pending a clean headed live round-trip"
+  "analysisMethod": "static curl + 5 JS bundles (~12.6 MB, hy-web 7.6 MB + index 4 MB + utils + monitor + runtime); session captured 2026-09-18 (hunyuan_token/hunyuan_user/hunyuan_source on .tencent.ai VERIFIED); chat round-trip + full chat DOM map LIVE-VERIFIED 2026-09-19 (headed real Chrome under Xvfb, proofs PASS 13717/12/72); composer/cold-boot preComposeDelayMs 8000 baked into profile; remaining capabilities wire-mapped, DOM-unverified (honest ok:false until a live capture grounds each toggle)"
 }

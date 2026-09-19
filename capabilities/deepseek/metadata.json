@@ -1,0 +1,15 @@
+{
+  "siteId": "deepseek",
+  "site": "chat.deepseek.com",
+  "name": "DeepSeek Chat (chat.deepseek.com)",
+  "url": "https://chat.deepseek.com",
+  "siteVersion": "SPA commit 9a1e24e6; bundles default-vendors.73c732e189.js + main.39d5f46438.js on fe-static.deepseek.com/chat/static/ (~2.5MB)",
+  "version": "0.3.0",
+  "status": "active",
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own DeepSeek Chat (chat.deepseek.com) sessions to chat, toggle reasoning/web-search, and manage conversation history with my account.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "reviewed",
+  "publishedAt": "2026-09-19"
+}

@@ -35,6 +35,12 @@ export interface ChatSiteProfile {
   captureMs: number;
   stableMs: number;
   note?: string;
+  // Cold-boot protection for slow SPAs (e.g. Tencent "Hy AI Studio"): the
+  // composer is visible long before the app finished booting, and an Enter
+  // pressed during boot is silently dropped. When set, the driver waits
+  // `preComposeDelayMs` (+ a random jitter up to 600ms — human-dwell-plausible)
+  // after the composer becomes visible and before composing.
+  preComposeDelayMs?: number;
   // Query-driven "capability" sites (e.g. Google AI Mode): instead of typing
   // into a composer, each prompt is ONE page load of `urlTemplate` with {q}
   // replaced by the URL-encoded prompt. `url` stays the warm-pool landing
@@ -204,14 +210,22 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
       'div[contenteditable="true"][role="textbox"]',
       'textarea[placeholder*="Ask anything"], textarea[placeholder*="Ask"], textarea[placeholder*="输入"]',
       ".chat-input textarea",
+      // "next" UI (2026-09-19): composer container is [data-testid="chat-editor"]
+      // wrapping div.chat-input-editor; the real editable sits deeper and matches
+      // [role="textbox"]. Container selectors are LAST — focusing the container
+      // breaks insertText, so the editable-first candidates above must win.
+      '[data-testid="chat-editor"] [role="textbox"]',
+      '[data-testid="chat-editor"] [contenteditable="true"]',
+      '[data-testid="chat-editor"]',
+      ".chat-input-editor",
     ],
     send: { kind: "keyEnter" },
     answer: ['.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown', '.chat-content-item-assistant .markdown', '.segment-text'],
-    newChat: '[aria-label*="New chat"], [aria-label*="new chat"], [aria-label*="新对话"]',
+    newChat: '[aria-label*="New chat"], [aria-label*="new chat"], [aria-label*="新对话"], [data-testid="sidebar-new-chat"]',
     dismiss: ['button[aria-label*="Sign in"], button[aria-label*="登录"]', 'button[aria-label*="Close"], button[aria-label*="关闭"]'],
     captureMs: 60000,
     stableMs: 2000,
-    note: "LOCKED — verified live against www.kimi.ai (2026-09-18) with an ingested Chrome session (access_token/refresh_token/msh_user_id in localStorage). Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine; drive the site's own UI.",
+    note: "LOCKED + LIVE-VERIFIED (2026-09-18/19): composer [data-testid='chat-editor'], answer excludes thinking block; new 'next' UI revision — sidebar history = a.next-sidebar-history-item__link (href /chat/<id>?chat_enter_method=history), model select [data-testid='model-select-trigger'] (Instant/High), toolkit panel (Web Search / Add files & images / Plugins / Skills) behind [data-testid='toolkit-trigger-btn']. Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine.",
   },
   deepseek: {
     id: "deepseek",
@@ -240,18 +254,29 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     loginRequired: true,
     loginHint: "HEADED session REQUIRED — cookie auth: hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai. Capture once: npx tsx src/cli.ts profile ingest aistudio.tencent.ai, or reuse your signed-in Chrome via UI2API_USER_DATA_DIR. iOA QR scan login via /api/oalogin / WeChat.",
     composer: [
+      "textarea.t-textarea__inner",
       'div[contenteditable="true"]',
       "textarea",
       '[class*="chat-input"] textarea',
       '[class*="input-box"] textarea',
     ],
     send: { kind: "keyEnter" },
-    answer: ['[class*="message-content"]', '[class*="answer"]', '[class*="response-text"]', '[class*="chat-content"]'],
+    answer: [
+      ".agent-chat__bubble--ai .hyc-content-md",
+      ".agent-chat__bubble--ai .hyc-common-markdown",
+      ".hyc-content-md",
+      '[class*="speech_show"] .hyc-common-markdown',
+      '[class*="message-content"]',
+      '[class*="answer"]',
+      '[class*="response-text"]',
+      '[class*="chat-content"]',
+    ],
     newChat: '[class*="new-chat"], [aria-label*="新对话"], [aria-label*="New chat"], a[href="/chat/HunyuanDefault"]',
     dismiss: ['button[aria-label*="关闭"], button[aria-label*="Close"]', '[class*="login-modal"] button[class*="close"]'],
     captureMs: 60000,
     stableMs: 2500,
-    note: "LOCKED session captured (hunyuan_token/hunyuan_user cookies VERIFIED on .tencent.ai) — DOM selectors are still candidates pending a clean live prompt round-trip. SPA = React + TDesign; anti-bot: galileotelemetry + traceId monitoring; drive the site's own UI.",
+    preComposeDelayMs: 8000,
+    note: "LIVE-VERIFIED chat round-trip (2026-09-19, headed real Chrome + injected snapshot): composer textarea.t-textarea__inner (placeholder 'Ask me anything'), AI answer in .agent-chat__bubble--ai .hyc-content-md (markdown .hyc-common-markdown), human bubble .agent-chat__bubble--human .hyc-content-text, completion marker 'Completed'. EdgeOne blocks headless (HTTP 567) — headed/real-Chrome only.",
   },
   hunyuan: {
     id: "hunyuan",

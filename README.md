@@ -174,6 +174,11 @@ Available sites (declarative, tune-able): `gemini`, `chatgpt`, `claude`,
 `copilot` (anonymous), `perplexity` (anonymous Ask), `huggingchat`, plus
 session-locked packages `deepseek` (chat.deepseek.com), `kimi` (www.kimi.ai)
 and `tencent-aistudio` (aistudio.tencent.ai — headed/real-profile only).
+All three session-locked sites are **live-verified end-to-end** (2026-09-19,
+see `capabilities/README.md`): deepseek = chat + real DeepThink/Search toggles +
+conversation list; kimi = chat + conversation list + model picker + web-search
+toolkit + file upload; tencent-aistudio = chat (EdgeOne-headed only) + full wire
+map. Each exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
 Sending is always the site's **own JS**: paste event + Enter — no synthetic
 mouse clicks; the answer is read from the page's event bus until it stops
 growing. (`npx tsx src/cli.ts prompt --sites` lists what's available; the full

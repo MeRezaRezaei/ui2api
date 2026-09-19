@@ -1,0 +1,15 @@
+{
+  "siteId": "tencent-aistudio",
+  "site": "aistudio.tencent.ai",
+  "name": "Tencent AI Studio (aistudio.tencent.ai)",
+  "url": "https://aistudio.tencent.ai",
+  "siteVersion": "SPA on aistudio.tencent.ai; API routes /api/new-portal/* (5 JS bundles ~12.6 MB; hy-web main 7.6 MB)",
+  "version": "0.2.0",
+  "status": "active",
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own Tencent AI Studio (aistudio.tencent.ai) sessions to chat with Hunyuan models using my logged-in iOA/WeChat session.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "reviewed",
+  "publishedAt": "2026-09-19"
+}
