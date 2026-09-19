@@ -11,9 +11,9 @@
   ],
   "send": { "kind": "keyEnter" },
   "answer": [
-    ".segment-text",
-    "[class*=\"answer\"]",
-    "[class*=\"response\"]"
+    ".toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown",
+    ".chat-content-item-assistant .markdown",
+    ".segment-text"
   ],
   "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"], [aria-label*=\"新对话\"]",
   "dismiss": [

@@ -1,6 +1,6 @@
-# Kimi capabilities (from JS bundle analysis, 2026-09-15)
+# Kimi capabilities (from JS bundle analysis, 2026-09-15; session + UI round-trip live-verified 2026-09-18)
 
-Analyzed 99 JS bundles (~12 MB) from `https://www.kimi.com` (lang zh-CN, homepage title: "Kimi AI 官网 - K3 上线，专为智能体编程与知识工作打造").
+Analyzed 99 JS bundles (~12 MB) from `https://www.kimi.ai` (lang zh-CN, homepage title: "Kimi AI 官网 - K3 上线，专为智能体编程与知识工作打造"). Live-verified host: `www.kimi.ai` (live ChatDriver round-trip 2026-09-18 on `www.kimi.ai/chat/...`); the token/session domain is `.kimi.com` scope.
 Transport: **Connect RPC** (connect-es v2, protobuf over HTTP POST, no WebSocket for chat). All RPCs live under `https://notilo.kimi.com`; REST file endpoints under `/apiv2` and `/apiv2-files`. 411 RPC methods across ~45 protobuf services were recovered by decoding the embedded `fileDesc`/`serviceDesc` descriptors.
 
 ## 1. Chat core (models, thinking mode, streaming)

@@ -171,9 +171,13 @@ parallel requests — exactly like the request queue + a browser. Semantics:
   (`promptd` itself starts Chrome with the debug port if you omit `--user-data-dir`.)
 
 Available sites (declarative, tune-able): `gemini`, `chatgpt`, `claude`,
-`copilot` (anonymous), `perplexity` (anonymous Ask), `huggingchat`. Sending is
-always the site's **own JS**: paste event + Enter — no synthetic mouse clicks; the
-answer is read from the page's event bus until it stops growing.
+`copilot` (anonymous), `perplexity` (anonymous Ask), `huggingchat`, plus
+session-locked packages `deepseek` (chat.deepseek.com), `kimi` (www.kimi.ai)
+and `tencent-aistudio` (aistudio.tencent.ai — headed/real-profile only).
+Sending is always the site's **own JS**: paste event + Enter — no synthetic
+mouse clicks; the answer is read from the page's event bus until it stops
+growing. (`npx tsx src/cli.ts prompt --sites` lists what's available; the full
+inventory of analyzed sites lives in `capabilities/README.md`.)
 
 - **Just works on its own**: zero-config browser (bundled Chromium, auto-fallbacks
   to system Chrome), no external LLM API, no logins for the anonymous sites.

@@ -1,9 +1,9 @@
 {
   "id": "kimi",
-  "name": "Kimi AI (www.kimi.com)",
-  "site": "www.kimi.com",
-  "url": "https://www.kimi.com",
-  "description": "Kimi AI assistant web app — chat with streaming answers, in-chat internet search, file/image upload, long-context mode. .cn mirror: kimi.moonshot.cn (login host login.moonshot.cn); canonical is www.kimi.com.",
+  "name": "Kimi AI (www.kimi.ai)",
+  "site": "www.kimi.ai",
+  "url": "https://www.kimi.ai",
+  "description": "Kimi AI assistant web app — chat with streaming answers, in-chat internet search, file/image upload, long-context mode. .cn mirror: kimi.moonshot.cn (login host login.moonshot.cn); canonical is www.kimi.ai.",
   "version": "0.1.0",
   "author": "ui2api capability package",
   "date": "2026-09-15",
@@ -84,11 +84,11 @@
   "auth": {
     "required": true,
     "kind": "session-snapshot",
-    "host": "www.kimi.com",
+    "host": "www.kimi.ai",
     "apiHost": "https://notilo.kimi.com",
     "localStorageKeys": ["access_token", "refresh_token", "msh_user_id"],
-    "capture": "ui2api profile capture \"https://www.kimi.com\" --login",
-    "note": "Auth is localStorage access_token (replayed as Bearer on notilo.kimi.com/apiv2, plus site-internal x-msh-shield-data TrustDecision header). Refresh via AuthService.RefreshToken; on Unauthenticated cleanToken() logs out. Exact cookie set TBD on first live capture."
+    "capture": "ui2api profile capture \"https://www.kimi.ai\" --login",
+    "note": "Auth is localStorage access_token (replayed as Bearer on notilo.kimi.com/apiv2, plus site-internal x-msh-shield-data TrustDecision header). Refresh via AuthService.RefreshToken; on Unauthenticated cleanToken() logs out. Verified live 2026-09-18: session with access_token/refresh_token/msh_user_id drives the ChatService.Chat UI round-trip."
   },
   "permissions": [
     "requires a real logged-in Kimi session snapshot (access_token in localStorage)",
@@ -97,5 +97,5 @@
   ],
   "builtinProfile": "kimi",
   "analyzed": "2026-09-15",
-  "analysisMethod": "static JS-bundle analysis (see CAPABILITIES.md — 99 bundles / ~12MB, 411 RPC methods / 45 services); no browser launched; no RPC payloads yet verified on the wire"
+  "analysisMethod": "static JS-bundle analysis (see CAPABILITIES.md — 99 bundles / ~12MB, 411 RPC methods / 45 services); session captured + chat round-trip live-verified 2026-09-18 (answer selector grounded: .toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown excludes the thinking block)"
 }
