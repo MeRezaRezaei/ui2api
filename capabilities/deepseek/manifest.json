@@ -4,7 +4,7 @@
   "site": "chat.deepseek.com",
   "url": "https://chat.deepseek.com",
   "description": "DeepSeek's chat product (deepseek-chat / deepseek-reasoner mode via per-session model_type + thinking toggle). REST + SSE chat on same origin, PoW-protected, token-auth from localStorage userToken.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "ui2api capabilities",
   "date": "2026-09-16",
   "siteVersion": "SPA commit 9a1e24e6; bundles default-vendors.73c732e189.js + main.39d5f46438.js on fe-static.deepseek.com/chat/static/ (~2.5MB) — static bundle analysis, 2026-09-16",
@@ -36,34 +36,45 @@
     {
       "id": "deepseek_list_conversations",
       "name": "List conversations",
-      "description": "Read the logged-in session's conversation list from the live DOM sidebar (a[href*='/chat/'] anchors; matches both /chat/<id> and /a/chat/s/<id> href shapes, static nav routes excluded). Honest current posture: DOM path reflects the current session only — the real wire RPC (POST /api/v0/chat_session/fetch_page for listing, GET /api/v0/chat/history_messages for message history) needs the localStorage userToken Bearer + PoW challenge headers only available inside a live headed session.",
-      "method": "ui-path (DOM sidebar a[href*='/chat/'] on the live page)",
-      "implementation": "openPage() + waitForDomain, then page.evaluate over a[href*='/chat/'] extracting the conversation id and innerText title, deduped by id, capped at 20. Wire RPC pending a live headed session capture (localStorage userToken + PoW-solved session).",
+      "description": "Read the logged-in session's conversation list from the live DOM sidebar (a[href*='/chat/'] anchors; matches both /chat/<id> and /a/chat/s/<id> href shapes, static nav routes excluded). Verified live 2026-09-19: real items returned (waitForSelector up to 15s, then hrefs + titles, deduped, capped at 20). Wire RPC (POST /api/v0/chat_session/fetch_page) needs the PoW challenge headers only available inside the page — DOM path is the honest, verified one.",
+      "method": "ui-path (DOM sidebar a[href*='/chat/'] on the live page) — LIVE-VERIFIED 2026-09-19",
+      "implementation": "openPage() + page.waitForSelector(\"a[href*='/chat/']\", {timeout:15000}), then page.evaluate over a[href*='/chat/'] extracting conversation id + innerText title, deduped by id, capped at 20. Proven against the locked 2026-09-18 session.",
       "recipe": null
     },
     {
       "id": "deepseek_reasoner",
       "name": "Reasoning / CoT mode (thinking toggle)",
-      "description": "Toggle reasoning (CoT) on per request/session. Mechanism verified in bundles: thinking_enabled boolean in completion body; x-thinking-enabled:'1'|'0' + x-model-type headers on file uploads; per-session model_type passed on every completion; i18n 'Think before responding to solve reasoning problems' toggle tooltip. model_type id VALUES are server-driven from /api/v0/client/settings feature model_configs (: [{model_type,is_default,enabled,switchable,file_feature:{vision}}]); literal 'deepseek-reasoner'/'deepseek-chat' ids do NOT appear in bundles — resolve from a live /client/settings read before use.",
-      "method": "ui-path (flip in-page thinking toggle) or model_type on direct wire",
-      "implementation": "set args.thinking → drive the page toggle (localStorage thinkingEnabledStorageHandle / searchEnabledStorageHandle back the composer switches); or set thinking_enabled/model_type on the /api/v0/chat/completion body. Reasoning text arrives in the same SSE delta/title patch stream (exact reasoning path key is in an async chunk — to capture live).",
+      "description": "Toggle reasoning (CoT) on per request/session. VERIFIED LIVE 2026-09-19: the composer carries a real toggle div.ds-toggle-button:has-text('DeepThink') whose state class is ds-toggle-button--selected; clicking flips it both ways and the state reaches the wire as thinking_enabled on the next POST /api/v0/chat/completion. (Bundle fact unchanged: literal 'deepseek-reasoner'/'deepseek-chat' ids do NOT appear in DTOs — model_type values are server-driven from /api/v0/client/settings; the UI toggle is the grounded way to address reasoning.)",
+      "method": "ui-path (flip in-page thinking toggle) — LIVE-VERIFIED 2026-09-19",
+      "implementation": "set args.state on/off → click div.ds-toggle-button:has-text('DeepThink') on the live page; state class ds-toggle-button--selected reflects the toggle; reasoning text arrives in the same SSE delta/title patch stream.",
       "recipe": "recipes/deepseek_chat.json"
+    },
+    {
+      "id": "deepseek_web_search",
+      "name": "Web search toggle",
+      "description": "Flip the composer 'Search' toggle (div.ds-toggle-button:has-text('Search'), state = ds-toggle-button--selected class) so the next completion carries search_enabled. Verified live 2026-09-19: click flips the --selected class both ways; the state reaches the wire as search_enabled in the next POST /api/v0/chat/completion body.",
+      "method": "ui-path (real toggle click in the logged-in page)",
+      "implementation": "verified DOM toggle on the composer; feeds search_enabled in the completion body; localStorage searchEnabledStorageHandle stayed null in the verified session (state held in the app store)",
+      "recipe": ""
     }
   ],
   "auth": {
     "required": true,
     "kind": "session-snapshot",
     "host": "chat.deepseek.com",
-    "credentials": { "kind": "token", "name": "userToken" },
+    "credentials": {
+      "kind": "token",
+      "name": "userToken"
+    },
     "capture": "ui2api analyse https://chat.deepseek.com --login",
     "note": "verified: localStorage userToken replayed as Authorization: Bearer <userToken> on every withToken request. Login paths are PoW-guarded (create_pow_challenge / guest challenge) and mobile-SMS/email-OTP only in bundles; password login not found. AWS WAF JS challenge sits on / — a real browser session (Playwright) that clears it is required."
   },
   "permissions": [
     "requires a real logged-in chat.deepseek.com session snapshot (localStorage userToken; also preserves settingsJwt + __appKit_userInfo)",
     "chat/completion targets carry a PoW header — page (Playwright) solves it invisibly; raw-call automation would need the miner",
-    "composer/send/answer selectors verified live 2026-09-18 (ChatDriver round-trip answered on chat.deepseek.com with localStorage userToken session)"
+    "composer/send/answer selectors verified live 2026-09-18 (ChatDriver round-trip answered on chat.deepseek.com with localStorage userToken session); reasoner + search toggles + conversation list verified live 2026-09-19"
   ],
   "builtinProfile": "deepseek (registered built-in in src/profile/profile.ts; session locked 2026-09-18)",
   "analyzed": "2026-09-16",
-  "analysisMethod": "static analysis of 2 real bundles (fe-static.deepseek.com/chat/static/: default-vendors.73c732e189.js, main.39d5f46438.js) recovered despite AWS WAF wall on the HTML entry (SPA HTML served from /api/v0/users/me). All endpoints/headers/SSE names verified as literal strings in main bundle. No browser launched; DOM selectors + model id values + PoW algorithm remain to-verify."
+  "analysisMethod": "static analysis of 2 real bundles (fe-static.deepseek.com/chat/static/: default-vendors.73c732e189.js, main.39d5f46438.js) recovered despite AWS WAF wall on the HTML entry (SPA HTML served from /api/v0/users/me); all endpoints/headers/SSE names verified as literal strings in main bundle. LIVE-VERIFIED 2026-09-19: chat round-trip (proof PASS 7023), DeepThink/Search toggles, conversation list — against locked session 2026-09-18T14:42:47Z."
 }

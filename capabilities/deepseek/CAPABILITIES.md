@@ -32,3 +32,18 @@ Analyzed 2 JS bundles (~2.5 MB) hosted on `fe-static.deepseek.com/chat/static/` 
 ## 6. Verified vs to-verify
 - **Verified (static)**: API base+envelope, all `/api/v0/...` paths, SSE event protocol + JSON-patch delta, Bearer-auth from localStorage `userToken`, PoW header scheme + challenge endpoint, hif throttle headers, `thinking_enabled`/`search_enabled` toggles + per-session `model_type`, model config source, TTS WebSocket.
 - **To verify (live/browser)**: actual `model_type` id values and current default; PoW mining algorithm + difficulty; composer/send/answer DOM selectors (`.ds-markdown` remains a candidate from prior UI knowledge); reasoning block selector/path; password login existence; whether completion needs a fresh PoW per request/session.
+## 5. LIVE VERIFICATION LOG — 2026-09-19 (DOM + functionality, end-to-end)
+
+Session: injected snapshot lock 2026-09-18T14:42:47Z (5 cookies / 31 localStorage
+keys incl. `userToken` → `Authorization: Bearer`). `ui2api proof --site deepseek`
+PASS (7023). Headless-safe.
+
+| Capability | Result | Verified mechanism (DOM) |
+|---|---|---|
+| `deepseek_chat` | ✔ proof PASS | composer → Enter → streamed answer read off the page; AWS WAF + PoW invisible to the page path. |
+| `deepseek_reasoner` | ✔ live toggle verified | real toggle `div.ds-toggle-button:has-text("DeepThink")`; state class `ds-toggle-button--selected`. `args.state` on/off; verified flips false→true and back (state reaches the wire as `thinking_enabled`). |
+| `deepseek_web_search` | ✔ live toggle verified | same toggle family `div.ds-toggle-button:has-text("Search")`; verified true→false and back (`search_enabled` on the next completion). |
+| `deepseek_list_conversations` | ✔ real items | `page.waitForSelector("a[href*='/chat/']", {timeout:15000})` then read hrefs (both `/chat/<id>` and `/a/chat/s/<uuid>` shapes) + titles. |
+
+Model_type note: literal `deepseek-reasoner`/`deepseek-chat` ids still never
+appear in the wire DTOs — model is addressable via the UI toggle, not by id.

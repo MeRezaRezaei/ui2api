@@ -73,6 +73,8 @@ export interface DeepSeekCapabilityResult {
   wireNote?: string;
   /** Anti-bot posture note — AWS WAF + PoW, browser-solved only. */
   antiBot?: string;
+  /** Human note about the verified mechanism / posture. */
+  note?: string;
 }
 
 const ANTI_BOT_NOTE =
@@ -148,6 +150,8 @@ export class DeepSeekCapabilities {
         return { ...base, ...(await this.listConversations(args)) };
       case "deepseek_reasoner":
         return { ...base, ...(await this.reasoner(args)) };
+      case "deepseek_web_search":
+        return { ...base, ...(await this.webSearch(args)) };
       default:
         return { capability, ok: false, data: undefined, error: `unknown deepseek capability: ${capability}` };
     }
@@ -196,7 +200,9 @@ export class DeepSeekCapabilities {
   // fail PoW validation. DOM is the only viable current path.
   private async listConversations(args: Record<string, unknown>): Promise<DeepSeekCapabilityResult> {
     const page = await this.openPage();
-    await waitForDomain(page, 3000);
+    // The SPA renders the sidebar conversation list after hydration — a
+    // readyState wait is NOT enough; wait for the actual anchor nodes.
+    await page.waitForSelector("a[href*='/chat/']", { timeout: 15000 }).catch(() => {});
     const query = String(args.query ?? "").trim();
     const rpcNote =
       "wire RPC (POST /api/v0/chat_session/fetch_page for session listing, " +
@@ -238,35 +244,86 @@ export class DeepSeekCapabilities {
     }
   }
 
-  // --- deepseek_reasoner: honest best-effort CoT toggle ---
-  // Verified in bundles: `thinking_enabled` in the completion body, `x-thinking-enabled`
-  // header on file uploads, per-session `model_type`, localStorage
-  // `thinkingEnabledStorageHandle` backing the in-page toggle. However, no
-  // verified DOM selector for the "Think" toggle button exists in the profile
-  // — the profile carries no reasoningToggle field. Fabricating a selector
-  // would be dishonest and break on the first live capture, so this returns
-  // an honest ok:false with the real mechanism documented. When the profile
-  // gains a verified toggle selector (or a reasoningToggle field is added to
-  // ChatSiteProfile), this will become the real driving path.
-  private async reasoner(args: Record<string, unknown>): Promise<DeepSeekCapabilityResult> {
+  // --- deepseek_reasoner: flip the REAL "DeepThink" toggle (VERIFIED 2026-09-19) ---
+// Composer toggles are div.ds-toggle-button rows labelled "DeepThink" and
+// "Search"; the active one carries the class ds-toggle-button--selected.
+// DeepThink flips `thinking_enabled` on the next completion + the per-session
+// model_type (bundle-verified); "Search" flips `search_enabled`. Live probe:
+// clicking flips the --selected class both ways; localStorage handles
+// (thinkingEnabledStorageHandle / searchEnabledStorageHandle) stayed null in
+// this session — the toggle state lives in the app store and is sent on the
+// wire in the completion body. `args.state` ("on" | "off") optionally targets
+// a specific state; default = click (toggle).
+private async reasoner(args: Record<string, unknown>): Promise<DeepSeekCapabilityResult> {
+  return this.flipToggle("deepseek_reasoner", "DeepThink", args);
+}
+
+// --- deepseek_web_search: flip the REAL "Search" toggle (VERIFIED 2026-09-19) ---
+private async webSearch(args: Record<string, unknown>): Promise<DeepSeekCapabilityResult> {
+  return this.flipToggle("deepseek_web_search", "Search", args);
+}
+
+private async flipToggle(
+  capability: "deepseek_reasoner" | "deepseek_web_search",
+  toggleText: "DeepThink" | "Search",
+  args: Record<string, unknown>
+): Promise<DeepSeekCapabilityResult> {
+  const page = await this.openPage();
+  try {
+    // Let the composer + toggles hydrate (the "next"-style SPA boots its event
+    // wiring lazily; a click before boot is dropped — same cold-boot behaviour
+    // as Tencent/Kimi). Poll for the toggle row up to 15s.
+    const toggle = page.locator(".ds-toggle-button").filter({ hasText: toggleText }).first();
+    const t0 = Date.now();
+    let visible = await toggle.isVisible().catch(() => false);
+    while (!visible && Date.now() - t0 < 15000) {
+      await page.waitForTimeout(700);
+      visible = await toggle.isVisible().catch(() => false);
+    }
+    if (!visible) {
+      return this.fail(capability, `"${toggleText}" toggle not visible after settle (composer/toggles may not have rendered)`);
+    }
+    const state = (): Promise<{ selected: boolean; cls: string | null }> =>
+      page.evaluate((label: string) => {
+        const el = [...document.querySelectorAll(".ds-toggle-button")].find(
+          (b) => ((b as HTMLElement).innerText || "").trim() === label
+        ) as HTMLElement | null;
+        if (!el) return { selected: false, cls: null };
+        return { selected: el.className.includes("ds-toggle-button--selected"), cls: el.className };
+      }, toggleText);
+
+    const before = await state();
+    const wanted = String(args.state ?? "").toLowerCase();
+    if (wanted === "on" && before.selected) {
+      // already on — nothing to flip
+    } else if (wanted === "off" && !before.selected) {
+      // already off — nothing to flip
+    } else {
+      await toggle.click().catch((e) => {
+        throw new Error(`toggle click failed: ${(e as Error).message.slice(0, 120)}`);
+      });
+      await page.waitForTimeout(900);
+    }
+    const after = await state();
+    const ok = wanted === "" || (wanted === "on" && after.selected) || (wanted === "off" && !after.selected);
     return {
-      capability: "deepseek_reasoner",
-      ok: false,
-      method: "unavailable",
-      data: undefined,
-      error:
-        "CoT = thinking_enabled; toggle selector unverified — the profile carries no " +
-        "reasoningToggle field and no DOM selector for the 'Think' button has been confirmed " +
-        "against a live capture. Mechanism (verified in bundles): localStorage " +
-        "thinkingEnabledStorageHandle backs the in-page toggle; completion body field " +
-        "thinking_enabled: boolean + per-session model_type drive reasoning on the wire. " +
-        "Add a verified selector to the profile to activate this capability.",
-      wireNote:
-        "reasoning streams inside the same SSE delta/title patch tree as normal answers " +
-        "(path-addressed state patch); the exact reasoning-path key is in an async chunk " +
-        "and has not been captured live yet",
+      capability,
+      ok,
+      method: "dom.toggle",
+      data: { toggle: toggleText, before: before.selected, after: after.selected, stateClass: after.cls?.slice(0, 90) ?? null },
+      note:
+        ok
+          ? `${toggleText} → ${after.selected ? "ON" : "OFF"}. The class ds-toggle-button--selected tracks the switch; the value reaches the wire as ${
+              toggleText === "DeepThink" ? "thinking_enabled" : "search_enabled"
+            } in the next completion body (bundle-verified). Toggle state is held in the app store — the localStorage handles stayed null in the verified session.`
+          : `requested state ${wanted} but ended at ${after.selected ? "ON" : "OFF"} — re-verify the toggle DOM.`,
     };
+  } catch (e) {
+    return this.fail(capability, e);
+  } finally {
+    await this.teardownPage(page);
   }
+}
 
   private fail(capability: string, e: unknown): DeepSeekCapabilityResult {
     return { capability, ok: false, data: undefined, error: e instanceof Error ? e.message : String(e) };

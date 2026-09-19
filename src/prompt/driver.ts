@@ -274,18 +274,26 @@ export class ChatDriver {
       // The SSR'd AI answer + citations arrive inside the page's init data; let
       // the site's own scripts finish hydrating, then read the streamed render.
       await this.page!.waitForTimeout(150 + Math.floor(Math.random() * 250));
-    } else if (this.profile.send.kind === "click") {
-      const sendSel = this.profile.send.selector;
-      if (!sendSel) throw new Error(`${this.profile.id}: send.kind "click" requires a selector`);
-      await this.dom.type(composer!, text);
-      // Random 50–200ms gate between the last input event and the click — a real
-      // human's eye-to-mouse travel time (audit item #7).
-      await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
-      await this.dom.click(sendSel);
     } else {
-      await this.dom.type(composer!, text);
-      await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
-      await this.dom.press(composer, ["Enter"]);
+      // Cold-boot protection: some SPAs show the composer before the app can
+      // actually dispatch a send (Tencent Hy Studio drops the Enter silently).
+      // Dwell the site's own example prompts the way a human would.
+      if (this.profile.preComposeDelayMs) {
+        await this.page!.waitForTimeout(Math.round(this.profile.preComposeDelayMs + Math.random() * 600));
+      }
+      if (this.profile.send.kind === "click") {
+        const sendSel = this.profile.send.selector;
+        if (!sendSel) throw new Error(`${this.profile.id}: send.kind "click" requires a selector`);
+        await this.dom.type(composer!, text);
+        // Random 50–200ms gate between the last input event and the click — a real
+        // human's eye-to-mouse travel time (audit item #7).
+        await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
+        await this.dom.click(sendSel);
+      } else {
+        await this.dom.type(composer!, text);
+        await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
+        await this.dom.press(composer, ["Enter"]);
+      }
     }
     // Read the streamed answer off the page: stop when text stops growing.
     const answerSel = this.profile.answer.join(", ") || "body";

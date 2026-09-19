@@ -71,3 +71,23 @@ Transport: **Connect RPC** (connect-es v2, protobuf over HTTP POST, no WebSocket
 12. `gemini_suggest_prompts` — Fetch suggestion prompts (`SuggestService.ListPrompts`) and model catalog (`ConfigService.GetAvailableModels`) for pickers per user.
 
 (Not exposing: identity/payments/remote-control/goal-tasks — sensitive or tied to interactive UI; they exist as RPCs above if a future capability needs them.)
+## 8. LIVE VERIFICATION LOG — 2026-09-19 (DOM + functionality, end-to-end)
+
+All checks ran against the injected session snapshot (2026-09-18T14:42:47Z lock:
+5 cookies / 36 localStorage keys incl. `access_token`/`refresh_token`/`msh_user_id`)
+via the `KimiCapabilities` runner + `ui2api proof --site kimi`. Headless-safe.
+
+| Capability | Result | Verified mechanism (DOM) |
+|---|---|---|
+| `kimi_chat` | ✔ proof PASS (14098, "Reply with ONLY the number") | composer editable div (contenteditable, role=textbox) → Enter → answer `.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown` (excludes thinking block; answer selector MUST NOT be plain `.markdown` — Kimi's thinking block also matches). |
+| `kimi_list_conversations` | ✔ 15 real conversations | sidebar `a.next-sidebar-history-item__link` (+ fallback `a[href^='/chat/']`), href `/chat/<uuid>?chat_enter_method=history`; wait via `page.waitForSelector(..., {timeout:15000})` (a fixed 3s waitForDomain raced pre-boot). |
+| `kimi_model_list` | ✔ K3, K3 Swarm, K2.8, Instant (selected) | click `[data-testid="model-select-trigger"]` → read `button.model-item` (name = first innerText line); selected via `.checked` class; Escape closes. |
+| `kimi_web_search` | ✔ ok:true | `[data-testid="toolkit-trigger-btn"]` opens toolkit → click `button.toolkit-item` "Web Search". Pre-boot clicks are dropped — helper `openToolkitItem` polls/re-clicks the trigger up to 15s until the row renders. |
+| `kimi_file_upload` | ✔ chip "kimi-attach-test / TXT / 52 Bytes" | `label.toolkit-item` "Add files & images" wraps hidden `input[type="file"].hidden-input`; set via `locator('input[type="file"]').setInputFiles(path)` (Playwright filechooser event NEVER fired — do not rely on it). Method label: `dom.input.setFiles`. |
+
+Long-context (`kimi_long_context`) remains honest ok:false — the composer's
+context-length picker DOM is still unverified.
+
+Cold-boot: on fresh contexts the toolkit/composer render before the app can
+dispatch; every interaction path polls for its target node (up to 15s) instead
+of trusting readyState.
