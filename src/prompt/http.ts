@@ -7,6 +7,12 @@
 //   POST /capability/gemini  {"capability":"gemini_list_conversations", ...}
 //                 -> one Gemini capability result (chat/list_conversations/
 //                    model_list/search_toggle) over the same browser+session.
+//   OpenAI-compatible surface (for OpenAI SDKs, OmniRoute, etc.):
+//   GET  /v1/models             -> {object:"list", data:[{id:"deepseek",...},...]}
+//   POST /v1/chat/completions   {"model":"deepseek"|"ui2api/deepseek",
+//                                "messages":[...], "stream"?:bool,
+//                                "new_chat"?:bool, "account"?:string}
+//                 -> OpenAI chat.completion JSON (or SSE chunks if stream:true)
 //   GET  /sites   -> the available chat-site profiles
 //   GET  /accounts?site=gemini  -> identity-keyed accounts stored for the site
 //   GET  /status  -> pool health (warm/idle/busy pages)
@@ -18,6 +24,8 @@
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
+import { handleOpenAIRoutes } from "./openai.js";
+import { buildRegistryPackages } from "./registry.js";
 import { defaultSiteId, listProfiles, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
@@ -119,8 +127,22 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       if (token && req.headers.authorization !== `Bearer ${token}`) {
         return send(res, 401, { error: "unauthorized" });
       }
+      // OpenAI-compatible surface: /v1/models + /v1/chat/completions
+      if (req.url?.startsWith("/v1/")) {
+        return handleOpenAIRoutes(req, res, { pool, profilesById });
+      }
       if (req.method === "GET" && req.url === "/sites") {
         return send(res, 200, { sites: Object.values(profilesById).map((p) => ({ id: p.id, name: p.name, url: p.url, loginRequired: p.loginRequired })) });
+      }
+      // REGISTRY — the installed ui2api packages (capabilities/<id>/), the
+      // contract consumed by OmniRoute to materialize provider nodes (models)
+      // and MCP tools (capabilities). Everything in the registry repo, nothing
+      // else: GET /registry -> { packages: [...] }
+      if (req.method === "GET" && req.url === "/registry") {
+        return send(res, 200, {
+          packages: buildRegistryPackages(),
+          generatedAt: new Date().toISOString(),
+        });
       }
       // Identity-keyed accounts stored for a site (the multi-account vault):
       //   GET /accounts?site=gemini  -> { site, accounts: [{slug, identity, capturedAt, source}] }

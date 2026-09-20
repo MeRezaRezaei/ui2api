@@ -60,7 +60,7 @@ function resourceMax(): number {
 export class ChatPool {
   private browser?: Browser;
   private workers: PoolWorker[] = [];
-  private waiters: Array<(w: PoolWorker) => void> = [];
+  private waiters: Array<{ siteId: string; resolve: (w: PoolWorker) => void }> = [];
   private readonly min: number;
   private readonly max: number;
   private readonly defaultProfile: string;
@@ -149,14 +149,17 @@ export class ChatPool {
       });
     }
     return new Promise((resolve) => {
-      this.waiters.push((w) => {
-        if (w.profileId !== siteId) {
-          // wrong site freed; re-enqueue
-          this.waiters.push(resolve as (x: PoolWorker) => void);
-          return;
-        }
-        w.busy = true;
-        resolve(w);
+      this.waiters.push({
+        siteId,
+        resolve: (w) => {
+          if (w.profileId !== siteId) {
+            // wrong site freed; re-enqueue
+            this.waiters.push({ siteId, resolve });
+            return;
+          }
+          w.busy = true;
+          resolve(w);
+        },
       });
     });
   }
@@ -164,16 +167,64 @@ export class ChatPool {
   private async spawn(siteId: string, account?: string): Promise<PoolWorker> {
     const profile = this.opts.profiles.find((p) => p.id === siteId);
     if (!profile) throw new Error(`unknown site: ${siteId}`);
-    const browser = await this.ensureBrowser();
-    const driver = new ChatDriver(profile, {
-      browser,
-      dataDir: this.dataDir,
-      defaultContext: this.attach,
-      account,
-    });
-    await driver.start();
-    const dedicated = account && account !== "default" ? { account } : undefined;
-    return { profileId: siteId, driver, busy: false, dedicated };
+    const realProfileOnly = Boolean((profile as { realProfileOnly?: boolean }).realProfileOnly);
+    // Real-profile-only sites (e.g. tencent-aistudio under Tencent EdgeOne) get
+    // one browser rotation: the site's anti-bot flags long-lived Chrome
+    // instances ("Access Restricted"/567) even though a fresh instance on the
+    // same IP+profile sails through (its challenge cookies are session-scoped).
+    // Retry once with a brand-new browser before failing the request.
+    const attempts = realProfileOnly ? 2 : 1;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const browser = await this.ensureBrowser();
+      const driver = new ChatDriver(profile, {
+        browser,
+        dataDir: this.dataDir,
+        // Real-profile-only sites must run on the browser's DEFAULT context —
+        // the user's actual profile session — because their anti-bot serves
+        // "Access Restricted" to ephemeral snapshot contexts (see
+        // ChatSiteProfile.realProfileOnly).
+        defaultContext: this.attach || realProfileOnly,
+        account,
+      });
+      try {
+        await driver.start();
+        const dedicated = account && account !== "default" ? { account } : undefined;
+        return { profileId: siteId, driver, busy: false, dedicated };
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        const blocked = /Access Restricted|Restricted Access|security policy|HTTP 567|web security policy/i.test(msg);
+        if (attempt < attempts && blocked) {
+          await this.restartBrowser();
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  // Close the shared browser and forget it; the next ensureBrowser() spawns a
+  // fresh instance. Used to rotate past anti-bot flags that attach to a
+  // specific Chrome instance (EdgeOne on aistudio.tencent.ai) rather than the IP.
+  private async restartBrowser(): Promise<void> {
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch {
+        // already gone
+      }
+      this.browser = undefined;
+      this.workers = [];
+      // Waiting requests re-acquire on a fresh browser (their waiters are
+      // re-triggered through acquire()).
+      const waiters = this.waiters;
+      this.waiters = [];
+      for (const { siteId, resolve } of waiters) {
+        void this.acquire(siteId).then(resolve, () => undefined);
+      }
+    }
   }
 
   // Return a page to the pool after a prompt. Unusable pages (browser died) are
@@ -199,19 +250,21 @@ export class ChatPool {
   private drainWorker(worker: PoolWorker): void {
     const next = this.waiters.shift();
     if (next) {
-      if (next && typeof next === "function") {
+      if (next.siteId === worker.profileId) {
         worker.busy = true;
-        next(worker);
+        next.resolve(worker);
         return;
       }
+      // wrong site freed; keep it and try the next waiter
+      this.waiters.unshift(next);
     }
     // else stay idle in the pool
   }
 
   private drain(siteId: string): void {
     const waiting = this.waiters.shift();
-    if (waiting && typeof waiting === "function") {
-      void this.acquire(siteId).then(waiting);
+    if (waiting) {
+      void this.acquire(siteId).then(waiting.resolve, () => undefined);
     }
   }
 

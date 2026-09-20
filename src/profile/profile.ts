@@ -41,6 +41,13 @@ export interface ChatSiteProfile {
   // `preComposeDelayMs` (+ a random jitter up to 600ms — human-dwell-plausible)
   // after the composer becomes visible and before composing.
   preComposeDelayMs?: number;
+  // Real-profile-only sites: their anti-bot (e.g. Tencent Cloud EdgeOne on
+  // aistudio.tencent.ai) serves "Access Restricted" to ephemeral snapshot
+  // contexts even with valid auth cookies. When true the driver uses the
+  // browser's DEFAULT context (real logged-in profile — UI2API_USER_DATA_DIR
+  // / attach) instead of a fresh injected context. Snapshot injection is
+  // skipped so the site sees an identical, fingerprint-consistent session.
+  realProfileOnly?: boolean;
   // Query-driven "capability" sites (e.g. Google AI Mode): instead of typing
   // into a composer, each prompt is ONE page load of `urlTemplate` with {q}
   // replaced by the URL-encoded prompt. `url` stays the warm-pool landing
@@ -220,7 +227,15 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
       ".chat-input-editor",
     ],
     send: { kind: "keyEnter" },
-    answer: ['.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown', '.chat-content-item-assistant .markdown', '.segment-text'],
+    answer: [
+      '.toolcall-rollup__part:has(+ .toolcall-rollup__tail) > .markdown-container > .markdown',
+      // Fallback for non-rollup rendering — MUST exclude the thinking block:
+      // its container carries `.toolcall-content-text` (guard discovered 2026-09-19:
+      // the previous bare selector matched thinking transcripts and, because the
+      // driver takes the LONGEST match, leaked them as the "answer").
+      '.chat-content-item-assistant .markdown-container:not(.toolcall-content-text) > .markdown',
+      '.segment-text',
+    ],
     newChat: '[aria-label*="New chat"], [aria-label*="new chat"], [aria-label*="新对话"], [data-testid="sidebar-new-chat"]',
     dismiss: ['button[aria-label*="Sign in"], button[aria-label*="登录"]', 'button[aria-label*="Close"], button[aria-label*="关闭"]'],
     captureMs: 60000,
@@ -276,7 +291,8 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     captureMs: 60000,
     stableMs: 2500,
     preComposeDelayMs: 8000,
-    note: "LIVE-VERIFIED chat round-trip (2026-09-19, headed real Chrome + injected snapshot): composer textarea.t-textarea__inner (placeholder 'Ask me anything'), AI answer in .agent-chat__bubble--ai .hyc-content-md (markdown .hyc-common-markdown), human bubble .agent-chat__bubble--human .hyc-content-text, completion marker 'Completed'. EdgeOne blocks headless (HTTP 567) — headed/real-Chrome only.",
+    realProfileOnly: true,
+    note: "LIVE-VERIFIED chat round-trip (2026-09-19, headed real Chrome + injected snapshot): composer textarea.t-textarea__inner (placeholder 'Ask me anything'), AI answer in .agent-chat__bubble--ai .hyc-content-md (markdown .hyc-common-markdown), human bubble .agent-chat__bubble--human .hyc-content-text, completion marker 'Completed'. EdgeOne blocks headless (HTTP 567) AND ephemeral snapshot contexts ('Access Restricted' — its challenge cookies are session-scoped, never captured) — real-profile/attach ONLY (realProfileOnly).",
   },
   hunyuan: {
     id: "hunyuan",
