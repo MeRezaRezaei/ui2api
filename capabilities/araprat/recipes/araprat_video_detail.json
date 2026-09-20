@@ -1,0 +1,16 @@
+{
+  "capability": "araprat_video_detail",
+  "site": "araprat",
+  "flow": "ui-path — load /v/<id> and read the video page metadata the site's JS renders",
+  "workType": "ui",
+  "reloadAfterSuccess": true,
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.aparat.com/v/{id}", "urlTemplate": "https://www.aparat.com/v/{id}", "input": "args.id", "note": "/v/<id> route is the widely-known Aparat video URL convention — NOT verified in this scaffold session" },
+    { "step": 2, "action": "extract", "selector": "h1, [class*='title']", "note": "UNVERIFIED candidates — title node; also read meta[name='og:title']/meta[name='og:description'] as stable fallbacks" },
+    { "step": 3, "action": "read", "selector": "meta[name='og:title'], meta[name='og:description'], h1", "until": "stable 3000ms", "timeoutMs": 30000, "note": "title/description/channel/views off the rendered page; og: meta tags are the most rot-resistant candidate; all UNVERIFIED" }
+  ],
+  "output": { "id": "string", "title": "string", "description?": "string", "url": "string", "channel?": "string" },
+  "rpc": "none captured — Aparat is known to expose fa.v1 APIs (e.g. /api/fa/v1/...) but the exact video-detail endpoint 400s without correct params/headers and was NOT explored further in this scaffold; a wire capture should map it properly. No fabricated traffic: reads happen off the rendered page.",
+  "stealth": "plain page loads in the user's own browser session — indistinguishable from a human opening a video page; no synthetic requests",
+  "sessionLock": "session.lock.json"
+}

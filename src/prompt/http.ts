@@ -38,6 +38,8 @@ import { ClaudeCapabilities } from "../capabilities/claude.js";
 import { ChatGPTCapabilities } from "../capabilities/chatgpt.js";
 import { CopilotCapabilities } from "../capabilities/copilot.js";
 import { HuggingChatCapabilities } from "../capabilities/huggingchat.js";
+import { YouTubeCapabilities } from "../capabilities/youtube.js";
+import { ArapratCapabilities } from "../capabilities/araprat.js";
 
 export interface PromptdOptions {
   port: number;
@@ -427,6 +429,55 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
         const shared = await pool.sharedBrowser();
         const caps = new HuggingChatCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // YouTube capability surface: video search + transcript read-back
+      // (NOT a chat site — no ChatDriver flow). SCAFFOLD, DOM-UNVERIFIED.
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/youtube") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("youtube", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/youtube/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new YouTubeCapabilities(profile, { browser: shared, dataDir });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Aparat capability surface: video search / trending / video-detail.
+      // SCAFFOLD: every capability returns honest ok:false scaffold-dom-unverified
+      // until selectors survive a live capture (not a chat site — no ChatDriver).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/araprat") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("araprat", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/araprat/profile.json");
+        }
+        const shared = await pool.sharedBrowser();
+        const caps = new ArapratCapabilities(profile, { browser: shared, dataDir });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

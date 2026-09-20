@@ -1,0 +1,19 @@
+{
+  "capability": "youtube_transcript",
+  "site": "youtube",
+  "flow": "ui-path — open watch page, expand description, click the site's own 'Show transcript' button, read the transcript panel segments",
+  "workType": "ui-path",
+  "reloadAfterSuccess": true,
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.youtube.com/watch?v={videoId}", "note": "one trusted navigation per video; the site's own JS boots the player + description panel" },
+    { "step": 2, "action": "click", "selector": "tp-yt-paper-button#expand, #description-inline-expander #expand", "note": "UNVERIFIED candidate — '...more' description expander so the engagement panel rows (incl. 'Show transcript') render. Some revisions expose the button without expanding; try both selectors. Swallow failure and probe for the transcript button anyway." },
+    { "step": 3, "action": "click", "selector": "button[aria-label*=\"Show transcript\"], ytd-video-description-transcript-section-renderer button", "note": "UNVERIFIED candidate — the site's own toggle; clicking it makes YouTube render the transcript panel (its own JS fetches the transcript). If absent, transcript is not offered for this video → honest ok:false, reason no-transcript-button." },
+    { "step": 4, "action": "wait", "selector": "ytd-transcript-segment-renderer", "timeoutMs": 15000, "stableMs": 2000, "note": "UNVERIFIED candidate — panel renders segments progressively; wait for stable growth." },
+    { "step": 5, "action": "read", "selector": "ytd-transcript-segment-renderer .segment-text", "until": "stable 2000ms", "timeoutMs": 20000, "note": "UNVERIFIED candidate — read {startMs from .segment-timestamp, text from .segment-text} per segment in DOM order." }
+  ],
+  "output": { "videoId": "string", "segments": "array<{startMs, text}>", "transcript": "string (joined)" },
+  "rpc": "none — deliberately no direct timedtext / innertube calls; the panel click makes the site fetch its own transcript.",
+  "stealth": "real browser, real clicks on the site's own controls, read-only DOM",
+  "sessionLock": "session.lock.json",
+  "notes": "SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed. Every selector is a candidate from prior public UI knowledge; the transcript button can live in the expanded description OR the engagement panel depending on revision. Re-tune on first live capture."
+}

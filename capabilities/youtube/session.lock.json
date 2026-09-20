@@ -1,0 +1,16 @@
+{
+  "site": "www.youtube.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.youtube.com",
+    "cookieNames": ["VISITOR_INFO1_LIVE", "CONSENT", "YSC"],
+    "apiHost": "https://www.youtube.com",
+    "authEndpoint": null,
+    "captureCommand": "ui2api profile capture \"https://www.youtube.com\"",
+    "targetDir": "data/www.youtube.com/.session/state.json"
+  },
+  "note": "Auth is OPTIONAL: anonymous search (and usually transcript) works without a session. A captured session is useful only to pre-answer the EU consent wall (CONSENT cookie) and reflect the user's region/account. No snapshot captured yet — package is scaffold, DOM-UNVERIFIED.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

@@ -1,0 +1,50 @@
+{
+  "id": "youtube",
+  "name": "YouTube (www.youtube.com)",
+  "site": "www.youtube.com",
+  "url": "https://www.youtube.com",
+  "description": "YouTube as a capability surface (NOT an AI chat site): video search via the site's own results page and transcript read-back from the watch page's own transcript panel. No chat composer exists; no chat capability is registered.",
+  "version": "0.1.0",
+  "author": "ui2api capabilities",
+  "date": "2026-09-20",
+  "siteVersion": "Polymer/Lit SPA (web components ytd-* shadow DOM); SCAFFOLD — no static bundle analysis or live capture performed yet",
+  "transport": {
+    "type": "web-app (spa)",
+    "protocol": "UI-driven only: real page loads (youtube.com/results?search_query=…) and clicks on the site's own buttons; answers read back off the rendered DOM. YouTube's internal innertube API (expected /youtubei/v1/*, unverified) is intentionally NOT driven directly — no fabricated traffic.",
+    "streaming": "n/a (no chat stream)"
+  },
+  "capabilities": [
+    {
+      "id": "youtube_search",
+      "name": "Video search",
+      "description": "Load YouTube's own results page for a query (https://www.youtube.com/results?search_query=<q>) and read the rendered result list (expected ytd-video-renderer rows, title link a#video-title — unverified) back as {title, videoId, url, channel, metadata}. SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed.",
+      "method": "ui-path (real navigation to the site's results URL + DOM read-back; the site's own JS renders the results)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "recipe": "recipes/youtube_search.json"
+    },
+    {
+      "id": "youtube_transcript",
+      "name": "Transcript read-back",
+      "description": "Open a watch page (youtube.com/watch?v=<id>), expand the description ('...more'), click the site's own 'Show transcript' button, and read the transcript panel segments (expected ytd-transcript-segment-renderer — unverified). SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed.",
+      "method": "ui-path (navigate + click the site's own transcript toggle + DOM read-back)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "recipe": "recipes/youtube_transcript.json"
+    }
+  ],
+  "auth": {
+    "required": false,
+    "kind": "optional-cookie",
+    "host": "www.youtube.com",
+    "note": "Search and (in most regions) transcript are available anonymously. Optional: capture a real session (ui2api profile capture \"https://www.youtube.com\") so consent walls are pre-answered and region/age restrictions reflect the user's account. No token extraction performed; no wire auth observed."
+  },
+  "permissions": [
+    "drives www.youtube.com in the user's own browser session (real page loads + real clicks only)",
+    "reads only what the page itself renders (result titles, transcript panel text)",
+    "respects YouTube ToS posture: no scraping of internal APIs, no download of media streams"
+  ],
+  "builtinProfile": "none — YouTube is not a chat site; no ChatDriver profile entry (see REGISTER.md)",
+  "analyzed": "2026-09-20",
+  "analysisMethod": "scaffold from prior public UI knowledge (web-components ytd-* tags); NO static bundle analysis and NO browser run — every selector is an unverified candidate pending first live capture"
+}

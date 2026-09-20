@@ -1,0 +1,19 @@
+{
+  "id": "youtube",
+  "name": "YouTube (www.youtube.com)",
+  "url": "https://www.youtube.com",
+  "loginRequired": false,
+  "loginHint": "optional: capture a www.youtube.com session once (ui2api profile capture \"https://www.youtube.com\") so consent walls are pre-answered; anonymous works for search",
+  "composer": [],
+  "send": { "kind": "keyEnter" },
+  "answer": [],
+  "dismiss": [
+    "button[aria-label*=\"Accept the use\"]",
+    "button[aria-label*=\"Accept all\"]",
+    "tp-yt-paper-dialog button[aria-label*=\"Close\"]"
+  ],
+  "captureMs": 30000,
+  "stableMs": 2000,
+  "urlTemplate": "https://www.youtube.com/results?search_query={q}",
+  "note": "SCAFFOLD, DOM-UNVERIFIED — YouTube is a capability surface (search + transcript), NOT a chat site: composer/answer are deliberately empty; ChatDriver is never used. urlTemplate targets the site's own results page. dismiss candidates are EU consent-wall guesses (unverified). All selectors are candidates pending first live capture."
+}

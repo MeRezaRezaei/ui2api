@@ -1,0 +1,15 @@
+{
+  "siteId": "araprat",
+  "site": "www.aparat.com",
+  "name": "Aparat (www.aparat.com) — Persian video-sharing platform",
+  "url": "https://www.aparat.com",
+  "siteVersion": "JS-required SPA shell; no bundle analysis performed",
+  "version": "0.1.0",
+  "status": "scaffold",
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own Aparat (aparat.com) browsing session to search videos and read video/channel metadata with my account or anonymously.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "unreviewed",
+  "publishedAt": "2026-09-20"
+}

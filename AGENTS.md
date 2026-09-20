@@ -147,6 +147,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
 - **Walled / scaffold / dead-end** inventory lives in `capabilities/README.md`
   (poe, grok, perplexity, t3chat, blackbox, adapta, zenmux, …). Be honest about
   status: never claim a capability is verified without a live round-trip.
+- **Scaffold, DOM-UNVERIFIED (registered 2026-09-20)**: `youtube`
+  (www.youtube.com) — capability surface, NOT a chat site (no chat capability
+  registered; none exists). `youtube_search` + `youtube_transcript` wired
+  (`src/capabilities/youtube.ts`, `/capability/youtube`) with honest ok:false
+  `scaffold-dom-unverified` on live-DOM misses; selectors (`ytd-video-renderer`,
+  transcript panel) are unverified candidates pending first live capture. Auth
+  optional-cookie. **`araprat`** = Aparat (www.aparat.com, Persian video
+  platform; "araprat" resolved via web search — literal araprat.* domains don't
+  exist). NOT a chat site; surface = search/trending/video-detail reads. All
+  selectors UNVERIFIED; runner ok:false `scaffold-dom-unverified` until a live
+  capture (start with `npx tsx src/cli.ts analyse https://www.aparat.com`).
 
 ## Conventions & red lines
 

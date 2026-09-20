@@ -1,0 +1,16 @@
+{
+  "capability": "araprat_search",
+  "site": "araprat",
+  "flow": "ui-path — navigate to /search/<q> and read the JS-rendered result grid",
+  "workType": "ui",
+  "reloadAfterSuccess": true,
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.aparat.com/search/{q}", "urlTemplate": "https://www.aparat.com/search/{q}", "input": "args.q (url-encoded)", "note": "search route evidenced (SPA shell served, not 404); the site's own JS renders results — wait for hydration" },
+    { "step": 2, "action": "extract", "selector": "a[href*='/v/']", "note": "UNVERIFIED candidate — result-grid item anchors; class names unknown until first live capture" },
+    { "step": 3, "action": "read", "selector": "a[href*='/v/']", "until": "stable 3000ms", "timeoutMs": 30000, "note": "titles + hrefs off the rendered grid; selectors UNVERIFIED" }
+  ],
+  "output": { "results": "array<{ id, title, url, channel? }>", "count": "number" },
+  "rpc": "none captured — the site's internal search API (if any) is undocumented in this scaffold; a wire capture (ui2api analyse https://www.aparat.com) may reveal a JSON endpoint to mirror later. No fabricated traffic: reads happen off the rendered page.",
+  "stealth": "plain page loads in the user's own browser session — indistinguishable from a human searching; no synthetic requests",
+  "sessionLock": "session.lock.json"
+}

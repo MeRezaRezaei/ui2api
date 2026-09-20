@@ -1,0 +1,14 @@
+{
+  "site": "www.aparat.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "www.aparat.com",
+    "cookies": [],
+    "captureCommand": "npx tsx src/cli.ts profile capture https://www.aparat.com --login",
+    "targetDir": "data/www.aparat.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — no live browser testing, no session capture yet. Anonymous browsing is expected to suffice for search/watch (evidence: public site, no login wall on fetch), but that too is unverified. Anti-bot posture unknown — first live capture must record whether headless Chromium is served real content or blocked/degraded. Capture once, then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

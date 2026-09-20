@@ -315,6 +315,11 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     stableMs: 2000,
     note: "UNVERIFIED selectors copied verbatim from capabilities/hunyuan/profile.json. HEADED-ONLY + anti-bot: the SPA sets X-webdriver: 1 for automated Chrome (Turing.js + QIMEI fingerprinting); session = hy_user/hy_token cookies outside bundle JS. Tune every selector after the first live capture (data/yuanbao.tencent.com/.session).",
   },
+  // NOTE: `youtube` + `araprat` (Aparat) are intentionally NOT builtin chat
+  // profiles — they are capability-only surfaces (video platforms, no
+  // composer/answer). Their /capability/<id> routes resolve the packaged
+  // capabilities/<id>/profile.json fallback instead (same pattern as any
+  // site without a builtin entry).
 };
 
 export const PROFILE_IDS = Object.keys(BUILTIN_PROFILES);

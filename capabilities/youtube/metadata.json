@@ -1,0 +1,15 @@
+{
+  "siteId": "youtube",
+  "site": "www.youtube.com",
+  "name": "YouTube (www.youtube.com)",
+  "url": "https://www.youtube.com",
+  "siteVersion": "Polymer/Lit SPA (web components ytd-*); scaffold, unverified",
+  "version": "0.1.0",
+  "status": "active",
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own YouTube browsing session to run video searches and read transcript panels that YouTube itself renders, using my own browser and account.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "unreviewed",
+  "publishedAt": "2026-09-20"
+}

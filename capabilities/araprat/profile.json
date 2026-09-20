@@ -1,0 +1,14 @@
+{
+  "id": "araprat",
+  "name": "Aparat (www.aparat.com) — Persian video-sharing platform",
+  "url": "https://www.aparat.com",
+  "loginRequired": false,
+  "loginHint": "anonymous browsing works for search/watch; capture a logged-in session only for account-scoped actions: npx tsx src/cli.ts profile capture https://www.aparat.com --login",
+  "composer": [],
+  "send": { "kind": "keyEnter" },
+  "answer": [],
+  "captureMs": 60000,
+  "stableMs": 3000,
+  "note": "SCAFFOLD — NOT AN AI CHAT SITE (video platform; 'araprat' resolved to Aparat via web search — the literal araprat.* domains do not exist). composer/answer are intentionally EMPTY: there is no chat composer; ChatDriver is not applicable. Selectors used by the capability runners (a[href*='/v/'] etc.) are UNVERIFIED candidate guesses documented in recipes/*.json — tune against a real browser on first live capture. The site serves a JS-required shell without JS, so every read must wait for hydration (stableMs 3000).",
+  "urlTemplate": "https://www.aparat.com/search/{q}"
+}

@@ -1,0 +1,18 @@
+{
+  "capability": "youtube_search",
+  "site": "youtube",
+  "flow": "ui-path — real navigation to the site's own results URL + rendered DOM read-back (no synthetic requests)",
+  "workType": "ui-path",
+  "reloadAfterSuccess": true,
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://www.youtube.com/results?search_query={q}", "note": "{q} is URL-encoded. One trusted navigation per query (same as a human typing in the search box); the site's own JS fetches and renders the results. Optional captured session pre-answers the consent wall." },
+    { "step": 2, "action": "wait", "selector": "ytd-video-renderer", "timeoutMs": 20000, "stableMs": 2000, "note": "UNVERIFIED candidate — results render inside web-components; may need pierce/shadow handling (ytd-video-renderer a#video-title)." },
+    { "step": 3, "action": "extract", "kind": "results", "selectors": ["ytd-video-renderer a#video-title", "a#video-title-link"], "max": 20, "note": "UNVERIFIED candidates — read title + href per row (href carries ?v=<videoId>); channel + metadata from sibling nodes (ytd-channel-name, #metadata-line). Both selectors expected to pierce light DOM (YouTube exposes slots); confirm on first live capture." },
+    { "step": 4, "action": "read", "selector": "ytd-video-renderer", "until": "stable 2000ms", "timeoutMs": 20000, "note": "infinite feed — read stops at stableMs after the first N rows; never scroll unless args.scroll is added later" }
+  ],
+  "output": { "results": "array<{title, videoId, url, channel?, metadataRaw?}>", "count": "number" },
+  "rpc": "none — deliberately no direct innertube (/youtubei/v1/*) calls; that would be fabricated traffic. The page itself issues every request.",
+  "stealth": "real browser, real navigation, read-only DOM — indistinguishable from a human search",
+  "sessionLock": "session.lock.json",
+  "notes": "SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed. ytd-video-renderer / a#video-title are prior-UI-knowledge candidates; YouTube ships frequent UI revisions — re-tune on first live capture."
+}
