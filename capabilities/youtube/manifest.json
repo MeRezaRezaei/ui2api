@@ -33,6 +33,61 @@
       "reloadAfterSuccess": true,
       "status": "verified-2026-09-20-ui-path-anonymous-gated (segments pending logged-in capture)",
       "recipe": "recipes/youtube_transcript.json"
+    },
+    {
+      "id": "youtube_comment",
+      "name": "Post a comment",
+      "description": "VERBATIM studio surface (comment) — LOGIN-GATED + public + irreversible. Registry contract: workType ui|js + reloadAfterSuccess. Honest: anonymous user hitting the comment composer gets YouTube s sign-in interstitial; ok:false login-required until an authorized captured logged-in session exists. NEVER posts without it.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "youtube_like",
+      "name": "Like a video",
+      "description": "LOGIN-GATED + public. Ok:false login-required until authorized captured session. Never fabricates a like.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "youtube_subscribe",
+      "name": "Subscribe to a channel",
+      "description": "LOGIN-GATED + public. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "youtube_upload",
+      "name": "Upload a video (Studio)",
+      "description": "Upload video to YouTube Studio (studio.youtube.com) — LOGIN-GATED + public + IRREVERSIBLE. Recipe-only; the file-picker + metadata + publish steps are honest ui-path recipes. Ok:false login-required until an authorized logged-in Studio session capture. NEVER posts without it.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required login-owns-video",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "youtube_playlist_add",
+      "name": "Add to a playlist",
+      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
     }
   ],
   "auth": {

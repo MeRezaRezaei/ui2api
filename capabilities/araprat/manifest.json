@@ -49,6 +49,72 @@
       "implementation": "openPage() → goto /v/<id> → waitForSelector('h1') → read h1 + div.description + deduped a[href*='/v/'] related list. Implemented in src/capabilities/araparat.ts.",
       "recipe": "recipes/araprat_video_detail.json",
       "verified": "2026-09-20"
+    },
+    {
+      "id": "araprat_comment",
+      "name": "Comment on a video",
+      "description": "Aparat comment composer — LOGIN-GATED + public + irreversible. Ok:false login-required until authorized captured logged-in session. Never fabricates.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "araprat_like",
+      "name": "Like a video",
+      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "araprat_follow",
+      "name": "Follow a channel",
+      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "araprat_subscribe",
+      "name": "Subscribe to a channel",
+      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "araprat_upload",
+      "name": "Upload a video (Studio)",
+      "description": "Aparat upload (admin.aparat.com / file picker) — LOGIN-GATED + public + IRREVERSIBLE. Recipe-only; ok:false login-required until authorized logged-in capture. Never uploads without it.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required login-owns-video",
+      "status": "login-gated-recipe-only"
+    },
+    {
+      "id": "araprat_playlist",
+      "name": "Add to playlist/favorites",
+      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required",
+      "status": "login-gated-recipe-only"
     }
   ],
   "auth": {

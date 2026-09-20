@@ -1,0 +1,20 @@
+{
+  "id": "araprat_follow",
+  "capability": "araprat_follow",
+  "version": "1.0.0",
+  "workType": "ui",
+  "reloadAfterSuccess": true,
+  "auth": "cookie-login-required",
+  "status": "login-gated-recipe-only",
+  "ok": false,
+  "steps": [
+    {
+      "label": "login-gate check",
+      "workType": "ui",
+      "selector": "button[class*=follow], [aria-label*=follow i]",
+      "ok": false,
+      "reloadAfterSuccess": true,
+      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+    }
+  ]
+}
