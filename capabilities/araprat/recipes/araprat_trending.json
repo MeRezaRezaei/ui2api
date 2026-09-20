@@ -3,13 +3,13 @@
   "site": "araprat",
   "flow": "ui-path — load the homepage and read the trending/recommended grid the site's JS renders",
   "workType": "ui",
-  "reloadAfterSuccess": true,
+  "verified": "2026-09-20",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://www.aparat.com", "note": "homepage evidenced live (Persian title, JS-required SPA shell)" },
-    { "step": 2, "action": "extract", "selector": "a[href*='/v/']", "note": "UNVERIFIED candidate — trending grid item anchors; class names unknown until first live capture" },
-    { "step": 3, "action": "read", "selector": "a[href*='/v/']", "until": "stable 3000ms", "timeoutMs": 30000, "note": "titles + hrefs off the rendered homepage; selectors UNVERIFIED" }
+    { "step": 1, "action": "open", "url": "https://www.aparat.com", "note": "VERIFIED 2026-09-20: www.aparat.com 301-redirects to /home; title 'آپارات - سرویس اشتراک ویدیو'; anonymous (no login)." },
+    { "step": 2, "action": "extract", "selector": "a[href*='/v/']", "note": "VERIFIED — 52 anchors on the rendered homepage. Card wrappers observed: [class*='thumb-wrapper'] and [class*='poster'] (styled-components hashed classes sc-d956e845-0/sc-2b236230-0 — hash-rot prone; the /v/ anchor is the stable selector)." },
+    { "step": 3, "action": "read", "selector": "a[href*='/v/']", "until": "first a[href*='/v/'] appears (waitForSelector)", "timeoutMs": 30000, "note": "VERIFIED — hydration ~7–10s after domcontentloaded; each video double-anchored (thumbnail + title), dedupe by /v/<id>; thumbnail img.alt holds the DURATION ('2:03:10'), title anchor holds the real Persian title." }
   ],
-  "output": { "videos": "array<{ id, title, url, channel? }>", "count": "number" },
+  "output": { "videos": "array<{ id, title, url }>", "count": "number" },
   "rpc": "none captured — homepage content is JS-rendered; a wire capture may reveal the underlying feed API later. No fabricated traffic: reads happen off the rendered page.",
   "stealth": "plain page loads in the user's own browser session — indistinguishable from a human browsing; no synthetic requests",
   "sessionLock": "session.lock.json"

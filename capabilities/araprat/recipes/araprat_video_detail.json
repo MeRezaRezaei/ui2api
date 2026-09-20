@@ -3,14 +3,14 @@
   "site": "araprat",
   "flow": "ui-path — load /v/<id> and read the video page metadata the site's JS renders",
   "workType": "ui",
-  "reloadAfterSuccess": true,
+  "verified": "2026-09-20",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://www.aparat.com/v/{id}", "urlTemplate": "https://www.aparat.com/v/{id}", "input": "args.id", "note": "/v/<id> route is the widely-known Aparat video URL convention — NOT verified in this scaffold session" },
-    { "step": 2, "action": "extract", "selector": "h1, [class*='title']", "note": "UNVERIFIED candidates — title node; also read meta[name='og:title']/meta[name='og:description'] as stable fallbacks" },
-    { "step": 3, "action": "read", "selector": "meta[name='og:title'], meta[name='og:description'], h1", "until": "stable 3000ms", "timeoutMs": 30000, "note": "title/description/channel/views off the rendered page; og: meta tags are the most rot-resistant candidate; all UNVERIFIED" }
+    { "step": 1, "action": "open", "url": "https://www.aparat.com/v/{id}", "urlTemplate": "https://www.aparat.com/v/{id}", "input": "args.id", "note": "VERIFIED 2026-09-20 on /v/mindkye (opened from a live search result): full SPA render, document.title = video title." },
+    { "step": 2, "action": "extract", "selector": "h1, div.description, a[href*='/v/']", "note": "VERIFIED — h1 (class 'heading title', styled-components sc-510d386d-0) carries the video title; div.description carries the Persian description; related videos are a[href*='/v/'] anchors (~22 on /v/mindkye). Channel info lives in a div [class*='info'] block (followers/comments actions) — no a[href*='/profile/'] anchors observed on the current UI." },
+    { "step": 3, "action": "read", "selector": "h1, div.description", "until": "h1 appears (waitForSelector)", "timeoutMs": 20000, "note": "VERIFIED — CRITICAL: the SPA does NOT populate og:/twitter: meta tags on /v/<id> (only og:site_name site-wide); the scaffold's og:* candidates are DEAD. h1 + div.description are the verified reads." }
   ],
-  "output": { "id": "string", "title": "string", "description?": "string", "url": "string", "channel?": "string" },
-  "rpc": "none captured — Aparat is known to expose fa.v1 APIs (e.g. /api/fa/v1/...) but the exact video-detail endpoint 400s without correct params/headers and was NOT explored further in this scaffold; a wire capture should map it properly. No fabricated traffic: reads happen off the rendered page.",
+  "output": { "id": "string", "title": "string (h1)", "description?": "string (div.description)", "url": "string", "related": "array<{ id, title, url }>", "relatedCount": "number" },
+  "rpc": "none captured — Aparat's /api/fa/v1/... video endpoint 400s without correct params/headers and was not explored; a wire capture should map it properly. No fabricated traffic: reads happen off the rendered page.",
   "stealth": "plain page loads in the user's own browser session — indistinguishable from a human opening a video page; no synthetic requests",
   "sessionLock": "session.lock.json"
 }

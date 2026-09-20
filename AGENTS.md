@@ -147,17 +147,22 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
 - **Walled / scaffold / dead-end** inventory lives in `capabilities/README.md`
   (poe, grok, perplexity, t3chat, blackbox, adapta, zenmux, …). Be honest about
   status: never claim a capability is verified without a live round-trip.
-- **Scaffold, DOM-UNVERIFIED (registered 2026-09-20)**: `youtube`
-  (www.youtube.com) — capability surface, NOT a chat site (no chat capability
-  registered; none exists). `youtube_search` + `youtube_transcript` wired
-  (`src/capabilities/youtube.ts`, `/capability/youtube`) with honest ok:false
-  `scaffold-dom-unverified` on live-DOM misses; selectors (`ytd-video-renderer`,
-  transcript panel) are unverified candidates pending first live capture. Auth
-  optional-cookie. **`araprat`** = Aparat (www.aparat.com, Persian video
-  platform; "araprat" resolved via web search — literal araprat.* domains don't
-  exist). NOT a chat site; surface = search/trending/video-detail reads. All
-  selectors UNVERIFIED; runner ok:false `scaffold-dom-unverified` until a live
-  capture (start with `npx tsx src/cli.ts analyse https://www.aparat.com`).
+- **Scaffold→VERIFIED (live round-trips 2026-09-20, attached real Chrome/152)**:
+  `youtube` (www.youtube.com) — capability surface, NOT a chat site.
+  `youtube_search` **VERIFIED** (search→`ytd-video-renderer a#video-title`
+  read-back, live proof 10 rows; manifest verified-2026-09-20);
+  `youtube_transcript` **UI path verified, segments LOGIN-GATED** — panel
+  expands but the site's own `get_transcript` endpoint answers HTTP 400
+  "Precondition check failed" without SAPISID (needs a logged-in capture;
+  honest partial, never claimed verified). Auth optional-cookie.
+  **`araprat`** = Aparat (www.aparat.com, Persian video platform; "araprat"
+  resolved via web search) — NOT a chat site; ALL THREE capabilities
+  **VERIFIED**: `araprat_search` (`input[name="search"]` → `/search/<q>` grid
+  `a[href*='/v/']`, dedupe double-anchored cards; live 'موزیک' → 30 deduped),
+  `araprat_trending` (homepage `/home`, 52 `/v/` anchors), `araprat_video_detail`
+  (`h1` + `div.description` + related `a[href*='/v/']`; og:/twitter: metas are
+  DEAD on this SPA — do not rely on them). Hydration: wait for
+  `a[href*='/v/']`, h1 lands ~3.5s before desc/related.
 
 ## Conventions & red lines
 

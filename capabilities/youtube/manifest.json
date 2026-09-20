@@ -7,7 +7,7 @@
   "version": "0.1.0",
   "author": "ui2api capabilities",
   "date": "2026-09-20",
-  "siteVersion": "Polymer/Lit SPA (web components ytd-* shadow DOM); SCAFFOLD — no static bundle analysis or live capture performed yet",
+  "siteVersion": "Polymer/Lit SPA (web components ytd-* shadow DOM); live-probed 2026-09-20 on real Chrome 152 (results list layout; structured-description modal; transcript panel login-gated)",
   "transport": {
     "type": "web-app (spa)",
     "protocol": "UI-driven only: real page loads (youtube.com/results?search_query=…) and clicks on the site's own buttons; answers read back off the rendered DOM. YouTube's internal innertube API (expected /youtubei/v1/*, unverified) is intentionally NOT driven directly — no fabricated traffic.",
@@ -17,19 +17,21 @@
     {
       "id": "youtube_search",
       "name": "Video search",
-      "description": "Load YouTube's own results page for a query (https://www.youtube.com/results?search_query=<q>) and read the rendered result list (expected ytd-video-renderer rows, title link a#video-title — unverified) back as {title, videoId, url, channel, metadata}. SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed.",
+      "description": "Load YouTube's own results page for a query (https://www.youtube.com/results?search_query=<q>) and read the rendered result list (ytd-video-renderer rows, title link a#video-title — VERIFIED 2026-09-20 live round-trip: 11 results on probe query) back as {title, videoId, url, channel, metadata}.",
       "method": "ui-path (real navigation to the site's results URL + DOM read-back; the site's own JS renders the results)",
       "workType": "ui-path",
       "reloadAfterSuccess": true,
+      "status": "verified-2026-09-20",
       "recipe": "recipes/youtube_search.json"
     },
     {
       "id": "youtube_transcript",
       "name": "Transcript read-back",
-      "description": "Open a watch page (youtube.com/watch?v=<id>), expand the description ('...more'), click the site's own 'Show transcript' button, and read the transcript panel segments (expected ytd-transcript-segment-renderer — unverified). SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed.",
+      "description": "Open a watch page (youtube.com/watch?v=<id>), expand the description (tp-yt-paper-button#expand), click the site's own 'Show transcript' button (button[aria-label=\"Show transcript\"]), and read the transcript panel segments (ytd-transcript-segment-renderer). UI path VERIFIED 2026-09-20 to the network gate: the site's own get_transcript call answers HTTP 400 'Precondition check failed' for ANONYMOUS sessions — segments require a logged-in session.lock.json capture; full read-back NOT yet verified.",
       "method": "ui-path (navigate + click the site's own transcript toggle + DOM read-back)",
       "workType": "ui-path",
       "reloadAfterSuccess": true,
+      "status": "verified-2026-09-20-ui-path-anonymous-gated (segments pending logged-in capture)",
       "recipe": "recipes/youtube_transcript.json"
     }
   ],
@@ -46,5 +48,5 @@
   ],
   "builtinProfile": "none — YouTube is not a chat site; no ChatDriver profile entry (see REGISTER.md)",
   "analyzed": "2026-09-20",
-  "analysisMethod": "scaffold from prior public UI knowledge (web-components ytd-* tags); NO static bundle analysis and NO browser run — every selector is an unverified candidate pending first live capture"
+  "analysisMethod": "live DOM probe on attached real Chrome 152 (CDP attach, launchBrowser UI2API_ATTACH_PORT=9222): youtube_search fully verified (list results, 11 rows); youtube_transcript UI path verified to the site's own get_transcript call, which is login-gated (HTTP 400 Precondition check failed, anonymous session — logged-in capture required for segment read-back)"
 }

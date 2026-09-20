@@ -3,14 +3,14 @@
   "site": "araprat",
   "flow": "ui-path — navigate to /search/<q> and read the JS-rendered result grid",
   "workType": "ui",
-  "reloadAfterSuccess": true,
+  "verified": "2026-09-20",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://www.aparat.com/search/{q}", "urlTemplate": "https://www.aparat.com/search/{q}", "input": "args.q (url-encoded)", "note": "search route evidenced (SPA shell served, not 404); the site's own JS renders results — wait for hydration" },
-    { "step": 2, "action": "extract", "selector": "a[href*='/v/']", "note": "UNVERIFIED candidate — result-grid item anchors; class names unknown until first live capture" },
-    { "step": 3, "action": "read", "selector": "a[href*='/v/']", "until": "stable 3000ms", "timeoutMs": 30000, "note": "titles + hrefs off the rendered grid; selectors UNVERIFIED" }
+    { "step": 1, "action": "open", "url": "https://www.aparat.com/search/{q}", "urlTemplate": "https://www.aparat.com/search/{q}", "input": "args.q (url-encoded)", "note": "VERIFIED 2026-09-20: /search/موزیک rendered 60 a[href*='/v/'] anchors; /search/طنز rendered 58. Title becomes '<q> | آپارات سرویس اشتراک ویدیو'. Result hrefs carry ?discovery=1 / ?refererRef=search query suffixes — strip to the bare /v/<id>." },
+    { "step": 2, "action": "extract", "selector": "a[href*='/v/']", "note": "VERIFIED — each video appears as TWO anchors (thumbnail-anchor with img.alt=duration like '2:03:10', title-anchor with real text); dedupe by /v/<id> and skip duration-only strings." },
+    { "step": 3, "action": "read", "selector": "a[href*='/v/'] img[alt], a[href*='/v/']", "until": "first a[href*='/v/'] appears (waitForSelector)", "timeoutMs": 30000, "note": "VERIFIED — anchors appear ~7–10s after domcontentloaded (SPA hydration); readyState alone is NOT enough. Header search input is input[name='search'] (id 'search-input' on search pages, placeholder 'جستجوی ویدیو در آپارات') — typing + Enter navigates to /search/<q> via the site's own JS (VERIFIED live)." }
   ],
-  "output": { "results": "array<{ id, title, url, channel? }>", "count": "number" },
-  "rpc": "none captured — the site's internal search API (if any) is undocumented in this scaffold; a wire capture (ui2api analyse https://www.aparat.com) may reveal a JSON endpoint to mirror later. No fabricated traffic: reads happen off the rendered page.",
+  "output": { "results": "array<{ id, title, url }>", "count": "number" },
+  "rpc": "none captured — the site's internal search API (under /api/fa/v1/...) is unmapped (naive probe 400s). Reads happen off the rendered page — no fabricated traffic.",
   "stealth": "plain page loads in the user's own browser session — indistinguishable from a human searching; no synthetic requests",
   "sessionLock": "session.lock.json"
 }

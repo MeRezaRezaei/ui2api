@@ -10,10 +10,22 @@
 //                         click the site's own "Show transcript" toggle, read
 //                         the transcript panel segments.
 //
-// STATUS: SCAFFOLD, DOM-UNVERIFIED — no live round-trip has been performed.
-// Every selector below is a candidate from prior public UI knowledge; on any
-// live-DOM step failure the runner returns ok:false with reason
-// "scaffold-dom-unverified" and never fakes success.
+// STATUS (2026-09-20, live round-trip on attached real Chrome 152 via CDP 9222):
+//   youtube_search     -> VERIFIED (verified-2026-09-20). 11 results read off a
+//                         real results page; selectors below are observed, not
+//                         candidates.
+//   youtube_transcript -> PARTIALLY VERIFIED, endpoint-gated. Every UI selector
+//                         up to the transcript panel is live-observed (expand,
+//                         Show transcript button, panel EXPANDED state), but the
+//                         site's OWN get_transcript call (issued by its JS after
+//                         our real click) answers HTTP 400 "Precondition check
+//                         failed" for an ANONYMOUS session (Chrome profile has
+//                         no YouTube login: no SAPISID/LOGIN_INFO, Sign-in
+//                         button present). Verified across 3+ honest attempts:
+//                         multiple videos, SOCS/CONSENT cookies, UA
+//                         normalization, player-menu paths — same 400 every
+//                         time. Transcript needs a logged-in session.lock.json
+//                         capture before it can be claimed verified.
 //
 // NOT built: any direct innertube (/youtubei/v1/*) or timedtext fetch — that
 // would be fabricated traffic (the core repo rule). The page itself issues
@@ -127,9 +139,11 @@ export class YouTubeCapabilities {
     const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
     const page = await this.openPage(url);
     try {
-      // UNVERIFIED candidate selector — results render inside ytd-* web
-      // components after hydration. On miss: honest ok:false.
-      await page.waitForSelector("ytd-video-renderer, ytd-compact-video-renderer", { timeout: 20000 });
+      // VERIFIED 2026-09-20: results page renders ytd-video-renderer rows with
+      // light-DOM a#video-title anchors (10 rows on the probe query; the grid
+      // ytd-rich-item-renderer shape did NOT appear for ?search_query= — list
+      // layout only).
+      await page.waitForSelector("ytd-video-renderer", { timeout: 20000 });
       const results = await page.evaluate((limit: number) => {
         const out: Array<{ title: string; videoId: string; url: string; channel?: string; metadataRaw?: string }> = [];
         // a#video-title / a#video-title-link live in the light DOM slotted by
@@ -144,7 +158,7 @@ export class YouTubeCapabilities {
           const title = ((a as HTMLElement).innerText || (a as HTMLAnchorElement).title || "").trim();
           if (!title) continue;
           const row = (a as HTMLElement).closest("ytd-video-renderer, ytd-compact-video-renderer");
-          const channel = row?.querySelector("ytd-channel-name")?.textContent?.trim() || undefined;
+          const channel = row?.querySelector("ytd-channel-name")?.textContent?.replace(/\s+/g, " ").trim() || undefined;
           const metadataRaw = row?.querySelector("#metadata-line")?.textContent?.replace(/\s+/g, " ").trim() || undefined;
           const videoId = m[1];
           if (!out.some((x) => x.videoId === videoId)) {
@@ -160,7 +174,7 @@ export class YouTubeCapabilities {
         method: "dom.results",
         data: { query, count: results.length, results },
         scaffold: SCAFFOLD_NOTE,
-        error: results.length === 0 ? "scaffold-dom-unverified: no ytd-video-renderer rows matched the candidate selectors" : undefined,
+        error: results.length === 0 ? "no ytd-video-renderer rows matched (verified selector; empty page = wall or change)" : undefined,
         note:
           results.length > 0
             ? "read off the site's own rendered results page (one real navigation; no synthetic requests)"
@@ -181,39 +195,49 @@ export class YouTubeCapabilities {
     const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
     const page = await this.openPage(url);
     try {
-      // UNVERIFIED candidates the whole way down. Expand "...more" so the
-      // engagement/description rows render; swallow failure and probe for the
-      // transcript button regardless.
-      for (const sel of ["tp-yt-paper-button#expand", "#description-inline-expander #expand"]) {
-        const btn = page.locator(sel).first();
-        if (await btn.isVisible().catch(() => false)) {
-          await btn.click().catch(() => {});
-          await page.waitForTimeout(600);
-          break;
+      // VERIFIED UI PATH 2026-09-20 (live-observed on Chrome 152):
+      // 1. expand: tp-yt-paper-button#expand inside ytd-text-inline-expander
+      //    (opens the structured-description modal; the "Show transcript"
+      //    button is INVISIBLE (w=0) until expanded).
+      // 2. button: button[aria-label="Show transcript"] — TWO copies exist in
+      //    ytd-video-description-transcript-section-renderer; exactly one is
+      //    laid out (rect.w>0) after expand. Playwright .isVisible() misses it
+      //    (0-box quirk), so probe rects in-page and click via the site's own
+      //    handler (el.click()).
+      // 3. panel: ytd-engagement-panel-section-list-renderer
+      //    [target-id="engagement-panel-searchable-transcript"] flips to
+      //    visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED" and its JS issues
+      //    /youtubei/v1/get_transcript. ANONYMOUS profiles get HTTP 400
+      //    "Precondition check failed" (login-gated) — segments never render.
+      //    Logged-in sessions (session.lock.json) are expected to render
+      //    ytd-transcript-segment-renderer rows.
+      await page.evaluate(() => {
+        const el = document.querySelector("tp-yt-paper-button#expand") as HTMLElement | null;
+        el?.click();
+      });
+      await page.waitForTimeout(1500);
+      const clicked = await page.evaluate(() => {
+        for (const b of Array.from(document.querySelectorAll('button[aria-label="Show transcript"]'))) {
+          const r = b.getBoundingClientRect();
+          if (r.width > 0) {
+            (b as HTMLElement).click();
+            return true;
+          }
         }
-      }
-      const transcriptBtn = page
-        .locator('button[aria-label*="Show transcript"], ytd-video-description-transcript-section-renderer button')
-        .first();
-      const t0 = Date.now();
-      let visible = await transcriptBtn.isVisible().catch(() => false);
-      while (!visible && Date.now() - t0 < 10000) {
-        await page.waitForTimeout(700);
-        visible = await transcriptBtn.isVisible().catch(() => false);
-      }
-      if (!visible) {
+        return false;
+      });
+      if (!clicked) {
         return {
           capability: "youtube_transcript",
           ok: false,
           method: "dom.transcript-panel",
           data: { videoId },
           error:
-            "scaffold-dom-unverified: 'Show transcript' button not found with candidate selectors (video may not offer a transcript, or the selector rotted)",
+            "no-transcript-button: 'Show transcript' not offered on this page (video without captions, or selector rot)",
           scaffold: SCAFFOLD_NOTE,
         };
       }
-      await transcriptBtn.click();
-      // UNVERIFIED candidate — the panel renders segments progressively.
+      // The panel renders segments progressively (or never, on the 400 gate).
       await page.waitForSelector("ytd-transcript-segment-renderer", { timeout: 15000 });
       const segments = await page.evaluate(() => {
         const out: Array<{ startMs: number; text: string }> = [];
@@ -236,7 +260,7 @@ export class YouTubeCapabilities {
         method: "dom.transcript-panel",
         data: { videoId, segments, transcript: segments.map((s) => s.text).join(" ") },
         scaffold: SCAFFOLD_NOTE,
-        error: segments.length === 0 ? "scaffold-dom-unverified: transcript panel matched but no segments read" : undefined,
+        error: segments.length === 0 ? "transcript panel matched but no segments read" : undefined,
         note:
           segments.length > 0
             ? "transcript rendered by the site's own panel after a real click; read-only DOM extraction"
@@ -254,7 +278,7 @@ export class YouTubeCapabilities {
       capability,
       ok: false,
       data: undefined,
-      error: `scaffold-dom-unverified: ${e instanceof Error ? e.message : String(e)}`,
+      error: `${e instanceof Error ? e.message : String(e)} (if this is a waitForSelector timeout on ytd-transcript-segment-renderer after a successful button click: the site's own get_transcript call is login-gated — HTTP 400 "Precondition check failed" for anonymous sessions; capture a logged-in session first)`,
       scaffold: SCAFFOLD_NOTE,
     };
   }

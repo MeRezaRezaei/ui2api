@@ -4,16 +4,21 @@
   "flow": "ui-path — open watch page, expand description, click the site's own 'Show transcript' button, read the transcript panel segments",
   "workType": "ui-path",
   "reloadAfterSuccess": true,
+  "verified": "ui-path selectors verified 2026-09-20; segment read BLOCKED by login gate (see observed)",
   "steps": [
-    { "step": 1, "action": "open", "url": "https://www.youtube.com/watch?v={videoId}", "note": "one trusted navigation per video; the site's own JS boots the player + description panel" },
-    { "step": 2, "action": "click", "selector": "tp-yt-paper-button#expand, #description-inline-expander #expand", "note": "UNVERIFIED candidate — '...more' description expander so the engagement panel rows (incl. 'Show transcript') render. Some revisions expose the button without expanding; try both selectors. Swallow failure and probe for the transcript button anyway." },
-    { "step": 3, "action": "click", "selector": "button[aria-label*=\"Show transcript\"], ytd-video-description-transcript-section-renderer button", "note": "UNVERIFIED candidate — the site's own toggle; clicking it makes YouTube render the transcript panel (its own JS fetches the transcript). If absent, transcript is not offered for this video → honest ok:false, reason no-transcript-button." },
-    { "step": 4, "action": "wait", "selector": "ytd-transcript-segment-renderer", "timeoutMs": 15000, "stableMs": 2000, "note": "UNVERIFIED candidate — panel renders segments progressively; wait for stable growth." },
-    { "step": 5, "action": "read", "selector": "ytd-transcript-segment-renderer .segment-text", "until": "stable 2000ms", "timeoutMs": 20000, "note": "UNVERIFIED candidate — read {startMs from .segment-timestamp, text from .segment-text} per segment in DOM order." }
+    { "step": 1, "action": "open", "url": "https://www.youtube.com/watch?v={videoId}", "note": "one trusted navigation per video; the site's own JS boots the player + description panel." },
+    { "step": 2, "action": "click", "selector": "tp-yt-paper-button#expand", "note": "VERIFIED 2026-09-20 — inside ytd-text-inline-expander; clicking opens the structured-description MODAL (tp-yt-iron-overlay-backdrop.opened appears and intercepts Playwright pointer clicks — so the next step clicks via the DOM API, which is how the site's own handlers receive it). Until expanded, the Show transcript button has rect 0x0 (invisible). #expand alone also matches; keep tp-yt-paper-button#expand as primary." },
+    { "step": 3, "action": "click", "selector": "button[aria-label=\"Show transcript\"]", "note": "VERIFIED 2026-09-20 — TWO copies live in ytd-video-description-transcript-section-renderer; exactly ONE is laid out (rect.w>0) after expand. Playwright isVisible() reports false for the 0-box quirk, so probe getBoundingClientRect in-page and el.click() the w>0 copy. (Other transcript buttons seen: 'Transcript' in a HIDDEN engagement panel, 'Close transcript' once open — all 0-box, ignore.)" },
+    { "step": 4, "action": "wait", "selector": "ytd-transcript-segment-renderer", "timeoutMs": 15000, "note": "PARTIALLY VERIFIED — the click DOES flip ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-searchable-transcript'] to visibility='ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' and the site's own JS then issues POST /youtubei/v1/get_transcript. For an ANONYMOUS session that call answers HTTP 400 'Precondition check failed' and no segments ever render (live-observed 2026-09-20; panel stuck at header-only 'In this video Chapters Transcript' with a lone ytd-continuation-item-renderer). A logged-in session.lock.json capture is REQUIRED for segments." },
+    { "step": 5, "action": "read", "selector": "ytd-transcript-segment-renderer .segment-text", "until": "stable 2000ms", "timeoutMs": 20000, "note": "CANDIDATE (from the site's component contract; not yet observed rendering because of the 400 gate): read {startMs from .segment-timestamp, text from .segment-text} per segment in DOM order." }
   ],
+  "observed": {
+    "date": "2026-09-20",
+    "probe": "watch pages 32M1al-Y6Ag / ENrzD9HAZK4 / TlB_eWDSMt4 / dQw4w9WgXcQ on attached real Chrome 152 (CDP 9222), anonymous profile (no SAPISID/LOGIN_INFO; Sign-in button present). Every attempt: expand OK, Show transcript button found + clicked OK, searchable-transcript panel EXPANDED, then the site's OWN get_transcript → 400 'Precondition check failed' and 0 segments. Ruled out: SOCS/CONSENT cookies (still 400), UA Headless token normalization (still 400), player gear/kebab menu paths (no transcript entry in this UI revision), 'c' CC shortcut (captions did not engage anonymously). Same 400 on every video ⇒ session gate, not per-video captions and not selector rot."
+  },
   "output": { "videoId": "string", "segments": "array<{startMs, text}>", "transcript": "string (joined)" },
   "rpc": "none — deliberately no direct timedtext / innertube calls; the panel click makes the site fetch its own transcript.",
   "stealth": "real browser, real clicks on the site's own controls, read-only DOM",
-  "sessionLock": "session.lock.json",
-  "notes": "SCAFFOLD, DOM-UNVERIFIED — no live round-trip performed. Every selector is a candidate from prior public UI knowledge; the transcript button can live in the expanded description OR the engagement panel depending on revision. Re-tune on first live capture."
+  "sessionLock": "session.lock.json (REQUIRED for youtube_transcript: capture a LOGGED-IN YouTube session — the anonymous get_transcript call is 400-gated)",
+  "notes": "UI path VERIFIED to the network gate 2026-09-20; segment rendering NOT yet observed (login-gated). Do not claim full verification until a logged-in round-trip reads segments."
 }

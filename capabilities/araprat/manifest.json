@@ -3,14 +3,14 @@
   "name": "Aparat (www.aparat.com) — Persian video-sharing platform",
   "site": "www.aparat.com",
   "url": "https://www.aparat.com",
-  "description": "Aparat (آپارات) is Iran's largest Persian-language video-sharing service (the 'Iranian YouTube'). NOT an AI chat site — the ui2api surface here is video discovery: search, trending, and video-detail reads driven through the site's own JS-rendered SPA. Scaffold package: the user's 'araprat' was resolved to Aparat via web search (the literal domains araprat.com/.ai/.io do not resolve); no bundle analysis and no live browser round-trip have been performed yet.",
+  "description": "Aparat (آپارات) is Iran's largest Persian-language video-sharing service (the 'Iranian YouTube'). NOT an AI chat site — the ui2api surface here is video discovery: search, trending, and video-detail reads driven through the site's own JS-rendered SPA. LIVE-VERIFIED 2026-09-20 against the attached real Chrome (CDP :9222): search 'موزیک' → 60 a[href*='/v/'] result anchors; homepage /home → 52 anchors; /v/mindkye → h1 title + div.description + 22 related anchors. Anti-bot: none observed.",
   "version": "0.1.0",
   "author": "ui2api capabilities",
   "date": "2026-09-20",
-  "siteVersion": "JS-required SPA shell — server returns an enable-JavaWS placeholder ('برای اجرای این برنامه لطفا جاوا اسکریپت دستگاه خود را فعال کنید') without JS; no bundle hashes recorded (no bundle analysis performed)",
+  "siteVersion": "JS-rendered SPA (styled-components; raw HTML carries ZERO anchors — /home 196KB, /search/<q> 47KB). Verified UI classes 2026-09-20: thumb-wrapper / poster cards, h1 'heading title', div.description. og: metas NOT populated on /v/<id> (only og:site_name site-wide).",
   "transport": {
     "type": "ui-driver",
-    "protocol": "DOM read of the site's own JS-rendered pages (https://www.aparat.com/search/<q>, homepage trending, /v/<id> video pages); no wire RPC captured yet",
+    "protocol": "DOM read of the site's own JS-rendered pages (https://www.aparat.com/search/<q>, /home trending, /v/<id> video pages); no wire RPC captured yet. VERIFIED 2026-09-20 on attached real Chrome.",
     "baseUrl": "https://www.aparat.com",
     "streaming": "n/a (video site, not a chat stream)",
     "auth": {
@@ -19,33 +19,36 @@
       "refresh": "unknown"
     },
     "antiBot": {
-      "unknown": "no probe performed — treat as potentially present; first live capture must record posture (headless may be blocked or served degraded content)"
+      "observed": "none 2026-09-20 — attached real Chrome (CDP :9222) received fully rendered content on /home, /search/<q>, /v/<id>; no block page, no CAPTCHA. Headless-fresh contexts not separately probed."
     }
   },
   "capabilities": [
     {
       "id": "araprat_search",
       "name": "Video search",
-      "description": "Search Aparat videos by loading https://www.aparat.com/search/<url-encoded-query> in the real browser and reading the result grid the site's own JS renders. Route shape evidenced (server returns the SPA shell for /search/<q>, not a 404); result-grid selectors are UNVERIFIED candidates — no live round-trip yet.",
-      "method": "ui-path (navigate to /search/<q>, read rendered results) — SCAFFOLD, DOM-UNVERIFIED",
-      "implementation": "openPage() → goto /search/<q> → wait for hydration → extract candidate item nodes (a[href*='/v/'] anchors as the minimal candidate) → titles + hrefs. All selectors candidate guesses; verify on first live capture.",
-      "recipe": "recipes/araprat_search.json"
+      "description": "Search Aparat videos by loading https://www.aparat.com/search/<url-encoded-query> in the real browser and reading the result grid the site's own JS renders. VERIFIED 2026-09-20: 'موزیک' → 60 a[href*='/v/'] anchors; header search input is input[name='search'] (placeholder 'جستجوی ویدیو در آپارات'), typing + Enter navigates via the site's own JS. Each video is double-anchored (thumbnail img.alt=duration + title anchor) — dedupe by /v/<id>, strip ?discovery/?refererRef suffixes.",
+      "method": "ui-path (navigate to /search/<q>, read rendered results) — LIVE-VERIFIED 2026-09-20",
+      "implementation": "openPage() → goto /search/<q> → waitForSelector(\"a[href*='/v/']\") (~7-10s hydration; readyState is NOT enough) → dedupe anchors by /v/<id> → titles (skip duration-only img.alt like '2:03:10') + bare URLs. Implemented in src/capabilities/araprat.ts.",
+      "recipe": "recipes/araprat_search.json",
+      "verified": "2026-09-20"
     },
     {
       "id": "araprat_trending",
       "name": "Trending / homepage videos",
-      "description": "Read the homepage's trending/recommended video grid from the live rendered DOM. Homepage existence evidenced; grid selectors UNVERIFIED candidates — no live round-trip yet.",
-      "method": "ui-path (homepage DOM read) — SCAFFOLD, DOM-UNVERIFIED",
-      "implementation": "openPage() → goto https://www.aparat.com → wait for hydration → extract candidate a[href*='/v/'] anchors. Selectors candidate guesses; verify on first live capture.",
-      "recipe": "recipes/araprat_trending.json"
+      "description": "Read the homepage's trending/recommended video grid from the live rendered DOM. VERIFIED 2026-09-20: www.aparat.com → /home renders 52 a[href*='/v/'] anchors anonymously. Card wrappers are styled-components hashed classes (thumb-wrapper / poster) — the /v/ anchor is the stable selector.",
+      "method": "ui-path (homepage DOM read) — LIVE-VERIFIED 2026-09-20",
+      "implementation": "openPage() → goto https://www.aparat.com (301s to /home) → waitForSelector(\"a[href*='/v/']\") → dedupe + titles. Implemented in src/capabilities/araparat.ts.",
+      "recipe": "recipes/araprat_trending.json",
+      "verified": "2026-09-20"
     },
     {
       "id": "araprat_video_detail",
       "name": "Video detail",
-      "description": "Read one video page's metadata (title, channel, views, description) from https://www.aparat.com/v/<id>. The /v/<id> route shape is a widely-known Aparat convention but was NOT verified in this scaffold session; page selectors UNVERIFIED — no live round-trip yet.",
-      "method": "ui-path (video page DOM read) — SCAFFOLD, DOM-UNVERIFIED",
-      "implementation": "openPage() → goto /v/<id> → wait for hydration → extract candidate title/description/meta nodes. Selectors candidate guesses; verify on first live capture.",
-      "recipe": "recipes/araprat_video_detail.json"
+      "description": "Read one video page's metadata from https://www.aparat.com/v/<id>. VERIFIED 2026-09-20 on /v/mindkye: h1 carries the title, div.description the Persian description, a[href*='/v/'] the related grid (~22). The SPA does NOT populate og:/twitter: meta tags on /v/<id> — h1 + div.description are the verified reads.",
+      "method": "ui-path (video page DOM read) — LIVE-VERIFIED 2026-09-20",
+      "implementation": "openPage() → goto /v/<id> → waitForSelector('h1') → read h1 + div.description + deduped a[href*='/v/'] related list. Implemented in src/capabilities/araparat.ts.",
+      "recipe": "recipes/araprat_video_detail.json",
+      "verified": "2026-09-20"
     }
   ],
   "auth": {
@@ -57,14 +60,15 @@
       "name": "unknown (no login capture performed)"
     },
     "capture": "npx tsx src/cli.ts profile capture https://www.aparat.com --login",
-    "note": "Anonymous browsing is supported for search/watch — auth is only needed for account-scoped actions (upload, likes, playlists), which this package does not expose yet."
+    "note": "Anonymous browsing VERIFIED live 2026-09-20 (search/trending/video pages fully render with no login wall). auth.required:false confirmed; session.lock stays awaiting-capture — auth is only needed for account-scoped actions (upload, likes, playlists), which this package does not expose."
   },
   "permissions": [
     "read-only video discovery on www.aparat.com through the site's own rendered UI (no fabricated traffic)",
-    "no live browser round-trip performed yet — every selector in this package is an unverified candidate",
+    "live-verified 2026-09-20 on the attached real Chrome — selectors in recipes/ are observed facts",
     "respect Aparat ToS and Iranian platform rules; this package automates only the user's own browsing session"
   ],
   "builtinProfile": "not yet registered (planned: src/profile/profile.ts entry 'araprat' — see REGISTER.md)",
   "analyzed": "2026-09-20",
-  "analysisMethod": "identity resolution only: web search ('araprat AI chat site' on DuckDuckGo) surfaces www.aparat.com as the top organic hit; araprat.com / www.araprat.com / araprat.ai / araprat.io all fail to resolve (no such domains). Site confirmed live via fetch (Persian title 'آپارات - سرویس اشتراک ویدیو', JS-required SPA shell). NO bundle analysis, NO wire capture, NO live browser run."
+  "analysisMethod": "identity resolution (web search: 'araprat' → www.aparat.com; literal araprat.* domains do not resolve) + LIVE DOM verification 2026-09-20 on the attached real Chrome (CDP :9222, via launchBrowser()): homepage, /search/موزیک, /search/طنز (typed+Enter), /v/mindkye all rendered and read. Raw-HTML curl probes confirmed the SPA shell (zero anchors without JS). No bundle analysis, no wire capture.",
+  "verified": "2026-09-20"
 }
