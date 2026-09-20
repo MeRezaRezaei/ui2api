@@ -50,6 +50,13 @@ describe("prompt registry", () => {
         assert.ok(tool.name.startsWith(`${pkg.id}_`), `tool ${tool.name} namespaced by site`);
         assert.equal(typeof tool.id, "string", `tool ${tool.name} carries raw daemon capability id`);
         assert.equal(tool.inputSchema.type, "object");
+        // The map contract distinguishes the two work types — driving the site's
+        // own real UI (ui-path) versus calling the site's own JS function
+        // (js-function) — and carries the reload policy so every language map
+        // reflects "after each successful action the only thing we need to do
+        // is to refresh the page".
+        assert.ok(tool.workType === "ui-path" || tool.workType === "js-function");
+        assert.equal(tool.reloadAfterSuccess, true);
       }
     }
   });

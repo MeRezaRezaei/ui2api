@@ -38,8 +38,28 @@ export interface RegistryTool {
   /** Raw capability id the daemon's /capability/<site> understands. */
   id: string;
   description: string;
-  method: string;
-  inputSchema: RegistryToolInputSchema;
+  /**
+   * Execution style for this capability:
+   *  - "ui-path":   drive the site's own real UI — mouse/keyboard against the
+   *                 page (composer typing, toggle clicks). Slower, visible as
+   *                 a genuine human session, works on any site.
+   *  - "js-function": inject what the site's own JS function expects into the
+   *                 DOM and call the function directly (no mouse/keyboard).
+   *                 Faster, invisible — the site runs exactly its own code
+   *                 path. Work type is chosen per-capability here, in the map.
+   * Defaults to "ui-path".
+   */
+  workType: "ui-path" | "js-function";
+  /**
+   * Reload-after-success policy, part of the map contract itself: the only
+   * thing the daemon needs to do after each successful action is to refresh
+   * the page, so anything the host site's server knows about this session is
+   * re-established and a missing piece of info in the current DOM can never
+   * leak into the next call — the map functions keep working by just
+   * reloading the page each time.
+   */
+  reloadAfterSuccess: boolean;
+  method: string;  inputSchema: RegistryToolInputSchema;
 }
 
 export interface RegistryChat {
@@ -208,6 +228,8 @@ export function buildRegistryPackages(): RegistryPackage[] {
       id: c.id,
       description: c.description || c.name || c.id,
       method: c.method || "ui-path",
+      workType: c.method === "js-function" ? "js-function" : "ui-path",
+      reloadAfterSuccess: true,
       inputSchema: capabilityInputSchema(siteId, c.id, c.method, c.description),
     }));
     packages.push({

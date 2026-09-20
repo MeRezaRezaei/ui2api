@@ -55,6 +55,7 @@ interface Flags {
   identity?: string;
   xhostAll?: boolean;
   model?: string;
+  lang?: string;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -90,6 +91,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--identity") f.identity = argv[++i];
     if (argv[i] === "--xhost-all") f.xhostAll = true;
     if (argv[i] === "--model") f.model = argv[++i];
+    if (argv[i] === "--lang") f.lang = argv[++i];
   }
   return f;
 }
@@ -227,6 +229,21 @@ async function cmdInstall(host: string, flags: Flags): Promise<void> {
   const reg = flags.registry || "https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/main";
   const dir = await installPackage(host, reg, root);
   console.log(`Installed ${host} -> ${dir}; run: ui2api serve ${host}`);
+}
+
+async function cmdLangGen(host: string | undefined, flags: Flags): Promise<void> {
+  const lang = flags.lang ?? "php";
+  if (lang !== "php")
+    throw new Error("langgen: only --lang php is implemented so far (laravel-compatible composer package)");
+  const { buildRegistryPackages } = await import("./prompt/registry.js");
+  const { generatePhpMaps } = await import("./generator/lang-php.js");
+  const packages = buildRegistryPackages();
+  if (host && !packages.some((p) => p.id === host))
+    throw new Error(`langgen: no served registry package for '${host}' (installed: ${packages.map((p) => p.id).join(", ") || "none"})`);
+  const outRoot = flags.out || resolve(process.cwd(), "sites", "map", lang);
+  const dirs = generatePhpMaps(packages, outRoot, host);
+  if (dirs.length === 0) throw new Error("langgen: no served registry packages to generate (run ui2api install <site> first)");
+  for (const d of dirs) console.log(`Generated ${lang} map package -> ${d} (composer.json + src/, one method per capability)`);
 }
 
 async function cmdRemap(host: string, flags: Flags): Promise<void> {
@@ -660,6 +677,9 @@ async function main(): Promise<void> {
     case "package":
       if (!arg) throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
       return cmdPackage(arg, flags);
+    case "langgen":
+      // Optional <host> targets one package; without it, every served package.
+      return cmdLangGen(arg || undefined, flags);
     case "install":
       if (!arg) throw new Error("usage: ui2api install <host> [--registry URL]");
       return cmdInstall(arg, flags);
