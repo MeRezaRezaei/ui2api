@@ -78,6 +78,17 @@ Serving: `src/prompt/http.ts` exposes `POST /prompt` (`{"site","prompt"}`),
 `GET /status`, `GET /health`. Binds `127.0.0.1` only, configurable bearer-token
 gate (`UI2API_PROMPTD_TOKEN`).
 
+Consumer surfaces (what OmniRoute / any external tool consumes — the registry
+is the ONLY info source, no site knowledge lives in the consumer):
+- `GET /registry` — runtime package registry (built only from installed
+  capability packages): `packages[]` each with `id/name/url/status/chat.model/
+  tools[]` (`tool.name` = `<site>_<capability>`, plus inputSchema). Consumers
+  materialize one provider per ACTIVE package and one tool per capability.
+- `GET /v1/models`, `POST /v1/chat/completions` — OpenAI-compatible chat
+  surface (model = site id; `stream:true` replays the finished DOM-rendered
+  answer as SSE — honest: ChatDriver reads the page, it does not synthesize
+  traffic). Non-chat capabilities stay on `/capability/<site>`.
+
 ## Environment knobs (runtime/browser.ts)
 
 - `UI2API_HEADED=1` — headed browser (needs a display; use Xvfb headlessly).
