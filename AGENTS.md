@@ -131,6 +131,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     `kimi_file_upload` (`label.toolkit-item` wrapping hidden
     `input[type="file"]` — use `setInputFiles`, filechooser never fires).
   - `gemini` (gemini.google.com) — verified earlier; do not re-capture.
+- **Suite gates (2026-09-21 restart fold)**: full suite now measured **378/378**.
+  The two wigolo-engine infra gates (chromium warmup on ubuntu26.04-x64) CLOSED by
+  aligning the wigolo clone's playwright 1.60→1.61: build 1228 is already present
+  on the box (`~/.cache/ms-playwright/chromium-1228`), so `chromium.executablePath()`
+  resolves to a real installed binary — genuine daemon browser launch, not a fabricated
+  green. promptd on 127.0.0.1:9797 must be restarted with CURRENT code after wiring
+  changes (a stale daemon predates new `/capability/*` routes and 404s them while
+  `/registry` still looks live — a lost-direction symptom; kill + `tsx src/cli.ts promptd`).
+  LIVE studio re-verification 2026-09-21 through the wire: `youtube_search`
+  ok:true 10 rows, `araprat_search` ok:true 30 rows; posting recipes stay honest
+  login-gated ok:false — never a fabricated post.
 - **Session-locked + chat verified (headed/real-Chrome only)**: `tencent-aistudio`
   (aistudio.tencent.ai). Cookies verified (`hunyuan_token`/`hunyuan_user`/
   `hunyuan_source` on `.tencent.ai`); **Tencent Cloud EdgeOne blocks headless
