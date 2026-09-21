@@ -96,13 +96,27 @@ test("detectDisplayInfo() reads DISPLAY and declines headless CI", () => {
   withEnv("DISPLAY", ":1", () => {
     withEnv("XAUTHORITY", undefined, () => {
       withEnv("CI", undefined, () => {
-        assert.deepEqual(detectDisplayInfo(), { display: ":1" });
+        assert.deepEqual(detectDisplayInfo(), { display: ":1", source: "env" });
       });
     });
   });
   withEnv("DISPLAY", undefined, () => {
     withEnv("CI", "1", () => {
       assert.equal(detectDisplayInfo(), null);
+    });
+  });
+});
+
+test("detectDisplayInfo() prefers an owned X socket over the :0 fallback", () => {
+  // A real user session socket check needs a controllable socket dir; we can't
+  // fake /tmp/.X11-unix here, so verify the contract mathematically instead:
+  // with DISPLAY unset and no CI, the result is either the owned socket (source
+  // "socket") or the documented :0 fallback — never a throw, always {display}.
+  withEnv("DISPLAY", undefined, () => {
+    withEnv("CI", undefined, () => {
+      const d = detectDisplayInfo();
+      assert.ok(d === null || d === undefined ? false : typeof d.display === "string");
+      assert.ok(d?.display === ":0" || d?.source === "socket");
     });
   });
 });

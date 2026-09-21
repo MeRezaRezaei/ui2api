@@ -13,7 +13,8 @@
 // Every function returns a result object on expected failure — nothing here
 // throws at the caller except a genuinely broken profile ingest.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { userInfo } from "node:os";
 import { chromium } from "playwright";
 import { detectProfileIdentity, ingestProfile } from "./profile-ingest.js";
@@ -23,14 +24,46 @@ import { accountSnapshotPath, saveAccountSnapshot, slugifyIdentity } from "./ses
 export interface DisplayInfo {
   display: string;
   xauthority?: string;
+  source?: "env" | "socket";
 }
 
-// Detect the X display to release/share. Reads DISPLAY (":0" when unset) and
-// the optional XAUTHORITY. Returns null on a headless CI run (nothing to share).
+// Detect the X display to release/share. Priority:
+//   1. DISPLAY env (a real session always sets it).
+//   2. The /tmp/.X11-unix/ socket owned by OUR euid — the user's actual
+//      session display. Falls back to ":0" ONLY when nothing else exists.
+// The :0 fallback alone is wrong on multi-session boxes: there it often
+// belongs to the login greeter, not the user (seen 2026-09-21 on a box
+// where uid 1005 owned X10/X20 but X0 belonged to cosmic-greeter), so
+// relaxing xhost on :0 would share the wrong screen.
+// Returns null on a headless CI run (nothing to share).
 export function detectDisplayInfo(): DisplayInfo | null {
   if (!process.env.DISPLAY && process.env.CI) return null;
-  const display = process.env.DISPLAY || ":0";
-  return process.env.XAUTHORITY ? { display, xauthority: process.env.XAUTHORITY } : { display };
+  if (process.env.DISPLAY) {
+    return process.env.XAUTHORITY
+      ? { display: process.env.DISPLAY, xauthority: process.env.XAUTHORITY, source: "env" }
+      : { display: process.env.DISPLAY, source: "env" };
+  }
+  const mine = displayFromOwnedSocket();
+  if (mine) return process.env.XAUTHORITY ? { display: mine, xauthority: process.env.XAUTHORITY, source: "socket" } : { display: mine, source: "socket" };
+  return process.env.XAUTHORITY ? { display: ":0", xauthority: process.env.XAUTHORITY } : { display: ":0" };
+}
+
+// Scan /tmp/.X11-unix/X* sockets; return the first owned by the current euid.
+// Each socket file is named X<N> meaning display ":N". Never throws.
+function displayFromOwnedSocket(): string | null {
+  try {
+    const dir = "/tmp/.X11-unix";
+    const entries = readdirSync(dir, { withFileTypes: true });
+    const euid = typeof process.geteuid === "function" ? process.geteuid() : 0;
+    for (const e of entries) {
+      if (!e.isSocket() || !e.name.startsWith("X")) continue;
+      const stat = statSync(join(dir, e.name));
+      if (stat.uid === euid) return `:${e.name.slice(1)}`;
+    }
+  } catch {
+    // no X11 dir or unreadable — caller falls back
+  }
+  return null;
 }
 
 /** Outcome of releasing the display lock via `xhost`. Never throws. */
