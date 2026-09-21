@@ -16,6 +16,7 @@ import {
   launchHeadedChromeForLogin,
   relaxDisplayLock,
   ui2apiUser,
+  ui2apiUserDataDir,
   ui2apiUserHome,
   userExists,
   type AssistedResult,
@@ -237,4 +238,49 @@ test("ui2apiUserHome resolves the real home only for the current user", () => {
     assert.equal(userExists(me), true);
   }
   assert.equal(userExists("definitely-not-a-user"), false);
+});
+
+test("ui2apiUserDataDir prefers the ui2api user's XDG dir when writable", () => {
+  const res = ui2apiUserDataDir({
+    ui2apiUser: () => "ui2api",
+    currentUser: () => "me",
+    userExists: () => true,
+    userHome: () => "/home/ui2api",
+    probeWrite: () => true,
+  });
+  assert.equal(res, "/home/ui2api/.local/share/ui2api");
+});
+
+test("ui2apiUserDataDir returns null when the ui2api user is absent", () => {
+  const res = ui2apiUserDataDir({
+    ui2apiUser: () => "ui2api",
+    currentUser: () => "me",
+    userExists: () => false,
+    userHome: () => "/home/ui2api",
+    probeWrite: () => true,
+  });
+  assert.equal(res, null);
+});
+
+test("ui2apiUserDataDir returns null when the dir is not writable (honest fallback)", () => {
+  const res = ui2apiUserDataDir({
+    ui2apiUser: () => "ui2api",
+    currentUser: () => "me",
+    userExists: () => true,
+    userHome: () => "/home/ui2api",
+    probeWrite: () => false,
+  });
+  assert.equal(res, null);
+});
+
+test("ui2apiUserDataDir returns the own dir when the process IS the ui2api user", () => {
+  const realHome = "/home/ui2api";
+  const res = ui2apiUserDataDir({
+    ui2apiUser: () => "ui2api",
+    currentUser: () => "ui2api",
+    userExists: () => true, // irrelevant: running AS the user owns the dir
+    userHome: () => realHome,
+    probeWrite: () => false, // irrelevant: own home, no probe needed
+  });
+  assert.equal(res, "/home/ui2api/.local/share/ui2api");
 });

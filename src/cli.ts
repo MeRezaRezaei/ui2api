@@ -406,11 +406,18 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
   const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
   const host = new URL(url).host;
 
-  // --assist: xhost display-share flow — data stored in the ui2api user, not
-  // the current user. The browser runs as the ui2api user, headed on the
-  // caller's X display; the user logs in the regular visual way.
+  // --assist: xhost display-share flow — data prefers the ui2api user (verbatim
+  // 1495: "data ill be stored in the ui2api user not the current user"). The
+  // browser runs headed on the caller's X display; the user logs in the
+  // regular visual way. The data dir is the explicit flag/env override, else
+  // the ui2api user's XDG data dir WHEN genuinely writable from this session,
+  // else the current-user data dir (honest fallback — never fake the claim).
   if (flags.assist) {
-    const { assistedLoginFlow, captureProfileFromLiveChrome, ui2apiUser, detectDisplayInfo } = await import("./runtime/xhost-capture.js");
+    const { assistedLoginFlow, captureProfileFromLiveChrome, ui2apiUser, ui2apiUserDataDir, detectDisplayInfo } = await import("./runtime/xhost-capture.js");
+    const { resolve } = await import("node:path");
+    const ui2apiDataDir = ui2apiUserDataDir();
+    const dataDir = flags.dataDir ?? process.env.UI2API_DATA_DIR ?? ui2apiDataDir ?? resolve(process.cwd(), "data");
+    const vaultOwner = ui2apiDataDir ? `ui2api user (${dataDir})` : `current user (${dataDir}${flags.dataDir || process.env.UI2API_DATA_DIR ? ", explicit override" : " — ui2api-user dir not writable from this session"})`;
     const waitForEnter = (): Promise<void> =>
       new Promise<void>((resolve) => {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -422,7 +429,6 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     const display = detectDisplayInfo();
     if (!display) throw new Error("--assist requires a visible X display (set DISPLAY=:0 or similar)");
     const user = ui2apiUser();
-    const { resolve } = await import("node:path");
     const { existsSync } = await import("node:fs");
     const profileDir = resolve(dataDir, `chrome-${host}`);
     const result = await assistedLoginFlow({
@@ -438,7 +444,7 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     console.log(`[ui2api] identity-keyed session captured for ${host}:`);
     console.log(`  identity: ${captured.identity}`);
     console.log(`  snapshot: ${captured.snapshotPath}`);
-    console.log(`  (data stored in ui2api user ${user})`);
+    console.log(`  (data vault: ${vaultOwner})`);
     // Capability reflection at capture end: probe what THIS account can do.
     try {
       const { listProfiles } = await import("./profile/profile.js");

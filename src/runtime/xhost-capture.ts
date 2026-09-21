@@ -13,7 +13,7 @@
 // Every function returns a result object on expected failure — nothing here
 // throws at the caller except a genuinely broken profile ingest.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { constants, existsSync, mkdirSync, readdirSync, statSync, accessSync } from "node:fs";
 import { join } from "node:path";
 import { userInfo } from "node:os";
 import { chromium } from "playwright";
@@ -129,6 +129,57 @@ export function userExists(user: string): boolean {
   } catch {
     return existsSync(`/home/${user}`);
   }
+}
+
+// Deps for ui2apiUserDataDir, injectable so the unit tests never touch a real
+// system user's home.
+export interface Ui2apiUserDataDirDeps {
+  ui2apiUser?: () => string;
+  currentUser?: () => string;
+  userExists?: (user: string) => boolean;
+  userHome?: (user: string) => string;
+  /** Writability probe: may grant W_OK on an existing dir or create it. */
+  probeWrite?: (dir: string) => boolean;
+}
+
+function defaultProbeWrite(dir: string): boolean {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    try {
+      mkdirSync(dir, { recursive: true });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Where login-UX data should live per verbatim 1495 ("data ill be stored in
+ * the ui2api user not the current user"). Returns the ui2api user's XDG data
+ * dir (…/.local/share/ui2api) when that path is GENUINELY usable from this
+ * session — either the current process already runs AS the ui2api user, or
+ * the ui2api user exists on this host and its candidate dir is writable or
+ * creatable right now. Returns null otherwise, meaning the caller MUST fall
+ * back to the current-user data dir (that fallback keeps captures working and
+ * is honest: we never claim the ui2api-user dir when we cannot write to it).
+ */
+export function ui2apiUserDataDir(deps: Ui2apiUserDataDirDeps = {}): string | null {
+  const d = {
+    ui2apiUser: ui2apiUser.bind(null),
+    currentUser: currentUsername,
+    userExists,
+    userHome: ui2apiUserHome,
+    probeWrite: defaultProbeWrite,
+    ...deps,
+  };
+  const user = d.ui2apiUser();
+  const mine = join(d.userHome(user), ".local", "share", "ui2api");
+  if (d.currentUser() === user) return mine; // running AS ui2api — the current-user dir IS the ui2api dir
+  if (!d.userExists(user)) return null;
+  return d.probeWrite(mine) ? mine : null;
 }
 
 /** What a live-profile capture produced for the identity vault. */
