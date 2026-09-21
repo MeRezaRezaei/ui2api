@@ -3,9 +3,15 @@
   "site": "www.youtube.com",
   "name": "YouTube (www.youtube.com)",
   "url": "https://www.youtube.com",
-  "siteVersion": "Polymer/Lit SPA (web components ytd-*); scaffold, unverified",
-  "version": "0.1.0",
+  "siteVersion": "Polymer/Lit SPA (web components ytd-*)",
+  "version": "0.3.0",
   "status": "active",
+  "verified": {
+    "since": "2026-09-20",
+    "evidence": "youtube_search VERIFIED live 2026-09-20 (attached real Chrome/152): search flow -> ytd-video-renderer a#video-title read-back, 10 rows; transcript UI path verified (segments remain login-gated, honest partial); 2026-09-21 POSTING surface implemented+dispatched but MEASURED login-gated (Google cookies browser-bound — attestable only via user's real attached Chrome)",
+    "via": "attached real Chrome/152 (anonymous search) + vault account data/sessions/youtube.com/merezarezaei@gmail.com/ (import) for posting",
+    "scope": "youtube_search verified; youtube_transcript UI-verified segments pending logged-in capture; posting (comment/like/subscribe/upload/playlist_add) login-gated awaiting real attached session — NOT verified"
+  },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own YouTube browsing session to run video searches and read transcript panels that YouTube itself renders, using my own browser and account.",
   "license": "MIT",

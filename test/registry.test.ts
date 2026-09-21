@@ -60,4 +60,28 @@ describe("prompt registry", () => {
       }
     }
   });
+
+  it("exposes a machine-checkable verified record (false or full {since,evidence,via})", () => {
+    const packages = buildRegistryPackages();
+    // Every package carries the field; a truthy value is always a full record.
+    for (const pkg of packages) {
+      assert.ok("verified" in pkg, `${pkg.id}: registry package must carry a verified field`);
+      if (pkg.verified !== false) {
+        assert.equal(typeof pkg.verified.since, "string");
+        assert.equal(typeof pkg.verified.evidence, "string");
+        assert.equal(typeof pkg.verified.via, "string");
+        assert.ok(pkg.verified.since.length > 0 && pkg.verified.evidence.length > 0 && pkg.verified.via.length > 0, `${pkg.id}: verified record must be non-empty`);
+      }
+    }
+    // The live-verified packages from folds #5/#6 (and earlier) must be marked.
+    const byId = new Map(packages.map((p) => [p.id, p]));
+    for (const id of ["deepseek", "kimi", "gemini"]) {
+      const p = byId.get(id);
+      assert.ok(p, `expected package ${id} in registry`);
+      assert.notEqual(p!.verified, false, `${id} should carry a verified record (live round-trip recorded)`);
+    }
+    // A scaffold-only package with no metadata stays unverified.
+    const unver = packages.filter((p) => p.verified === false);
+    assert.ok(unver.length > 0, "some packages are honestly NOT verified");
+  });
 });

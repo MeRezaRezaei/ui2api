@@ -6,6 +6,12 @@
   "siteVersion": "SPA on www.kimi.ai; Connect RPC on notilo.kimi.com/apiv2 — 411 methods / 45 protobuf services decoded from 99 JS bundles (~12MB)",
   "version": "0.2.0",
   "status": "active",
+  "verified": {
+    "since": "2026-09-19",
+    "evidence": "full surface live round-trip via session-locked vault replay, proof PASS kimi 13965 (2026-09-19): chat, list_conversations (15 real), model_list (K3/K3 Swarm/K2.8/Instant), web_search, file_upload; capability probe ok:true tier 'Upgrade' + real model rows (fold #5, 2026-09-21)",
+    "via": "session-locked vault replay (localStorage access_token Bearer + x-msh-shield-data on notilo.kimi.com/apiv2)",
+    "scope": "chat, list_conversations, model_list, web_search, file_upload"
+  },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own Kimi AI (www.kimi.ai) sessions to chat, use in-chat web search, upload files, list conversations, and read the model picker with my account.",
   "license": "MIT",

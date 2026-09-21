@@ -76,12 +76,31 @@ export interface RegistryPackage {
   site: string;
   authRequired: boolean;
   status: string;
+  /**
+   * Machine-checkable verification record, from metadata.json `verified`.
+   * `false` (or absent) = NOT verified — the registry consumer can rely on
+   * this to gate which packages it surfaces as working. Never set without a
+   * real recorded live round-trip in this repo.
+   */
+  verified: RegistryVerified | false;
   chat: RegistryChat;
   tools: RegistryTool[];
 }
 
+export interface RegistryVerified {
+  /** ISO date the live round-trip was recorded. */
+  since: string;
+  /** Human-readable proof pointer (proof id / live-qualified check). */
+  evidence: string;
+  /** How it was verified (session-locked vault replay, attached real Chrome, …). */
+  via: string;
+  /** Optional honesty note: which capabilities the verification covers. */
+  scope?: string;
+}
+
 interface Metadata {
   status?: string;
+  verified?: RegistryVerified | boolean;
 }
 
 interface ManifestCapability {
@@ -215,11 +234,19 @@ export function buildRegistryPackages(): RegistryPackage[] {
     }
     const caps = Array.isArray(manifest?.capabilities) ? manifest.capabilities : [];
     let status = "unknown";
+    let verified: RegistryVerified | false = false;
     try {
       const meta = JSON.parse(
         readFileSync(resolve(pkgDir, "metadata.json"), "utf8")
       ) as Metadata;
       if (typeof meta.status === "string" && meta.status.trim()) status = meta.status.trim();
+      // A truthy `verified` value must be a full record; anything else (true,
+      // bogus) is refused here and by validate-registry.mjs so consumers can
+      // trust the field.
+      const v = meta.verified;
+      if (v && typeof v === "object" && typeof v.since === "string" && typeof v.evidence === "string" && typeof v.via === "string") {
+        verified = { since: v.since, evidence: v.evidence, via: v.via, scope: v.scope ?? undefined };
+      }
     } catch {
       // metadata.json absent → scaffold/experimental package, status stays "unknown"
     }
@@ -241,6 +268,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       site: manifest?.site || "",
       authRequired: manifest?.auth?.required !== false,
       status,
+      verified,
       chat: { model: siteId, streaming: true },
       tools,
     });

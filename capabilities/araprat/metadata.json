@@ -5,8 +5,14 @@
   "url": "https://www.aparat.com",
   "siteVersion": "JS-required SPA shell; no bundle analysis performed",
   "version": "0.1.0",
-  "status": "scaffold",
+  "status": "active",
   "author": "ui2api capability package",
+  "verified": {
+    "since": "2026-09-20",
+    "evidence": "ALL 3 capabilities VERIFIED live 2026-09-20 (attached Chrome/152): araprat_search (input[name=search]->/search/<q> grid, live 'موزیک' -> 30 deduped), araprat_trending (/home, 52 /v/ anchors), araprat_video_detail (h1+div.description+related); re-wire 2026-09-21 youtube_search ok:true 10 rows + araprat_search ok:true 30 rows",
+    "via": "attached real Chrome/152 + vault replay",
+    "scope": "search, trending, video_detail"
+  },
   "authorizedUse": "Automate my own Aparat (aparat.com) browsing session to search videos and read video/channel metadata with my account or anonymously.",
   "license": "MIT",
   "ui2api": "0.1.0",

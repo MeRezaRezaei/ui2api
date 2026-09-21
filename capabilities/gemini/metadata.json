@@ -1,0 +1,21 @@
+{
+  "siteId": "gemini",
+  "site": "gemini.google.com",
+  "name": "Gemini (gemini.google.com)",
+  "url": "https://gemini.google.com",
+  "siteVersion": "boq_assistant-bard-web-server_20260914.08_p0",
+  "version": "1.0.0",
+  "status": "active",
+  "verified": {
+    "since": "2026-09-15",
+    "evidence": "live-verified 2026-09-15 (batchexecute RPC layer + chat round-trip) and re-verified on first-release audit fold #6 (2026-09-21): one-shot ChatDriver prompt answered PONG (10 reads, stable) AND /v1/chat/completions model=gemini answered OK — both real",
+    "via": "session-locked vault replay (gemini.google.com, localStorage BARD_EMBED_CHAT_STORAGE_KEY_V2 + cookies)",
+    "scope": "chat (ChatDriver + StreamGenerate), list_conversations, model_list read"
+  },
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own Gemini (gemini.google.com) sessions to chat and list conversations with my account.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "reviewed",
+  "publishedAt": "2026-09-21"
+}

@@ -131,6 +131,33 @@ for (const pkgName of pkgNames) {
       assert.strictEqual(profile?.id, pkgName, `${relCap(profilePath)}: "id" (${JSON.stringify(profile?.id)}) must equal the package dir name (${pkgName})`);
     });
 
+    await t.test("C2. metadata.verified is absent/false or a full honest record", () => {
+      // v2 "verified" contract (audit G2/G3, fold #8): machine-checkable,
+      // honest. Absent/false = NOT verified. A truthy verified MUST be a full
+      // {since,evidence,via} record — a bare `true` is refused so the /registry
+      // consumer can trust the field. `status` must not lie either.
+      const metaPath = join(pkgDir, "metadata.json");
+      if (!existsSync(metaPath)) {
+        t.diagnostic(`warn ${pkgName}: no metadata.json — package stays NOT verified by absence`);
+        return;
+      }
+      const meta = readJsonFile(metaPath) as { status?: unknown; verified?: unknown };
+      const v = meta.verified;
+      if (v === undefined || v === false) {
+        t.diagnostic(`info ${pkgName}: verified absent/false -> treated as NOT verified (honest)`);
+        return;
+      }
+      assert.ok(v !== true && v !== null && typeof v === "object" && !Array.isArray(v), `${relCap(metaPath)}: verified must be a {since,evidence,via} record, not ${JSON.stringify(v)} (bare true refused)`);
+      const rec = v as Record<string, unknown>;
+      for (const k of ["since", "evidence", "via"]) {
+        assert.ok(typeof rec[k] === "string" && (rec[k] as string).trim().length > 0, `${relCap(metaPath)}: verified.${k} is required and non-empty`);
+      }
+      if (typeof rec.scope !== "undefined") {
+        assert.ok(typeof rec.scope === "string" && (rec.scope as string).trim().length > 0, `${relCap(metaPath)}: verified.scope must be a non-empty string when present`);
+      }
+      assert.strictEqual(meta.status, "active", `${relCap(metaPath)}: verified packages must have status "active" (found ${JSON.stringify(meta.status)})`);
+    });
+
     await t.test("D. session.lock.json exists and follows the session-state format", () => {
       // Real observed values across the inventory (checked against the files
       // before writing this): gemini is "locked"/locked:true with a snapshot

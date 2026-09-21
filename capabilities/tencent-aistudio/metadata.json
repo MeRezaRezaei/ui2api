@@ -6,6 +6,12 @@
   "siteVersion": "SPA on aistudio.tencent.ai; API routes /api/new-portal/* (5 JS bundles ~12.6 MB; hy-web main 7.6 MB)",
   "version": "0.2.0",
   "status": "active",
+  "verified": {
+    "since": "2026-09-19",
+    "evidence": "chat round-trip VERIFIED LIVE 2026-09-19 (headed real Chrome + injected snapshot), proofs PASS 6916/13717; composer textarea.t-textarea__inner, answer .agent-chat__bubble--ai .hyc-content-md -> .hyc-common-markdown, completion marker 'Completed'",
+    "via": "headed real-Chrome only (Tencent Cloud EdgeOne blocks headless, HTTP 567) + session.lock injected snapshot; cookies hunyuan_token/hunyuan_user/hunyuan_source on .tencent.ai verified",
+    "scope": "chat verified; remaining capabilities wire-mapped, DOM-unverified (history drawer renders no anchor list — CRUD honest ok:false)"
+  },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own Tencent AI Studio (aistudio.tencent.ai) sessions to chat with Hunyuan models using my logged-in iOA/WeChat session.",
   "license": "MIT",

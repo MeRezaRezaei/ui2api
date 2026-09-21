@@ -6,6 +6,12 @@
   "siteVersion": "SPA commit 9a1e24e6; bundles default-vendors.73c732e189.js + main.39d5f46438.js on fe-static.deepseek.com/chat/static/ (~2.5MB)",
   "version": "0.3.0",
   "status": "active",
+  "verified": {
+    "since": "2026-09-19",
+    "evidence": "live chat + coT + web search round-trip via session-locked vault replay, proof PASS deepseek 11462 (2026-09-19); capability probe ok:true with real toggle abilities DeepThink/Search (folds #5, 2026-09-21)",
+    "via": "session-locked vault replay (localStorage userToken Bearer + AWS WAF/PoW page path)",
+    "scope": "chat, deepseek_reasoner + deepseek_web_search composer toggles, conversation list"
+  },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own DeepSeek Chat (chat.deepseek.com) sessions to chat, toggle reasoning/web-search, and manage conversation history with my account.",
   "license": "MIT",

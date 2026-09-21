@@ -64,6 +64,21 @@ export function validatePackage(pkgDir) {
     if (metadata.url !== null && metadata.url !== undefined && !/^https?:\/\//i.test(String(metadata.url)))
       errors.push("metadata.url must be http(s) or null (dead-end)");
     if (!["reviewed", "unreviewed"].includes(metadata.trust)) errors.push("metadata.trust must be 'reviewed' | 'unreviewed'");
+    // v2 `verified` contract (audit G2/G3, fold #8): machine-checkable, honest.
+    // Absent or false = NOT verified. A truthy verified MUST be a full record
+    // with since+evidence+via from a real recorded live round-trip; `true` as a
+    // bare boolean is rejected so consumers can trust the field.
+    const v = metadata.verified;
+    if (v !== undefined && v !== false) {
+      if (v === true || typeof v !== "object" || v === null)
+        errors.push("metadata.verified must be a {since,evidence,via[,…]} record or false/absent (bare true is refused)");
+      else {
+        for (const k of ["since", "evidence", "via"])
+          if (typeof v[k] !== "string" || !v[k].trim()) errors.push(`metadata.verified.${k} is required (string)`);
+        if (typeof v.scope !== "undefined" && (typeof v.scope !== "string" || !v.scope.trim()))
+          errors.push("metadata.verified.scope must be a non-empty string when present");
+      }
+    }
   }
   if (manifest) {
     for (const k of MANIFEST_REQUIRED) if (manifest[k] === undefined || manifest[k] === null || manifest[k] === "")
