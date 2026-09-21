@@ -29,6 +29,13 @@ export interface ChatSiteProfile {
   send: SendStrategy;
   answer: string[];
   newChat?: string;
+  // Optional JS-function-indexed entry point (verbatim 2026-09-20T10:01):
+  // when the analyzer captured a real window.<root>.<method> for this site, a
+  // profile can carry it so a capability runner can call the site's own
+  // function instead of (or before) driving the DOM — see src/runtime/js-exec.ts
+  // + docs/ENGINE.md "JS-function-indexed execution". Only set when a live
+  // capture proved the function callable; never invented.
+  jsIndex?: { root: string; method: string; args?: unknown[] };
   // Best-effort buttons to click away before composing (consent / promo
   // overlays on anonymous sites). Failures are swallowed.
   dismiss?: string[];

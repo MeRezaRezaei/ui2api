@@ -4,11 +4,21 @@
 // everywhere: paste -> Enter (the SITE's own JS runs) -> awaitAnswer reads the
 // streamed response off the page like the event bus it is.
 
+import { execJsFunction, type JsCallResult } from "./js-exec.js";
+
 export interface DomPrimitives {
   click(selector: string): Promise<string | void>;
   type(selector: string, text: string): Promise<string | void>;
   waitFor(selector: string, timeoutMs?: number): Promise<string | void>;
   extract(expr: string): Promise<unknown>;
+  // JS-function-indexed call (verbatim 2026-09-20T10:01): invoke a captured
+  // window.<root>.<method>(...) directly in the page instead of mouse/keyboard.
+  jsCall(
+    rootName: string,
+    method: string,
+    args?: unknown[],
+    opts?: { reloadAfterSuccess?: boolean }
+  ): Promise<JsCallResult>;
   // JS-level primitives — keyboard/paste events, not mouse simulation.
   paste(selector: string, text: string): Promise<unknown>;
   press(selector: string | null, keys: string[]): Promise<unknown>;
@@ -64,6 +74,16 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
           return null;
         },
         { sel, kind, arg }
+      );
+    },
+    // JS-function-indexed call: run the site's OWN function by name instead of
+    // driving the DOM with mouse/keyboard. The verbatim's second execution mode.
+    async jsCall(rootName, method, args, opts = {}) {
+      const p = await pageFn();
+      return execJsFunction(
+        async () => p,
+        { root: rootName, method, params: [], sampleArgs: args ?? [] },
+        { args: args ?? [], reloadAfterSuccess: opts.reloadAfterSuccess }
       );
     },
     // Drive the site's own JS by playing the exact keyboard/paste events a real

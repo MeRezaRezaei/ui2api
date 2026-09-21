@@ -203,6 +203,25 @@ export class ChatDriver {
     }
   }
 
+  // JS-function-indexed probe (verbatim 2026-09-20T10:01): when the profile
+  // ships a live-captured index, call window.<root>.<method> in the page and
+  // report ok/error honestly. reloadAfterSuccess implements the verbatim rule —
+  // after a successful indexed call the page is refreshed so the server's view
+  // of us is whole again before any DOM-driven work. No index = silent no-op
+  // (the UI path stays the default everywhere).
+  private async probeJsIndex(): Promise<void> {
+    const idx = this.profile.jsIndex;
+    if (!idx) return;
+    const res = await this.dom.jsCall(idx.root, idx.method, idx.args, {
+      reloadAfterSuccess: true,
+    });
+    if (process.env.UI2API_DEBUG) {
+      console.info(
+        `[ui2api] indexed call ${idx.root}.${idx.method}: ${res.ok ? "ok" : "failed"} ${res.error ?? ""} (${res.networkHits.length} network hit(s))`
+      );
+    }
+  }
+
   async ask(prompt: string, opts: PromptOptions = {}): Promise<PromptResult> {
     const text = String(prompt ?? "").trim();
     if (!text) throw new Error("prompt must not be empty");
@@ -240,6 +259,12 @@ export class ChatDriver {
       }
     }
     await this.dismissOverlays();
+    // JS-function-indexed entry (verbatim 2026-09-20T10:01): when the profile
+    // carries a live-captured window.<root>.<method> for this site, probe it
+    // first — the site's own function answers with its own session. Honest:
+    // only fires when a capture shipped the index; ok:false is reported, never
+    // fabricated as success. Profiles without a jsIndex keep the UI path.
+    await this.probeJsIndex();
     // Model selection (capability reflection): when a specific model is
     // requested, verify it against the account's observed model list and
     // select it — or fail loudly instead of silently prompting on the wrong

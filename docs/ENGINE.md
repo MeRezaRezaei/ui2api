@@ -8,6 +8,50 @@ Two engines are currently supported, selected per-invocation.
 | `native`  | (default)                    | in-process Playwright | Chrome profile | —        | in-page `evaluate` |
 | `wigolo`  | `--engine wigolo`, `UI2API_ENGINE=wigolo` | local wigolo daemon (loopback) | Chrome profile/CDP | baked-in | native fallback |
 
+## JS-function-indexed execution (the `call` mode)
+
+There are two ways to make a site's own JS do work, and both are honest (no
+synthesized traffic — the site's own code runs in the user's real session):
+
+1. **UI path** (mouse/keyboard): paste → Enter → read the streamed answer off
+   the page event bus. This is the ChatDriver default, backed by
+   `makeDomPrimitives` (`paste`, `press`, `capture`, `awaitAnswer`).
+2. **Indexed-call path**: the analyzer captures real js-function entry points —
+   `window.<root>.<method>(...args)` correlated with the network each call
+   produced (`kind: "js-function"` / `"js-return"` / `"network"` captures keyed
+   by callId, see `docs/AUDIT.md`). Instead of driving the DOM, the executor
+   calls that SAME function with the SAME argument shape inside the live page,
+   then correlates the produced fetch/XHR traffic with the result.
+
+`src/runtime/js-exec.ts` implements the executor. Contract:
+
+```ts
+interface JsFunctionIndex {
+  root: string;       // window.<root>
+  method: string;
+  params: string[];   // declared parameter order (analyzer parseParams)
+  sampleArgs: unknown[]; // captured argument shape
+}
+interface JsCallResult {
+  ok: boolean;
+  value: unknown;
+  error?: string;     // "not-a-function: <root>.<method>" when the index is stale
+  networkHits: Array<{ url: string; method: string }>; // fetch/XHR the call fired
+}
+
+execJsFunction(getPage, index, { args?, reloadAfterSuccess?, reloadTimeoutMs? })
+```
+
+The verbatim rule for this mode: **"after each success action the only thing we
+need to do is to refresh the page so anything the server knows about us will be
+there again"** — pass `reloadAfterSuccess: true` and the caller reloads the page
+after every successful indexed call (never after failure).
+
+Access: the same `DomPrimitives` seam exposes it as `jsCall(rootName, method,
+args?)`, so capability runners, generated servers and the hub all get one
+implementation. Engine split: `call` recipes always use the native page
+(wigolo's tool surface has no arbitrary in-page JS execution — see below).
+
 ## The wigolo engine
 
 `serve`/`hub run ... --engine wigolo` (or `UI2API_ENGINE=wigolo`) executes recipe
