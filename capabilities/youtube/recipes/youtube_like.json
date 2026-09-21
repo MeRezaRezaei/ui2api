@@ -5,16 +5,26 @@
   "workType": "ui",
   "reloadAfterSuccess": true,
   "auth": "cookie-login-required",
-  "status": "login-gated-recipe-only",
+  "status": "implemented-dom-unverified",
   "ok": false,
   "steps": [
     {
-      "label": "login-gate check",
+      "label": "open watch page",
       "workType": "ui",
-      "selector": "ytd-segmented-like-dislike-button-renderer button, [aria-label*=\"like this video\" i]",
-      "ok": false,
-      "reloadAfterSuccess": true,
-      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+      "selector": "https://www.youtube.com/watch?v={videoId}",
+      "note": "one real navigation; the site's own JS renders the like button"
+    },
+    {
+      "label": "click like/unlike",
+      "workType": "ui",
+      "selector": "ytd-segmented-like-dislike-button-renderer button:not([disabled])",
+      "note": "real click on the site's own toggle; the page's own JS issues the innertube call. action=like|unlike; reversible."
+    },
+    {
+      "label": "read-back pressed state",
+      "workType": "ui",
+      "selector": "ytd-segmented-like-dislike-button-renderer button[aria-pressed]",
+      "note": "verify the site flipped aria-pressed / label to match the requested action; ok=false until a logged-in session round-trip proves it"
     }
   ]
 }

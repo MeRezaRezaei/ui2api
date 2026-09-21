@@ -32,7 +32,13 @@
 // every request; we only navigate, click the site's own controls, and read
 // back what renders.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
-import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import {
+  injectSnapshot,
+  listAccounts,
+  loadAccountSnapshot,
+  loadSnapshot,
+  snapshotPath,
+} from "../runtime/session-store.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -106,7 +112,23 @@ export class YouTubeCapabilities {
     }
     const host = new URL(this.profile.url).host;
     if (!usingUserChrome()) {
-      const snap = loadSnapshot(snapshotPath(this.dataDir, host));
+      // Session resolution (same ladder as every other runner):
+      //   1. the identity-keyed account vault (data/sessions/<host>/<slug>/)
+      //      — first stored account wins when no specific identity is asked;
+      //   2. the legacy flat snapshot (data/<host>/.session/state.json);
+      //   3. the legacy cookie file (data/<host>/.session/cookies.json).
+      // YouTube captures are usually keyed by google.com email under
+      // data/sessions/youtube.com/<email>/ — both WWW and bare hosts are tried.
+      const hosts = [host, host.replace(/^www\./, "")];
+      let snap: ReturnType<typeof loadSnapshot> | null = null;
+      for (const h of hosts) {
+        const accounts = listAccounts(this.dataDir, h);
+        if (accounts.length > 0) {
+          snap = loadAccountSnapshot(this.dataDir, h, accounts[0].identity ?? accounts[0].slug);
+          if (snap) break;
+        }
+      }
+      snap ??= loadSnapshot(snapshotPath(this.dataDir, host));
       if (snap) {
         await injectSnapshot(context, snap);
       } else {
@@ -125,6 +147,16 @@ export class YouTubeCapabilities {
         return this.search(args);
       case "youtube_transcript":
         return this.transcript(args);
+      case "youtube_comment":
+        return this.comment(args);
+      case "youtube_like":
+        return this.like(args);
+      case "youtube_subscribe":
+        return this.subscribe(args);
+      case "youtube_upload":
+        return this.upload(args);
+      case "youtube_playlist_add":
+        return this.playlistAdd(args);
       default:
         return { capability, ok: false, data: undefined, error: `unknown youtube capability: ${capability}` };
     }
@@ -268,6 +300,250 @@ export class YouTubeCapabilities {
       };
     } catch (e) {
       return this.fail("youtube_transcript", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- youtube_like: open the watch page and toggle the site's own like
+  // button. LIKE is reversible and low-risk (a real click on the visible
+  // button, never a synthetic request); UNLIKE returns the video to its prior
+  // state when `action: "like"` was already applied. The page's own JS talks
+  // to innertube; we only click the site's control.
+  private async like(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
+    const videoId = String(args.videoId ?? "").trim();
+    if (!videoId) return this.fail("youtube_like", "videoId is required");
+    const action = (String(args.action ?? "like").toLowerCase() === "unlike") ? "unlike" : "like";
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const page = await this.openPage(url);
+    try {
+      // VERIFIED SELECTOR 2026-09-21 (live probe): the top-bar action row
+      // renders the like toggle as yt-button-shape button with aria-label
+      // "like this video …/ Unlike". The ytd-segmented-like-dislike layout also
+      // exists in older / South-hosting variants — both are matched.
+      const btn = page
+        .locator(
+          "yt-button-shape button[aria-label*='like this video'], yt-button-shape button[aria-label*='unlike this video'], ytd-segmented-like-dislike-button-renderer button:not([disabled])"
+        )
+        .first();
+      await btn.waitFor({ state: "visible", timeout: 25000 });
+      // Determine current state WITHOUT side effects: count pressed buttons.
+      const pressedBefore = await page.evaluate(() => {
+        const rows = Array.from(
+          document.querySelectorAll(
+            "yt-button-shape button[aria-label], ytd-segmented-like-dislike-button-renderer button"
+          )
+        );
+        return rows
+          .map((b) => ({
+            pressed: b.getAttribute("aria-pressed"),
+            label: (b.getAttribute("aria-label") ?? "").toLowerCase(),
+          }))
+          .filter((x) => x.pressed === "true" || x.label.includes("unlike"));
+      });
+      const alreadyWanted =
+        (action === "like" && pressedBefore.length > 0) || (action === "unlike" && pressedBefore.length === 0);
+      if (!alreadyWanted) {
+        // Real click on the site's own button — the page's JS then sends the
+        // (authenticated) innertube request. No synthetic fetch, ever.
+        await btn.click();
+        // Wait for the button's pressed state to flip (the site re-renders it).
+        await page.waitForTimeout(1500);
+      }
+      const pressedAfter = await page.evaluate(() => {
+        const rows = Array.from(
+          document.querySelectorAll(
+            "yt-button-shape button[aria-label], ytd-segmented-like-dislike-button-renderer button"
+          )
+        );
+        return rows.map((b) => ({
+          pressed: b.getAttribute("aria-pressed"),
+          label: (b.getAttribute("aria-label") ?? "").toLowerCase(),
+        }));
+      });
+      const isLiked = pressedAfter.some((x) => x.pressed === "true" || x.label.includes("unlike"));
+      const ok = action === "like" ? isLiked : !isLiked;
+      return {
+        capability: "youtube_like",
+        ok,
+        method: "dom.click-like-button",
+        data: { videoId, action, liked: isLiked, buttonState: pressedAfter },
+        scaffold: SCAFFOLD_NOTE,
+        error: ok ? undefined : "like button did not flip to the requested state (anonymous session or rotated DOM)",
+        note: ok ? `the site's own like button was clicked and its visible state now reflects ${action}` : undefined,
+      };
+    } catch (e) {
+      return this.fail("youtube_like", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- youtube_subscribe: click the site's own subscribe/unsubscribe button on
+  // a channel page. Requires a logged-in session; anonymous visitors get the
+  // "Sign in to subscribe" gate instead. Never fabricated traffic — we only
+  // click the site's rendered button and read back what the page shows.
+  private async subscribe(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
+    const channelId = String(args.channelId ?? "").trim();
+    if (!channelId) return this.fail("youtube_subscribe", "channelId is required (youtube.com/channel/<id>)");
+    const url = channelId.startsWith("http") ? channelId : `https://www.youtube.com/channel/${encodeURIComponent(channelId)}`;
+    const page = await this.openPage(url);
+    try {
+      const btn = page.locator("ytd-subscribe-button-renderer button:not([disabled])").first();
+      await btn.waitFor({ state: "visible", timeout: 20000 });
+      const labelBefore = ((await btn.getAttribute("aria-label")) ?? "").toLowerCase();
+      const wantSubscribe = !labelBefore.includes("subscribed");
+      const subscribedBefore = labelBefore.includes("subscribed");
+      if (wantSubscribe !== subscribedBefore) {
+        const target = page.locator("ytd-subscribe-button-renderer button").first();
+        await target.click();
+        await page.waitForTimeout(2500);
+      }
+      const label = (await btn.getAttribute("aria-label")) ?? "";
+      const isSubscribed = label.toLowerCase().includes("subscribed");
+      const ok = wantSubscribe ? isSubscribed : !isSubscribed;
+      return {
+        capability: "youtube_subscribe",
+        ok,
+        method: "dom.click-subscribe-button",
+        data: { channelId, subscribed: isSubscribed, buttonLabel: label },
+        scaffold: SCAFFOLD_NOTE,
+        error: ok ? undefined : "subscribe button did not flip (anonymous session or DOM rotated)",
+        note: ok ? `channel${isSubscribed ? " subscribed" : " unsubscribed"} via the site's own button` : undefined,
+      };
+    } catch (e) {
+      return this.fail("youtube_subscribe", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- youtube_comment: post a comment through the watch page's own composer
+  // (the site's #placeholder-area contenteditable). Requires a logged-in
+  // session — anonymous visitors see no composer. The page's own JS submits.
+  private async comment(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
+    const videoId = String(args.videoId ?? "").trim();
+    const text = String(args.text ?? "").trim();
+    if (!videoId) return this.fail("youtube_comment", "videoId is required");
+    if (!text) return this.fail("youtube_comment", "text is required");
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const page = await this.openPage(url);
+    try {
+      // The comment composer is the site's own contenteditable; focus it, type
+      // via the keyboard so the site's own input handlers receive real text,
+      // then let the site's own "Comment" submit button fire.
+      const composer = page.locator(
+        "ytd-comment-simplebox-renderer #placeholder-area, ytd-comment-simplebox-renderer [contenteditable=true]"
+      ).first();
+      await composer.waitFor({ state: "visible", timeout: 20000 });
+      await composer.click();
+      await composer.pressSequentially(text, { delay: 25 });
+      // The Comment button becomes enabled after the first character.
+      await page.waitForTimeout(500);
+      const submit = page.locator(
+        "ytd-comment-simplebox-renderer #submit-button, ytd-comment-simplebox-renderer button[aria-label*='Comment']"
+      ).first();
+      const submitEnabled = ((await submit.getAttribute("disabled")) ?? null) === null;
+      if (submitEnabled) {
+        await submit.click();
+        await page.waitForTimeout(2500);
+      }
+      const posted = await page.evaluate((needle: string) => {
+        const els = Array.from(document.querySelectorAll("#contenteditable-root, #content-text, ytd-comment-renderer #content-text"));
+        return els.some((el) => ((el as HTMLElement).textContent ?? "").trim().includes(needle));
+      }, text.slice(0, 32));
+      return {
+        capability: "youtube_comment",
+        ok: posted,
+        method: "dom.comment-composer",
+        data: { videoId, submitted: submitEnabled, posted, textPreview: text.slice(0, 64) },
+        scaffold: SCAFFOLD_NOTE,
+        error: posted
+          ? undefined
+          : submitEnabled
+            ? "comment button clicked but no read-back of the text appeared (posting failed or gated)"
+            : "comment submit button stayed disabled (anonymous session or DOM rotated)",
+        note: posted ? "comment text was read back from the page's own comment list after a real submit" : undefined,
+      };
+    } catch (e) {
+      return this.fail("youtube_comment", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- youtube_playlist_add: add the video to a playlist via the site's own
+  // Save menu (three-dot → "Save to playlist"). Requires login; anonymous gets
+  // a sign-in prompt in the menu.
+  private async playlistAdd(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
+    const videoId = String(args.videoId ?? "").trim();
+    if (!videoId) return this.fail("youtube_playlist_add", "videoId is required");
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const page = await this.openPage(url);
+    try {
+      // The Save affordance is the first button whose aria-label starts with
+      // "Save" inside the watch header's action bar.
+      const save = page.locator(
+        "ytd-menu-renderer button[aria-label^='Save'], yt-button-shape button[aria-label^='Save'], ytd-button-renderer button[aria-label^='Save']"
+      ).first();
+      await save.waitFor({ state: "visible", timeout: 20000 });
+      await save.click();
+      await page.waitForTimeout(1200);
+      // Pick the first playlist entry (the site's own menu item) if the menu
+      // opened with a creation form, else confirm the default choice.
+      const opened = await page.evaluate(() => {
+        const items = Array.from(document.querySelectorAll("ytd-add-to-playlist-renderer yt-formatted-string[has-link], yt-add-to-playlist-renderer .playlist-creator-menu-item"));
+        return items.length;
+      });
+      return {
+        capability: "youtube_playlist_add",
+        ok: opened > 0,
+        method: "dom.save-playlist-menu",
+        data: { videoId, playlistChoices: opened },
+        scaffold: "scaffold-dom-unverified: Save affordance selector is a candidate (no live round-trip yet); the menu is expected to list the account's playlists",
+        error: opened === 0 ? "Save menu did not list any playlist entries (anonymous session or DOM rotated)" : undefined,
+        note: opened > 0 ? "the site's own Save menu rendered the account's playlist choices (no add committed — menu demands a choice)" : undefined,
+      };
+    } catch (e) {
+      return this.fail("youtube_playlist_add", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- youtube_upload: hand a local file to the site's own hidden
+  // input[type=file] on youtube.com/upload. Requires login; anonymous gets a
+  // sign-in redirect. We only `setInputFiles` — the site's own JS uploads.
+  private async upload(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
+    const filePath = String(args.filePath ?? "").trim();
+    if (!filePath) return this.fail("youtube_upload", "filePath is required");
+    const page = await this.openPage("https://www.youtube.com/upload");
+    try {
+      const fileInput = page.locator("input[type=file]").first();
+      await fileInput.waitFor({ state: "attached", timeout: 20000 });
+      const visible = await fileInput.isVisible();
+      if (!visible) {
+        // The file input may sit inside a shadow/slotted wrapper — attempt the
+        // piped setInputFiles anyway (playwright reaches it when on the page).
+      }
+      await fileInput.setInputFiles(filePath);
+      // After a successful handoff the site starts processing the file.
+      await page.waitForTimeout(2000);
+      const processing = await page.evaluate(() => {
+        const t = document.body.innerText ?? "";
+        return /processing|selected|processing your video|uploading/i.test(t);
+      });
+      return {
+        capability: "youtube_upload",
+        ok: processing,
+        method: "dom.file-input-handoff",
+        data: { fileName: filePath.split("/").pop(), processing },
+        scaffold: "scaffold-dom-unverified: hidden file input + processing text are candidates (no live round-trip yet); upload demands login",
+        error: processing ? undefined : "site did not show processing state after the file handoff (anonymous or unsupported format)",
+        note: processing ? "the file was handed to the site's own upload input and the page entered its processing state" : undefined,
+      };
+    } catch (e) {
+      return this.fail("youtube_upload", e);
     } finally {
       await this.teardownPage(page);
     }

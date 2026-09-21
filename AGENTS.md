@@ -166,6 +166,19 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   expands but the site's own `get_transcript` endpoint answers HTTP 400
   "Precondition check failed" without SAPISID (needs a logged-in capture;
   honest partial, never claimed verified). Auth optional-cookie.
+  **2026-09-21: POSTING surface implemented + dispatched** —
+  `youtube_comment`/`youtube_like`/`youtube_subscribe`/`youtube_upload`/
+  `youtube_playlist_add` on `/capability/youtube` (were "unknown youtube
+  capability"); runner `openPage()` gained a vault-account ladder
+  (`data/sessions/<host>/<slug>/` first, then legacy flat snapshot, then cookie
+  file). **MEASURED login-bound**: a real account vault exists on the box
+  (data/sessions/youtube.com/merezarezaei@gmail.com/, source=import) but
+  Google auth cookies are **browser-bound** (app-bound encryption) — replaying
+  the vault OR the real Chrome profile copy into fresh ephemeral contexts
+  renders anonymous AND trips YouTube's "Sign in to confirm you're not a bot".
+  Posting therefore needs the **user's own real Chrome attached**
+  (`UI2API_ATTACH_PORT` / live profile), exactly like `tencent-aistudio`;
+  never fabricate a post until a real attached session proves the flip.
   **`araprat`** = Aparat (www.aparat.com, Persian video platform; "araprat"
   resolved via web search) — NOT a chat site; ALL THREE capabilities
   **VERIFIED**: `araprat_search` (`input[name="search"]` → `/search/<q>` grid

@@ -4,17 +4,27 @@
   "version": "1.0.0",
   "workType": "ui",
   "reloadAfterSuccess": true,
-  "auth": "cookie-login-required",
-  "status": "login-gated-recipe-only",
+  "auth": "cookie-login-required login-owns-video",
+  "status": "implemented-dom-unverified",
   "ok": false,
   "steps": [
     {
-      "label": "login-gate check",
+      "label": "open upload page",
+      "workType": "ui",
+      "selector": "https://www.youtube.com/upload",
+      "note": "one real navigation; the site's own JS renders the Studio file input"
+    },
+    {
+      "label": "hand file to the site's own input",
       "workType": "ui",
       "selector": "input[type=file]",
-      "ok": false,
-      "reloadAfterSuccess": true,
-      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+      "note": "setInputFiles — the site's own JS uploads the file; no synthetic request"
+    },
+    {
+      "label": "read-back processing state",
+      "workType": "ui",
+      "selector": "body",
+      "note": "verify the page entered processing/uploading state after handoff; ok=false until a logged-in session + real file round-trip proves it. NEVER claims uploaded without this read-back."
     }
   ]
 }

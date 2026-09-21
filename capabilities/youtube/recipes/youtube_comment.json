@@ -5,16 +5,32 @@
   "workType": "ui",
   "reloadAfterSuccess": true,
   "auth": "cookie-login-required",
-  "status": "login-gated-recipe-only",
+  "status": "implemented-dom-unverified",
   "ok": false,
   "steps": [
     {
-      "label": "login-gate check",
+      "label": "open watch page",
       "workType": "ui",
-      "selector": "#contenteditable, [contenteditable=true], #placeholder-area",
-      "ok": false,
-      "reloadAfterSuccess": true,
-      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+      "selector": "https://www.youtube.com/watch?v={videoId}",
+      "note": "one real navigation; the site's own JS renders the comment composer"
+    },
+    {
+      "label": "focus composer + type",
+      "workType": "ui",
+      "selector": "ytd-comment-simplebox-renderer #placeholder-area, ytd-comment-simplebox-renderer [contenteditable=true]",
+      "note": "real key events into the site's own contenteditable"
+    },
+    {
+      "label": "press the site's Comment button",
+      "workType": "ui",
+      "selector": "ytd-comment-simplebox-renderer #submit-button",
+      "note": "the site's own JS submits; never a synthetic fetch"
+    },
+    {
+      "label": "read-back posted text",
+      "workType": "ui",
+      "selector": "#content-text, ytd-comment-renderer #content-text",
+      "note": "verify the site's comment list shows the text after the real submit; ok=false until a logged-in session round-trip proves it. NEVER claims posted without this read-back."
     }
   ]
 }

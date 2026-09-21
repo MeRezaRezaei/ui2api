@@ -5,16 +5,26 @@
   "workType": "ui",
   "reloadAfterSuccess": true,
   "auth": "cookie-login-required",
-  "status": "login-gated-recipe-only",
+  "status": "implemented-dom-unverified",
   "ok": false,
   "steps": [
     {
-      "label": "login-gate check",
+      "label": "open watch page",
       "workType": "ui",
-      "selector": "[aria-label*=\"Save\" i], ytd-button-renderer[aria-label*=\"Save\" i]",
-      "ok": false,
-      "reloadAfterSuccess": true,
-      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+      "selector": "https://www.youtube.com/watch?v={videoId}",
+      "note": "one real navigation; the site's own JS renders the Save affordance"
+    },
+    {
+      "label": "open Save menu",
+      "workType": "ui",
+      "selector": "ytd-menu-renderer button[aria-label^='Save'], yt-button-shape button[aria-label^='Save']",
+      "note": "real click on the site's own Save button"
+    },
+    {
+      "label": "read-back playlist choices",
+      "workType": "ui",
+      "selector": "ytd-add-to-playlist-renderer, yt-add-to-playlist-renderer",
+      "note": "verify the account's playlist list rendered in the menu; NO add is committed until a choice is selected; ok=false until a logged-in session round-trip proves it"
     }
   ]
 }

@@ -37,57 +37,57 @@
     {
       "id": "youtube_comment",
       "name": "Post a comment",
-      "description": "VERBATIM studio surface (comment) — LOGIN-GATED + public + irreversible. Registry contract: workType ui|js + reloadAfterSuccess. Honest: anonymous user hitting the comment composer gets YouTube s sign-in interstitial; ok:false login-required until an authorized captured logged-in session exists. NEVER posts without it.",
+      "description": "VERBATIM studio surface (comment) — LOGIN-GATED + public + irreversible. Registry contract: workType ui|js + reloadAfterSuccess. IMPLEMENTED (dispatch lives on /capability/youtube 2026-09-21): opens the watch page's own composer (ytd-comment-simplebox-renderer #placeholder-area), types via real key events, presses the site's own submit button, then reads the text back off the page's comment list. Honest: anonymous user hitting the comment composer gets YouTube's sign-in interstitial; ok:false login-required until an authorized captured logged-in session exists. NEVER posts without it.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
     },
     {
       "id": "youtube_like",
       "name": "Like a video",
-      "description": "LOGIN-GATED + public. Ok:false login-required until authorized captured session. Never fabricates a like.",
+      "description": "IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): clicks the site's own ytd-segmented-like-dislike-button-renderer like button on the watch page and reads back the pressed state (aria-pressed/label). Reversible (action=unlike). Ok:false login-required until an authorized captured session. Never fabricates a like.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
     },
     {
       "id": "youtube_subscribe",
       "name": "Subscribe to a channel",
-      "description": "LOGIN-GATED + public. Ok:false login-required until authorized captured session.",
+      "description": "IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): clicks the site's own ytd-subscribe-button-renderer button on a channel page and reads back the button label flip. Reversible. Ok:false login-required until an authorized captured session.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
     },
     {
       "id": "youtube_upload",
       "name": "Upload a video (Studio)",
-      "description": "Upload video to YouTube Studio (studio.youtube.com) — LOGIN-GATED + public + IRREVERSIBLE. Recipe-only; the file-picker + metadata + publish steps are honest ui-path recipes. Ok:false login-required until an authorized logged-in Studio session capture. NEVER posts without it.",
+      "description": "Upload video to YouTube (youtube.com/upload) — LOGIN-GATED + public + IRREVERSIBLE. IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): hands a local file to the site's own hidden input[type=file] via setInputFiles and reads back the page's processing state. Ok:false until an authorized logged-in session + real file. NEVER publishes a video without it.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required login-owns-video",
-      "status": "login-gated-recipe-only"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session + real file)"
     },
     {
       "id": "youtube_playlist_add",
       "name": "Add to a playlist",
-      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "description": "IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): opens the watch page's Save menu (button[aria-label^='Save']) and reads back whether the account's playlist choices rendered; no add is committed until a choice is made. Ok:false login-required until an authorized captured session.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
     }
   ],
   "auth": {

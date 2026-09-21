@@ -5,16 +5,26 @@
   "workType": "ui",
   "reloadAfterSuccess": true,
   "auth": "cookie-login-required",
-  "status": "login-gated-recipe-only",
+  "status": "implemented-dom-unverified",
   "ok": false,
   "steps": [
     {
-      "label": "login-gate check",
+      "label": "open channel page",
       "workType": "ui",
-      "selector": "#subscribe-button button, ytd-subscribe-button-renderer button",
-      "ok": false,
-      "reloadAfterSuccess": true,
-      "note": "LOGIN-GATED login-required. If attached session returns a logged-in composer, capture then verify; NEVER fabricate a post without a verified live read-back."
+      "selector": "https://www.youtube.com/channel/{channelId}",
+      "note": "one real navigation; the site's own JS renders the subscribe button"
+    },
+    {
+      "label": "click subscribe/unsubscribe",
+      "workType": "ui",
+      "selector": "ytd-subscribe-button-renderer button:not([disabled])",
+      "note": "real click on the site's own toggle; the page's own JS issues the subscription call"
+    },
+    {
+      "label": "read-back button label",
+      "workType": "ui",
+      "selector": "ytd-subscribe-button-renderer button",
+      "note": "verify the site flipped the label to Subscribed/Unsubscribed; ok=false until a logged-in session round-trip proves it"
     }
   ]
 }
