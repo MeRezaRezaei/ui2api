@@ -16,7 +16,8 @@ Core property (non-negotiable): **no fabricated traffic.** We never synthesize
 requests or send fake inputs that could look foreign to the site's anti-bot
 stack. We drive the site through its own UI/JS and read answers back off the
 page. Docs: `docs/VISION.md`, `docs/ENGINE.md`, `docs/STEALTH.md` (stealth
-audit + posture), `docs/AUDIT.md`, `docs/TROUBLESHOOTING.md`.
+audit + posture), `docs/AUDIT.md`, `docs/TROUBLESHOOTING.md`. New users: start
+at `docs/ONBOARDING.md` (copy-paste v1 flow).
 
 ## Layout
 

@@ -172,17 +172,23 @@ parallel requests — exactly like the request queue + a browser. Semantics:
 
 Available sites (declarative, tune-able): `gemini`, `chatgpt`, `claude`,
 `copilot` (anonymous), `perplexity` (anonymous Ask), `huggingchat`, plus
-session-locked packages `deepseek` (chat.deepseek.com), `kimi` (www.kimi.ai)
-and `tencent-aistudio` (aistudio.tencent.ai — headed/real-profile only).
-All three session-locked sites are **live-verified end-to-end** (2026-09-19,
-see `capabilities/README.md`): deepseek = chat + real DeepThink/Search toggles +
+session-locked packages `deepseek` (chat.deepseek.com), `kimi` (www.kimi.ai),
+`gemini` and `tencent-aistudio` (aistudio.tencent.ai — headed/real-profile only).
+Four chat sites are **live-verified end-to-end** (2026-09-19, see
+`capabilities/README.md`): deepseek = chat + real DeepThink/Search toggles +
 conversation list; kimi = chat + conversation list + model picker + web-search
-toolkit + file upload; tencent-aistudio = chat (EdgeOne-headed only) + full wire
-map. Each exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
+toolkit + file upload; gemini = chat (re-verified fold #6/2026-09-15); tencent-
+aistudio = chat (EdgeOne-headed only) + full wire map. Capability-only sites
+(not chat): `youtube` (`youtube_search` verified 2026-09-20; posting login-
+bound) and `araprat` (search/trending/video_detail verified 2026-09-20). A
+machine-checkable `verified` record (since/evidence/via) rides on every
+`/registry` package — absent or `false` = honestly not verified. Each verified
+chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
 Sending is always the site's **own JS**: paste event + Enter — no synthetic
 mouse clicks; the answer is read from the page's event bus until it stops
 growing. (`npx tsx src/cli.ts prompt --sites` lists what's available; the full
-inventory of analyzed sites lives in `capabilities/README.md`.)
+inventory of analyzed sites lives in `capabilities/README.md`)
+Full copy-paste onboarding: **docs/ONBOARDING.md**.
 
 - **Just works on its own**: zero-config browser (bundled Chromium, auto-fallbacks
   to system Chrome), no external LLM API, no logins for the anonymous sites.
