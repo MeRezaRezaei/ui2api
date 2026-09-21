@@ -59,7 +59,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_comment.json"
     },
     {
       "id": "araprat_like",
@@ -70,7 +71,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_like.json"
     },
     {
       "id": "araprat_follow",
@@ -81,7 +83,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_follow.json"
     },
     {
       "id": "araprat_subscribe",
@@ -92,7 +95,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_subscribe.json"
     },
     {
       "id": "araprat_upload",
@@ -103,7 +107,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required login-owns-video",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_upload.json"
     },
     {
       "id": "araprat_playlist",
@@ -114,7 +119,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "login-gated-recipe-only"
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/araprat_playlist.json"
     }
   ],
   "auth": {

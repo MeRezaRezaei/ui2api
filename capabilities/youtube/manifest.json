@@ -43,7 +43,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
+      "recipe": "recipes/youtube_comment.json"
     },
     {
       "id": "youtube_like",
@@ -54,7 +55,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
+      "recipe": "recipes/youtube_like.json"
     },
     {
       "id": "youtube_subscribe",
@@ -65,7 +67,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
+      "recipe": "recipes/youtube_subscribe.json"
     },
     {
       "id": "youtube_upload",
@@ -76,7 +79,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required login-owns-video",
-      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session + real file)"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session + real file)",
+      "recipe": "recipes/youtube_upload.json"
     },
     {
       "id": "youtube_playlist_add",
@@ -87,7 +91,8 @@
       "workType": "ui",
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
-      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)"
+      "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
+      "recipe": "recipes/youtube_playlist_add.json"
     }
   ],
   "auth": {
