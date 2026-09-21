@@ -50,6 +50,26 @@ with documented web-session auth (from the open-source OmniRoute repo).
 - Analysis agents never launch browsers (host is constrained) — static bundle
   reading + curl only.
 
+## Live one-shot sweep (2026-09-21, fold #9) — honest per-site blockers
+
+On this box (headless vault-replay browsers in `data/sessions/`), trying to add a
+NEW live-verified chat site beyond kimi/deepseek/gemini/tencent-aistudio gave
+these MEASURED results (nothing fabricated — every site below answered the
+composer probe with a wall, not an answer):
+
+| Site | Live result on this box | Blocker |
+|---|---|---|
+| `copilot` | composer probe → region interstitial | **"Not available in your region"** — Microsoft serves a region-gate page (`textarea` hint only, no chat). Composer selectors `#userInput` no longer resolve; the only `<textarea>` is inside the region notice. |
+| `perplexity` | page → **Cloudflare "Just a moment…"** challenge | no composer, challenge wall (known: chat transport already documented Cloudflare-403) |
+| `chatgpt` | page renders **empty login wall** (SPA boots, no composer) | anonymous cookie set in vault is Cloudflare-only (`_cfuvid`/`__cf_bm`/`__cflb`); needs a real `__Secure-*` auth session capture |
+| `huggingchat` | composer found, "Start chatting" CTA → **OAuth2 login** (`huggingface.co/login?next=…oauth/authorize`) | **anonymous no longer answers**: the welcome interstitial's single CTA kicks the OAuth gate (added profile `dismiss` for the interstitial, but the gate itself needs a logged-in capture) |
+| `claude` | not re-attempted | known Cloudflare-walled (assets-proxy only); needs headed real-profile |
+
+Conclusion (honest): no NEW chat site can be live-verified on this box without a
+real logged-in session capture (headed/attached Chrome) — the box's existing
+sessions cover exactly the already-verified set. This snapshots the wall so a
+future fold with an attached real Chrome knows exactly where to begin.
+
 ## Inventory status (2026-09-15 — JS bundle analysis, no browser launched)
 
 | Package | Status | Key discovery |

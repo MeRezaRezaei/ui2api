@@ -210,6 +210,7 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     composer: ["textarea[placeholder*='Ask']", ".ChatInput textarea", "textarea"],
     send: { kind: "keyEnter" },
     answer: [".message.overflow-y-auto", '[data-testid="message"]', ".chat-container .message"],
+    dismiss: ["button:has-text('Start chatting')"],
     captureMs: 90000,
     stableMs: 2500,
   },
