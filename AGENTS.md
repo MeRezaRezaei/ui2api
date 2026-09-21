@@ -131,7 +131,7 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     `kimi_file_upload` (`label.toolkit-item` wrapping hidden
     `input[type="file"]` — use `setInputFiles`, filechooser never fires).
   - `gemini` (gemini.google.com) — verified earlier; do not re-capture.
-- **Suite gates (2026-09-21 restart fold)**: full suite now measured **378/378**.
+- **Suite gates (2026-09-21, fold #11)**: full suite now measured **418/418**.
   The two wigolo-engine infra gates (chromium warmup on ubuntu26.04-x64) CLOSED by
   aligning the wigolo clone's playwright 1.60→1.61: build 1228 is already present
   on the box (`~/.cache/ms-playwright/chromium-1228`), so `chromium.executablePath()`
