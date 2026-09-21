@@ -66,6 +66,12 @@ export interface ChatSiteProfile {
     pickerOpen?: string[];
     pickerOption?: string[];
     restrictionMarkers?: Array<{ kind: string; patterns: string[] }>;
+    abilityToggles?: Array<{
+      id: string;
+      selector: string;
+      label: string;
+      selectedClass?: string;
+    }>;
   };
 }
 
@@ -240,6 +246,21 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     dismiss: ['button[aria-label*="Sign in"], button[aria-label*="登录"]', 'button[aria-label*="Close"], button[aria-label*="关闭"]'],
     captureMs: 60000,
     stableMs: 2000,
+    // Capability reflection (LIVE-verified 2026-09-21 against the account
+    // vault snapshot): composer model select [data-testid="model-select-trigger"]
+    // opens a panel of button.model-item rows (current: "Instant High" → the
+    // K3-family row named "K3 Chat & Agent"); the membership-upgrade button in
+    // the sidebar is the tier signal ("Upgrade" = not on the paid tier).
+    capability: {
+      pickerOpen: ['[data-testid="model-select-trigger"]'],
+      pickerOption: ["button.model-item", "[role='menuitem'] button"],
+      tierSelectors: ["button.membership-upgrade", "[class*='membership-upgrade']"],
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade", "可行的升级", "升级会员"] },
+        { kind: "limit", patterns: ["you've reached your limit", "limit reached", "message limit", "次数用尽"] },
+        { kind: "login", patterns: ["log in to continue", "sign in to continue"] },
+      ],
+    },
     note: "LOCKED + LIVE-VERIFIED (2026-09-18/19): composer [data-testid='chat-editor'], answer excludes thinking block; new 'next' UI revision — sidebar history = a.next-sidebar-history-item__link (href /chat/<id>?chat_enter_method=history), model select [data-testid='model-select-trigger'] (Instant/High), toolkit panel (Web Search / Add files & images / Plugins / Skills) behind [data-testid='toolkit-trigger-btn']. Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine.",
   },
   deepseek: {
@@ -260,6 +281,24 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     dismiss: ['button[aria-label*="Close"]', 'button[aria-label*="Accept"]'],
     captureMs: 60000,
     stableMs: 2000,
+    // Capability reflection (LIVE-verified 2026-09-21 against the account
+    // vault snapshot): deepseek exposes NO model picker in the shell — what it
+    // shows instead are composer TOGGLES, `.ds-toggle-button` rows labelled
+    // "DeepThink" and "Search", the active one carrying class
+    // ds-toggle-button--selected. Those are the real per-account abilities.
+    capability: {
+      abilityToggles: [
+        { id: "reasoner", selector: ".ds-toggle-button", label: "DeepThink", selectedClass: "ds-toggle-button--selected" },
+        { id: "web_search", selector: ".ds-toggle-button", label: "Search", selectedClass: "ds-toggle-button--selected" },
+      ],
+      restrictionMarkers: [
+        // Full phrase matches only — bare "rate limit" matched a SIDEBAR
+        // conversation title ("Fix GitHub Rate Limit and Redundant Downloads"),
+        // a false positive found 2026-09-21. These are the real banner texts.
+        { kind: "limit", patterns: ["rate limit reached", "too many requests, please", "you've reached the limit", "you have reached the limit", "server busy, please", "服务繁忙，请稍后重试", "请求过于频繁"] },
+        { kind: "login", patterns: ["please log in", "log in to continue", "sign in to continue", "请登录"] },
+      ],
+    },
     note: "LOCKED — verified live against chat.deepseek.com (2026-09-18) with an ingested Chrome session (localStorage userToken → Bearer; AWS WAF token + ds_session_id cookies). HEADED session REQUIRED: AWS WAF JS challenge + PoW mining solved invisibly by the real browser.",
   },
   "tencent-aistudio": {

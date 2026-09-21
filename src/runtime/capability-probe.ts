@@ -56,6 +56,14 @@ export interface ModelObserved {
   tier?: string;
 }
 
+/** A toggle-driven site ability (e.g. DeepSeek's DeepThink/Search). */
+export interface AbilityToggle {
+  id: string;
+  label: string;
+  on: boolean;
+  present: boolean;
+}
+
 export interface CapabilityReport {
   site: string;
   host: string;
@@ -65,6 +73,9 @@ export interface CapabilityReport {
   models: ModelObserved[];
   modelsMethod: "wire" | "dom" | "declared" | "none";
   restrictions: RestrictionHit[];
+  /** Toggle-driven abilities observed on the composer (method:"dom" when read). */
+  abilities?: AbilityToggle[];
+  abilitiesMethod?: "dom" | "unknown";
   ok: boolean;
   reason?: string;
 }
@@ -77,10 +88,18 @@ export function buildReport(input: {
   models: ModelObserved[];
   modelsMethod: CapabilityReport["modelsMethod"];
   restrictions?: RestrictionHit[];
+  abilities?: AbilityToggle[];
+  abilitiesMethod?: CapabilityReport["abilitiesMethod"];
   reason?: string;
 }): CapabilityReport {
   const restrictions = input.restrictions ?? [];
-  const ok = input.tier.method !== "unknown" || input.models.length > 0 || input.modelsMethod !== "none";
+  const abilities = input.abilities ?? [];
+  const abilitiesMethod = input.abilitiesMethod ?? "unknown";
+  const ok =
+    input.tier.method !== "unknown" ||
+    input.models.length > 0 ||
+    input.modelsMethod !== "none" ||
+    abilities.some((a) => a.present);
   return {
     site: input.site,
     host: input.host,
@@ -90,6 +109,7 @@ export function buildReport(input: {
     models: input.models,
     modelsMethod: input.modelsMethod,
     restrictions,
+    ...(abilities.length ? { abilities, abilitiesMethod } : {}),
     ok,
     ...(ok ? {} : { reason: input.reason ?? "nothing readable with the current probe selectors" }),
   };
@@ -107,6 +127,20 @@ export interface ProfileCapability {
   pickerOpen?: string[];
   pickerOption?: string[];
   restrictionMarkers?: RestrictionMarker[];
+  /**
+   * Toggle-driven abilities — composer switches that reveal what THIS account
+   * can do (DeepSeek's "DeepThink"/"Search", ...). Each entry names the toggle
+   * and how to read its on/off state. Ground:
+   *   selector      — container for one or more toggles (e.g. ".ds-toggle-button")
+   *   label         — case-insensitive substring matching the toggle text
+   *   selectedClass — class that marks the toggle as active (optional)
+   */
+  abilityToggles?: Array<{
+    id: string;
+    selector: string;
+    label: string;
+    selectedClass?: string;
+  }>;
 }
 
 export function profileCapability(profile: ChatSiteProfile): ProfileCapability {
@@ -232,6 +266,39 @@ export async function probeCapabilities(opts: {
     }
   }
 
+  // 2b. Toggle-driven abilities (e.g. DeepSeek DeepThink/Search) — switches
+  //     that reveal account-specific capabilities. Each read is guarded.
+  const abilityToggles = cap.abilityToggles ?? [];
+  if (abilityToggles.length) {
+    try {
+      const reads = await opts.page.evaluate((toggles) => {
+        return toggles.map((t) => {
+          const els = [...document.querySelectorAll(t.selector)];
+          const el = els.find((e) =>
+            ((e as HTMLElement).innerText || "").toLowerCase().includes(t.label.toLowerCase())
+          );
+          if (!el) return { id: t.id, present: false, on: false };
+          const cls = ((el as HTMLElement).className || "").toString();
+          const aria = el.getAttribute?.("aria-pressed");
+          return {
+            id: t.id,
+            present: true,
+            on: t.selectedClass ? cls.includes(t.selectedClass) : aria === "true",
+          };
+        });
+      }, abilityToggles as Array<{ id: string; selector: string; label: string; selectedClass?: string }>);
+      const abilities: AbilityToggle[] = reads
+        .map((r, i) => ({ label: abilityToggles[i]?.label ?? r.id, on: r.on, present: r.present, id: r.id }))
+        .slice(0, 12);
+      if (abilities.some((a) => a.present)) {
+        report.abilities = abilities;
+        report.abilitiesMethod = "dom";
+      }
+    } catch {
+      // toggle read failed — abilities stay absent
+    }
+  }
+
   // 3. Restrictions — scan visible text once.
   if (cap.restrictionMarkers?.length) {
     try {
@@ -242,7 +309,11 @@ export async function probeCapabilities(opts: {
     }
   }
 
-  report.ok = report.tier.method !== "unknown" || report.models.length > 0 || report.modelsMethod !== "none";
+  report.ok =
+    report.tier.method !== "unknown" ||
+    report.models.length > 0 ||
+    report.modelsMethod !== "none" ||
+    (report.abilities?.some((a) => a.present) ?? false);
   if (!report.ok) report.reason = "nothing readable with the current probe selectors";
   return report;
 }

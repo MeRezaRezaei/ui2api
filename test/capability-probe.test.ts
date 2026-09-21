@@ -69,6 +69,45 @@ test("buildReport honest-unknown: nothing readable -> ok:false with reason", () 
   assert.ok(report.reason);
 });
 
+test("buildReport: ability toggles present -> ok true even with unknown tier/models", () => {
+  const report = buildReport({
+    site: "deepseek",
+    host: "chat.deepseek.com",
+    account: "merezarezaei@gmail.com",
+    tier: { value: null, method: "unknown" },
+    models: [],
+    modelsMethod: "none",
+    abilities: [
+      { id: "reasoner", label: "DeepThink", on: false, present: true },
+      { id: "web_search", label: "Search", on: true, present: true },
+    ],
+    abilitiesMethod: "dom",
+  });
+  assert.equal(report.ok, true);
+  assert.equal(report.abilitiesMethod, "dom");
+  assert.equal(report.abilities?.length, 2);
+  const search = report.abilities?.find((a) => a.id === "web_search");
+  assert.equal(search?.on, true);
+});
+
+test("buildReport: only absent toggles -> ok false (honest)", () => {
+  const report = buildReport({
+    site: "deepseek",
+    host: "chat.deepseek.com",
+    account: "x",
+    tier: { value: null, method: "unknown" },
+    models: [],
+    modelsMethod: "none",
+    abilities: [
+      { id: "reasoner", label: "DeepThink", on: false, present: false },
+      { id: "web_search", label: "Search", on: false, present: false },
+    ],
+    abilitiesMethod: "dom",
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.reason);
+});
+
 test("model availability decision: present -> allowed, absent -> explicit error", async () => {
   const observed = ["gemini-2.5-pro", "gemini-2.5-flash"];
   assert.equal(observed.includes("gemini-2.5-pro"), true);
