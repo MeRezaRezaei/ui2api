@@ -189,6 +189,27 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   DEAD on this SPA — do not rely on them). Hydration: wait for
   `a[href*='/v/']`, h1 lands ~3.5s before desc/related.
 
+- **Full-surface audit fold #17f (2026-09-22, done)** — per-site status after
+  double-check + code-audit (details in `docs/verbatim-goals.md` GOAL 6):
+  - **WORKS LIVE (re-verified this fold through the wire/attach)**: `gemini`
+    (vault, PONG), `deepseek` (vault, PONG), `kimi` (vault, PONG),
+    `tencent-aistudio` (headed .tencent.ai cookie session — the refreshed
+    ui2api copy-Chrome profile carries hunyuan_token/user/source), `youtube_search`
+    (ok:true rows), `araprat_search`/`araprat_trending`/`araprat_video_detail`
+    (ok:true).
+  - **HONEST dead-end (never claimed verified)**: `hunyuan` = yuanbao.tencent.com
+    has NO session ANYWHERE on this box (not in real me-Chrome, not in the
+    copy) — hy_user/hy_token are domain cookies the user has never generated.
+    The Tencent AI surface the user means is aistudio.tencent.ai (VERIFIED,
+    and its HunyuanDefault chat already serves modelId=hy4-preview-g).
+    `google-ai-search` stays BLOCKED on portal v20 (external sign-in required).
+  - **Audit fixes shipped**: `test/capability-dispatch.test.ts` RUNNERS now
+    include `youtube` + `araprat` (12 runners, IN-SYNC manifest↔dispatch —
+    was 10, these two live-verified runners were outside the suite);
+    `src/capabilities/araprat.ts` + manifest now dispatch the 6 posting caps
+    HONESTLY as login-gated (ok:false loginGated:true, no browser) so they no
+    longer fall into the dead "unknown" branch; suite 430/430.
+
 ## Conventions & red lines
 
 - **Never commit `data/`**, `.agents/`, `.opencode/`, `sites/*/server/` (see
