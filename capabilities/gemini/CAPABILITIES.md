@@ -1,5 +1,17 @@
 # Gemini capabilities (from JS bundle analysis, 2026-09-15)
 
+> ## Status (2026-09-22): VERIFIED — works live, VAULT-driven, **DO NOT re-capture**
+>
+> Live verified + re-verified through `/v1/chat/completions` and one-shot
+> ChatDriver (PONG, stable reads; `/v1/chat/completions` model=gemini OK) —
+> driven by the vault account (`data/sessions/gemini.google.com/<slug>/state.json`).
+> Per AGENTS.md: gemini was verified earlier; **do not re-capture**. The §0
+> signed-out compact-ID decode below is a 2026-09-15 probe snapshot, NOT the
+> product state — the only unresolved item is conversation-CRUD compact-ID
+> pinning (create/rename/delete), which was not pinnable on the probe's
+> signed-out SSR leaf and remains unpinned via the vault (v1 full paths listed
+> at §0).
+
 Bundles analyzed (fetched read-only with curl, no login/execution):
 - `gemini-home.html` (840 KB; `WIZ_global_data`, `bard-initial-data`, `_F_toggles_default_BardChatUi`)
 - `main.js` = `boq-bard-web.BardChatUi` base/bootstrap (115 KB; `m=_b`)
@@ -35,8 +47,10 @@ Void RPCs carry no data-bearing payload; none merit their own capability. Conver
 CRUD compact IDs (create/rename/delete) were **not** pinnable live: New-chat fires no
 batchexecute (conversation created lazily on first `StreamGenerate`), and the snapshot
 account renders a signed-out SSR leaf with 0 conversations (rename/delete not
-exercisable). TODO re-capture a signed-in session + row-kebab walk to pin them; v1 full
-paths are `CreateConversation / MutateConversation / UpdateChat / DeleteConversation /
+exercisable). **Status (2026-09-22): unchanged — CRUD compact IDs stay
+unpinned; use the existing VAULT account (do NOT re-capture, AGENTS red line)
++ a row-kebab walk on its real conversation list to pin them; v1 full paths are
+`CreateConversation / MutateConversation / UpdateChat / DeleteConversation /
 BranchConversation / UpdateConversation / ListConversationTurns / GetConversationTurn`.
 
 ## 1. Chat core (baseline)

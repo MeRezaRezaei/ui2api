@@ -1,5 +1,28 @@
 # Google AI search capabilities (from network/JS analysis, 2026-09-15)
 
+> ## STATUS (fold #17d/#17f, 2026-09-22): **BLOCKED — external credential
+> requirement, honest**
+>
+> google-ai-search is **NOT verified and NOT capturable-as-is on this box.**
+> Root cause (MEASURED): Google auth cookies on Chrome 152 are **app-bound**
+> (new "portal" os_crypt v20, bound to the original OS user + Chrome install) —
+> NOT portable cross-user, exactly the youtube gate. Live round-trip attempted:
+> `profile ingest www.google.com` from the real me-Chrome read only **2/19
+> cookies (SEARCH_SAMESITE, SOCS)**; injecting the gemini vault's `.google.com`
+> cookies (SID/NID/__Secure-3PSID/SAPISID/HSID, 2026-09-16) into www.google.com
+> IS sent + read (the consent wall clears) but Google does NOT treat the request
+> as signed-in — `/search` and myaccount.google.com both render signed-out (no
+> account chip), and AI Mode answer blocks (`[data-attrid="ai_web_answer"]`,
+> .Ants3c, #via-container) never render across 3 distinct queries. The
+> §5 "Suggested capabilities" below remain **design intent**, not realized work.
+>
+> **Unblock (external action required):** the USER signs into www.google.com in
+> a browser ui2api can capture/attach (exactly like `tencent-aistudio` /
+> youtube posting), then `ui2api profile add-all --known` (one-command bulk
+> OS-Chrome login) or per-host `ui2api profile capture
+> "https://www.google.com" --login`, then a **live re-verify** of AI Mode. Until
+> then the status stays honest unknown/not-verified.
+
 Research notes: all findings below are from this host (geolocated Germany, Google auto-serves `lang=de`), fetched with a real Chrome 131 UA via `curl`. Nothing was logged in; no browser was launched. "Verified" = reproduced with curl in this session; "bundle" = found in the downloaded `boq-bard-web` JS bundles; "prior art" = from public reverse-engineering/press, NOT reproducible here because the endpoint needs a live session. Fingerprints are byte-counts/HTTP codes/marker strings so future runs can diff against them.
 
 ## 1. Direct URL scheme (what actually works, verified by curl)
