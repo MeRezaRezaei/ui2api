@@ -112,19 +112,25 @@ test("GOAL8(a): registry accounts field equals the vault for hosts with real on-
   }
 });
 
-test("GOAL8(a): no-vault / mismatched-host packages surface accounts:[] honestly (kimi's www.kimi.com key)", () => {
-  // kimi is the host-drift case: its packaged profile url is https://www.kimi.com,
-  // so registry + path-form key the vault by host www.kimi.com — while the
-  // captured vault actually lives at www.kimi.ai / kimi.ai. listAccounts at the
-  // keyed host is [], so the field MUST surface [] — never a fabricated account
-  // and never an accidental pull from another host's vault.
+test("GOAL8(a): kimi keys the vault by www.kimi.ai (corrected profile) — accounts surfaces the real vault", () => {
+  // kimi was a host-drift case: its packaged profile url was https://www.kimi.com
+  // while manifest, builtin profile, and the captured vault all use
+  // https://www.kimi.ai — so registry + path-form keyed the wrong host and
+  // surfaced [] honestly-but-wrongly. Fixed: packaged profile.url now matches
+  // www.kimi.ai (canonical; manifest + builtin + live sessions agree), so the
+  // field must surface the REAL on-box vault, not [].
   const pkgs = buildRegistryPackages();
   const kimi = pkgs.find((p) => p.id === "kimi");
   assert.ok(kimi, "kimi: packaged site missing from buildRegistryPackages()");
   const host = registryVaultHost("kimi");
-  assert.equal(host, "www.kimi.com", "kimi packaged profile keys the vault by www.kimi.com");
-  assert.deepEqual(listAccounts(resolveDataDir(), host), [], `no vault indexed at ${host}`);
-  assert.deepEqual(pathFormAccounts(kimi), [], "kimi path-form accounts must be [] (honest empty)");
+  assert.equal(host, "www.kimi.ai", "kimi packaged profile must key the vault by www.kimi.ai (canonical)");
+  const stored = listAccounts(resolveDataDir(), host);
+  assert.ok(stored.length >= 1, `kimi: expected a real on-box vault at ${host}`);
+  assert.deepEqual(
+    pathFormAccounts(kimi),
+    stored,
+    "kimi path-form accounts must equal listAccounts(resolveDataDir(), \"www.kimi.ai\")"
+  );
 });
 
 // ─── (b) GATED SURFACE STILL HONEST WITH ACCOUNT ────────────────────────────

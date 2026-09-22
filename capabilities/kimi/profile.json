@@ -1,9 +1,9 @@
 {
  "id": "kimi",
- "name": "Kimi AI (www.kimi.com)",
- "url": "https://www.kimi.com",
+ "name": "Kimi AI (www.kimi.ai)",
+ "url": "https://www.kimi.ai",
  "loginRequired": true,
- "loginHint": "VERIFIED auth (from token-CrFSxcOs.js): sessions live in localStorage under keys access_token, refresh_token, msh_user_id; access_token is replayed as 'Authorization: Bearer <access_token>' against the Connect host https://notilo.kimi.com/apiv2 (OAuth base https://auth.kimi.com/api, login host login.moonshot.cn). Capture once: ui2api profile capture \"https://www.kimi.com\" --login → replay data/www.kimi.com/.session",
+ "loginHint": "VERIFIED auth (from token-CrFSxcOs.js): sessions live in localStorage under keys access_token, refresh_token, msh_user_id; access_token is replayed as 'Authorization: Bearer <access_token>' against the Connect host https://notilo.kimi.com/apiv2 (OAuth base https://auth.kimi.com/api, login host login.moonshot.cn). Capture once: ui2api profile capture \"https://www.kimi.ai\" --login → replay the session vault (data/sessions/www.kimi.ai/) into fresh browser contexts",
  "composer": [
   "div[contenteditable=\"true\"][role=\"textbox\"]",
   "textarea[placeholder*=\"Ask anything\"], textarea[placeholder*=\"Ask\"], textarea[placeholder*=\"输入\"]",
@@ -47,5 +47,5 @@
    "unverified — close / 关闭 overlay candidate; confirm on first live capture"
   ]
  },
- "note": "REFINED SCAFFOLD — auth facts (localStorage access_token bearer → notilo.kimi.com/apiv2) and the RPC surface come from CAPABILITIES.md bundle analysis and are verified; every DOM selector above is an UNVERIFIED candidate to be confirmed on the first live capture (data/www.kimi.com/.session). Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine analytics on page — drive the site's own UI, no synthetic clicks."
+ "note": "REFINED SCAFFOLD — auth facts (localStorage access_token bearer → notilo.kimi.com/apiv2) and the RPC surface come from CAPABILITIES.md bundle analysis and are verified; every DOM selector above is an UNVERIFIED candidate to be confirmed on the first live capture (session vault data/sessions/www.kimi.ai/). Anti-bot: TrustDecision blackbox (x-msh-shield-data) + VolcanoEngine analytics on page — drive the site's own UI, no synthetic clicks."
 }
