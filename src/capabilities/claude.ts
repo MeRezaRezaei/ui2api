@@ -44,7 +44,7 @@
 //     (b-shared-3/b-shared-15) and answer [data-testid="assistant-message"]
 //     (b-shared-7/b-shared-msg-1/b-shared-common-msg-1).
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
-import { injectSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
@@ -53,6 +53,8 @@ export interface ClaudeCapabilityOptions {
   browser?: Browser;
   dataDir?: string;
   headless?: boolean;
+  /** Identity-keyed account (email or vault slug); "default" = the legacy snapshot. */
+  account?: string;
 }
 
 export interface ClaudeCapabilityResult {
@@ -85,12 +87,14 @@ export class ClaudeCapabilities {
   private ownsBrowser: boolean;
   private readonly dataDir: string;
   private readonly headless: boolean;
+  private readonly account?: string;
 
   constructor(private readonly profile: ChatSiteProfile, opts: ClaudeCapabilityOptions = {}) {
     this.browser = opts.browser;
     this.ownsBrowser = !opts.browser;
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.headless = opts.headless ?? headlessDefault();
+    this.account = opts.account;
   }
 
   private async ensureBrowser(): Promise<Browser> {
@@ -120,7 +124,21 @@ export class ClaudeCapabilities {
     }
     const host = new URL(this.profile.url).host;
     if (!usingUserChrome()) {
-      const snap = loadSnapshot(snapshotPath(this.dataDir, host));
+      let snap: ReturnType<typeof loadSnapshot> | null = null;
+      if (this.account && this.account !== "default") {
+        // Identity-keyed account vault (data/sessions/<host>/<slug>/): load the
+        // requested identity's snapshot and inject IT — never a silent fallback
+        // to the legacy default identity.
+        snap = loadAccountSnapshot(this.dataDir, host, this.account);
+        if (!snap) {
+          throw new Error(
+            `no stored session for ${this.profile.id} account "${this.account}" on ${host} — capture it ` +
+              `first (ui2api profile capture <url> --login) or omit account for the legacy default snapshot`
+          );
+        }
+      } else {
+        snap = loadSnapshot(snapshotPath(this.dataDir, host));
+      }
       if (snap) {
         await injectSnapshot(context, snap);
       } else {

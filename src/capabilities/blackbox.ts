@@ -13,6 +13,8 @@ import { loginGatedResult, type GatedRunResult } from "./gated.js";
 export interface BlackboxCapabilityOptions {
   browser?: Browser;
   dataDir?: string;
+  /** Identity-keyed account (email or vault slug); "default" = the legacy snapshot. */
+  account?: string;
 }
 
 export class BlackboxCapabilities {

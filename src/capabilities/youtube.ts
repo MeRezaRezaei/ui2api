@@ -49,6 +49,8 @@ export interface YouTubeCapabilityOptions {
   headless?: boolean;
   /** External browser pool handle — reserved for daemon integration. */
   pool?: Browser;
+  /** Identity-keyed account (email or vault slug); "default" = the legacy snapshot. */
+  account?: string;
 }
 
 export interface YouTubeCapabilityResult {
@@ -81,12 +83,14 @@ export class YouTubeCapabilities {
   private ownsBrowser: boolean;
   private readonly dataDir: string;
   private readonly headless: boolean;
+  private readonly account?: string;
 
   constructor(private readonly profile: ChatSiteProfile, opts: YouTubeCapabilityOptions = {}) {
     this.browser = opts.browser;
     this.ownsBrowser = !opts.browser;
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.headless = opts.headless ?? headlessDefault();
+    this.account = opts.account;
   }
 
   private async ensureBrowser(): Promise<Browser> {
@@ -120,21 +124,37 @@ export class YouTubeCapabilities {
     if (!usingUserChrome()) {
       // Session resolution (same ladder as every other runner):
       //   1. the identity-keyed account vault (data/sessions/<host>/<slug>/)
-      //      — first stored account wins when no specific identity is asked;
+      //      — an explicitly requested `account` (email or slug) is honored
+      //      verbatim, otherwise the first stored account wins;
       //   2. the legacy flat snapshot (data/<host>/.session/state.json);
       //   3. the legacy cookie file (data/<host>/.session/cookies.json).
       // YouTube captures are usually keyed by google.com email under
       // data/sessions/youtube.com/<email>/ — both WWW and bare hosts are tried.
       const hosts = [host, host.replace(/^www\./, "")];
       let snap: ReturnType<typeof loadSnapshot> | null = null;
-      for (const h of hosts) {
-        const accounts = listAccounts(this.dataDir, h);
-        if (accounts.length > 0) {
-          snap = loadAccountSnapshot(this.dataDir, h, accounts[0].identity ?? accounts[0].slug);
+      if (this.account && this.account !== "default") {
+        // A specific identity was asked for: load THAT snapshot or fail loudly —
+        // never a silent fallback to a different stored account.
+        for (const h of hosts) {
+          snap = loadAccountSnapshot(this.dataDir, h, this.account);
           if (snap) break;
         }
+        if (!snap) {
+          throw new Error(
+            `no stored session for ${this.profile.id} account "${this.account}" on ${host} — capture it ` +
+              `first (ui2api profile capture <url> --login) or omit account for the legacy default snapshot`
+          );
+        }
+      } else {
+        for (const h of hosts) {
+          const accounts = listAccounts(this.dataDir, h);
+          if (accounts.length > 0) {
+            snap = loadAccountSnapshot(this.dataDir, h, accounts[0].identity ?? accounts[0].slug);
+            if (snap) break;
+          }
+        }
+        snap ??= loadSnapshot(snapshotPath(this.dataDir, host));
       }
-      snap ??= loadSnapshot(snapshotPath(this.dataDir, host));
       if (snap) {
         await injectSnapshot(context, snap);
       } else {

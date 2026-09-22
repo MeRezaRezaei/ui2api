@@ -129,6 +129,22 @@ function registryPackageFor(siteId: string): RegistryPackage | undefined {
   return buildRegistryPackages().find((p) => p.id === siteId);
 }
 
+// Identity-keyed account routing on the capability surface — the same `account`
+// contract as /prompt: empty or "default" = the legacy shared session; anything
+// else must resolve to a stored vault snapshot for this site's host, else the
+// request is rejected (400, thrown up to the server catch) BEFORE any browser
+// work — never launch a browser for a nonexistent account.
+function resolveCapabilityAccount(account: string | undefined, profile: ChatSiteProfile, dataDir: string): void {
+  if (!account || account === "default") return;
+  const host = new URL(profile.url).host;
+  const slug = slugifyIdentity(account);
+  const stored = listAccounts(dataDir, host);
+  const match = stored.find((a) => a.slug === slug || a.identity === account);
+  if (!match) {
+    throw new Error(`no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`);
+  }
+}
+
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {
   const token = opts.token ?? process.env.UI2API_PROMPTD_TOKEN ?? "";
   const dataDir = opts.dataDir ?? process.env.UI2API_DATA_DIR ?? "data";
@@ -300,12 +316,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         const profile = idFrom("gemini", profilesById);
         // Reuse the pool's logged-in browser: a fresh per-request browser lands
         // on the signed-out landing shell and RPC/DOM reads fail. Sharing the
         // pool browser keeps the proven session AND avoids a second Chrome.
+        // An explicit account must resolve to a stored snapshot before any
+        // browser work (a nonexistent account never spins Chrome up).
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new GeminiCapabilities(profile, { browser: shared, dataDir });
+        const caps = new GeminiCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -323,14 +346,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("kimi", profilesById);
         } catch {
           profile = resolvePackagedProfile("kimi") ?? resolveProfile("capabilities/kimi/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new KimiCapabilities(profile, { browser: shared, dataDir });
+        const caps = new KimiCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -347,14 +375,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("hunyuan", profilesById);
         } catch {
           profile = resolvePackagedProfile("hunyuan") ?? resolveProfile("capabilities/hunyuan/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir });
+        const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -370,14 +403,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("venice", profilesById);
         } catch {
           profile = resolvePackagedProfile("venice") ?? resolveProfile("capabilities/venice/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new VeniceCapabilities(profile, { browser: shared, dataDir });
+        const caps = new VeniceCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -394,14 +432,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("deepseek", profilesById);
         } catch {
           profile = resolveProfile("capabilities/deepseek/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new DeepSeekCapabilities(profile, { browser: shared, dataDir });
+        const caps = new DeepSeekCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -419,14 +462,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("tencent-aistudio", profilesById);
         } catch {
           profile = resolveProfile("capabilities/tencent-aistudio/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new TencentAistudioCapabilities(profile, { browser: shared, dataDir });
+        const caps = new TencentAistudioCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -442,14 +490,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("claude", profilesById);
         } catch {
           profile = resolveProfile("capabilities/claude/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new ClaudeCapabilities(profile, { browser: shared, dataDir });
+        const caps = new ClaudeCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -464,14 +517,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("chatgpt", profilesById);
         } catch {
           profile = resolveProfile("capabilities/chatgpt/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new ChatGPTCapabilities(profile, { browser: shared, dataDir });
+        const caps = new ChatGPTCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -486,14 +544,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("copilot", profilesById);
         } catch {
           profile = resolveProfile("capabilities/copilot/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new CopilotCapabilities(profile, { browser: shared, dataDir });
+        const caps = new CopilotCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -508,14 +571,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("huggingchat", profilesById);
         } catch {
           profile = resolveProfile("capabilities/huggingchat/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new HuggingChatCapabilities(profile, { browser: shared, dataDir });
+        const caps = new HuggingChatCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -532,14 +600,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("youtube", profilesById);
         } catch {
           profile = resolveProfile("capabilities/youtube/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new YouTubeCapabilities(profile, { browser: shared, dataDir });
+        const caps = new YouTubeCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -558,14 +631,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("araprat", profilesById);
         } catch {
           profile = resolveProfile("capabilities/araprat/profile.json");
         }
+        resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
-        const caps = new ArapratCapabilities(profile, { browser: shared, dataDir });
+        const caps = new ArapratCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -583,13 +661,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("adapta", profilesById);
         } catch {
           profile = resolvePackagedProfile("adapta") ?? resolveProfile("capabilities/adapta/profile.json");
         }
-        const caps = new AdaptaCapabilities(profile);
+        const caps = new AdaptaCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -608,13 +690,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("blackbox", profilesById);
         } catch {
           profile = resolvePackagedProfile("blackbox") ?? resolveProfile("capabilities/blackbox/profile.json");
         }
-        const caps = new BlackboxCapabilities(profile);
+        const caps = new BlackboxCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -633,13 +719,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("chatglm", profilesById);
         } catch {
           profile = resolvePackagedProfile("chatglm") ?? resolveProfile("capabilities/chatglm/profile.json");
         }
-        const caps = new ChatglmCapabilities(profile);
+        const caps = new ChatglmCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -658,13 +748,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("codex", profilesById);
         } catch {
           profile = resolvePackagedProfile("codex") ?? resolveProfile("capabilities/codex/profile.json");
         }
-        const caps = new CodexCapabilities(profile);
+        const caps = new CodexCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -683,13 +777,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("conol", profilesById);
         } catch {
           profile = resolvePackagedProfile("conol") ?? resolveProfile("capabilities/conol/profile.json");
         }
-        const caps = new ConolCapabilities(profile);
+        const caps = new ConolCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -708,13 +806,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("copilot-m365", profilesById);
         } catch {
           profile = resolvePackagedProfile("copilot-m365") ?? resolveProfile("capabilities/copilot-m365/profile.json");
         }
-        const caps = new CopilotM365Capabilities(profile);
+        const caps = new CopilotM365Capabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -733,13 +835,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("doubao", profilesById);
         } catch {
           profile = resolvePackagedProfile("doubao") ?? resolveProfile("capabilities/doubao/profile.json");
         }
-        const caps = new DoubaoCapabilities(profile);
+        const caps = new DoubaoCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -758,13 +864,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("duckduckgo", profilesById);
         } catch {
           profile = resolvePackagedProfile("duckduckgo") ?? resolveProfile("capabilities/duckduckgo/profile.json");
         }
-        const caps = new DuckduckgoCapabilities(profile);
+        const caps = new DuckduckgoCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -783,13 +893,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("google-ai-search", profilesById);
         } catch {
           profile = resolvePackagedProfile("google-ai-search") ?? resolveProfile("capabilities/google-ai-search/profile.json");
         }
-        const caps = new GoogleAiSearchCapabilities(profile);
+        const caps = new GoogleAiSearchCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -808,13 +922,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("grok", profilesById);
         } catch {
           profile = resolvePackagedProfile("grok") ?? resolveProfile("capabilities/grok/profile.json");
         }
-        const caps = new GrokCapabilities(profile);
+        const caps = new GrokCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -833,13 +951,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("inner-ai", profilesById);
         } catch {
           profile = resolvePackagedProfile("inner-ai") ?? resolveProfile("capabilities/inner-ai/profile.json");
         }
-        const caps = new InnerAiCapabilities(profile);
+        const caps = new InnerAiCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -858,13 +980,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("manus", profilesById);
         } catch {
           profile = resolvePackagedProfile("manus") ?? resolveProfile("capabilities/manus/profile.json");
         }
-        const caps = new ManusCapabilities(profile);
+        const caps = new ManusCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -883,13 +1009,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("notion", profilesById);
         } catch {
           profile = resolvePackagedProfile("notion") ?? resolveProfile("capabilities/notion/profile.json");
         }
-        const caps = new NotionCapabilities(profile);
+        const caps = new NotionCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -908,13 +1038,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("perplexity", profilesById);
         } catch {
           profile = resolvePackagedProfile("perplexity") ?? resolveProfile("capabilities/perplexity/profile.json");
         }
-        const caps = new PerplexityCapabilities(profile);
+        const caps = new PerplexityCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -933,13 +1067,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("poe", profilesById);
         } catch {
           profile = resolvePackagedProfile("poe") ?? resolveProfile("capabilities/poe/profile.json");
         }
-        const caps = new PoeCapabilities(profile);
+        const caps = new PoeCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -958,13 +1096,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("t3chat", profilesById);
         } catch {
           profile = resolvePackagedProfile("t3chat") ?? resolveProfile("capabilities/t3chat/profile.json");
         }
-        const caps = new T3chatCapabilities(profile);
+        const caps = new T3chatCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -983,13 +1125,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("tinycms", profilesById);
         } catch {
           profile = resolvePackagedProfile("tinycms") ?? resolveProfile("capabilities/tinycms/profile.json");
         }
-        const caps = new TinycmsCapabilities(profile);
+        const caps = new TinycmsCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1008,13 +1154,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("v0", profilesById);
         } catch {
           profile = resolvePackagedProfile("v0") ?? resolveProfile("capabilities/v0/profile.json");
         }
-        const caps = new V0Capabilities(profile);
+        const caps = new V0Capabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1033,13 +1183,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("xiaomimimo", profilesById);
         } catch {
           profile = resolvePackagedProfile("xiaomimimo") ?? resolveProfile("capabilities/xiaomimimo/profile.json");
         }
-        const caps = new XiaomimimoCapabilities(profile);
+        const caps = new XiaomimimoCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1058,13 +1212,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
           profile = idFrom("zenmux", profilesById);
         } catch {
           profile = resolvePackagedProfile("zenmux") ?? resolveProfile("capabilities/zenmux/profile.json");
         }
-        const caps = new ZenmuxCapabilities(profile);
+        const caps = new ZenmuxCapabilities(profile, { account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1077,7 +1235,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
 
       send(res, 404, { error: "not found" });
     } catch (e) {
-      send(res, e instanceof Error && /unknown site /.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
+      send(res, e instanceof Error && /unknown site |no stored account /.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
     }
   });
 
