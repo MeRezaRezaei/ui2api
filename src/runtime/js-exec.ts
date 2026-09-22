@@ -39,6 +39,14 @@ export interface JsCallResult {
   error?: string;
   /** The fetch/XHR the call produced (url + method), captured in-page. */
   networkHits: Array<{ url: string; method: string }>;
+  /**
+   * True when the site's function returned an observable and the seam
+   * subscribed to it — mirroring the site's own dispatch pattern (gemini
+   * senders return RxJS observables; the site's app subscribes to fire the
+   * network). The subscription is what makes the captured sender's traffic
+   * happen; it is the site's own JS, nothing synthesized.
+   */
+  subscribed?: boolean;
 }
 
 export interface JsCallOptions {
@@ -58,7 +66,7 @@ async ({ root, method, args, captureNetworkHits }) => {
   const holder = window;
   const fn = (holder[root] || {})[method];
   if (typeof fn !== "function") {
-    return { ok: false, value: undefined, error: "not-a-function: " + root + "." + method, networkHits: [] };
+    return { ok: false, value: undefined, error: "not-a-function: " + root + "." + method, networkHits: [], subscribed: false };
   }
   const hits = [];
   const restore = [];
@@ -84,11 +92,27 @@ async ({ root, method, args, captureNetworkHits }) => {
       restore.push(() => { XHRp.prototype.open = open; });
     }
   }
+  let subscribed = false;
   try {
-    const value = await fn.apply(holder[root], args || []);
-    return { ok: true, value: value === undefined ? null : value, error: undefined, networkHits: hits };
+    let value = await fn.apply(holder[root], args || []);
+    // Site-own dispatch pattern (gemini et al.): the captured sender returns an
+    // RxJS observable; the site's own app subscribes to fire the network. The
+    // seam mirrors that — subscribe for a bounded window so the traffic the
+    // function produces actually happens, exactly as the site would.
+    if (value && typeof value.subscribe === "function") {
+      subscribed = true;
+      await new Promise((resolve) => {
+        const sub = value.subscribe({
+          next: function () {},
+          error: function () { resolve(undefined); },
+          complete: function () { resolve(undefined); },
+        });
+        setTimeout(function () { try { sub.unsubscribe(); } catch {} resolve(undefined); }, 1500);
+      });
+    }
+    return { ok: true, value: value === undefined ? null : value, error: undefined, networkHits: hits, subscribed };
   } catch (e) {
-    return { ok: false, value: undefined, error: String(e), networkHits: hits };
+    return { ok: false, value: undefined, error: String(e), networkHits: hits, subscribed };
   } finally {
     restore.forEach(function (r) { try { r(); } catch {} });
   }
@@ -107,9 +131,21 @@ export async function execJsFunction(
 ): Promise<JsCallResult> {
   const page = await getPage();
   const args = opts.args !== undefined ? opts.args : index.sampleArgs;
+  // PAGE_JS_CALL is an async arrow-function SOURCE, not a callable — passing it
+  // to evaluate as a string makes Playwright treat it as an expression and
+  // return undefined (verified live on playwright 1.62.1). Mirror the proven
+  // gemini-rpc invocation: pass the source through as an arg and have evaluate's
+  // OWN function build + invoke the recipe (same new Function pattern as
+  // callGeminiRpc), so the input object is actually bound.
   const result = (await page.evaluate(
-    PAGE_JS_CALL,
-    { root: index.root, method: index.method, args, captureNetworkHits: true }
+    async ({ fnSrc, input }: { fnSrc: string; input: unknown }) => {
+      const fn = new Function("arg", "return (" + fnSrc + ")(arg);");
+      return fn(input);
+    },
+    {
+      fnSrc: PAGE_JS_CALL,
+      input: { root: index.root, method: index.method, args, captureNetworkHits: true },
+    }
   )) as JsCallResult;
   if (result.ok && opts.reloadAfterSuccess) {
     const waitUntil = "domcontentloaded";

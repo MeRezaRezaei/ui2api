@@ -97,6 +97,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     send: { kind: "keyEnter" },
     answer: [".model-response-text", ".response-content", '[data-test-id="answer-container"] .markdown'],
     newChat: '[aria-label*="New chat"], [aria-label*="new chat"]',
+    // JS-function-indexed entry (VERIFIED live 2026-09-22 against a
+    // vault-injected session, UI2API_ATTACH_PORT=9222): the captured sender
+    // default_BardChatUi.dTi(_, url) returns an RxJS observable; the seam
+    // subscribes it (the site's own dispatch pattern) which fires the batchexecute
+    // POST through the page's own JS — proof: ok:true, subscribed:true,
+    // networkHits=[GET /_/BardChatUi/data/batchexecute]. Only a tiny warm handshake
+    // — the ChatDriver DOM path still delivers every prompt.
+    jsIndex: { root: "default_BardChatUi", method: "dTi", args: [undefined, "/_/BardChatUi/data/batchexecute"] },
     captureMs: 40000,
     stableMs: 2000,
     // Capability reflection: learn what THIS account can actually do. These

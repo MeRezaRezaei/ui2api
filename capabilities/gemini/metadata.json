@@ -17,5 +17,12 @@
   "license": "MIT",
   "ui2api": "0.1.0",
   "trust": "reviewed",
-  "publishedAt": "2026-09-21"
+  "publishedAt": "2026-09-21",
+  "jsFunctionIndexed": {
+    "since": "2026-09-22",
+    "root": "default_BardChatUi",
+    "method": "dTi",
+    "via": "JS-function-indexed execution seam (execJsFunction): captured live from a vault-injected gemini session (targeted wrap of 5 stream senders on default_BardChatUi; 50 captures, 4 correlated pairs — P9d→StreamGenerate POST, qwa→batchexecute POST ×3). Replayed through the seam: ok=true, subscribed=true, networkHits=[GET /_/BardChatUi/data/batchexecute] (proof /ott/ui2api-work/replay-gemini-final-proof.json, 2026-09-22). The site's own observable dispatch, subscribed mirroring the site's own app — no fabricated traffic.",
+    "evidence": "execJsFunction against live logged-in page returned {ok:true, subscribed:true, networkHits:[{url:\"/_/BardChatUi/data/batchexecute\",method:\"GET\"}]} (proof PASS, 2026-09-22T04:5x)"
+  }
 }

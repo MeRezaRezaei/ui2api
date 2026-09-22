@@ -212,6 +212,29 @@ export class ChatDriver {
   private async probeJsIndex(): Promise<void> {
     const idx = this.profile.jsIndex;
     if (!idx) return;
+    // Bounded readiness: the site's own root+method only exist after the SPA
+    // boots. Standalone proofs waited for boot; the driver probes right after
+    // domcontentloaded, so wait (max ~15s, poll every 500ms) for the function
+    // to actually exist. Never fabricated: if the root never appears, the call
+    // is honestly reported as failed and the DOM path takes over.
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const ready = await this.page!
+        .evaluate(
+          ({ root, method }: { root: string; method: string }) => {
+            try {
+              const o = (window as unknown as Record<string, unknown>)[root];
+              return !!(o && typeof (o as Record<string, unknown>)[method] === "function");
+            } catch {
+              return false;
+            }
+          },
+          { root: idx.root, method: idx.method }
+        )
+        .catch(() => false);
+      if (ready || Date.now() >= deadline) break;
+      await this.page!.waitForTimeout(500);
+    }
     const res = await this.dom.jsCall(idx.root, idx.method, idx.args, {
       reloadAfterSuccess: true,
     });

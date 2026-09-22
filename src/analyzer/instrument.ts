@@ -38,8 +38,12 @@ export const INSTRUMENT_SRC = `
     rec({ kind: "network", method: this.__u2u && this.__u2u.m, url: this.__u2u && this.__u2u.u, requestBody: b, callId: callId });
     return _send.apply(this, arguments);
   };
-  window.__ui2api_wrapRoot = function (obj, rootName) {
+  window.__ui2api_wrapRoot = function (obj, rootName, targets) {
+    var targetSet = targets && targets.length ? {} : null;
+    if (targetSet) targets.forEach(function (t) { targetSet[t] = 1; });
+    var _clearTimer = null;
     Object.getOwnPropertyNames(obj).forEach(function (k) {
+      if (targetSet && !targetSet[k]) return;
       var v = obj[k];
       if (typeof v === "function") {
         var orig = v;
@@ -48,7 +52,14 @@ export const INSTRUMENT_SRC = `
           var callId = ++buf.seq; buf.current = callId;
           rec({ kind: "js-function", function: rootName + "." + k, args: args.map(safe), callId: callId });
           var r;
-          try { r = orig.apply(this, args); } finally { buf.current = null; }
+          try { r = orig.apply(this, args); } finally {
+            // keep the call id "open" briefly so a fetch/XHR the method
+            // schedules a tick later is still correlated to it (same pattern
+            // as the DOM-event captures below; without this, network calls
+            // fired after the method returns get callId null).
+            if (_clearTimer) clearTimeout(_clearTimer);
+            _clearTimer = setTimeout(function () { buf.current = null; }, 250);
+          }
           if (r && typeof r.then === "function") {
             return r.then(function (rr) {
               rec({ kind: "js-return", function: rootName + "." + k, returnPreview: safe(rr), callId: callId });
