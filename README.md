@@ -61,8 +61,9 @@ returns the result — no brittle screen-scraping.
   session cookies so tools can act on sites that require sign-in.
 - **V1 login simplicity gate** — `xhost+` display-share capture (login in a real
   visible browser as the `ui2api` user), OS-wide Chrome-profile scanning with
-  checkbox-style site import, and an identity-keyed multi-account session vault.
-  See [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
+  checkbox-style site import, a one-command `profile add-all` bulk import of
+  every Chrome-profile site session, and an identity-keyed multi-account
+  session vault. See [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
 - **Capability reflection** — learn what a specific account can actually do on a
   chat site (plan tier, available models, restriction walls) from what the site
   itself shows: `ui2api profile capabilities <host> [--account email]` probes the
@@ -327,13 +328,22 @@ npx tsx src/cli.ts profile capture "https://gemini.google.com" --assist \
 
 Chrome stores cookies/localStorage per site domain. ui2api scans the whole OS
 for **any Chrome/Chromium profile** (all users), lists every site that has data
-there, and lets you import the ones you want into the identity-keyed vault:
+there, and lets you import the ones you want into the identity-keyed vault.
+**One command imports them all** — no per-host loop:
 
 ```bash
+# THE recommended first login: every known site session, read-back verified
+npx tsx src/cli.ts profile add-all --known        # non-interactive bulk import
+npx tsx src/cli.ts profile add-all --interactive  # checkbox-pick which hosts to import
+
+# Or target one host explicitly:
 npx tsx src/cli.ts profile scan      # every site in every Chrome profile on the OS
 npx tsx src/cli.ts profile import gemini.google.com [--identity me@example.com]
 npx tsx src/cli.ts profile list gemini.google.com   # accounts stored for the site
 ```
+
+Every `add-all` row is read back from the vault and reported honestly —
+`imported` / `decrypt-limited` / `skipped-no-auth` — never a blind "ok".
 
 ### 3. Identity-keyed multi-account sessions
 
@@ -352,7 +362,10 @@ curl http://127.0.0.1:9797/accounts?site=gemini
 ```
 
 Fallback keeps working: without `--account`, the legacy single-session path is
-used, so existing setups are unaffected.
+used, so existing setups are unaffected. Each `GET /registry` package also
+carries its stored `accounts[]` (`slug`, `identity`, `host`, `source`,
+`capturedAt`), so an external consumer can discover every identity without any
+site knowledge.
 
 ## Wigolo engine (`--engine wigolo`)
 

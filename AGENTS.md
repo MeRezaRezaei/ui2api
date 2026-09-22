@@ -54,10 +54,11 @@ test/                    # node:test suites (unit, integration, validation)
    in-sync with each site's manifest by `test/capability-dispatch.test.ts`.
 
 Both use **snapshot-injected sessions**: capture once
-(`ui2api profile capture <url> --login` or `profile ingest <host>` for offline
-read of a live Chrome profile), lock it in the package
-(`capabilities/<site>/session.lock.json`), and replay cookies + localStorage
-into fresh browser contexts at runtime.
+(`ui2api profile add-all --known` for the one-command bulk login of every OS
+Chrome-profile site session, or `profile capture <url> --login` / `profile
+ingest <host>` for a single host / offline read of a live Chrome profile), lock
+it in the package (`capabilities/<site>/session.lock.json`), and replay cookies
++ localStorage into fresh browser contexts at runtime.
 
 ## Commands
 
@@ -68,6 +69,7 @@ npx tsx src/cli.ts prompt --sites                    # list available sites (--s
 npx tsx src/cli.ts promptd                           # daemon: POST /prompt, /status, /sites
 npx tsx src/cli.ts analyse <url> [--login] [--llm]   # recorder + action map
 npx tsx src/cli.ts profile scan|import|capture|ingest|list  # session management
+npx tsx src/cli.ts profile add-all [--known|--interactive]  # one-command bulk import: ALL Chrome-profile site sessions → vault (read-back verified, no per-host loop)
 npx tsx src/cli.ts package | install | plugin serve  # package + hub workflows
 npx tsx src/cli.ts hub | serve | remap | generate    # server generation pipeline
 npm test                  # integration (test/integration.ts)
@@ -78,6 +80,15 @@ Serving: `src/prompt/http.ts` exposes `POST /prompt` (`{"site","prompt"}`),
 `GET /sites`, `GET /capabilities/<site>`, `POST /capability/<site>`,
 `GET /status`, `GET /health`. Binds `127.0.0.1` only, configurable bearer-token
 gate (`UI2API_PROMPTD_TOKEN`).
+
+**Multi-account** (live-verified 2026-09-22, GOAL 8): `POST /capability/<site>`
+and `POST /prompt` accept an optional `"account":"<slug|email>"` — the account is
+validated against the vault (`listAccounts`+`slugifyIdentity`) BEFORE any browser
+launches; unknown account → 400 `no stored account "<acct>" for "<host>"; available: [<slugs>]`.
+`GET /accounts?site=<site>` lists vault accounts; each `GET /registry` package
+carries `accounts: [{slug, identity, host, source, capturedAt}]` (same list in the
+`GET /capabilities/<site>` path form). Vault path `data/sessions/<host>/<slug>/state.json`;
+`"default"` = the legacy flat session.
 
 Consumer surfaces (what OmniRoute / any external tool consumes — the registry
 is the ONLY info source, no site knowledge lives in the consumer):
@@ -209,6 +220,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     `src/capabilities/araprat.ts` + manifest now dispatch the 6 posting caps
     HONESTLY as login-gated (ok:false loginGated:true, no browser) so they no
     longer fall into the dead "unknown" branch; suite 430/430.
+  - **Multi-account surfaces live-verified (GOAL 8, 2026-09-22)**: `account` param
+    on `POST /capability/<site>` + `POST /prompt` (vault-validated pre-browser),
+    `GET /accounts?site=`, registry `accounts[]` — **and `profile add-all`
+    one-command bulk login live-verified (GOAL 9, 2026-09-22)** (read-back
+    verdict table, zero temp residue; replaces the per-host import loop).
 
 ## Conventions & red lines
 

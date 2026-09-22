@@ -41,10 +41,29 @@ npx tsx src/cli.ts prompt 'say hello' --site copilot
 
 ## 4. Capture once, summon your session (the login-UX flow)
 
-This is the verified v1 flow (folds #7–#10). It stores data in the **ui2api
-user** when that is genuinely writable, and says so honestly otherwise.
+This is the verified v1 flow (folds #7–#10; bulk login live-verified GOAL 9,
+2026-09-22). It stores data in the **ui2api user** when that is genuinely
+writable, and says so honestly otherwise.
 
-### 4a. Find the accounts you already have
+### 4a. First login — ONE command (recommended)
+
+Import every site session your OS Chrome profiles already hold into the
+identity-keyed vault in one step — no per-host loop:
+
+```
+npx tsx src/cli.ts profile add-all --known        # non-interactive: every KNOWN AI chat host
+npx tsx src/cli.ts profile add-all --interactive  # checkbox-pick exactly which hosts to import
+```
+
+Real output shape (live run 2026-09-22): a per-account read-back verdict
+table — `imported` (snapshot on disk, account listed, cookies/localStorage
+present), `decrypt-limited (portal v20)` (e.g. chatgpt.com app-bound
+cookies), or `skipped-no-auth` (host has no usable cookies). Every row is
+READ BACK from the vault, never a blind "ok"; exit is non-zero only when
+all selected hosts failed. Zero temp-dir residue (`u2a-*` markers swept).
+This replaces the manual per-host import loop as the go-to login flow.
+
+### 4b. Find what you already have — or target one host explicitly
 
 ```
 npx tsx src/cli.ts profile scan
@@ -58,6 +77,7 @@ Real output on this box (fold #11):
 
 Sites found (checkbox index) — import any with:
   ui2api profile import <host> [--account email]
+[ui2api] tip: add ALL known hosts in one step →  ui2api profile add-all [--known|--interactive]
 
 [...83 hosts...]
 [ ] 26. gemini.google.com  (1 profile, 4 cookies)  [KNOWN]
@@ -69,9 +89,7 @@ Tip: 4 of 83 hosts match known AI chat sites.
 `scan` reads your real OS Chrome cookie DB (no browser launched). The
 `[KNOWN]` mark means the host matches a builtin chat profile.
 
-### 4b. Create the identity vault
-
-Import your existing OS-Chrome cookies for a host:
+Prefer an explicit target over bulk `add-all`? Import that one host:
 
 ```
 npx tsx src/cli.ts profile import www.kimi.ai --account me@example.com
@@ -103,7 +121,16 @@ press Enter, and the vault is stored keyed by (host, identity) under
 > — and TELLS you which one it used: `(data vault: <owner>)`. It never claims
 > ui2api-user storage it cannot actually write.
 
-### 4c. Check what an account can do
+### 4c. Use a specific account
+
+Multi-account is live on the wire: pass `"account":"<slug|email>"` in
+`POST /capability/<site>` and `POST /prompt` (validated against the vault
+before any browser; unknown account → 400 listing the available slugs).
+List stored accounts with `GET /accounts?site=<site>`, and each
+`GET /registry` package carries its `accounts[]` — so callers can discover
+every stored identity without site knowledge.
+
+### 4d. Check what an account can do
 
 ```
 npx tsx src/cli.ts profile capabilities www.kimi.ai
