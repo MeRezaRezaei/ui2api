@@ -32,6 +32,7 @@
 // every request; we only navigate, click the site's own controls, and read
 // back what renders.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { sameOrigin, assertChannelUrl } from "../runtime/ssrf.js";
 import {
   injectSnapshot,
   listAccounts,
@@ -99,6 +100,11 @@ export class YouTubeCapabilities {
   // pattern as every other runner). YouTube works anonymously; a snapshot,
   // when present, only pre-answers the consent wall.
   private async openPage(url: string): Promise<Page> {
+    if (!sameOrigin(url, this.profile.url)) {
+      throw new Error(
+        `SSRF guard: refusing to navigate ${url} — origin pinning serves only ${new URL(this.profile.url).host}, never arbitrary URLs`
+      );
+    }
     const browser = await this.ensureBrowser();
     const context = await browser.newContext({
       viewport: usingUserChrome() || !this.headless ? null : { width: 1280, height: 900 },
@@ -386,7 +392,18 @@ export class YouTubeCapabilities {
   private async subscribe(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
     const channelId = String(args.channelId ?? "").trim();
     if (!channelId) return this.fail("youtube_subscribe", "channelId is required (youtube.com/channel/<id>)");
-    const url = channelId.startsWith("http") ? channelId : `https://www.youtube.com/channel/${encodeURIComponent(channelId)}`;
+    let url: string;
+    try {
+      url = assertChannelUrl(channelId, "www.youtube.com");
+    } catch (e) {
+      return {
+        capability: "youtube_subscribe",
+        ok: false,
+        data: { channelId },
+        error: e instanceof Error ? e.message : String(e),
+        scaffold: SCAFFOLD_NOTE,
+      };
+    }
     const page = await this.openPage(url);
     try {
       const btn = page.locator("ytd-subscribe-button-renderer button:not([disabled])").first();
@@ -406,7 +423,7 @@ export class YouTubeCapabilities {
         capability: "youtube_subscribe",
         ok,
         method: "dom.click-subscribe-button",
-        data: { channelId, subscribed: isSubscribed, buttonLabel: label },
+        data: { channelId, url, subscribed: isSubscribed, buttonLabel: label },
         scaffold: SCAFFOLD_NOTE,
         error: ok ? undefined : "subscribe button did not flip (anonymous session or DOM rotated)",
         note: ok ? `channel${isSubscribed ? " subscribed" : " unsubscribed"} via the site's own button` : undefined,

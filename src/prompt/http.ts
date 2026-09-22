@@ -7,6 +7,12 @@
 //   POST /capability/gemini  {"capability":"gemini_list_conversations", ...}
 //                 -> one Gemini capability result (chat/list_conversations/
 //                    model_list/search_toggle) over the same browser+session.
+//                 Capabilities not declared by the site's package manifest are
+//                 rejected with a 400 BEFORE any browser work: {error:
+//                 "unknown capability "<x>" for "<site>"; available: […]"}.
+//   GET  /capabilities/<site>  -> the installed package's manifest capability
+//                 surface {site, name, url, capabilities:[{id,name,description,
+//                 method}], source:"manifest"} for any installed package.
 //   OpenAI-compatible surface (for OpenAI SDKs, OmniRoute, etc.):
 //   GET  /v1/models             -> {object:"list", data:[{id:"deepseek",...},...]}
 //   POST /v1/chat/completions   {"model":"deepseek"|"ui2api/deepseek",
@@ -25,7 +31,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
-import { buildRegistryPackages } from "./registry.js";
+import { buildRegistryPackages, type RegistryPackage } from "./registry.js";
 import { defaultSiteId, listProfiles, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
@@ -40,6 +46,26 @@ import { CopilotCapabilities } from "../capabilities/copilot.js";
 import { HuggingChatCapabilities } from "../capabilities/huggingchat.js";
 import { YouTubeCapabilities } from "../capabilities/youtube.js";
 import { ArapratCapabilities } from "../capabilities/araprat.js";
+import { AdaptaCapabilities } from "../capabilities/adapta.js";
+import { BlackboxCapabilities } from "../capabilities/blackbox.js";
+import { ChatglmCapabilities } from "../capabilities/chatglm.js";
+import { CodexCapabilities } from "../capabilities/codex.js";
+import { ConolCapabilities } from "../capabilities/conol.js";
+import { CopilotM365Capabilities } from "../capabilities/copilot-m365.js";
+import { DoubaoCapabilities } from "../capabilities/doubao.js";
+import { DuckduckgoCapabilities } from "../capabilities/duckduckgo.js";
+import { GoogleAiSearchCapabilities } from "../capabilities/google-ai-search.js";
+import { GrokCapabilities } from "../capabilities/grok.js";
+import { InnerAiCapabilities } from "../capabilities/inner-ai.js";
+import { ManusCapabilities } from "../capabilities/manus.js";
+import { NotionCapabilities } from "../capabilities/notion.js";
+import { PerplexityCapabilities } from "../capabilities/perplexity.js";
+import { PoeCapabilities } from "../capabilities/poe.js";
+import { T3chatCapabilities } from "../capabilities/t3chat.js";
+import { TinycmsCapabilities } from "../capabilities/tinycms.js";
+import { V0Capabilities } from "../capabilities/v0.js";
+import { XiaomimimoCapabilities } from "../capabilities/xiaomimimo.js";
+import { ZenmuxCapabilities } from "../capabilities/zenmux.js";
 
 export interface PromptdOptions {
   port: number;
@@ -58,6 +84,10 @@ export interface PromptdServer {
 }
 
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  // Cache the parsed body on the request so a pre-dispatch guard (capability
+  // validation) and the routed handler can both read the same body.
+  const cached = (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache;
+  if (cached) return Promise.resolve(cached);
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (c) => {
@@ -66,7 +96,9 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
     });
     req.on("end", () => {
       try {
-        resolve(body ? (JSON.parse(body) as Record<string, unknown>) : {});
+        const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+        (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache = parsed;
+        resolve(parsed);
       } catch (e) {
         reject(new Error("invalid JSON body"));
       }
@@ -89,6 +121,12 @@ function idFrom(reqSite: unknown, resolved: Record<string, ChatSiteProfile>): Ch
   const p = resolved[id];
   if (!p) throw new Error(`unknown site "${id}" — try one of ${Object.keys(resolved).join(", ")}`);
   return p;
+}
+
+// Resolve the installed capability package for a site (registry-first: the same
+// source /registry serves). Absent package → undefined (no packaged surface).
+function registryPackageFor(siteId: string): RegistryPackage | undefined {
+  return buildRegistryPackages().find((p) => p.id === siteId);
 }
 
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {
@@ -129,6 +167,29 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       if (token && req.headers.authorization !== `Bearer ${token}`) {
         return send(res, 401, { error: "unauthorized" });
       }
+      // Capability-dispatch guard: reject capabilities the site's package does
+      // not declare (manifest is the single source of truth, matching the
+      // /registry tools), BEFORE the routed runner does any browser work.
+      // Declared capabilities — including login-gated ones — flow through
+      // unchanged to their runner.
+      if (req.method === "POST" && req.url) {
+        const capMatch = /^\/capability\/([^/?#]+)$/.exec(req.url);
+        if (capMatch) {
+          const site = decodeURIComponent(capMatch[1]);
+          const pkg = registryPackageFor(site);
+          if (pkg) {
+            const body = await readJson(req);
+            const capability = String(body.capability ?? "");
+            if (!capability) return send(res, 400, { error: "capability is required" });
+            const available = pkg.tools.map((t) => t.id);
+            if (!available.includes(capability)) {
+              return send(res, 400, {
+                error: `unknown capability "${capability}" for "${site}"; available: [${available.join(", ")}]`,
+              });
+            }
+          }
+        }
+      }
       // OpenAI-compatible surface: /v1/models + /v1/chat/completions
       if (req.url?.startsWith("/v1/")) {
         return handleOpenAIRoutes(req, res, { pool, profilesById });
@@ -157,6 +218,32 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         if (!profile) return send(res, 400, { error: "site is required" });
         const host = new URL(profile.url).host;
         return send(res, 200, { site: profile.id, host, accounts: listAccounts(dataDir, host) });
+      }
+      // Capability reflection, path form: GET /capabilities/<site> -> the
+      // installed package's declared capability surface (the same manifest the
+      // /registry tools derive from). Works for every installed package —
+      // capability-first sites (youtube/araprat) have no ChatDriver profile
+      // entry, so this reads the local manifest only and never drives an
+      // origin; the gate is package existence, not profile existence.
+      if (req.method === "GET" && req.url) {
+        const pathCap = /^\/capabilities\/([^/?#]+)\/?$/.exec(req.url);
+        if (pathCap) {
+          const site = decodeURIComponent(pathCap[1]);
+          const pkg = registryPackageFor(site);
+          if (!pkg) return send(res, 400, { error: `no capability package installed for "${site}"` });
+          return send(res, 200, {
+            site: pkg.id,
+            name: pkg.name,
+            url: pkg.url,
+            capabilities: pkg.tools.map((t) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              method: t.method,
+            })),
+            source: "manifest",
+          });
+        }
       }
       // Capability reflection: the stored per-account fingerprint (models,
       // tier, restrictions) captured by `ui2api profile capabilities`.
@@ -488,6 +575,506 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
+      // adapta capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/adapta") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("adapta", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("adapta") ?? resolveProfile("capabilities/adapta/profile.json");
+        }
+        const caps = new AdaptaCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // blackbox capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/blackbox") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("blackbox", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("blackbox") ?? resolveProfile("capabilities/blackbox/profile.json");
+        }
+        const caps = new BlackboxCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // chatglm capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/chatglm") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("chatglm", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("chatglm") ?? resolveProfile("capabilities/chatglm/profile.json");
+        }
+        const caps = new ChatglmCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // codex capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/codex") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("codex", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("codex") ?? resolveProfile("capabilities/codex/profile.json");
+        }
+        const caps = new CodexCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // conol capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/conol") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("conol", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("conol") ?? resolveProfile("capabilities/conol/profile.json");
+        }
+        const caps = new ConolCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // copilot-m365 capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/copilot-m365") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("copilot-m365", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("copilot-m365") ?? resolveProfile("capabilities/copilot-m365/profile.json");
+        }
+        const caps = new CopilotM365Capabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // doubao capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/doubao") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("doubao", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("doubao") ?? resolveProfile("capabilities/doubao/profile.json");
+        }
+        const caps = new DoubaoCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // duckduckgo capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/duckduckgo") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("duckduckgo", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("duckduckgo") ?? resolveProfile("capabilities/duckduckgo/profile.json");
+        }
+        const caps = new DuckduckgoCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // google-ai-search capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/google-ai-search") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("google-ai-search", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("google-ai-search") ?? resolveProfile("capabilities/google-ai-search/profile.json");
+        }
+        const caps = new GoogleAiSearchCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // grok capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/grok") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("grok", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("grok") ?? resolveProfile("capabilities/grok/profile.json");
+        }
+        const caps = new GrokCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // inner-ai capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/inner-ai") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("inner-ai", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("inner-ai") ?? resolveProfile("capabilities/inner-ai/profile.json");
+        }
+        const caps = new InnerAiCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // manus capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/manus") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("manus", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("manus") ?? resolveProfile("capabilities/manus/profile.json");
+        }
+        const caps = new ManusCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // notion capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/notion") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("notion", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("notion") ?? resolveProfile("capabilities/notion/profile.json");
+        }
+        const caps = new NotionCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // perplexity capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/perplexity") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("perplexity", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("perplexity") ?? resolveProfile("capabilities/perplexity/profile.json");
+        }
+        const caps = new PerplexityCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // poe capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/poe") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("poe", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("poe") ?? resolveProfile("capabilities/poe/profile.json");
+        }
+        const caps = new PoeCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // t3chat capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/t3chat") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("t3chat", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("t3chat") ?? resolveProfile("capabilities/t3chat/profile.json");
+        }
+        const caps = new T3chatCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // tinycms capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/tinycms") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("tinycms", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("tinycms") ?? resolveProfile("capabilities/tinycms/profile.json");
+        }
+        const caps = new TinycmsCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // v0 capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/v0") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("v0", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("v0") ?? resolveProfile("capabilities/v0/profile.json");
+        }
+        const caps = new V0Capabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // xiaomimimo capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/xiaomimimo") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("xiaomimimo", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("xiaomimimo") ?? resolveProfile("capabilities/xiaomimimo/profile.json");
+        }
+        const caps = new XiaomimimoCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // zenmux capability surface: no captured session exists on this box — every
+      // declared capability is dispatched HONESTLY as login-gated by its runner
+      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // Registry-first, packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/zenmux") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("zenmux", profilesById);
+        } catch {
+          profile = resolvePackagedProfile("zenmux") ?? resolveProfile("capabilities/zenmux/profile.json");
+        }
+        const caps = new ZenmuxCapabilities(profile);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
       send(res, 404, { error: "not found" });
     } catch (e) {
       send(res, e instanceof Error && /unknown site /.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
