@@ -4,7 +4,10 @@ import {
   buildRegistryPackages,
   capabilityInputSchema,
   bareCapabilityId,
+  resolveDataDir,
 } from "../src/prompt/registry.js";
+import { listAccounts } from "../src/runtime/session-store.js";
+import { resolvePackagedProfile } from "../src/profile/profile.js";
 
 describe("prompt registry", () => {
   it("derives a chat tool schema with prompt required and site toggles", () => {
@@ -83,5 +86,40 @@ describe("prompt registry", () => {
     // A scaffold-only package with no metadata stays unverified.
     const unver = packages.filter((p) => p.verified === false);
     assert.ok(unver.length > 0, "some packages are honestly NOT verified");
+  });
+
+  it("exposes per-package stored accounts consistent with GET /accounts (vault on disk)", () => {
+    const packages = buildRegistryPackages();
+    const dataDir = resolveDataDir();
+    const byId = new Map(packages.map((p) => [p.id, p]));
+    for (const pkg of packages) {
+      const profile = resolvePackagedProfile(pkg.id);
+      if (profile?.url) {
+        // url-ful package -> accounts is a REAL array (possibly []), exactly
+        // what the vault returns for the SAME host GET /accounts?site= serves
+        // (http.ts derives it as new URL(profile.url).host — not manifest url).
+        const host = new URL(profile.url).host;
+        assert.ok(Array.isArray(pkg.accounts), `${pkg.id}: url-ful package must carry an accounts array`);
+        assert.deepEqual(
+          pkg.accounts,
+          listAccounts(dataDir, host),
+          `${pkg.id}: accounts must match the on-disk vault for ${host}`
+        );
+      } else {
+        // url-less package -> field ABSENT (undefined), never an empty array.
+        assert.equal(pkg.accounts, undefined, `${pkg.id}: url-less package must omit accounts`);
+      }
+    }
+    // On-box vault today: deepseek + gemini each hold a stored identity; the
+    // registry surfaces it. Empty-vault honesty ([]) is exercised by the loop
+    // for url-ful hosts with no accounts.json on this box (e.g. kimi's profile
+    // host www.kimi.com has none — even though manifest says www.kimi.ai).
+    const deepseek = byId.get("deepseek");
+    assert.ok(deepseek && Array.isArray(deepseek.accounts) && deepseek.accounts.length > 0, "deepseek: stored vault account listed in registry");
+    const gemini = byId.get("gemini");
+    assert.ok(gemini && Array.isArray(gemini.accounts) && gemini.accounts.length > 0, "gemini: stored vault account listed in registry");
+    // url-less fixtures keep the field STRICTLY absent.
+    assert.equal(byId.get("chatglm")?.accounts, undefined, "chatglm: no url => no accounts field");
+    assert.equal(byId.get("tinycms")?.accounts, undefined, "tinycms: no url => no accounts field");
   });
 });

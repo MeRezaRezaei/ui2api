@@ -25,6 +25,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile } from "../profile/profile.js";
+import { listAccounts, type StoredAccount } from "../runtime/session-store.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -85,6 +86,15 @@ export interface RegistryPackage {
   verified: RegistryVerified | false;
   chat: RegistryChat;
   tools: RegistryTool[];
+  /**
+   * The identity-keyed vault accounts stored for this site — the SAME source
+   * as `GET /accounts?site=<id>` (http.ts). Host is derived from the packaged
+   * profile's url (`new URL(profile.url).host`), matching /accounts exactly.
+   * `[]` is honest: it means "no accounts stored for this site's host". The
+   * field is ABSENT (undefined) only when the package has no resolvable url
+   * (no host to key the vault by) — never an empty-by-accident array.
+   */
+  accounts?: StoredAccount[];
 }
 
 export interface RegistryVerified {
@@ -216,9 +226,15 @@ export function capabilityInputSchema(
   return { type: "object", properties: {}, required: [] };
 }
 
+/** Resolve the daemon's data dir the same way promptd/pool do (env → "data"). */
+export function resolveDataDir(): string {
+  return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
+}
+
 /** Build the registry 'packages' array from the installed capability packages. */
 export function buildRegistryPackages(): RegistryPackage[] {
   const ids = listInstalledPackageIds();
+  const dataDir = resolveDataDir();
   const packages: RegistryPackage[] = [];
   for (const siteId of ids) {
     // Only packages the daemon can actually serve (has a packaged ChatSiteProfile).
@@ -259,6 +275,18 @@ export function buildRegistryPackages(): RegistryPackage[] {
       reloadAfterSuccess: true,
       inputSchema: capabilityInputSchema(siteId, c.id, c.method, c.description),
     }));
+    // Stored vault accounts for this site, keyed by the packaged profile's host
+    // — EXACTLY the host GET /accounts?site= uses (http.ts: new URL(profile.url).host).
+    // No url → no host to key the vault by → field omitted (undefined).
+    let accounts: StoredAccount[] | undefined;
+    const profileUrl = profile.url;
+    if (profileUrl) {
+      try {
+        accounts = listAccounts(dataDir, new URL(profileUrl).host);
+      } catch {
+        accounts = undefined;
+      }
+    }
     packages.push({
       id: siteId,
       name: manifest?.name || profile.name || siteId,
@@ -271,6 +299,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       verified,
       chat: { model: siteId, streaming: true },
       tools,
+      ...(accounts !== undefined ? { accounts } : {}),
     });
   }
   return packages;

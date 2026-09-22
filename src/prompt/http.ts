@@ -12,7 +12,9 @@
 //                 "unknown capability "<x>" for "<site>"; available: […]"}.
 //   GET  /capabilities/<site>  -> the installed package's manifest capability
 //                 surface {site, name, url, capabilities:[{id,name,description,
-//                 method}], source:"manifest"} for any installed package.
+//                 method}], source:"manifest", accounts:[{slug,identity,host,
+//                 source,capturedAt}]} for any installed package — `accounts` is
+//                 the same identity-keyed vault as /accounts?site= ([] when none).
 //   OpenAI-compatible surface (for OpenAI SDKs, OmniRoute, etc.):
 //   GET  /v1/models             -> {object:"list", data:[{id:"deepseek",...},...]}
 //   POST /v1/chat/completions   {"model":"deepseek"|"ui2api/deepseek",
@@ -258,6 +260,12 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
               method: t.method,
             })),
             source: "manifest",
+            // Identity-keyed vault accounts stored for this site — the SAME
+            // source as the peer's registry field (`buildRegistryPackages`
+            // derives the host from the packaged profile url) and `/accounts?site=`.
+            // `[]` is honest "no accounts stored"; a package with no resolvable url
+            // leaves the field absent (undefined) → surface as [].
+            accounts: pkg.accounts ?? [],
           });
         }
       }
