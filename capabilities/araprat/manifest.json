@@ -53,7 +53,7 @@
     {
       "id": "araprat_comment",
       "name": "Comment on a video",
-      "description": "Aparat comment composer — LOGIN-GATED + public + irreversible. Ok:false login-required until authorized captured logged-in session. Never fabricates.",
+      "description": "Aparat comment composer — LOGIN-GATED + public + irreversible. Dispatched honestly: ok:false login-required until an authorized captured logged-in session exists. Never fabricates.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
@@ -65,7 +65,7 @@
     {
       "id": "araprat_like",
       "name": "Like a video",
-      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "description": "LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
@@ -77,7 +77,7 @@
     {
       "id": "araprat_follow",
       "name": "Follow a channel",
-      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "description": "LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
@@ -89,7 +89,7 @@
     {
       "id": "araprat_subscribe",
       "name": "Subscribe to a channel",
-      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "description": "LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
@@ -101,7 +101,7 @@
     {
       "id": "araprat_upload",
       "name": "Upload a video (Studio)",
-      "description": "Aparat upload (admin.aparat.com / file picker) — LOGIN-GATED + public + IRREVERSIBLE. Recipe-only; ok:false login-required until authorized logged-in capture. Never uploads without it.",
+      "description": "Aparat upload (admin.aparat.com / file picker) — LOGIN-GATED + public + IRREVERSIBLE. Dispatched honestly: ok:false login-required until an authorized logged-in capture exists. Never uploads without it.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",
@@ -113,7 +113,7 @@
     {
       "id": "araprat_playlist",
       "name": "Add to playlist/favorites",
-      "description": "LOGIN-GATED. Ok:false login-required until authorized captured session.",
+      "description": "LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists.",
       "kind": "action",
       "method": "ui",
       "workType": "ui",

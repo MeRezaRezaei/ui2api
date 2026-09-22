@@ -462,10 +462,11 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Aparat capability surface: video search / trending / video-detail.
-      // SCAFFOLD: every capability returns honest ok:false scaffold-dom-unverified
-      // until selectors survive a live capture (not a chat site — no ChatDriver).
-      // Registry-first, packaged-JSON-fallback profile resolution.
+      // Aparat capability surface: video search / trending / video-detail
+      // (LIVE-VERIFIED 2026-09-20) + posting actions dispatched HONESTLY as
+      // login-gated (ok:false login-required, no captured session exists).
+      // Not a chat site — no ChatDriver. Registry-first, packaged-JSON-fallback
+      // profile resolution.
       if (req.method === "POST" && req.url === "/capability/araprat") {
         const body = await readJson(req);
         const capability = String(body.capability ?? "");

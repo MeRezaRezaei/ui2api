@@ -62,6 +62,16 @@ the site's own JS renders.
 | `araprat_trending` | load homepage `/home`, read trending grid | **VERIFIED 2026-09-20** (52 anchors) |
 | `araprat_video_detail` | load `/v/<id>`, read `h1` title + `div.description` + related | **VERIFIED 2026-09-20** (/v/mindkye → h1 + 22 related) |
 
+> **Audit fold #17f (2026-09-22):** account-scoped POSTING actions
+> (`araprat_comment` / `araprat_like` / `araprat_follow` /
+> `araprat_subscribe` / `araprat_upload` / `araprat_playlist`) are
+> **recipe-only — NOT in `manifest.json capabilities[]` and NOT dispatched**
+> by `src/capabilities/araprat.ts`. They require a captured logged-in Aparat
+> session (none exists) and would otherwise resolve to a dead
+> "unknown araprat capability" branch. Recipes stay on disk as
+> login-gated future work; the manifest's `postingSurface` block documents
+> this split so manifest ↔ dispatch stay IN-SYNC.
+
 ## Wire facts
 
 None captured. Aparat exposes internal JSON APIs under `/api/fa/v1/...`

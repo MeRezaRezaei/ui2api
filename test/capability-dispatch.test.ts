@@ -15,6 +15,8 @@ import { ChatGPTCapabilities } from "../src/capabilities/chatgpt.js";
 import { GeminiCapabilities } from "../src/capabilities/gemini.js";
 import { HuggingChatCapabilities } from "../src/capabilities/huggingchat.js";
 import { CopilotCapabilities } from "../src/capabilities/copilot.js";
+import { YouTubeCapabilities } from "../src/capabilities/youtube.js";
+import { ArapratCapabilities } from "../src/capabilities/araprat.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Hermetic capability-runner dispatch tests (no browser, no network, no daemon)
@@ -128,6 +130,20 @@ const RUNNERS: RunnerDef[] = [
     manifestPath: u("../capabilities/copilot/manifest.json"),
     sourcePath: u("../src/capabilities/copilot.ts"),
     make: (p) => new CopilotCapabilities(p),
+  },
+  {
+    id: "youtube",
+    profilePath: u("../capabilities/youtube/profile.json"),
+    manifestPath: u("../capabilities/youtube/manifest.json"),
+    sourcePath: u("../src/capabilities/youtube.ts"),
+    make: (p) => new YouTubeCapabilities(p),
+  },
+  {
+    id: "araprat",
+    profilePath: u("../capabilities/araprat/profile.json"),
+    manifestPath: u("../capabilities/araprat/manifest.json"),
+    sourcePath: u("../src/capabilities/araprat.ts"),
+    make: (p) => new ArapratCapabilities(p),
   },
 ];
 

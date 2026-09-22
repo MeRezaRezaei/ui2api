@@ -72,6 +72,8 @@ export interface ArapratCapabilityResult {
   antiBot?: string;
   /** Human note about the verified mechanism / posture. */
   note?: string;
+  /** Honest login-gated marker: no captured session exists; recipe shipped, not executable. */
+  loginGated?: boolean;
 }
 
 const ANTI_BOT_NOTE =
@@ -203,9 +205,37 @@ export class ArapratCapabilities {
         return this.trending();
       case "araprat_video_detail":
         return this.videoDetail(args);
+      // Account-scoped posting surface: declared in the manifest and
+      // dispatched HONESTLY as login-gated. Aparat posting actions require a
+      // captured logged-in session (none exists in this package — session.lock
+      // stays awaiting-capture). Ok:false login-required, no browser opened,
+      // no fabricated traffic. Wired in audit fold #17f so manifest ↔ dispatch
+      // stay IN-SYNC instead of posting caps falling into the unknown branch.
+      case "araprat_comment":
+      case "araprat_like":
+      case "araprat_follow":
+      case "araprat_subscribe":
+      case "araprat_upload":
+      case "araprat_playlist":
+        return this.loginGated(capability);
       default:
         return { capability, ok: false, data: undefined, error: `unknown araprat capability: ${capability}` };
     }
+  }
+
+  // Honest login-gated short-circuit: no captured Aparat session exists, so a
+  // posting action can only ever return ok:false login-required — NEVER a
+  // fabricated success or a dead dispatch. No browser is launched.
+  private loginGated(capability: string): ArapratCapabilityResult {
+    return {
+      capability,
+      ok: false,
+      data: undefined,
+      error:
+        `login-required: ${capability} needs an authorized captured Aparat session ` +
+        `(ui2api profile capture https://www.aparat.com --login first); recipe shipped, not yet executable`,
+      loginGated: true,
+    };
   }
 
   // --- araprat_search: navigate /search/<q>, read the JS-rendered grid ---
