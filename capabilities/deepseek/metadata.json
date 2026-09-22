@@ -17,5 +17,11 @@
   "license": "MIT",
   "ui2api": "0.1.0",
   "trust": "reviewed",
-  "publishedAt": "2026-09-19"
+  "publishedAt": "2026-09-19",
+  "jsFunctionIndexed": {
+    "since": "2026-09-22",
+    "status": "HONEST NO-GO — not window-rooted",
+    "via": "live attach 9222 + vault-inject recon (21 window objects with functions, 16 senders = window-native fetch/fetchLater only): app is module-bundled (rspackChunk_deepseek_chat is a module loader array, not a callable sender). Seam attempts: window.fetch/fetchLater → ok:true but 0 networkHits (nothing to fetch with no args). No index is shipped — fabricating a root would violate the honesty red line. ChatDriver DOM path (proof PASS 11462) remains the verified answer path.",
+    "evidence": "/ott/ui2api-work/deepseek-index-verdict.json (window roots + sender scan + seam attempts, 2026-09-22T06:0xZ)"
+  }
 }
