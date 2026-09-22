@@ -53,6 +53,9 @@ interface Flags {
   assist?: boolean;
   account?: string;
   identity?: string;
+  identityPrefix?: string;
+  known?: boolean;
+  interactive?: boolean;
   xhostAll?: boolean;
   model?: string;
   lang?: string;
@@ -89,6 +92,9 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--assist") f.assist = true;
     if (argv[i] === "--account") f.account = argv[++i];
     if (argv[i] === "--identity") f.identity = argv[++i];
+    if (argv[i] === "--identity-prefix") f.identityPrefix = argv[++i];
+    if (argv[i] === "--known") f.known = true;
+    if (argv[i] === "--interactive") f.interactive = true;
     if (argv[i] === "--xhost-all") f.xhostAll = true;
     if (argv[i] === "--model") f.model = argv[++i];
     if (argv[i] === "--lang") f.lang = argv[++i];
@@ -524,6 +530,7 @@ async function cmdProfileScan(flags: Flags): Promise<void> {
   }
   console.log("Sites found (checkbox index) — import any with:");
   console.log("  ui2api profile import <host> [--account email]");
+  console.log("[ui2api] tip: add ALL known hosts in one step →  ui2api profile add-all [--known|--interactive]");
   console.log("");
   console.log(renderCheckboxList(index.hits));
   if (skipped.length > 0) {
@@ -584,6 +591,156 @@ async function cmdProfileList(host: string, flags: Flags): Promise<void> {
   }
   console.log("");
   console.log("Drive one with:  ui2api prompt '...' --site <id> --account <slug|email>");
+}
+
+// Import EVERY site session found in the OS's Chrome profiles into the vault in
+// ONE command — "a mother fucking command" (verbatim:1582). Scans all profiles,
+// lets the user pick from a checkbox list (interactive, default) or bulk-imports
+// every KNOWN host with no prompting (--known, the CI/bulk-demo path). Every
+// import is then READ BACK from the vault — snapshot on disk, account listed,
+// cookies/localStorage present — never an unverified "ok".
+async function cmdProfileAddAll(flags: Flags): Promise<void> {
+  const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
+  const { findAllChromeProfilesOnOs, scanProfilesForSites, renderCheckboxList, importSiteSnapshot } = await import("./runtime/profile-scan.js");
+  const { profiles, skipped } = findAllChromeProfilesOnOs();
+  if (profiles.length === 0) {
+    console.log("[ui2api] no Chrome/Chromium profiles found on this machine.");
+    console.log("  Install + sign in to Chrome (or Chromium), then re-run. Everything else stays local.");
+    return;
+  }
+  const index = scanProfilesForSites(profiles);
+  console.log(`[ui2api] scanned ${profiles.length} Chrome profile root(s):`);
+  for (const p of profiles) console.log(`  - ${p.root} (user: ${p.user})`);
+  console.log("");
+  if (index.hits.length === 0) {
+    console.log("No sites with stored cookie data were found in any profile.");
+    return;
+  }
+  console.log("Sites found (checkbox index):");
+  console.log(renderCheckboxList(index.hits));
+  if (skipped.length > 0) {
+    console.log("");
+    console.warn(`Skipped (unreadable/denied): ${skipped.length} path(s) — run as the owning user or check permissions.`);
+  }
+  console.log("");
+
+  // Choose which hosts to import. --known = every KNOWN hit, no prompting.
+  const chosen: (typeof index.hits)[number][] = [];
+  if (flags.known) {
+    chosen.push(...index.hits.filter((h) => h.known));
+    if (chosen.length === 0) {
+      console.log(`[ui2api] --known: no KNOWN AI chat hosts found — nothing to import.`);
+      return;
+    }
+    console.log(`[ui2api] --known: importing ${chosen.length} KNOWN host(s) without prompting.`);
+  } else {
+    const answer = await askLine("import selected hosts (comma indices or 'all')? ");
+    if (answer.trim().toLowerCase() === "all") {
+      chosen.push(...index.hits);
+    } else {
+      for (const part of answer.split(",")) {
+        const n = Number(part.trim());
+        if (Number.isInteger(n) && n >= 1 && n <= index.hits.length) chosen.push(index.hits[n - 1]);
+      }
+    }
+    if (chosen.length === 0) {
+      console.log("[ui2api] nothing selected — nothing imported.");
+      return;
+    }
+    console.log(`[ui2api] importing ${chosen.length} selected host(s).`);
+  }
+
+  // Identity: --identity-prefix overrides the slug base; otherwise the same
+  // default `profile import <host>` uses (detected from the profile's
+  // Preferences, falling back to the current user).
+  const identity = flags.identityPrefix || flags.identity;
+
+  // host -> slug/identity -> verdict table. One row per host, deduped by slug
+  // (a host present in several profiles converges on one vault account).
+  interface AddAllRow {
+    host: string;
+    slug: string;
+    identity: string;
+    verdict: string;
+  }
+  const rows = new Map<string, AddAllRow>();
+  let attempted = 0;
+  let hostSucceeded = 0;
+  let hostFailed = 0;
+
+  for (const hit of chosen) {
+    let hostOk = false;
+    // Import from every profile root the scan located for this host.
+    for (const root of hit.profiles) {
+      attempted++;
+      let verdict: string;
+      let slug = "";
+      let importedIdentity = identity;
+      let imp: Awaited<ReturnType<typeof importSiteSnapshot>>;
+      try {
+        imp = await importSiteSnapshot({ root, host: hit.host, dataDir, identity });
+        importedIdentity = imp.identity;
+        slug = slugifyIdentity(importedIdentity);
+        // Verification pass: read the account back from the VAULT — same seams
+        // `profile list` uses. Never claim ok for something not on disk.
+        const listed = listAccounts(dataDir, hit.host).some((a) => a.slug === slug);
+        const snap = loadAccountSnapshot(dataDir, hit.host, slug);
+        if (!listed || !snap) {
+          verdict = "failed(read-back-missing)";
+        } else {
+          const cookies = (snap.cookies ?? []).length;
+          const ls = (snap.localStorage ?? []).length;
+          if (cookies === 0 && imp.stats.cookiesMatched > 0) {
+            // The profile HAD cookies for this host but every one was
+            // undecryptable (app-bound, portal v20 class) — captured but not
+            // usable; say so honestly instead of "imported".
+            verdict = "decrypt-limited (portal v20)";
+          } else if (cookies > 0 || ls > 0) {
+            verdict = "imported";
+          } else {
+            verdict = "skipped-no-auth";
+          }
+        }
+      } catch (e) {
+        verdict = `failed(${e instanceof Error ? e.message.split("\n")[0] : String(e)})`;
+        if (!slug) slug = flags.identityPrefix || flags.identity || "?";
+      }
+      if (verdict !== "failed(read-back-missing)" && !verdict.startsWith("failed(")) hostOk = true;
+      rows.set(`${hit.host}|${slug}`, {
+        host: hit.host,
+        slug,
+        identity: importedIdentity ?? "?",
+        verdict,
+      });
+    }
+    if (hostOk) hostSucceeded++;
+    else if (hit.profiles.length > 0) hostFailed++;
+  }
+
+  console.log("");
+  console.log("[ui2api] add-all result (host -> slug/identity -> verdict):");
+  for (const r of rows.values()) {
+    console.log(`  ${r.host} -> ${r.identity} (${r.slug}) -> ${r.verdict}`);
+  }
+
+  // Exit non-zero only if ALL selected hosts failed AND at least one was
+  // attempted (CI sees a real failure); 0 if any succeeded or all were skipped.
+  const allFailed = attempted > 0 && hostFailed === chosen.length && hostSucceeded === 0;
+  if (allFailed) {
+    console.error(`[ui2api] ERROR: all ${chosen.length} selected host(s) failed to import (${attempted} import attempt(s)).`);
+    process.exitCode = 1;
+  }
+}
+
+// Ask one line on stdin (the repo's plain-readline convention for prompts).
+async function askLine(q: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(q, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 /**
@@ -709,6 +866,9 @@ async function main(): Promise<void> {
         if (!rest[0]) throw new Error("usage: ui2api profile import <host> [--profile DIR] [--identity email] [--data-dir DIR]");
         return cmdProfileImport(rest[0], flags);
       }
+      if (arg === "add-all") {
+        return cmdProfileAddAll(flags);
+      }
       if (arg === "list") {
         if (!rest[0]) throw new Error("usage: ui2api profile list <host> [--data-dir DIR]");
         return cmdProfileList(rest[0], flags);
@@ -717,7 +877,7 @@ async function main(): Promise<void> {
         if (!rest[0]) throw new Error("usage: ui2api profile capabilities <host> [--account email] [--data-dir DIR]");
         return cmdProfileCapabilities(rest[0], flags);
       }
-      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | list <host> | capabilities <host> [--account email]");
+      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | add-all [--known|--interactive] [--identity-prefix STR] | list <host> | capabilities <host> [--account email]");
     }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);

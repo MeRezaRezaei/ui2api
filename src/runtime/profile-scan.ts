@@ -4,10 +4,10 @@
 // profile roots, indexes which sites have stored cookies across all discovered
 // profiles, and lets the caller selectively import site snapshots into the
 // identity-keyed vault — the "checkbox indexing" UX described in VERBATIM.md.
-import { readdirSync, existsSync, mkdtempSync, cpSync } from "node:fs";
+import { readdirSync, existsSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { userInfo } from "node:os";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ingestProfile, detectProfileIdentity } from "./profile-ingest.js";
 import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity } from "./session-store.js";
@@ -113,6 +113,9 @@ function isKnownHost(host: string): boolean {
  * Copy the Cookies SQLite DB (and WAL/SHM) out of a Chrome profile root so it
  * can be read without the lock that a running Chrome imposes.
  * Mirrors the copy logic in profile-ingest.ts (not exported there).
+ * Never throws after creating its temp dir: any failure between mkdtemp and
+ * return removes the dir again, so `copyCookiesForReading` alone leaves nothing
+ * behind.
  */
 function copyCookiesForReading(profileRoot: string): { dbPath: string } {
   const def = join(profileRoot, "Default");
@@ -124,11 +127,71 @@ function copyCookiesForReading(profileRoot: string): { dbPath: string } {
   }
   const tmp = mkdtempSync(join(tmpdir(), "u2a-scan-read-"));
   const dbPath = join(tmp, "Cookies");
-  for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-    const src = dbSrc + suffix;
-    if (existsSync(src)) cpSync(src, dbPath + suffix);
+  try {
+    for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+      const src = dbSrc + suffix;
+      if (existsSync(src)) cpSync(src, dbPath + suffix);
+    }
+  } catch (e) {
+    rmSync(tmp, { recursive: true, force: true });
+    throw e;
   }
   return { dbPath };
+}
+
+/**
+ * Copy a profile's Cookies DB for reading, run `fn` with the copy path, then
+ * ALWAYS remove the temp dir — even when `fn` throws. This is the finally-style
+ * wrapper for the scan path: a scan leaves zero `u2a-scan-read-*` residue in
+ * the tmpdir no matter what the read does.
+ */
+export function withCopyCookiesForReading<T>(
+  profileRoot: string,
+  fn: (dbPath: string) => T
+): T {
+  const { dbPath } = copyCookiesForReading(profileRoot);
+  try {
+    return fn(dbPath);
+  } finally {
+    rmSync(dirname(dbPath), { recursive: true, force: true });
+  }
+}
+
+// Other markers in the repo's temp family: profile-ingest.ts creates
+// `u2a-ingest-` (copyProfileForReading) and `u2a-ls-` (readLocalStorageFor).
+// readLocalStorageFor removes its own in a finally; copyProfileForReading does
+// NOT — so the import path (importSiteSnapshot below) sweeps any new dirs of
+// those markers after ingestProfile returns, keeping the GOAL 9 "zero residue
+// after scan+import" invariant even for upsream leaks.
+const INGEST_TMP_MARKERS = ["u2a-ingest-", "u2a-ls-"] as const;
+
+/** Names of currently-present temp dirs matching the given marker prefixes. */
+function tmpDirsByMarker(prefixes: readonly string[]): Set<string> {
+  try {
+    const found = new Set<string>();
+    for (const name of readdirSync(tmpdir())) {
+      if (prefixes.some((p) => name.startsWith(p))) found.add(name);
+    }
+    return found;
+  } catch {
+    return new Set<string>();
+  }
+}
+
+/**
+ * Remove every temp dir matching `markers` that did not exist yet in `before`.
+ * Used to sweep the upstream `u2a-ingest-`/`u2a-ls-` copies created while an
+ * ingest ran. Best-effort (tmpdir is volatile) — never throws.
+ */
+function sweepTempDirs(before: Set<string>, markers: readonly string[]): void {
+  for (const name of tmpDirsByMarker(markers)) {
+    if (before.has(name)) continue;
+    try {
+      rmSync(join(tmpdir(), name), { recursive: true, force: true });
+    } catch {
+      // best effort — left a dir? the next sweep will retry it.
+    }
+  }
 }
 
 // --- Exported types ---
@@ -275,29 +338,27 @@ export function scanProfilesForSites(
   const skipped: string[] = [];
 
   for (const p of profiles) {
-    let dbPath: string;
+    let hostCounts: Map<string, number>;
     try {
-      ({ dbPath } = copyCookiesForReading(p.root));
-    } catch {
-      skipped.push(p.root);
-      continue;
-    }
-
-    const hostCounts = new Map<string, number>();
-    try {
-      const db = new DatabaseSync(dbPath, { readBigInts: true });
-      try {
-        const rows = db
-          .prepare("SELECT host_key, COUNT(*) AS n FROM cookies GROUP BY host_key")
-          .all() as Array<{ host_key: string; n: bigint | number }>;
-        for (const r of rows) {
-          const h = normalizeHostKey(r.host_key);
-          if (!h) continue;
-          hostCounts.set(h, (hostCounts.get(h) ?? 0) + Number(r.n));
+      // withCopyCookiesForReading removes the u2a-scan-read- copy in a finally,
+      // whether the read succeeds or throws — zero residue per profile.
+      hostCounts = withCopyCookiesForReading(p.root, (dbPath) => {
+        const counts = new Map<string, number>();
+        const db = new DatabaseSync(dbPath, { readBigInts: true });
+        try {
+          const rows = db
+            .prepare("SELECT host_key, COUNT(*) AS n FROM cookies GROUP BY host_key")
+            .all() as Array<{ host_key: string; n: bigint | number }>;
+          for (const r of rows) {
+            const h = normalizeHostKey(r.host_key);
+            if (!h) continue;
+            counts.set(h, (counts.get(h) ?? 0) + Number(r.n));
+          }
+        } finally {
+          db.close();
         }
-      } finally {
-        db.close();
-      }
+        return counts;
+      });
     } catch {
       skipped.push(p.root);
       continue;
@@ -349,10 +410,22 @@ export function scanProfilesForSites(
 export async function importSiteSnapshot(
   opts: ImportOptions
 ): Promise<ImportResult> {
-  const { snapshot, stats, warnings: ingestWarnings } = await ingestProfile({
-    profileDir: opts.root,
-    targetHost: opts.host,
-  });
+  // ingestProfile talks to profile-ingest.ts, whose copyProfileForReading
+  // creates a u2a-ingest- dir it never removes. Sweep any NEW ingest-marker dirs
+  // after it returns (or throws), so the GOAL 9 "zero residue after scan+import"
+  // invariant holds across module boundaries.
+  const beforeIngest = tmpDirsByMarker(INGEST_TMP_MARKERS);
+  let ingest: IngestResult;
+  try {
+    ingest = await ingestProfile({
+      profileDir: opts.root,
+      targetHost: opts.host,
+    });
+  } finally {
+    sweepTempDirs(beforeIngest, INGEST_TMP_MARKERS);
+  }
+
+  const { snapshot, stats, warnings: ingestWarnings } = ingest;
 
   const detected = detectProfileIdentity(opts.root).best;
   const user = owningUser(opts.root);
