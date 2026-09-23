@@ -208,6 +208,22 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     ui2api copy-Chrome profile carries hunyuan_token/user/source), `youtube_search`
     (ok:true rows), `araprat_search`/`araprat_trending`/`araprat_video_detail`
     (ok:true).
+  - **FULL-SURFACE VERIFIED (GOAL 15, 2026-09-23, headed Xvfb ALL_OK=true)**:
+    `duckduckgo` (duck.ai, anonymous) ALL SIX caps live-verified through the real
+    runner (was 5 wire-mapped/DOM-unverified): `duckduckgo_chat` (answer reads
+    `[id*="assistant-message"]`, first-send consent wall handled),
+    `duckduckgo_model_picker` (composer chip → menu `[role='menuitemradio']`
+    rows testid `model-picker-row-<id>`, aria-checked), `duckduckgo_web_search`
+    (Tools → Web Search row → chip `button[aria-label='Remove Web Search']`
+    read-back; enable+disable; chat after enable carried a REAL WebSearch
+    tool-invocation, 5 citations in IDB), `duckduckgo_file_upload`
+    (setInputFiles on composer `input[type='file']`, accept-list enforced →
+    chip read-back), `duckduckgo_reasoning` (reasoning-mode button text flip;
+    'extended' honestly ok:false — not offered on free GPT-5.6 Luna),
+    `duckduckgo_chat_history` (real IndexedDB `savedAIChatData`
+    saved-chats/pre-canonical-chats + sidebar corroboration; string-evaluate
+    fixes the swc `__name` crash — named arrows inside page.evaluate hang-or-crash,
+    keep evaluate code as strings). Dispatch test runner added: 581/581 green.
   - **HONEST dead-end (never claimed verified)**: `hunyuan` = yuanbao.tencent.com
     has NO session ANYWHERE on this box (not in real me-Chrome, not in the
     copy) — hy_user/hy_token are domain cookies the user has never generated.

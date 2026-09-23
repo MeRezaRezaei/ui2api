@@ -180,8 +180,10 @@ Available sites (declarative, tune-able): `gemini`, `chatgpt`, `claude`,
 real DeepThink/Search toggles + conversation list; kimi = chat + conversation
 list + model picker + web-search toolkit + file upload; gemini = chat
 (re-verified fold #6/2026-09-15); tencent-aistudio = chat (EdgeOne-headed only)
-+ full wire map; duckduckgo = chat + model-picker UI (verified 2026-09-22;
-web_search/file_upload/reasoning/chat_history honestly unverified). Capability-
++ full wire map; duckduckgo = **FULL SURFACE verified 2026-09-23** (chat,
+model-picker, web-search toggle, file upload, reasoning-mode, chat-history —
+all six live-verified headed/Xvfb, see `capabilities/duckduckgo/CAPABILITIES.md`).
+Capability-
 only sites (not chat): `youtube` (`youtube_search` verified 2026-09-20; posting
 login-bound) and `araprat` (search/trending/video_detail verified 2026-09-20).
 A machine-checkable `verified` record (since/evidence/via) rides on every
