@@ -73,9 +73,9 @@
     {
       "id": "tencent_aistudio_conversation_crud",
       "name": "Conversation CRUD + history",
-      "description": "List/get/rename/delete conversations via /api/new-portal/ endpoints + generate/id + continue. CURRENT POSTURE (2026-09-19, honest): the History entry (div.layout-menu__menu-history) renders NO anchor list on this revision — a DOM conversation-list selector is unverified, so the runner returns ok:false with mechanism notes until a live History capture.",
-      "method": "in-page fetch (credentials: include) — endpoints VERIFIED in bundles; DOM/list path UNVERIFIED",
-      "implementation": "POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue. Response shapes to verify on a live History capture.",
+      "description": "List/open conversations via the live History surface. LIST + OPEN LIVE-VERIFIED 2026-09-23 (headed real Chrome + snapshot): History → /chat-history renders the user's real dated conversation list as div.list-item rows (title/model/type); clicking a row navigates into /chat/HunyuanDefault/<id>?from=history. rename/delete DOM not located on this revision — honest ok:false for those actions. Wire: POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, history/del, clear, share, /api/new-portal/user/agent/conversation/continue.",
+      "method": "ui-path (History surface) — list + open LIVE-VERIFIED 2026-09-23; rename/delete unverified (no DOM control)",
+      "implementation": "GET https://aistudio.tencent.ai/chat-history renders the user's conversation list as div.list-item rows (no href — ids are click-only). runner: list → read .list-item rows; open → click a row (by title or index) → read back URL /chat/HunyuanDefault/<id>?from=history. POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue for the (unverified) CRUD writes.",
       "recipe": null
     },
     {

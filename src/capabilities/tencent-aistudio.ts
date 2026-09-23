@@ -19,17 +19,22 @@
 //                                      .hyc-common-markdown), completion marker
 //                                      "Completed". proof round-trips PASS
 //                                      (12, 13717, 72, …).
-//   tencent_aistudio_conversation_crud — NO live DOM selector yet: the History
-//                                      drawer (layout-menu__menu-history) renders
-//                                      no anchor list on this revision; the wire
-//                                      chat-list API is documented in
-//                                      CAPABILITIES.md but not captured. Honest
-//                                      ok:false pending a live History capture.
+//   tencent_aistudio_conversation_crud — LIVE-VERIFIED 2026-09-23: History →
+//                                      /chat-history renders the user's real dated
+//                                      conversation list as div.list-item rows
+//                                      (title/model/type); clicking a row navigates
+//                                      into /chat/HunyuanDefault/<id>?from=history.
+//                                      rename/delete DOM NOT located → honest
+//                                      ok:false for those actions.
 //   tencent_aistudio_deep_think / web_search / image_gen / code_run /
 //   file_upload / tts / podcast / translations — wire surface mapped in
 //   CAPABILITIES.md from JS-bundle analysis (searchDeepMode, deep-think speech
-//   types, DIT image gen, coder runCode, etc.); DOM toggles/panels for these
-//   are UNVERIFIED — honest ok:false with mechanism notes (never fabricated).
+//   types, DIT image gen, coder runCode, etc.); DOM toggles/panels measured on
+//   live 2026-09-23: NONE of the composer toggles exist on the current Hy4
+//   preview composer (no 搜索/联网, no 深度思考 switch, no attach control, no
+//   input[type=file]), and /image /code /tts /podcast /translate routes answer
+//   "Current Page Does Not Exist"; image surface lives on the separate
+//   hy3d.tencent.ai app. Honest ok:false with measured reasons (never fabricated).
 import { launchBrowser, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
@@ -93,13 +98,22 @@ export class TencentAistudioCapabilities {
     return this.browser;
   }
 
-  private async openPage(): Promise<Page> {
+  private async openPage(initialUrl?: string): Promise<Page> {
     const browser = await this.ensureBrowser();
-    const context = await browser.newContext({
+    // Reuse the caller-provided (attached / persistent) context ONLY, like
+    // ChatDriver's defaultContext: a caller-supplied browser already carries its
+    // real session. A freshly-launched browser ships with an EMPTY default
+    // context — create our own and inject the snapshot into it.
+    const existing = !this.ownsBrowser && browser.contexts().length > 0 ? browser.contexts()[0] : null;
+    const context = existing ?? (await browser.newContext({
       viewport: usingUserChrome() || !this.headless ? null : { width: 1280, height: 900 },
-    });
+    }));
     const host = new URL(this.profile.url).host;
-    if (!usingUserChrome()) {
+    // Inject the captured session into FRESH contexts unconditionally (matches
+    // ChatDriver): even real Chrome (UI2API_CHROME=1) launches with an EMPTY
+    // profile — the snapshot is what makes the context a logged-in session.
+    // The existing context (attached real profile) already carries its cookies.
+    if (!existing) {
       let snap: ReturnType<typeof loadSnapshot> | null = null;
       if (this.account && this.account !== "default") {
         // Identity-keyed account vault (data/sessions/<host>/<slug>/): load the
@@ -120,7 +134,11 @@ export class TencentAistudioCapabilities {
       }
     }
     const page = await context.newPage();
-    await page.goto(this.profile.url, { waitUntil: "domcontentloaded", timeout: 90000 });
+    // Navigate straight to the target route on a cold boot: the app's SPA router
+    // can swallow a mid-boot route change, so double-navigation (home then
+    // /chat-history) races the Vue boot. Entering at the target route works
+    // (probe-verified 2026-09-23).
+    await page.goto(initialUrl ?? this.profile.url, { waitUntil: "domcontentloaded", timeout: 90000 });
     return page;
   }
 
@@ -130,17 +148,7 @@ export class TencentAistudioCapabilities {
       case "tencent_aistudio_chat":
         return { ...base, ...(await this.chat(args)) };
       case "tencent_aistudio_conversation_crud":
-        return {
-          ...base,
-          capability,
-          ok: false,
-          data: undefined,
-          error:
-            "conversation list/CRUD: the History drawer (layout-menu__menu-history) rendered no " +
-            "anchor list on the 2026-09-19 revision — no verified DOM selector. Wire API documented " +
-            "in CAPABILITIES.md (per-chat /chat/HunyuanDefault route + chat list endpoints) but not " +
-            "yet captured live. Re-verify on a live headed capture.",
-        };
+        return { ...base, ...(await this.conversationCrud(args)) };
       case "tencent_aistudio_deep_think":
         return {
           ...base,
@@ -148,10 +156,11 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "deep think / reasoning: bundle analysis proves deep-think speech types in the SSE stream " +
-            "(HYCSpeechType) rendered as .agent-chat__conv--ai__deep_think-style blocks, but the composer " +
-            "toggle DOM is UNVERIFIED (the composer area shows a model chip + toolbar, no confirmed " +
-            "deep-think switch selector). Confirm the toggle selector on a live capture to activate.",
+            "deep think / reasoning: the Hy4 preview composer (measured live 2026-09-23) exposes " +
+            "NO deep-think toggle button (scanned every composer toolbar control / control-extra; " +
+            "only the 'High' model-mode chip exists). Deep-think OUTPUT does render live — answers " +
+            "carry a 'Deep thinking completed（Ran for …s）' detail block (hy-detail-block-header-title) — " +
+            "but there is no switch to expose as a capability. Honest ok:false.",
         };
       case "tencent_aistudio_web_search":
         return {
@@ -161,7 +170,9 @@ export class TencentAistudioCapabilities {
           data: undefined,
           error:
             "web search / deep search mode: bundle analysis proves searchDeepMode in the chat options " +
-            "payload, but the composer's search-mode toggle DOM is UNVERIFIED. Confirm on a live capture.",
+            "payload, but the live Hy4 preview composer (measured 2026-09-23) exposes NO search/联网 " +
+            "toggle (scanned every composer control + all DOM elements matching 搜索/search/联网/deep " +
+            "search — none). Honest ok:false until a toggle appears or the wire payload is captured.",
         };
       case "tencent_aistudio_image_gen":
         return {
@@ -170,8 +181,10 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "image generation (DIT / vision): wire surface mapped in CAPABILITIES.md from bundles; no " +
-            "verified in-chat trigger DOM. Confirm on a live capture.",
+            "image generation (DIT / vision): the aistudio chat surface (measured live 2026-09-23) has " +
+            "no image-gen trigger, and /image answers 'Current Page Does Not Exist'. The 3D Studio menu " +
+            "entry opens the SEPARATE app hy3d.tencent.ai (text-to-3D / image-to-3D) — a different surface, " +
+            "not the DIT image gen in aistudio. Honest ok:false.",
         };
       case "tencent_aistudio_code_run":
         return {
@@ -180,8 +193,9 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "code interpreter / sandbox (coder.runCode): bundle-mapped; no verified in-chat trigger DOM. " +
-            "Confirm on a live capture.",
+            "code interpreter / sandbox (coder.runCode): bundle-mapped; live Hy4 preview composer + /code " +
+            "route (measured 2026-09-23, 'Current Page Does Not Exist') expose no code-run trigger. " +
+            "Honest ok:false.",
         };
       case "tencent_aistudio_file_upload":
         return {
@@ -190,8 +204,9 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "file upload + document QA: bundle-mapped; the composer file affordance selector is " +
-            "UNVERIFIED. Confirm on a live capture.",
+            "file upload + document QA: the composer has a files zone div " +
+            "(hy-chat-input__content-top-content-wrapper--no-files) but NO input[type=file] and no " +
+            "attach/upload control in the live DOM (measured 2026-09-23). Honest ok:false.",
         };
       case "tencent_aistudio_tts":
         return {
@@ -200,7 +215,8 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "TTS / ASR: bundle-mapped; no verified in-chat trigger DOM. Confirm on a live capture.",
+            "TTS / ASR: bundle-mapped (audio/synthesis); NO TTS/朗读/speaker control anywhere in the live " +
+            "DOM, and /tts answers 'Current Page Does Not Exist' (measured 2026-09-23). Honest ok:false.",
         };
       case "tencent_aistudio_podcast":
         return {
@@ -209,7 +225,10 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "podcast generation: bundle-mapped; no verified in-chat trigger DOM. Confirm on a live capture.",
+            "podcast generation: bundle-mapped (PODCAST speech type); no podcast/播客 trigger in the live " +
+            "composer or side menu (measured 2026-09-23); /podcast answers 'Current Page Does Not Exist'. " +
+            "A prior 'MorningSunlightPodcastScript' conversation exists in history — feature has existed — " +
+            "but no current trigger DOM. Honest ok:false.",
         };
       case "tencent_aistudio_translations":
         return {
@@ -218,11 +237,96 @@ export class TencentAistudioCapabilities {
           ok: false,
           data: undefined,
           error:
-            "in-chat translation: bundle-mapped (translation speech type in the stream); no verified " +
-            "composer toggle DOM. Confirm on a live capture.",
+            "in-chat translation: bundle-mapped (translateModelList) but no translation/翻译 control in the " +
+            "live composer, and /translate answers 'Current Page Does Not Exist' (measured 2026-09-23). " +
+            "Honest ok:false.",
         };
       default:
         return { capability, ok: false, data: undefined, error: `unknown tencent-aistudio capability: ${capability}` };
+    }
+  }
+
+  // --- tencent_aistudio_conversation_crud: LIVE-VERIFIED 2026-09-23 list + open ---
+  // History menu → /chat-history renders the user's real dated conversation list as
+  // `div.list-item` rows (title / model / type). Rows are divs (no href) — the id is
+  // only revealed by the click, which navigates into /chat/HunyuanDefault/<id>?from=history.
+  private async conversationCrud(args: Record<string, unknown>): Promise<TencentAistudioCapabilityResult> {
+    const action = String(args.action ?? "list");
+    if (action !== "list" && action !== "open") {
+      return {
+        capability: "tencent_aistudio_conversation_crud",
+        ok: false,
+        data: undefined,
+        error:
+          `conversation action "${action}" not live-verified: rename/delete DOM not located on the ` +
+          `2026-09-23 revision (only the list + open-by-click are proven). Honest ok:false.`,
+      };
+    }
+    const page = await this.openPage(new URL("/chat-history", this.profile.url).toString());
+    try {
+      // History is a dated list that hydrates ~5-9s after the SPA cold-boots.
+      await page.waitForTimeout(8000 + Math.floor(Math.random() * 500));
+      await page.waitForSelector(".list-item", { timeout: 45000 });
+      const rows = await page.evaluate(() =>
+        Array.from(document.querySelectorAll(".list-item")).map((el) => ({
+          title: ((el.firstChild as HTMLElement)?.innerText ?? el.textContent ?? "").trim(),
+          text: ((el as HTMLElement).innerText ?? "").trim(),
+        }))
+      );
+      if (action === "list") {
+        return {
+          capability: "tencent_aistudio_conversation_crud",
+          ok: true,
+          method: "ui-path",
+          data: {
+            conversations: rows.map((r) => ({ title: r.text.split("\n")[0], text: r.text })),
+            note:
+              "History → /chat-history: real user conversation list rendered as div.list-item rows " +
+              "(title/model/type, dated groups). LIVE-VERIFIED 2026-09-23 (headed real Chrome + snapshot).",
+          },
+          note: "list LIVE-VERIFIED 2026-09-23 — .list-item rows on /chat-history; ids are click-only (divs, no hrefs). rename/delete not located.",
+        };
+      }
+      // action === "open" — click the row for args.title (or args.index) and read back the resulting URL.
+      const title = String(args.title ?? "");
+      const index = typeof args.index === "number" ? args.index : 0;
+      const rowIndex = title.length > 0 ? rows.findIndex((r) => r.text.toLowerCase().includes(title.toLowerCase())) : index;
+      if (rowIndex < 0 || !rows[rowIndex]) {
+        return {
+          capability: "tencent_aistudio_conversation_crud",
+          ok: false,
+          data: undefined,
+          error: `no conversation row matching title="${title}" (got ${rows.length} rows)`,
+        };
+      }
+      const target = rows[rowIndex];
+      // Click the DOM row at the inspected index (rows share order with the DOM;
+      // hasText/getByText are unreliable against the multi-line row text).
+      await page.locator(".list-item").nth(rowIndex).click({ timeout: 10000 });
+      await page.waitForTimeout(6000);
+      const url = page.url();
+      const m = url.match(/\/chat\/[^/]+\/([A-Za-z0-9]+)/);
+      if (!m) {
+        return {
+          capability: "tencent_aistudio_conversation_crud",
+          ok: false,
+          data: { clicked: target.text },
+          error: `clicked row "${target.text.slice(0, 60)}" but no /chat/<model>/<id> in resulting URL: ${url}`,
+        };
+      }
+      return {
+        capability: "tencent_aistudio_conversation_crud",
+        ok: true,
+        method: "ui-path",
+        data: { conversationId: m[1], url, clicked: target.text.slice(0, 120) },
+        note:
+          "open LIVE-VERIFIED 2026-09-23: clicked /chat-history row → navigated into " +
+          `/chat/HunyuanDefault/<id>?from=history (real conversation page).`,
+      };
+    } catch (e) {
+      return this.fail("tencent_aistudio_conversation_crud", e);
+    } finally {
+      if (this.ownsBrowser) await page.context().close().catch(() => {});
     }
   }
 

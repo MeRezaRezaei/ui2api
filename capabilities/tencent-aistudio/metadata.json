@@ -8,9 +8,9 @@
   "status": "active",
   "verified": {
     "since": "2026-09-19",
-    "evidence": "chat round-trip VERIFIED LIVE 2026-09-19 (headed real Chrome + injected snapshot), proofs PASS 6916/13717; composer textarea.t-textarea__inner, answer .agent-chat__bubble--ai .hyc-content-md -> .hyc-common-markdown, completion marker 'Completed'",
+    "evidence": "chat round-trip VERIFIED LIVE 2026-09-19 + re-verified 2026-09-23 (headed real Chrome + injected snapshot), proofs PASS 6916/13717 and 2026-09-23 probe answer '415'; composer textarea.t-textarea__inner, answer .agent-chat__bubble--ai .hyc-content-md -> .hyc-common-markdown, completion marker 'Completed'. conversation list+open LIVE-VERIFIED 2026-09-23 (History → /chat-history div.list-item rows; row click → /chat/HunyuanDefault/<id>?from=history)",
     "via": "headed real-Chrome only (Tencent Cloud EdgeOne blocks headless, HTTP 567) + session.lock injected snapshot; cookies hunyuan_token/hunyuan_user/hunyuan_source on .tencent.ai verified",
-    "scope": "chat verified; remaining capabilities wire-mapped, DOM-unverified (history drawer renders no anchor list — CRUD honest ok:false)"
+    "scope": "chat verified; conversation list+open verified (rename/delete unverified — no DOM control); web_search/deep_think/image_gen/code_run/file_upload/tts/podcast/translations = HONEST BLOCKED — measured live 2026-09-23: no composer toggle/control exists on the current Hy4 preview composer (no 搜索/联网, no deep-think switch, no input[type=file]/attach), /image /code /tts /podcast /translate routes answer 'Current Page Does Not Exist', image surface = separate hy3d.tencent.ai app. Deep-think OUTPUT renders live ('Deep thinking completed（Ran for …s）' detail block) but there is no toggle to expose."
   },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own Tencent AI Studio (aistudio.tencent.ai) sessions to chat with Hunyuan models using my logged-in iOA/WeChat session.",

@@ -164,9 +164,18 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   marker "Completed". Cold-boot gotcha: sends typed before ~5–8s are silently
   dropped — `preComposeDelayMs: 8000` in the profile. Runner wired
   (`src/capabilities/tencent-aistudio.ts` + `/capability/tencent-aistudio`);
-  History drawer renders NO anchor list → conversation CRUD stays honest
-  ok:false; remaining capabilities wire-mapped, DOM-unverified (never claim
-  verified without a live round-trip).
+  **conversation list + open LIVE-VERIFIED 2026-09-23** (History → `/chat-history`
+  renders the user's real dated conversation list as `div.list-item` rows —
+  title/model/type; row click navigates into `/chat/HunyuanDefault/<id>?from=history`;
+  ids are click-only, rows are divs, not anchors; rename/delete DOM NOT located).
+  Chat re-verified 2026-09-23 through the wire (proof "415"). Remaining
+  capabilities measured live 2026-09-23 → HONEST BLOCKED with measured reasons:
+  web_search / deep_think toggles do NOT exist on the current Hy4 preview
+  composer (no 搜索/联网, no deep-think switch; deep-think OUTPUT renders —
+  "Deep thinking completed（Ran for …s）" — but there is no toggle to expose);
+  no `input[type=file]`/attach for file_upload; `/image /code /tts /podcast
+  /translate` are dead routes; image surface = separate `hy3d.tencent.ai` app
+  (never claim verified without a live round-trip).
 - **Walled / scaffold / dead-end** inventory lives in `capabilities/README.md`
   (poe, grok, perplexity, t3chat, blackbox, adapta, zenmux, …). Be honest about
   status: never claim a capability is verified without a live round-trip.
