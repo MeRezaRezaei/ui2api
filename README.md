@@ -207,6 +207,7 @@ Full copy-paste onboarding: **docs/ONBOARDING.md**.
 
 Wire it into an agent the same way as any generated server:
 `npx tsx src/cli.ts plugin serve src/plugins/ai-web.ts --base-url https://gemini.google.com` exposes `send_prompt`, `new_chat`, `read_last_response` and `ai_status` over MCP.
+Consumer-side live proofs — a fresh OpenAI-compatible client streaming `POST /v1/chat/completions` (`stream:true` → real DOM-read SSE, deepseek→"418", kimi→"419") and an external MCP client invoking `deepseek_list_conversations` to `ok:true` over `plugin serve` (GOAL 17, 2026-09-23) — with copy-paste snippets, in **docs/ONBOARDING.md §11**.
 
 ## How it works
 

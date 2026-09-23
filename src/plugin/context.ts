@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { launchBrowser, sessionPath, defaultSitesDir } from "../runtime/browser.js";
+import { launchBrowser, sessionPath, loadCookies, usingUserChrome, defaultSitesDir } from "../runtime/browser.js";
+import { injectSnapshot, loadSnapshot, loadAccountSnapshot, snapshotPath, listAccounts } from "../runtime/session-store.js";
 import { makeDomPrimitives } from "../runtime/dom-primitives.js";
 import { sameOrigin } from "../runtime/ssrf.js";
 import { analyse } from "../analyzer/explore.js";
@@ -44,7 +45,27 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
     const browser = await launchBrowser();
     browserRef = browser;
     const ctx = await browser.newContext();
-    try { const c = JSON.parse(readFileSync(sessionPath(dataDir, new URL(deps.baseUrl).host), "utf8")); if (Array.isArray(c)) await ctx.addCookies(c); } catch {}
+    // Reuse the site's captured session the same way ChatDriver and the
+    // capability runners do: a full profile snapshot (cookies + localStorage +
+    // sessionStorage + IndexedDB) when one exists, else the legacy cookie file.
+    // Without this a `plugin serve`/generated-consumer page is anonymous even
+    // though a real vault session is stored (flat state.json on this box).
+    const host = new URL(deps.baseUrl).host;
+    if (!usingUserChrome()) {
+      let snap = loadSnapshot(snapshotPath(dataDir, host));
+      if (!snap) {
+        // Fall back to the first stored vault account when no flat snapshot
+        // exists (identity-keyed vault is the bulk-import layout of record).
+        const accts = listAccounts(dataDir, host);
+        if (accts.length) snap = loadAccountSnapshot(dataDir, host, accts[0].slug);
+      }
+      if (snap) {
+        await injectSnapshot(ctx, snap);
+      } else {
+        const cookies = loadCookies(sessionPath(dataDir, host));
+        if (cookies.length > 0) await ctx.addCookies(cookies as never[]);
+      }
+    }
     page = await ctx.newPage();
     await page.goto(deps.baseUrl, { waitUntil: "load", timeout: 30000 });
     return page;

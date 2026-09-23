@@ -257,3 +257,115 @@ blocker listed above — do not invent a green for it.
   sessions expire; re-capture with `--assist` (headed) as the wall instructs.
 - The daemon answers stale `/registry` — restart it: kill the promptd process,
   then `npx tsx src/cli.ts promptd` (it must run the CURRENT code).
+
+## 11. Consumer quickstart — external clients, proven end-to-end (GOAL 17, 2026-09-23)
+
+The CLI/curl flow above is the producer view. GOAL 17 (proven on this box
+2026-09-23) added the **external-client** angle — two clients in their own
+processes, zero ui2api imports:
+
+1. a plain OpenAI-compatible client hit the daemon's `POST /v1/chat/completions`
+   with `"stream": true` and assembled the real SSE answer, and
+2. an external MCP client (`@modelcontextprotocol/sdk`) connected to
+   `ui2api plugin serve` over stdio and invoked a live verification tool.
+
+Wire outputs below are the real runs — nothing fabricated, sanitized ids only.
+
+### 11a. OpenAI-compatible SSE (`stream:true`) — exact wire
+
+```
+npx tsx src/cli.ts promptd          # http://127.0.0.1:9797
+```
+
+```
+POST /v1/chat/completions
+{"model":"deepseek","stream":true,
+ "messages":[{"role":"user","content":"Reply with ONLY the number 418"}]}
+```
+
+Real SSE the client received (proof `G17-SSE-deepseek-muea5d27`, 2026-09-23):
+
+```
+HTTP/1.1 200 · content-type: text/event-stream
+data: {"id":"chatcmpl-ui2api-…","object":"chat.completion.chunk","model":"deepseek",
+       "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-ui2api-…","object":"chat.completion.chunk","model":"deepseek",
+       "choices":[{"index":0,"delta":{"content":"418"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-ui2api-…","object":"chat.completion.chunk","model":"deepseek",
+       "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+Measured client assembly: `finalContent "418"`, 3 SSE events, 5.4s. Same wire
+on kimi → `"419"` (proof `G17-SSE-kimi-muea5t6d`). The `content` is the
+**DOM-read answer**: ChatDriver pastes into the site's own composer, presses
+Enter, and reads the rendered answer until it stops growing. Nothing on the
+OpenAI side is synthesized — when the site errors, the error text is what
+streams back (gemini hit a transient "I seem to be encountering an error…"
+streak during the proof run; the surface streamed the real page text rather
+than a fabricated 417).
+
+### 11b. MCP over stdio — external client invokes a tool
+
+The consumer-facing way to drive a captured session from an agent. Server
+side, a small plugin module wraps a verified capability runner:
+
+```ts
+// deepseek-plugin.ts (repo root) — `npx tsx src/cli.ts plugin serve ./deepseek-plugin.ts --base-url https://chat.deepseek.com`
+import { resolveProfile } from "./src/profile/profile.js";
+import { DeepSeekCapabilities } from "./src/capabilities/deepseek.js";
+import type { Ui2ApiPlugin } from "./src/plugin/types.js";
+
+export default {
+  name: "deepseek-capabilities",
+  version: "1.0.0",
+  manifest: { name: "deepseek-capabilities", version: "1.0.0", author: "you",
+    description: "DeepSeek live capabilities over MCP.", authorizedUse: "your own account",
+    license: "MIT", ui2api: "0.1.0" },
+  setup(ctx) {
+    ctx.registerTool(
+      { name: "deepseek_list_conversations",
+        description: "List the user's real DeepSeek conversations from the live page sidebar.",
+        inputSchema: { type: "object", properties: {} } },
+      async () => {
+        const caps = new DeepSeekCapabilities(
+          resolveProfile("capabilities/deepseek/profile.json"), { dataDir: "data" });
+        try { return await caps.run("deepseek_list_conversations", {}); }
+        finally { await caps.close().catch(() => {}); }
+      }
+    );
+  },
+} satisfies Ui2ApiPlugin;
+```
+
+Any MCP client connects over stdio (`Client` + `StdioClientTransport` from
+`@modelcontextprotocol/sdk`). Real invocation, this box, 2026-09-23
+(proof `G17-MCP-mueat9b8`):
+
+```
+connect  · handshake 711ms
+list_tools  · ["deepseek_list_conversations"]
+call_tool("deepseek_list_conversations")  · call 1675ms
+→ { "antiBot": "AWS WAF JS challenge … solved invisibly by a headed session …",
+    "capability": "deepseek_list_conversations", "ok": true,
+    "method": "dom.sidebar",
+    "data": { "conversations": [ { "id": "s/…", "title": "…" }, … ] } }
+```
+
+`method: "dom.sidebar"` = the result was read off the real sidebar DOM of the
+captured session (the "418" conversation created by the §11a call is in that
+list — same account, same page).
+
+The shipped example module is the same contract for chat:
+`npx tsx src/cli.ts plugin serve src/plugins/ai-web.ts --base-url https://gemini.google.com`
+exposes `send_prompt`, `new_chat`, `read_last_response`, `ai_status` over MCP
+(see README "Wire it into an agent…").
+
+ACP: the generated stdio ACP server surface (`generate --acp` →
+`sites/server/acp.ts`, protocolVersion 2025-03-26) is covered by the unit suite
+(`test/acp.test.ts`, initialize + list_tools over JSON-RPC), but a *live* ACP
+tool call needs a real captured action map for a site — none is installed on
+this box out of the box — so MCP stdio is the live-proven consumer surface.
