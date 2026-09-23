@@ -1,6 +1,6 @@
 {
   "name": "ui2api",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Turn any site you use into AI tools — analyze a site's real action recipes once, then generate a per-site MCP or ACP server so your AI agent can drive it by calling tools.",
   "type": "module",
   "bin": {

@@ -4,6 +4,34 @@ All notable changes to ui2api are tracked here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-09-23
+
+GOAL 15/16/17 verified surface (full-functionality live verification + registry
+re-sync + consumer surface proof). API/registry data changes.
+
+### Added
+- duckduckgo capabilities now carry the **full verified surface** (0.3.0):
+  chat, model_picker, web_search, file_upload, reasoning, chat_history — all
+  six VERIFIED live 2026-09-23 through the real runner (headed Xvfb
+  ALL_OK=true) with 5 new recipe JSONs + chat recipe.
+- kimi metadata gains `long_context` verified (picker + enum mapping live;
+  Extra Long honestly plan-gated on free accounts).
+- tencent-aistudio metadata gains conversation list+open VERIFIED (live
+  `/chat-history` rows → open by id); the remaining 8 capabilities are
+  recorded HONEST-BLOCKED with measured reasons (no UI exists for them on the
+  current Hy4 preview composer / dead routes / separate app).
+
+### Fixed
+- `src/plugin/context.ts` MCP session-injection bug: generated-consumer pages
+  booted anonymous (loaded a nonexistent `cookies.json`). They now inject the
+  same snapshot → vault → cookies chain as the runners, gated on
+  `!usingUserChrome()` — external MCP consumers are signed into the site.
+
+### Docs
+- `docs/ONBOARDING.md` §11: consumer quickstart — promptd up → OpenAI-compatible
+  `POST /v1/chat/completions` (SSE) call → external MCP stdio client →
+  `ui2api plugin serve` tool invocation, with measured live outputs.
+
 ## [0.1.1] — 2026-09-23
 
 Production-readiness hardening (GOAL 14 zero-to-sell audit). No API changes.
