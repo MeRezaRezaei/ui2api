@@ -26,6 +26,11 @@ re-sync + consumer surface proof). API/registry data changes.
   booted anonymous (loaded a nonexistent `cookies.json`). They now inject the
   same snapshot → vault → cookies chain as the runners, gated on
   `!usingUserChrome()` — external MCP consumers are signed into the site.
+- `engines.node` floor corrected `>=20.0.0` → `>=22.13.0` — `node:sqlite`
+  (`src/runtime/profile-scan.ts`, `profile-ingest.ts`) is unflagged only on
+  22.13+; the `>=20.0.0` claim crashed `ui2api profile scan|add-all` with
+  ERR_UNKNOWN_BUILTIN_MODULE on every clean install/CI. CI now runs the same
+  floor family (node 24). GOAL 20 — first fully-green GitHub Actions run.
 
 ### Docs
 - `docs/ONBOARDING.md` §11: consumer quickstart — promptd up → OpenAI-compatible
@@ -37,7 +42,7 @@ re-sync + consumer surface proof). API/registry data changes.
 Production-readiness hardening (GOAL 14 zero-to-sell audit). No API changes.
 
 ### Fixed
-- `engines.node` aligned `>=18.19.0` → `>=20.0.0` (playwright requires node >=20; CI runs 20).
+- `engines.node` aligned `>=18.19.0` → `>=20.0.0` (0.1.1-era floor; SUPERSEDED in 0.2.0 — `node:sqlite` profile-scan/ingest needs ≥22.13, see the 0.2.0 entry).
 - `homepage` field added to package.json.
 - Machine-absolute paths (`/home/me`, `/ott/ui2api-work`, `/home/ui2api/...`)
   removed from the published tarball: capability `metadata.json` evidence fields

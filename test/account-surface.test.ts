@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +42,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CAPABILITIES_DIR = join(ROOT, "capabilities");
 const HTTP_SOURCE = readFileSync(join(ROOT, "src", "prompt", "http.ts"), "utf8");
 
+/** True when the real on-box vault file exists for the host (data/sessions/ is gitignored). */
+function vaultPresent(host: string): boolean {
+  return existsSync(join(resolveDataDir(), "sessions", host, "accounts.json"));
+}
+
 /** Host the registry keys the vault by — the SAME derivation buildRegistryPackages uses. */
 function registryVaultHost(siteId: string): string {
   const profile = resolvePackagedProfile(siteId);
@@ -71,13 +76,18 @@ test("GOAL8(a): /capabilities/<site> exposes accounts via the registry field, no
   );
 });
 
-test("GOAL8(a): registry accounts field equals the vault for hosts with real on-box vaults", () => {
+test("GOAL8(a): registry accounts field equals the vault for hosts with real on-box vaults", (t) => {
   // Real, on-box, live vault state (data/sessions/<host>/accounts.json exists).
   const realVaultHosts = [
     { site: "deepseek", host: "chat.deepseek.com", slug: "merezarezaei@gmail.com", identity: "merezarezaei@gmail.com" },
     { site: "gemini", host: "gemini.google.com", slug: "merezarezaei@gmail.com", identity: "merezarezaei@gmail.com" },
     { site: "tencent-aistudio", host: "aistudio.tencent.ai", slug: "merezarezaei@gmail.com", identity: "merezarezaei@gmail.com" },
   ] as const;
+  const missingHosts = realVaultHosts.filter(({ host }) => !vaultPresent(host)).map(({ host }) => host);
+  if (missingHosts.length > 0) {
+    t.skip(`no real on-box vaults for: ${missingHosts.join(", ")} (data/ is gitignored — clean checkout has none)`);
+    return;
+  }
   const pkgs = buildRegistryPackages();
   const byId = new Map(pkgs.map((p) => [p.id, p]));
 
@@ -112,7 +122,11 @@ test("GOAL8(a): registry accounts field equals the vault for hosts with real on-
   }
 });
 
-test("GOAL8(a): kimi keys the vault by www.kimi.ai (corrected profile) — accounts surfaces the real vault", () => {
+test("GOAL8(a): kimi keys the vault by www.kimi.ai (corrected profile) — accounts surfaces the real vault", (t) => {
+  if (!vaultPresent("www.kimi.ai")) {
+    t.skip("no vault for www.kimi.ai (data/ is gitignored — clean checkout has none)");
+    return;
+  }
   // kimi was a host-drift case: its packaged profile url was https://www.kimi.com
   // while manifest, builtin profile, and the captured vault all use
   // https://www.kimi.ai — so registry + path-form keyed the wrong host and
@@ -200,7 +214,11 @@ test("GOAL8(c): an unknown account misses resolveCapabilityAccount's predicate a
   );
 });
 
-test("GOAL8(c): the real vault account loads a snapshot with its host — the boundary dogfood", () => {
+test("GOAL8(c): the real vault account loads a snapshot with its host — the boundary dogfood", (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
   const host = registryVaultHost("deepseek");
   const snap = loadAccountSnapshot(resolveDataDir(), host, "merezarezaei@gmail.com");
   assert.ok(snap, `real vault identity must load a snapshot at ${host}`);

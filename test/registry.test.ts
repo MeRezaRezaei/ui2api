@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildRegistryPackages,
   capabilityInputSchema,
@@ -8,6 +10,11 @@ import {
 } from "../src/prompt/registry.js";
 import { listAccounts } from "../src/runtime/session-store.js";
 import { resolvePackagedProfile } from "../src/profile/profile.js";
+
+/** True when the real on-box vault file exists for the host (data/sessions/ is gitignored). */
+function vaultPresent(host: string): boolean {
+  return existsSync(join(resolveDataDir(), "sessions", host, "accounts.json"));
+}
 
 describe("prompt registry", () => {
   it("derives a chat tool schema with prompt required and site toggles", () => {
@@ -88,7 +95,7 @@ describe("prompt registry", () => {
     assert.ok(unver.length > 0, "some packages are honestly NOT verified");
   });
 
-  it("exposes per-package stored accounts consistent with GET /accounts (vault on disk)", () => {
+  it("exposes per-package stored accounts consistent with GET /accounts (vault on disk)", (t) => {
     const packages = buildRegistryPackages();
     const dataDir = resolveDataDir();
     const byId = new Map(packages.map((p) => [p.id, p]));
@@ -115,9 +122,17 @@ describe("prompt registry", () => {
     // for url-ful hosts with no accounts.json on this box (e.g. kimi's profile
     // host www.kimi.com has none — even though manifest says www.kimi.ai).
     const deepseek = byId.get("deepseek");
-    assert.ok(deepseek && Array.isArray(deepseek.accounts) && deepseek.accounts.length > 0, "deepseek: stored vault account listed in registry");
+    if (!vaultPresent("chat.deepseek.com")) {
+      t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none) — skipping deepseek vault assert");
+    } else {
+      assert.ok(deepseek && Array.isArray(deepseek.accounts) && deepseek.accounts.length > 0, "deepseek: stored vault account listed in registry");
+    }
     const gemini = byId.get("gemini");
-    assert.ok(gemini && Array.isArray(gemini.accounts) && gemini.accounts.length > 0, "gemini: stored vault account listed in registry");
+    if (!vaultPresent("gemini.google.com")) {
+      t.skip("no vault for gemini.google.com (data/ is gitignored — clean checkout has none) — skipping gemini vault assert");
+    } else {
+      assert.ok(gemini && Array.isArray(gemini.accounts) && gemini.accounts.length > 0, "gemini: stored vault account listed in registry");
+    }
     // url-less fixtures keep the field STRICTLY absent.
     assert.equal(byId.get("chatglm")?.accounts, undefined, "chatglm: no url => no accounts field");
     assert.equal(byId.get("tinycms")?.accounts, undefined, "tinycms: no url => no accounts field");
