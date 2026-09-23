@@ -221,3 +221,47 @@ test("promptd exposes the engine as localhost JSON so /var/www apps can use it u
     site.close();
   }
 });
+
+test("promptd bearer gate: token set => 401 without/with wrong token, 200 with it", async () => {
+  const site = await startMockChat();
+  const dir = mkdtempSync(join(tmpdir(), "u2a-token-"));
+  try {
+    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile], token: "op-secret" });
+    const base = `http://127.0.0.1:${svc.port}`;
+    try {
+      const noAuth = await fetch(`${base}/health`);
+      assert.equal(noAuth.status, 401);
+
+      const wrongAuth = await fetch(`${base}/health`, { headers: { authorization: "Bearer nope" } });
+      assert.equal(wrongAuth.status, 401);
+
+      const okAuth = await fetch(`${base}/health`, { headers: { authorization: "Bearer op-secret" } });
+      assert.equal(okAuth.status, 200);
+      assert.equal((await okAuth.json()).ok, true);
+    } finally {
+      await svc.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    site.close();
+  }
+});
+
+test("promptd without a token answers localhost requests unauthed (localhost-only posture)", async () => {
+  const site = await startMockChat();
+  const dir = mkdtempSync(join(tmpdir(), "u2a-notoken-"));
+  try {
+    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile] });
+    const base = `http://127.0.0.1:${svc.port}`;
+    try {
+      const health = await fetch(`${base}/health`);
+      assert.equal(health.status, 200);
+      assert.equal((await health.json()).ok, true);
+    } finally {
+      await svc.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    site.close();
+  }
+});

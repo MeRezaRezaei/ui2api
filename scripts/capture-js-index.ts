@@ -10,10 +10,11 @@
 //
 // Usage: npx tsx scripts/capture-js-index.ts [site]   (site default "gemini")
 // Env:  UI2API_ATTACH_PORT=9222 (append to be used), SNAP_PATH override,
-//       WORK dir override (default /ott/ui2api-work)
+//       WORK dir override (default <os tmpdir>/ui2api-work)
 // Output: $WORK/captures-<site>.json (raw) + capture-<site>-summary.json
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { Browser, Page } from "playwright";
 import { INSTRUMENT_SRC } from "../src/analyzer/instrument.js";
 import { launchBrowser } from "../src/runtime/browser.js";
@@ -26,10 +27,10 @@ if (!profile) throw new Error(`no builtin profile for site ${site}`);
 
 process.env.UI2API_ATTACH_PORT = process.env.UI2API_ATTACH_PORT || "9222";
 
-const WORK = process.env.WORK || "/ott/ui2api-work";
+const WORK = process.env.WORK || join(tmpdir(), "ui2api-work");
 const SNAP_PATH =
   process.env.SNAP_PATH ||
-  `/home/me/Documents/projects/ui2api/data/sessions/${new URL(profile.url).host}/merezarezaei@gmail.com/state.json`;
+  join(process.cwd(), "data/sessions", new URL(profile.url).host, "merezarezaei@gmail.com", "state.json");
 const OUT_RAW = join(WORK, `captures-${site}.json`);
 const OUT_SUM = join(WORK, `capture-${site}-summary.json`);
 const OUT_LOG = join(WORK, `capture-${site}.log`);

@@ -232,8 +232,12 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `.gitignore`). Session snapshots contain real credentials.
 - **Origin pinning / SSRF guards** live in `src/runtime/ssrf.ts` — endpoints
   only serve configured sites, never arbitrary URLs.
-- **Trust gate** (`src/prompt/http.ts`, trust.ts): daemon answers only the
-  profiles you configure, bearer-token gated by default posture.
+- **Trust gate** (`src/prompt/http.ts` + `src/runtime/ssrf.ts`): the daemon
+  binds `127.0.0.1` by default and answers ONLY the profiles handed to it at
+  startup (`idFrom`/`profilesById`, `src/prompt/http.ts` — unknown site →
+  400), never arbitrary URLs; optionally bearer-token gated via
+  `UI2API_PROMPTD_TOKEN` (no token set = localhost-only posture, README's
+  "optionally bearer-token gated").
 - **Verification before claiming done**: `npx tsc --noEmit`, `npm run build`,
   `npm test`, `npm run test:unit`. Package + runner sync is enforced by
   `test/capability-dispatch.test.ts` (18/18) and package shape by

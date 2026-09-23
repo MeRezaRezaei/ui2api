@@ -22,6 +22,6 @@
     "since": "2026-09-22",
     "status": "HONEST NO-GO — not window-rooted",
     "via": "live attach 9222 + vault-inject recon (57 window objects incl. default_gsi, #app Vue instance, HYDRATION_INIT_STATE): the apiv2 RPC client is module-scoped inside the Vite bundle (statics.kimi.ai/kimi-web-seo); no window.<root>.<method> fires apiv2. Seam attempts: only discoverable window methods (Intl.*) → ok:true but 0 networkHits. No index is shipped — fabricating a root would violate the honesty red line. ChatDriver DOM path (proof PASS 13965) remains the verified answer path.",
-    "evidence": "/ott/ui2api-work/kimi-index-proof.json (recon + delegator scan + chat evidence, 2026-09-22T05:41Z)"
+    "evidence": "proof JSON kept outside the repo (gitignored): recon + delegator scan + chat evidence, 2026-09-22T05:41Z"
   }
 }

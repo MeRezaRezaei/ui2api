@@ -9,6 +9,7 @@
 //       UI2API_DEBUG=1 (driver logs the indexed-call line)
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { ChatDriver } from "../src/prompt/driver.js";
 import { BUILTIN_PROFILES } from "../src/profile/profile.js";
 
@@ -19,7 +20,7 @@ const site = process.argv[2] ?? "gemini";
 const profile = BUILTIN_PROFILES[site as keyof typeof BUILTIN_PROFILES];
 if (!profile) throw new Error(`no builtin profile for site ${site}`);
 
-const OUT = join("/ott/ui2api-work", `driver-probe-result-${site}.json`);
+const OUT = join(process.env.WORK || join(tmpdir(), "ui2api-work"), `driver-probe-result-${site}.json`);
 
 async function main(): Promise<void> {
   const driver = new ChatDriver(profile, { account: "merezarezaei@gmail.com" });
