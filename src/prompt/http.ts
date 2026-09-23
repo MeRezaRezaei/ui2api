@@ -864,9 +864,12 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // duckduckgo capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
+      // duckduckgo capability surface: ANONYMOUS site (no captured session — or
+      // account — is ever needed; VQD tokens are minted at runtime by the site's
+      // own JS). duckduckgo_chat is VERIFIED (live headed round-trip 2026-09-22);
+      // the remaining declared capabilities run their own honest read paths with
+      // ok:false + reason (never login-gated — a login-gated verdict would be a
+      // fabricated excuse for an anonymous site).
       // Registry-first, packaged-JSON-fallback profile resolution.
       if (req.method === "POST" && req.url === "/capability/duckduckgo") {
         const body = await readJson(req);

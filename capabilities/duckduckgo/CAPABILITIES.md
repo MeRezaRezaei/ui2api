@@ -1,5 +1,18 @@
 # DuckDuckGo AI Chat capabilities (from JS bundle analysis, 2026-09-16)
 
+## STATUS (fold #19 / GOAL 13, 2026-09-22): **ANONYMOUS — chat VERIFIED live**
+
+`duckduckgo_chat` is **VERIFIED** with a live round-trip (headed, Xvfb, 2026-09-22):
+composer `textarea` + Enter → first-send consent wall ("By clicking 'Continue' you
+agree…") dismissed by clicking its Continue button → composer re-focused → Enter
+again → the site's own JS runs `GET /duckchat/v1/status` (VQD) +
+`POST /duckchat/v1/chat` (SSE, wire-observed **200**) → answer read off the page
+(`[id*="assistant-message"]`). Proof: prompt "say hi" → answer "Hi", model chip
+"GPT-5.6 Luna". **This site NEVER login-gates** — it is anonymous by design; the
+runner before GOAL 13 wrongly short-circuited the whole surface to
+`loginGated:true` (a fabricated excuse for an anonymous site), now fixed — see
+`src/capabilities/duckduckgo.ts` header for the per-capability honest status.
+
 Analyzed statically (curl only, Chrome UA, no browser launched), 3 JS bundles (~4.3 MB) from
 `https://duck.ai/chat` (the final host after `duckduckgo.com/?ia=chat` and `/aichat` both
 302→`https://duck.ai/chat`). App shell is a React SPA; page version `serp_20260915_052329_ET`,
@@ -118,17 +131,19 @@ model-name literals; VQD token flow (status→chat header); auth endpoints for D
 `x-fe-version`/`x-fe-signals` headers; `X-Vqd-Hash-1` challenge mechanism; error type
 enum; anonymous usage (no login required); app shell served without bot wall.
 
-**To verify on first live (headed) capture** (no browser launched):
-1. Exact VQD response header name (the `x-vqd-4` / `f.TY` mapping) — confirmed to exist
-   but the literal header name is obfuscated behind module exports.
-2. `__DDG_BE_VERSION__` and `__DDG_FE_CHAT_HASH__` — runtime-injected values not in the
-   static HTML; their source (likely a bootstrap data endpoint or server-set window variable).
-3. JSON frame `role` field values for assistant text content (the `action:"success"` path
-   processes `role` strings but the exact text-role literal is composed dynamically).
-4. DOM selectors for the composer input, send button, answer container, model picker,
-   and chat history sidebar.
-5. The VQD challenge flow (`ERR_CHALLENGE` + `challengeData` → `AIChatAnomalyDetectionChallengeView`
-   → canvas hash solve → retry) — when exactly it triggers.
+**Verified (live, headed Xvfb round-trip 2026-09-22 — GOAL 13):** the full anonymous chat
+path through `src/capabilities/duckduckgo.ts`: composer `textarea` → first-Enter consent wall
+("By clicking 'Continue' you agree…", button text "Continue") → Continue click → composer
+re-focus → Enter → site JS drives `GET /duckchat/v1/status` + `POST /duckchat/v1/chat` (SSE,
+HTTP 200) → answer renders at `[id*="assistant-message"]` (innerText =
+`<model chip>\n\n<answer>[ \n\n2nd opinion]` — runner strips the chip + footer; chip reads
+"Generating response"/"Stop generating" while streaming, settles to e.g. "GPT-5.6 Luna").
+Proofs: "say hi"→"Hi" & "what is 2+2?"→"2 + 2 = 4", both ok:true ~7–9 s.
+
+**Remaining honest gap:** headless mode surfaced a transient "Oops... Duck.ai is temporarily
+unavailable… anonymous code 02f8" after the consent wall (abuse/anti-bot posture on headless
+fingerprints) — the VERIFIED path is headed (Xvfb with `UI2API_HEADED=1`); headless chat stays
+unverified, NOT a defect claim to paper over.
 
 ## 8. Bot-wall outcome
 
@@ -143,10 +158,10 @@ enum; anonymous usage (no login required); app shell served without bot wall.
 
 | id | description |
 |----|-------------|
-| `duckduckgo_chat` | Composer send + SSE-streamed answer via `POST /duckchat/v1/chat` (UI-path driver). |
-| `duckduckgo_model_picker` | Read available models from the embedded model config (static bundle list, no endpoint). |
-| `duckduckgo_web_search` | Toggle `metadata.toolChoice.WebSearch` → grounded answer with inline citations. |
-| `duckduckgo_image_generate` | Toggle `metadata.toolChoice.GenerateImage` → AI image generation via backend. |
-| `duckduckgo_file_upload` | Attach files/images as base64 in the messages payload (PDF, images, documents). |
-| `duckduckgo_reasoning` | Set `reasoningEffort` to fast/reasoning/extended for supported models. |
-| `duckduckgo_chat_history` | Read/write recent chats from IndexedDB local storage (anonymous) or DDG account sync. |
+| `duckduckgo_chat` | Composer send + SSE-streamed answer via `POST /duckchat/v1/chat` (UI-path driver). **VERIFIED live 2026-09-22.** |
+| `duckduckgo_model_picker` | Read available models from the embedded model config (static bundle list, no endpoint). DOM-unverified — honest unverified, never login-gated. |
+| `duckduckgo_web_search` | Toggle `metadata.toolChoice.WebSearch` → grounded answer with inline citations. DOM-unverified — honest unverified, never login-gated. |
+| `duckduckgo_image_generate` | Toggle `metadata.toolChoice.GenerateImage` → AI image generation via backend. DOM-unverified — honest unverified, never login-gated. |
+| `duckduckgo_file_upload` | Attach files/images as base64 in the messages payload (PDF, images, documents). DOM-unverified — honest unverified, never login-gated. |
+| `duckduckgo_reasoning` | Set `reasoningEffort` to fast/reasoning/extended for supported models. DOM-unverified — honest unverified, never login-gated. |
+| `duckduckgo_chat_history` | Read/write recent chats from IndexedDB local storage (anonymous) or DDG account sync. DOM-unverified — honest unverified, never login-gated. |

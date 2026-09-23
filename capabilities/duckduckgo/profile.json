@@ -12,10 +12,7 @@
   ],
   "send": { "kind": "keyEnter" },
   "answer": [
-    "[class*=\"message\"][class*=\"assistant\"]",
-    "[class*=\"response\"]",
-    "[class*=\"markdown\"]",
-    "[class*=\"chat-message\"]"
+    "[id*=\"assistant-message\"]"
   ],
   "newChat": [
     "[aria-label*=\"New chat\"]",

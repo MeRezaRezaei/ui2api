@@ -1,0 +1,21 @@
+{
+  "siteId": "duckduckgo",
+  "site": "duck.ai",
+  "name": "DuckDuckGo AI Chat (duck.ai)",
+  "url": "https://duck.ai/chat",
+  "siteVersion": "React SPA (serp_20260915_052329_ET, SHA af41a90799e2d64643c19a933f25b799c589b2df)",
+  "version": "0.2.0",
+  "status": "active",
+  "verified": {
+    "since": "2026-09-22",
+    "evidence": "duckduckgo_chat VERIFIED live (headed Xvfb round-trip): composer textarea + Enter -> first-send consent wall (Continue button) -> refocus + Enter -> site's own JS GET /duckchat/v1/status (VQD) + POST /duckchat/v1/chat (SSE, HTTP 200) -> answer read via [id*='assistant-message']. Proofs: 'say hi' -> 'Hi' (model 'GPT-5.6 Luna'), 'what is 2+2?' -> '2 + 2 = 4'; ok:true 7-9s. Anonymous site — never login-gated. Headless showed transient 'anonymous code 02f8' after consent wall; verified path is headed.",
+    "via": "headed Xvfb browser (UI2API_HEADED=1 posture), anonymous session, no credentials",
+    "scope": "duckduckgo_chat verified; duckduckgo_model_picker/web_search/image_generate/file_upload/reasoning/chat_history wire-mapped from bundles, DOM-unverified — honest unverified (never login-gated)"
+  },
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own anonymous DuckDuckGo AI Chat session (no account, no credentials) to send prompts and read streamed answers the site itself renders.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "unreviewed",
+  "publishedAt": "2026-09-22"
+}

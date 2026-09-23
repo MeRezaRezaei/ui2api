@@ -49,7 +49,6 @@ const LOGIN_GATED_BY_DESIGN = new Set([
   "conol",
   "copilot-m365",
   "doubao",
-  "duckduckgo",
   "google-ai-search",
   "grok",
   "inner-ai",
