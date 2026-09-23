@@ -13,7 +13,7 @@
     "captureCommand": "ui2api profile capture \"https://duck.ai\" --login",
     "targetDir": "data/duck.ai/.session/state.json"
   },
-  "note": "This package works ANONYMOUSLY — no session capture required for chat. The VQD token is fetched by the app from GET /duckchat/v1/status (x-vqd-accept:1) and refreshed per chat response. DDG account sync (internal_duckchat_user cookie) is optional. Capture once headed only if DDG account features are needed; otherwise set locked:true with a null snapshot hash. All DOM selectors are UNVERIFIED — confirm on first live capture. Bot-wall: no wall on static page loads; ERR_CHALLENGE may trigger on chat POST abuse (X-Vqd-Hash-1 canvas PoW).",
+  "note": "This package works ANONYMOUSLY — no session capture required for chat. The VQD token is fetched by the app from GET /duckchat/v1/status (x-vqd-accept:1) and refreshed per chat response. DDG account sync (internal_duckchat_user cookie) is optional. Capture once headed only if DDG account features are needed; otherwise set locked:true with a null snapshot hash. ALL DOM selectors live-verified headed 2026-09-22/23 (see profile.json selectorNotes) — 'unverified' entries reflect pre-verification bundle analysis only. Bot-wall: no wall on static page loads; ERR_CHALLENGE may trigger on chat POST abuse (X-Vqd-Hash-1 canvas PoW).",
   "capturedAt": null,
   "snapshotHash": null
 }

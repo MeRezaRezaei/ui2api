@@ -13,26 +13,26 @@
       "step": 2,
       "action": "new-chat",
       "onlyWhen": "args.newChat",
-      "note": "jittered 600-1300ms human dwell; New Chat button (DUCKCHAT_NEW_CHAT_BUTTON); selector unverified"
+      "note": "jittered 600-1300ms human dwell; New Chat button (DUCKCHAT_NEW_CHAT_BUTTON); live path uses [aria-label*='New chat'] (VERIFIED live 2026-09-23)"
     },
     {
       "step": 3,
       "action": "type",
       "input": "args.prompt",
-      "note": "trusted keyboard.insertText into composer (textarea or contenteditable). Selector unverified — confirm on first live capture."
+      "note": "trusted keyboard.insertText into composer textarea (VERIFIED live 2026-09-22 — plain <textarea>, no contenteditable required)."
     },
     {
       "step": 4,
       "action": "send",
-      "note": "Enter (keyEnter strategy), 50-200ms gate"
+      "note": "Enter (keyEnter strategy), 50-200ms gate. First send on a fresh context hits the consent wall (Continue button text) — dismiss + refocus + resend."
     },
     {
       "step": 5,
       "action": "read",
-      "selector": "[class*=\"message\"][class*=\"assistant\"]",
+      "selector": "[id*=\"assistant-message\"]",
       "until": "stable 2000ms",
       "timeoutMs": 45000,
-      "note": "answer selector UNVERIFIED — SSE stream delivers text via JSON frames with action:success, role:assistant. The DOM rendering class is module-hashed; confirm on first live capture."
+      "note": "answer selector VERIFIED live 2026-09-22 — [id*='assistant-message']; innerText = <model chip>\\n\\n<answer>[ \\n\\n2nd opinion]; runner strips the chip + footer. SSE delivers text via JSON frames with action:success, role:assistant."
     }
   ],
   "output": {

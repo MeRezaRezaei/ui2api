@@ -1,0 +1,34 @@
+{
+  "capability": "duckduckgo_file_upload",
+  "site": "duckduckgo",
+  "flow": "ui-path — setInputFiles on the composer's hidden file input and read the attachment chip back (VERIFIED live 2026-09-23)",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "Anonymous chat — no session snapshot needed."
+    },
+    {
+      "step": 2,
+      "action": "upload",
+      "target": "input[type='file']",
+      "note": "The attach button (button[aria-label='Add images or PDFs'], class PskLiaYNlcPUquZPq1Cs) wraps a hidden input[type='file'] with accept=\"image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf\". setInputFiles directly (the filechooser never fires). Payload: args.path, or args.file={name,mimeType,data|path}, or args.data(base64)+args.name. Mimes outside the accept list are REJECTED by the runner (honest — the site won't attach them)."
+    },
+    {
+      "step": 3,
+      "action": "read",
+      "target": "button[aria-label^='Remove image '], button[aria-label^='Remove file ']",
+      "note": "ATTACHED read-back: composer renders the attachment chip (e.g. aria-label 'Remove image 1', class aYkHt4TxswVPtfPDUObH)."
+    }
+  ],
+  "output": {
+    "fileName": "string",
+    "mimeType": "string",
+    "bytes": "number",
+    "chip": "string|null"
+  },
+  "rpc": "The uploaded file rides the NEXT POST /duckchat/v1/chat request as a content part: {type:'image', mimeType, image:dataUrl} for images or {type:'file', content:base64, encoding:'base64', mimeType, filename} for documents (bundle-verified). Upload itself is executed by the site's own handler — never synthesized.",
+  "stealth": "setInputFiles feeds the site's own attach handler exactly like a drag/drop from the user's disk; identical uploader codepath, no forged request.",
+  "sessionLock": "session.lock.json"
+}

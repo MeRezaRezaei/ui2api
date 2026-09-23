@@ -1,0 +1,47 @@
+{
+  "capability": "duckduckgo_reasoning",
+  "site": "duckduckgo",
+  "flow": "ui-path — flip the composer reasoning-mode toggle and read the button text back (VERIFIED live 2026-09-23)",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "Anonymous chat — no session snapshot needed."
+    },
+    {
+      "step": 2,
+      "action": "read",
+      "target": "button[aria-label='Reasoning mode']",
+      "note": "Composer button whose text is the current mode ('Fast' or 'Reasoning')."
+    },
+    {
+      "step": 3,
+      "action": "click",
+      "target": "button[aria-label='Reasoning mode']",
+      "note": "Opens a popover with [role='menuitemradio'] rows: 'Reasoning / Takes longer to respond' and 'Fast / Answers right away'."
+    },
+    {
+      "step": 4,
+      "action": "click",
+      "target": "target mode row",
+      "note": "args.mode='fast'|'reasoning' (default 'fast'). 'extended' is NOT offered by the free-tier GPT-5.6 Luna composer (measured 2026-09-23) — the runner reports that honestly as ok:false, never fabricated."
+    },
+    {
+      "step": 5,
+      "action": "read",
+      "target": "button[aria-label='Reasoning mode']",
+      "note": "STATE read-back: the composer button text flips Fast<->Reasoning. Escape to close the popover."
+    }
+  ],
+  "output": {
+    "before": "string",
+    "after": "string",
+    "mode": "string",
+    "changed": "boolean",
+    "options": "string[]"
+  },
+  "rpc": "The selected mode rides the NEXT POST /duckchat/v1/chat request as reasoningEffort (bundle-verified; values from DUCKCHAT_REASONING_MODE_{FAST,REASONING,EXTENDED_REASONING} i18n). Extended thinking additionally sets extendedThinking in request metadata for supporting plus/pro models.",
+  "stealth": "drives only the site's own reasoning-mode toggle; identical to a user picking the mode in the UI. No synthetic request.",
+  "sessionLock": "session.lock.json"
+}

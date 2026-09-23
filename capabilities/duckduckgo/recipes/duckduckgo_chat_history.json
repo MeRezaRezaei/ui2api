@@ -1,0 +1,35 @@
+{
+  "capability": "duckduckgo_chat_history",
+  "site": "duckduckgo",
+  "flow": "read the site's own IndexedDB + sidebar DOM (VERIFIED live 2026-09-23)",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "Anonymous chat — no session snapshot needed. A fresh anonymous context shows 0 chats (the site creates the store on its FIRST chat); sendProbe drives one real probe chat (site's own JS) when a non-empty read is wanted."
+    },
+    {
+      "step": 2,
+      "action": "read",
+      "target": "IndexedDB 'savedAIChatData'",
+      "note": "Stores: saved-chats, pre-canonical-chats, chat-images, sync-credentials, sync-state. Rows keyed by chatId {title, model, messages[], reasoningMode, lastEdit, pinned, fileRefs}. Read via page.evaluate (the site's own storage). The internal '__metadata__' sentinel row is filtered out."
+    },
+    {
+      "step": 3,
+      "action": "read",
+      "target": "sidebar",
+      "note": "DOM corroboration: input[aria-label='Search chats'] + one button[aria-label='Delete Chat'] per chat row; row titles match the IndexedDB chat titles."
+    }
+  ],
+  "output": {
+    "count": "number",
+    "chats": "Array<{id, title, model, reasoningMode, pinned, messageCount, lastEdit}>",
+    "stores": "string[]",
+    "sidebar": "{searchInput, deleteRows, rows}",
+    "seeded": "{prompt, reason} | undefined"
+  },
+  "rpc": "Anonymous chats are device-local IndexedDB (namespaced to the duck.ai origin). DDG-account sync would additionally use /duckchat/v1/auth/authorize -> /auth/token -> internal_duckchat_user cookie (encrypted); not required for the anonymous read.",
+  "stealth": "reads the browser's own storage — no request leaves the page. sendProbe drives a real chat through the site's own composer, indistinguishable from the user typing.",
+  "sessionLock": "session.lock.json"
+}

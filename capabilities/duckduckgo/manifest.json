@@ -41,41 +41,41 @@
       "id": "duckduckgo_web_search",
       "name": "Web search toggle",
       "description": "Toggle in-chat web search (metadata.toolChoice.WebSearch → backend performs search, injects results + citations)",
-      "method": "ui-toggle (composer toolbar Web Search switch)",
-      "implementation": "metadata.toolChoice.WebSearch:true on the chat POST request. UI toggle driven by DUCKCHAT_TOOLS_WEB_SEARCH_LABEL state. Exact DOM selector unverified.",
-      "recipe": null
+      "method": "ui-toggle (composer Tools → Web Search row)",
+      "implementation": "Composer 'Tools' button → popover row \"Web Search / Source answers from the web\" ([role='menuitemradio']); enabled state read back from the composer chip button[aria-label='Remove Web Search']. VERIFIED live 2026-09-23 (headed Xvfb): enable→chip, chat after enable carried a REAL WebSearch tool-invocation with 5 citations in saved-chats.",
+      "recipe": "recipes/duckduckgo_web_search.json"
     },
     {
       "id": "duckduckgo_model_picker",
       "name": "Model picker read",
       "description": "Read available AI models from the embedded bundle config (gpt-4o/5.x, claude-sonnet-4-x/opus-4-x, llama-4, mistral-small, kimi-k2-5)",
-      "method": "dom.picker (unverified selectors) or embedded model list",
-      "implementation": "Model names are embedded in the JS bundle (NOT fetched from an endpoint). Model picker state key: availableModels. Picker UI DOM selectors unverified. Subscription tiers (free/plus/pro) gate model access.",
-      "recipe": null
+      "method": "ui.model-picker (composer chip → [role='menu'][aria-label='Choose a model'])",
+      "implementation": "Composer model chip (text '5.6 Luna', w≈100 h≈32) opens [role='menu'][aria-label='Choose a model']; rows are [role='menuitemradio'] with data-testid=\"model-picker-row-<id>\" and aria-checked=\"true\" on the active model. VERIFIED live 2026-09-23: 6 rows read (GPT-5.6 Luna selected, GPT-5.4 mini, Claude Haiku 4.5, Mistral Small 4, gpt-oss 120B, Gemma 4 31B BETA). Post-chat composer hides the chip → New Chat retry.",
+      "recipe": "recipes/duckduckgo_model_picker.json"
     },
     {
       "id": "duckduckgo_file_upload",
       "name": "File / image upload",
       "description": "Attach files and images to a chat message (base64-encoded in request body)",
-      "method": "composer attach UI (file input) or programmatic (base64 in content array)",
-      "implementation": "Content parts: {type:'image', mimeType, image: dataUrl} for images; {type:'file', content: base64, encoding:'base64', mimeType, filename} for documents. Page context: {type:'file', ..., source:'page-context', url, title}. Max file/image limits enforced client+server.",
-      "recipe": null
+      "method": "ui.file-upload (setInputFiles on hidden input[type='file'])",
+      "implementation": "Attach button (button[aria-label='Add images or PDFs']) wraps input[type='file'] accept=\"image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf\"; setInputFiles → attachment chip button[aria-label^='Remove image '] read-back. VERIFIED live 2026-09-23 with a 1x1 PNG (chip 'Remove image 1'). Content parts: {type:'image', mimeType, image:dataUrl} or {type:'file', content:base64, encoding:'base64', mimeType, filename}.",
+      "recipe": "recipes/duckduckgo_file_upload.json"
     },
     {
       "id": "duckduckgo_reasoning",
       "name": "Reasoning mode",
       "description": "Set reasoning effort (fast / reasoning / extended) for supported models",
-      "method": "composer reasoning toggle or request param",
-      "implementation": "reasoningEffort field in chat POST body; values from DUCKCHAT_REASONING_MODE_{FAST,REASONING,EXTENDED_REASONING} i18n keys. Extended reasoning flag: extendedThinking in request metadata.",
-      "recipe": null
+      "method": "ui.toggle (button[aria-label='Reasoning mode'] popover)",
+      "implementation": "Composer button[aria-label='Reasoning mode'] text Fast/Reasoning; popover rows [role='menuitemradio'] 'Reasoning Takes longer to respond' / 'Fast Answers right away'. VERIFIED live 2026-09-23: selecting flips the button text (read-back). 'extended' is NOT offered for the free-tier GPT-5.6 Luna composer (measured limit, honest ok:false). reasoningEffort rides the chat POST; extendedThinking in request metadata for plus/pro models.",
+      "recipe": "recipes/duckduckgo_reasoning.json"
     },
     {
       "id": "duckduckgo_chat_history",
       "name": "Chat history (local or synced)",
       "description": "Read recent chats from IndexedDB (anonymous, device-local) or DDG-account sync",
-      "method": "IndexedDB read or DOM sidebar",
-      "implementation": "Local storage via CHATS_STORAGE_* events (IndexedDB-backed); DDG sync via internal_duckchat_user cookie + /duckchat/v1/auth/* endpoints. CHATS_DATA_GET/SET/REMOVE operations in bundle. Selectors unverified.",
-      "recipe": null
+      "method": "indexeddb.saved-chats + dom.sidebar",
+      "implementation": "Anonymous chats live in IndexedDB 'savedAIChatData' (v6), stores saved-chats / pre-canonical-chats keyed by chatId {title, model, messages[], reasoningMode, lastEdit, pinned}; sidebar input[aria-label='Search chats'] + per-row button[aria-label='Delete Chat'] corroborate. VERIFIED live 2026-09-23 (sendProbe read-back: 'Abilities list' row, model gpt-5.6-luna, stored + sidebar match). DDG sync via /duckchat/v1/auth/* + internal_duckchat_user cookie (optional).",
+      "recipe": "recipes/duckduckgo_chat_history.json"
     }
   ],
   "models": {

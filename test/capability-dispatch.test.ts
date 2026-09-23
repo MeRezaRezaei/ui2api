@@ -17,6 +17,7 @@ import { HuggingChatCapabilities } from "../src/capabilities/huggingchat.js";
 import { CopilotCapabilities } from "../src/capabilities/copilot.js";
 import { YouTubeCapabilities } from "../src/capabilities/youtube.js";
 import { ArapratCapabilities } from "../src/capabilities/araprat.js";
+import { DuckduckgoCapabilities } from "../src/capabilities/duckduckgo.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Hermetic capability-runner dispatch tests (no browser, no network, no daemon)
@@ -144,6 +145,13 @@ const RUNNERS: RunnerDef[] = [
     manifestPath: u("../capabilities/araprat/manifest.json"),
     sourcePath: u("../src/capabilities/araprat.ts"),
     make: (p) => new ArapratCapabilities(p),
+  },
+  {
+    id: "duckduckgo",
+    profilePath: u("../capabilities/duckduckgo/profile.json"),
+    manifestPath: u("../capabilities/duckduckgo/manifest.json"),
+    sourcePath: u("../src/capabilities/duckduckgo.ts"),
+    make: (p) => new DuckduckgoCapabilities(p),
   },
 ];
 
