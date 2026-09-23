@@ -1,0 +1,14 @@
+{
+  "site": "mail.google.com",
+  "locked": false,
+  "status": "awaiting-capture",
+  "requiredSession": {
+    "host": "mail.google.com",
+    "cookies": [],
+    "captureCommand": "npx tsx src/cli.ts profile capture https://mail.google.com --login",
+    "targetDir": "data/mail.google.com/.session/state.json"
+  },
+  "note": "SCAFFOLD ONLY — GOAL 19 static wire analysis measured 2026-09-23 that mail.google.com is 100% behind the Google auth wall (every path 301/302s to accounts.google.com/ServiceLogin, content-length:0, no JS bundles fetchable), so NO anonymous surface exists and NO selector is statically observable. Google auth cookies are browser-bound (app-bound cookie class, same as youtube posting): portable replay into ephemeral contexts renders anonymous. The honest primary seam is the user's own real Chrome attached with mail.google.com signed in (UI2API_ATTACH_PORT=9222); a portable capture (profile capture / profile add-all --known) works only if it measurably replays a logged-in inbox. Capture once, then this lock file records the snapshot hash + date.",
+  "capturedAt": null,
+  "snapshotHash": null
+}

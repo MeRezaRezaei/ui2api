@@ -1,0 +1,16 @@
+{
+  "id": "gmail",
+  "name": "Gmail (mail.google.com) — capability surface, NOT an AI chat site",
+  "url": "https://mail.google.com",
+  "loginRequired": true,
+  "loginHint": "Gmail has NO anonymous surface (measured 2026-09-23: every path 302s to accounts.google.com/ServiceLogin). Sign in to mail.google.com in your real Chrome and attach it (google-chrome --remote-debugging-port=9222, then UI2API_ATTACH_PORT=9222), or capture a session that measurably replays: npx tsx src/cli.ts profile capture https://mail.google.com --login. Google cookies are app-bound — portable replay may still render anonymous.",
+  "composer": [],
+  "send": {
+    "kind": "keyEnter"
+  },
+  "answer": [],
+  "captureMs": 120000,
+  "stableMs": 4000,
+  "note": "NOT AN AI CHAT SITE (email client). composer/answer are intentionally EMPTY: there is no chat composer; ChatDriver is not applicable. The capability surface is the user's own inbox driven through gmail's own UI (read_inbox / list_threads / open_thread / search / send). ALL selector facts are DOM-UNVERIFIED (mail.google.com is 100% auth-walled statically — GOAL 19 wire measurement 2026-09-23); the runner re-reads the real rendered DOM on every call and reports honestly what the session actually shows.",
+  "urlTemplate": "https://mail.google.com/mail/u/0/{view}"
+}

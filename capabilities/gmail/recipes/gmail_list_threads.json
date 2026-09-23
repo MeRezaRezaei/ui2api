@@ -1,0 +1,17 @@
+{
+  "capability": "gmail_list_threads",
+  "site": "gmail",
+  "flow": "ui-path — navigate the site's own hash route (#label/<Label> / #search/<q> / #inbox) and read the rendered conversation rows",
+  "workType": "ui-path",
+  "reloadAfterSuccess": true,
+  "verified": "DOM-UNVERIFIED",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://mail.google.com/mail/u/0/#{view}", "urlTemplate": "https://mail.google.com/mail/u/0/#{view}", "input": "args.view (default #inbox; label route 'label/<Label>' or search route 'search/<q>' — url-encoded)", "note": "Gmail's SPA routes its own views through the # hash — the site's JS boots the requested view. Must run in a logged-in session; otherwise the site 302s to accounts.google.com (measured 2026-09-23)." },
+    { "step": 2, "action": "wait", "selector": "tr.zA", "timeoutMs": 20000, "note": "Conversation-row surface (DOM-UNVERIFIED — re-tune on first capture). An empty view honestly returns 0 rows." },
+    { "step": 3, "action": "extract", "kind": "rows", "selectors": ["tr.zA"], "max": 50, "note": "Same per-row fields as gmail_read_inbox (subject .y6, sender .bog, snippet .y2, date .xW, unread .zE / dot). DOM-UNVERIFIED." }
+  ],
+  "output": { "rows": "array<{id, subject, sender, snippet, dateTag, unread}>", "count": "number", "view": "string" },
+  "rpc": "none — RPC bridge deliberately not driven; reads off the rendered page",
+  "stealth": "plain hash-route navigation + DOM read in the user's own logged-in session",
+  "sessionLock": "session.lock.json"
+}

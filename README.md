@@ -185,7 +185,12 @@ model-picker, web-search toggle, file upload, reasoning-mode, chat-history —
 all six live-verified headed/Xvfb, see `capabilities/duckduckgo/CAPABILITIES.md`).
 Capability-
 only sites (not chat): `youtube` (`youtube_search` verified 2026-09-20; posting
-login-bound) and `araprat` (search/trending/video_detail verified 2026-09-20).
+login-bound), `araprat` (search/trending/video_detail verified 2026-09-20) and
+`gmail` (the flagship "working with a gmail agent" pitch — inbox read/list/open/
+search + composer, all **DOM-unverified** because mail.google.com is 100%
+auth-walled statically (GOAL 19 measured 2026-09-23); drive it via the user's
+own real Chrome attached with mail.google.com signed in,
+`UI2API_ATTACH_PORT=9222`).
 A machine-checkable `verified` record (since/evidence/via) rides on every
 `/registry` package — absent or `false` = honestly not verified. Each verified
 chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.

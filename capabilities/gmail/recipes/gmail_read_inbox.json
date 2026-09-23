@@ -1,0 +1,17 @@
+{
+  "capability": "gmail_read_inbox",
+  "site": "gmail",
+  "flow": "ui-path — open mail.google.com/mail/u/0/ in the session and read the site's own rendered conversation list",
+  "workType": "ui-path",
+  "reloadAfterSuccess": true,
+  "verified": "DOM-UNVERIFIED",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://mail.google.com/mail/u/0/", "note": "Must run in a session that measurably shows the logged-in inbox. Anonymous/no-session → the site itself redirects to accounts.google.com (MEASURED 2026-09-23, 302, content-length:0); the runner then reports honest ok:false with the sign-in reason — never a fabricated read." },
+    { "step": 2, "action": "wait", "selector": "tr.zA, [role='row'] a[href*='#inbox'], table[role='presentation'] tr", "timeoutMs": 20000, "note": "Known-stable Gmail conversation-row surface (DOM-UNVERIFIED — re-tune against a real session on first capture). The row carries the sender + snippet + relative date; a row entering focus renders the open thread." },
+    { "step": 3, "action": "extract", "kind": "rows", "selectors": ["tr.zA"], "max": 50, "note": "Per row: subject (.y6 or span[role='link']), sender (.bog / b.Email), snippet (.y2 /* tellRow */), date (.xW or [role='gridcell'] time title), read state (tr.zA vs tr.zE unread; dot indicator [role='link'] + base64 IMG). DOM-UNVERIFIED — every field re-read from the live DOM." }
+  ],
+  "output": { "rows": "array<{id, subject, sender, snippet, dateTag, unread}>", "count": "number", "view": "inbox" },
+  "rpc": "none — Gmail's internal RPC bridge is deliberately not driven (no fabricated traffic). Reads happen off the rendered page.",
+  "stealth": "plain page load + DOM read in the user's own logged-in session — indistinguishable from a human opening Gmail",
+  "sessionLock": "session.lock.json"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "gmail_send",
+  "capability": "gmail_send",
+  "version": "1.0.0",
+  "workType": "ui",
+  "reloadAfterSuccess": true,
+  "auth": "cookie-login-required google-web-session",
+  "status": "login-gated-recipe-only",
+  "ok": false,
+  "steps": [
+    {
+      "label": "login-gate check",
+      "workType": "ui",
+      "selector": "div[gh='cm'], .T-I.J-J5-Ji.T-I-KE, button[aria-label^='Compose']",
+      "ok": false,
+      "reloadAfterSuccess": true,
+      "note": "LOGIN-GATED login-required. Compose → to (input[name='to'], aria-label 'To' recipient), subject (input[name='subjectbox']), body (div[aria-label='Message Body'][contenteditable='true']), send (the site's own Send button div[role='button'][gh='send'] / 'Send'). DOM-UNVERIFIED. If the attached session returns the real composer and a sent confirmation reads back, capture then verify; NEVER fabricate a sent email without a verified live read-back."
+    }
+  ]
+}

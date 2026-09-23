@@ -1,0 +1,100 @@
+{
+  "id": "gmail",
+  "name": "Gmail (mail.google.com) — the user's flagship 'working with a gmail agent' pitch",
+  "site": "mail.google.com",
+  "url": "https://mail.google.com",
+  "description": "Gmail — the user's flagship adoption pitch ('as working with gmail agent without paying for google ai plan', docs/verbatim.md:313): mail.google.com buttons and abilities callable as API. NOT an AI chat site — the ui2api surface is the user's own inbox: read the conversation list, search it, open a thread, and (eventually) compose. GOAL 19 static-wire-measured 2026-09-23: mail.google.com is 100% behind the Google auth wall, so EVERY selector below is DOM-unverified pending a captured/attached real session — nothing is claimed verified, nothing is fabricated. Auth class: google web session with the app-bound-cookie caveat (same as youtube posting) — the honest primary seam is the user's own real Chrome attached via UI2API_ATTACH_PORT=9222.",
+  "version": "0.1.0",
+  "author": "ui2api capabilities",
+  "date": "2026-09-23",
+  "siteVersion": "Gmail SPA — shell+bundles NOT statically observable (measured 2026-09-23: every path 301/302s to accounts.google.com/ServiceLogin, content-length:0, no JS). Selectors listed from known-stable Gmail UI surface names, explicitly DOM-unverified",
+  "transport": {
+    "type": "ui-driver",
+    "protocol": "DOM read/write of the site's own rendered UI in the user's own logged-in session (real navigation, real clicks, real typing; reads off the rendered conversation list / opened thread). Gmail's internal RPC bridge (/mail/u/*/_/*) is deliberately NOT driven — no fabricated traffic.",
+    "baseUrl": "https://mail.google.com",
+    "streaming": "n/a (not a chat stream)",
+    "auth": {
+      "scheme": "google web session (app-bound cookies caveat)",
+      "tokenOrigin": "account session (mail.google.com sign-in)",
+      "refresh": "n/a",
+      "note": "MEASURED 2026-09-23: portable cookie replay renders anonymous for Google (browser-bound cookies, same class as youtube posting). The honest primary seam is the user's own real Chrome attached (UI2API_ATTACH_PORT=9222) or a captured session that actually replays."
+    },
+    "antiBot": {
+      "observed": "not probed — no session. Google's sign-in/interstitial posture is avoided entirely through the attached real Chrome path."
+    }
+  },
+  "capabilities": [
+    {
+      "id": "gmail_read_inbox",
+      "name": "Read inbox",
+      "description": "Open mail.google.com/mail/u/0/ in the user's session and read the site's own rendered conversation list: rows carry sender, subject, snippet, date and read/unread state. DOM-UNVERIFIED (auth-walled statically, GOAL 19 measured 2026-09-23) — the known-stable Gmail row surface (table role=row rows with the subject/snippet/date cells) is implemented; the runner honestly re-reads whatever the real session renders and reports ok:false with the measured reason if the sign-in wall shows.",
+      "method": "ui-path (open inbox, read rendered conversation rows)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "status": "dom-unverified-auth-walled",
+      "recipe": "recipes/gmail_read_inbox.json"
+    },
+    {
+      "id": "gmail_list_threads",
+      "name": "List threads (folder / label / query route)",
+      "description": "Navigate the site's own hash route (#label/<Label>, #search/<q>, or the default #inbox) and read the same rendered conversation rows as gmail_read_inbox. DOM-UNVERIFIED (auth-walled statically, GOAL 19 measured 2026-09-23).",
+      "method": "ui-path (navigate the site's label/search view, read rendered rows)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "status": "dom-unverified-auth-walled",
+      "recipe": "recipes/gmail_list_threads.json"
+    },
+    {
+      "id": "gmail_open_thread",
+      "name": "Open a thread and read it",
+      "description": "Open the first matching thread (or drive a search to find one) by clicking the site's own conversation row, then read the opened thread's subject, from, date and body text off the rendered message pane. DOM-UNVERIFIED (auth-walled statically, GOAL 19 measured 2026-09-23).",
+      "method": "ui-path (click the site's own row, read the opened message pane)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "status": "dom-unverified-auth-walled",
+      "recipe": "recipes/gmail_open_thread.json"
+    },
+    {
+      "id": "gmail_search",
+      "name": "Search mail",
+      "description": "Type the query into the site's own search box (known-stable surfaces: input[aria-label='Search mail'] / input[name='q']) and press Enter so gmail's own JS runs the search, then read the rendered results. DOM-UNVERIFIED (auth-walled statically, GOAL 19 measured 2026-09-23).",
+      "method": "ui-path (type + Enter in the site's own search box, read results)",
+      "workType": "ui-path",
+      "reloadAfterSuccess": true,
+      "status": "dom-unverified-auth-walled",
+      "recipe": "recipes/gmail_search.json"
+    },
+    {
+      "id": "gmail_send",
+      "name": "Compose and send an email",
+      "description": "Click the site's own Compose button, fill to/subject/body in the site's own composer fields, click the site's own Send button, and read back the sent confirmation. MUTATION + login-gated by design: dispatched honestly ok:false with login-required until a real captured/attached session exists — NEVER fabricated. DOM-UNVERIFIED (auth-walled statically, GOAL 19 measured 2026-09-23).",
+      "kind": "action",
+      "method": "ui",
+      "workType": "ui",
+      "reloadAfterSuccess": true,
+      "auth": "cookie-login-required google-web-session",
+      "status": "login-gated-recipe-only",
+      "recipe": "recipes/gmail_send.json"
+    }
+  ],
+  "auth": {
+    "required": true,
+    "kind": "session-snapshot",
+    "host": "mail.google.com",
+    "credentials": {
+      "kind": "google-web-session",
+      "name": "account session (browser-bound — app-bound cookie caveat)"
+    },
+    "capture": "npx tsx src/cli.ts profile capture https://mail.google.com --login",
+    "note": "auth.required:true — no anonymous surface exists (measured 2026-09-23: every mail.google.com path 302s to accounts.google.com/ServiceLogin, content-length:0, no JS bundles fetchable). session.lock stays awaiting-capture. Primary documented seam: the user's own real Chrome attached with mail.google.com signed in (UI2API_ATTACH_PORT=9222)."
+  },
+  "permissions": [
+    "read the user's own rendered inbox/list/thread/search results through gmail's own UI (no fabricated traffic, no RPC synthesis)",
+    "no mail is ever sent without a real session proof; gmail_send stays login-gated until a live round-trip reads back a sent confirmation",
+    "Google app-bound-cookie caveat documented — never claim a portable replay works until it measurably shows the logged-in inbox"
+  ],
+  "builtinProfile": "none — Gmail is not a chat site; no ChatDriver profile entry (see REGISTER.md)",
+  "analyzed": "2026-09-23",
+  "analysisMethod": "static wire probe only (curl, no browser, no login): every mail.google.com path measured 301/302 → accounts.google.com/ServiceLogin with zero body/bundles → Gmail UI is auth-walled and NOT statically observable. Capability list from known-stable Gmail UI surface names, explicitly DOM-unverified; runners are real Playwright UI paths.",
+  "verified": "2026-09-23"
+}

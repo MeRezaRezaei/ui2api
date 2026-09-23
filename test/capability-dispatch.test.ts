@@ -17,6 +17,7 @@ import { HuggingChatCapabilities } from "../src/capabilities/huggingchat.js";
 import { CopilotCapabilities } from "../src/capabilities/copilot.js";
 import { YouTubeCapabilities } from "../src/capabilities/youtube.js";
 import { ArapratCapabilities } from "../src/capabilities/araprat.js";
+import { GmailCapabilities } from "../src/capabilities/gmail.js";
 import { DuckduckgoCapabilities } from "../src/capabilities/duckduckgo.js";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ const RUNNERS: RunnerDef[] = [
     manifestPath: u("../capabilities/araprat/manifest.json"),
     sourcePath: u("../src/capabilities/araprat.ts"),
     make: (p) => new ArapratCapabilities(p),
+  },
+  {
+    id: "gmail",
+    profilePath: u("../capabilities/gmail/profile.json"),
+    manifestPath: u("../capabilities/gmail/manifest.json"),
+    sourcePath: u("../src/capabilities/gmail.ts"),
+    make: (p) => new GmailCapabilities(p),
   },
   {
     id: "duckduckgo",

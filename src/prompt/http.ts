@@ -48,6 +48,7 @@ import { CopilotCapabilities } from "../capabilities/copilot.js";
 import { HuggingChatCapabilities } from "../capabilities/huggingchat.js";
 import { YouTubeCapabilities } from "../capabilities/youtube.js";
 import { ArapratCapabilities } from "../capabilities/araprat.js";
+import { GmailCapabilities } from "../capabilities/gmail.js";
 import { AdaptaCapabilities } from "../capabilities/adapta.js";
 import { BlackboxCapabilities } from "../capabilities/blackbox.js";
 import { ChatglmCapabilities } from "../capabilities/chatglm.js";
@@ -621,6 +622,41 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
         const caps = new YouTubeCapabilities(profile, { browser: shared, dataDir, account });
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+      // Gmail capability surface — the user's flagship adoption pitch
+      // (docs/verbatim.md:313): mail.google.com abilities callable as API.
+      // NOT a chat site — no ChatDriver. GOAL 19 static wire analysis
+      // (2026-09-23): mail.google.com is 100% auth-walled (every path 302s to
+      // accounts.google.com/ServiceLogin), so every runner selector is
+      // DOM-UNVERIFIED known-stable Gmail surface; each call honestly detects
+      // the auth wall (redirect → ok:false with the measured two-step unblock)
+      // and never fabricates a read or a send. Registry-first,
+      // packaged-JSON-fallback profile resolution.
+      if (req.method === "POST" && req.url === "/capability/gmail") {
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real
+        // runners) and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom("gmail", profilesById);
+        } catch {
+          profile = resolveProfile("capabilities/gmail/profile.json");
+        }
+        resolveCapabilityAccount(account, profile, dataDir);
+        const shared = await pool.sharedBrowser();
+        const caps = new GmailCapabilities(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

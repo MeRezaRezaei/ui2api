@@ -1,0 +1,18 @@
+{
+  "capability": "gmail_search",
+  "site": "gmail",
+  "flow": "ui-path — type the query into the site's own search box and press Enter so gmail's own JS runs the search; read the rendered results",
+  "workType": "ui-path",
+  "reloadAfterSuccess": true,
+  "verified": "DOM-UNVERIFIED",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://mail.google.com/mail/u/0/", "note": "Must run in a logged-in session; otherwise the site 302s to accounts.google.com (measured 2026-09-23)." },
+    { "step": 2, "action": "type", "selector": "input[aria-label='Search mail'], input[name='q']", "input": "args.query", "note": "Known-stable Gmail search-box surface (DOM-UNVERIFIED — re-tune on first capture). Real keystrokes so gmail's own input handlers receive them, then Enter." },
+    { "step": 3, "action": "wait", "selector": "tr.zA", "timeoutMs": 25000, "note": "Gmail's own JS fetches + renders the results (the URL hash becomes #search/<q>). Read the same row surface as gmail_read_inbox. DOM-UNVERIFIED." },
+    { "step": 4, "action": "extract", "kind": "rows", "selectors": ["tr.zA"], "max": 50, "note": "Same per-row fields (subject .y6, sender .bog, snippet .y2, date .xW). Empty result = 0 rows returned honestly." }
+  ],
+  "output": { "rows": "array<{id, subject, sender, snippet, dateTag, unread}>", "count": "number", "query": "string" },
+  "rpc": "none — RPC bridge deliberately not driven; the page's own JS performs the search",
+  "stealth": "real typing + Enter in the site's own search box — indistinguishable from a human searching",
+  "sessionLock": "session.lock.json"
+}
