@@ -8,9 +8,9 @@
   "status": "active",
   "verified": {
     "since": "2026-09-19",
-    "evidence": "full surface live round-trip via session-locked vault replay, proof PASS kimi 13965 (2026-09-19): chat, list_conversations (15 real), model_list (K3/K3 Swarm/K2.8/Instant), web_search, file_upload; capability probe ok:true tier 'Upgrade' + real model rows (fold #5, 2026-09-21)",
+    "evidence": "full surface live round-trip via session-locked vault replay, proof PASS kimi 13965 (2026-09-19): chat, list_conversations (15 real), model_list (K3/K3 Swarm/K2.8/Instant), web_search, file_upload; capability probe ok:true tier 'Upgrade' + real model rows (fold #5, 2026-09-21); kimi_long_context mechanism live-verified 2026-09-23 (runner proof): picker rows + ContextLength enum codes measured on K3 Chat & Agent (Standard L=5 selectable/ok:true; Extra Long XL=6 PLAN-GATED on this free account — measured gate 'Available to subscribers on the Max plan or higher' dialog, honest blocker, never fabricated)",
     "via": "session-locked vault replay (localStorage access_token Bearer + x-msh-shield-data on notilo.kimi.com/apiv2)",
-    "scope": "chat, list_conversations, model_list, web_search, file_upload"
+    "scope": "chat, list_conversations, model_list, web_search, file_upload, long_context (picker + enum mapping live; Extra Long plan-gated on this account)"
   },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own Kimi AI (www.kimi.ai) sessions to chat, use in-chat web search, upload files, list conversations, and read the model picker with my account.",

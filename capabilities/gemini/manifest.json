@@ -30,7 +30,8 @@
       "name": "Search / Web-access toggle",
       "description": "Flip the composer search switch (feeds the tools field of StreamGenerate)",
       "method": "ui-toggle",
-      "recipe": "recipes/gemini_search_toggle.json"
+      "recipe": "recipes/gemini_search_toggle.json",
+      "notes": "MEASURED 2026-09-23 (GOAL 15): Google-Search grounding is a SIGNED-IN-only sources/extensions entry (otAQ7b Search=1, menuitemcheckbox riding the StreamGenerate tools field). All stored gemini sources replay SIGNED-OUT (Google auth browser-bound/app-bound — same phenomenon as youtube posting), so the runner returns the measured honest blocker (ok:false, reason string); toggle from the user's own signed-in Chrome (UI2API_ATTACH_PORT). Runner guard excludes the 'Deep research' menuitemcheckbox (label contains 'search') from matching."
     }
   ],
   "auth": {

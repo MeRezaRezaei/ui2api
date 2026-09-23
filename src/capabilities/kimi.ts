@@ -32,6 +32,22 @@
 //                              filechooser drives it so the site's own JS uploads
 //                              (multipart POST notilo.kimi.com/apiv2-files/
 //                              file/upload + GetFileParseProgress tracking).
+//   kimi_long_context       -> drives the REAL composer context-length picker
+//                              (MEASURED LIVE 2026-09-23): the model panel
+//                              [data-testid="model-select-trigger"] renders
+//                              button[data-testid="model-context-length-item"]
+//                              (class effort-item) ONLY when the selected model
+//                              carries contextLengthOptions (K3 family; the
+//                              Instant speed model has none); clicking it opens
+//                              a submenu of
+//                              button[data-testid="model-context-length-option"]
+//                              carrying data-context-length=<ContextLength enum>
+//                              (5=L "Standard" default, 6=XL "Extra Long").
+//                              Selecting "Extra Long" on a non-Max account shows
+//                              the measured upgrade gate ("Extra Long / Available
+//                              to subscribers on the Max plan or higher / Cancel /
+//                              Upgrade") — the long option is plan-gated, and the
+//                              runner reports that honestly instead of an ok.
 //
 // NOT built: kimi_chat_direct (the ChatService.Chat Connect/protobuf stream is
 // untested — no live wire capture yet; encoding proto frames without replaying
@@ -161,13 +177,7 @@ export class KimiCapabilities {
       case "kimi_file_upload":
         return this.fileUpload(args);
       case "kimi_long_context":
-        return {
-          capability: "kimi_long_context",
-          ok: false,
-          data: undefined,
-          error:
-            "kimi_long_context sets ChatRequestOptions.context_length (kimi.common.v1.ContextLength enum) on the existing ChatService.Chat stream — the composer length picker is driven by state key selectContextLength, but exact ContextLength enum codes and the toggle DOM selector are UNVERIFIED; confirm on first live capture",
-        };
+        return this.longContext(args);
       default:
         return { capability, ok: false, data: undefined, error: `unknown kimi capability: ${capability}` };
     }
@@ -374,6 +384,162 @@ export class KimiCapabilities {
       };
     } catch (e) {
       return this.fail("kimi_file_upload", e);
+    } finally {
+      await this.teardownPage(page);
+    }
+  }
+
+  // --- kimi_long_context: drive the REAL composer context-length picker ---
+  // The long-context UI IS the model panel's "Context length" row (MEASURED LIVE
+  // 2026-09-23 against the account vault): the row exists only for models whose
+  // contextLengthOptions is non-empty (K3 family; the Instant speed model has
+  // none). Option rows carry data-context-length=<kimi.common.v1.ContextLength
+  // enum> (5=L "Standard" default, 6=XL "Extra Long"); selecting "Extra Long"
+  // on a non-Max account opens the measured upgrade gate ("Extra Long / Available
+  // to subscribers on the Max plan or higher / Cancel / Upgrade"), so the runner
+  // reports the gate honestly instead of a fabricated ok:true. The selection
+  // feeds state key selectContextLength → ChatRequestOptions.context_length on
+  // the next ChatService.Chat send (same stream as normal chat).
+  private async longContext(args: Record<string, unknown>): Promise<KimiCapabilityResult> {
+    const page = await this.openPage();
+    await page.waitForSelector('[data-testid="model-select-trigger"]', { timeout: 15000 }).catch(() => {});
+    const reopenPanel = async (): Promise<void> => {
+      await page.click('[data-testid="model-select-trigger"]', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(900);
+    };
+    try {
+      await reopenPanel();
+      // The picker row only renders for a model with contextLengthOptions; if the
+      // current model (e.g. "Instant") has none, select the flagship K3 Chat &
+      // Agent so the real user path reaches the picker.
+      let hasPicker = await page.locator('[data-testid="model-context-length-item"]').isVisible().catch(() => false);
+      if (!hasPicker) {
+        const k3 = page.locator('button.model-item').filter({ hasText: "K3 Chat & Agent" }).first();
+        if ((await k3.count()) > 0) {
+          await k3.click({ timeout: 8000 }).catch(() => {});
+          await page.waitForTimeout(1000);
+          await reopenPanel();
+          hasPicker = await page.locator('[data-testid="model-context-length-item"]').isVisible().catch(() => false);
+        }
+      }
+      if (!hasPicker) {
+        return {
+          capability: "kimi_long_context",
+          ok: false,
+          method: "dom.context-length-picker",
+          data: undefined,
+          error:
+            "no model with a context-length picker is selected and K3 Chat & Agent is unavailable on this account — contextLengthOptions is empty for the selected model (measured live 2026-09-23: 'Instant' renders no picker row)",
+        };
+      }
+      // Open the option submenu: the picker row is a menu item with
+      // data-close-on-select=false; its options live in a sibling popup of
+      // button[data-testid="model-context-length-option"].
+      await page
+        .locator('[data-testid="model-context-length-item"]')
+        .click({ timeout: 8000 })
+        .catch(() => {});
+      await page.waitForSelector('button[data-testid="model-context-length-option"]', { timeout: 6000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      const picker = await page.evaluate(() => {
+        const row = document.querySelector<HTMLElement>("button[data-testid='model-context-length-item']");
+        const options = Array.from(
+          document.querySelectorAll<HTMLElement>("button[data-testid='model-context-length-option']")
+        );
+        return {
+          current: row ? (row.innerText || "").replace(/\s+/g, " ").trim().replace(/^Context length\s*/, "") : null,
+          options: options.map((el) => {
+            const txt = (el.innerText || "").replace(/\s+/g, " ").trim();
+            return {
+              name: (txt.match(/^([^\n·]+)/)?.[1] ?? txt.slice(0, 40)).slice(0, 40),
+              contextLength: Number(el.getAttribute("data-context-length")) || 0,
+              selected: el.getAttribute("aria-checked") === "true",
+              desc: txt.slice(0, 140),
+            };
+          }),
+        };
+      });
+      // Target enum: 6=XL "Extra Long" (the long-context option), 5=L "Standard".
+      const wantLong = args.longContext !== false;
+      const wantValue = typeof args.length === "number" ? args.length : wantLong ? 6 : 5;
+      const target = picker.options.find((o) => o.contextLength === wantValue);
+      if (!target) {
+        return {
+          capability: "kimi_long_context",
+          ok: false,
+          method: "dom.context-length-picker",
+          data: picker,
+          error:
+            `context length enum ${wantValue} is not offered by the selected model — ` +
+            `measured options: ${picker.options.map((o) => `${o.name}(enum ${o.contextLength})`).join(", ") || "(none)"}`,
+        };
+      }
+      if (target.selected) {
+        return {
+          capability: "kimi_long_context",
+          ok: true,
+          method: "dom.context-length-picker",
+          data: { ...picker, applied: target.name, contextLengthApplied: true },
+          note: "already the active context length — feeds ChatRequestOptions.context_length on the next ChatService.Chat send",
+        };
+      }
+      await page
+        .locator(`button[data-testid="model-context-length-option"][data-context-length="${wantValue}"]`)
+        .click({ timeout: 8000 })
+        .catch(() => {});
+      await page.waitForTimeout(1400);
+      // Measure whether the site answered with the real toggle or a plan gate.
+      // The measured plan-gate renders `div[data-testid="confirm-dialog"]` under
+      // `div.modal-mask` (no role=dialog) with body text "Available to
+      // subscribers on the Max plan or higher / Cancel / Upgrade" — scan both
+      // the dialog containers and the body so a gate can never be silently
+      // mistaken for an applied toggle.
+      const gate = await page.evaluate(() => {
+        const markers = [/subscribers on the/i, /plan or higher/i, /^Upgrade$/im];
+        const dialogs = Array.from(
+          document.querySelectorAll<HTMLElement>("[role='dialog'], [data-testid='confirm-dialog'], [class*='modal'], [class*='dialog']")
+        ).map((el) => (el.innerText || "").replace(/\s+/g, " ").trim());
+        const hit = dialogs.find((t) => /subscribers on the|plan or higher/i.test(t));
+        if (hit) return hit.slice(0, 240);
+        const text = document.body.innerText;
+        const m = text.match(/[^\n]*subscribers on the[^\n]*/i);
+        return m ? m[0].replace(/\s+/g, " ").trim().slice(0, 240) : null;
+      });
+      if (gate) {
+        return {
+          capability: "kimi_long_context",
+          ok: false,
+          method: "dom.context-length-picker",
+          data: { ...picker, gate },
+          error:
+            `context-length option "${target.name}" (ContextLength enum ${wantValue}) is plan-gated on this account — ` +
+            `measured upgrade gate: "${gate}" (2026-09-23); available options: ${picker.options.map((o) => o.name).join(", ")}`,
+        };
+      }
+      const applied = await page.evaluate(() => {
+        const row = document.querySelector<HTMLElement>("button[data-testid='model-context-length-item']");
+        return row ? (row.innerText || "").replace(/\s+/g, " ").trim() : null;
+      });
+      if (!applied || !applied.includes(target.name)) {
+        return {
+          capability: "kimi_long_context",
+          ok: false,
+          method: "dom.context-length-picker",
+          data: { ...picker, applied },
+          error:
+            `clicking context length "${target.name}" (enum ${wantValue}) did not change the selection and no plan gate was measured — picker read-back: ${applied ?? "(row gone)"} (measured 2026-09-23)`,
+        };
+      }
+      return {
+        capability: "kimi_long_context",
+        ok: true,
+        method: "dom.context-length-picker",
+        data: { ...picker, applied, contextLengthApplied: true },
+        note:
+          "sets ChatRequestOptions.context_length (kimi.common.v1.ContextLength enum) — option rows carry data-context-length=<enum> and feed the selectContextLength state into the ChatService.Chat stream",
+      };
+    } catch (e) {
+      return this.fail("kimi_long_context", e);
     } finally {
       await this.teardownPage(page);
     }

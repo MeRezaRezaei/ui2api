@@ -12,6 +12,12 @@
     "via": "session-locked vault replay (gemini.google.com, localStorage BARD_EMBED_CHAT_STORAGE_KEY_V2 + cookies)",
     "scope": "chat (ChatDriver + StreamGenerate), list_conversations, model_list read"
   },
+  "searchToggle": {
+    "since": "2026-09-23",
+    "status": "HONEST-BLOCKED (measured blocker, GOAL 15) — feature-unavailable to a replayed session",
+    "evidence": "runner proof via vault replay: EVERY stored gemini source (vault osbulk, vault merezarezaei@gmail.com, legacy .session) renders SIGNED-OUT — Google auth cookies are browser-bound/app-bound (same measured phenomenon as youtube posting). Signed-out leaf of boq_assistant-bard-web-server_20260914.08_p0 has NO Search toggle in composer (Upload & tools / mode picker / Dictate only), tools panel gates at 'Sign in to try tools', mode picker = 3.5 Flash-Lite / 3.6 Flash / 3.1 Pro. Google-Search grounding is a signed-in-only sources/extensions entry (otAQ7b Search=1, menuitemcheckbox riding the StreamGenerate tools field). Runner returns ok:false with this measured reason; toggle requires the user's own signed-in Chrome (UI2API_ATTACH_PORT).",
+    "via": "real runner gemini_search_toggle() on vault replay + tools-panel dump, 2026-09-23"
+  },
   "author": "ui2api capability package",
   "authorizedUse": "Automate my own Gemini (gemini.google.com) sessions to chat and list conversations with my account.",
   "license": "MIT",

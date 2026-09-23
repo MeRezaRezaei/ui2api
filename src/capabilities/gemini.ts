@@ -10,6 +10,24 @@
 //   gemini_search_toggle    -> toggles the composer Search / Web-access switch
 //                              in the UI (UpdateToolPermission equivalent)
 //
+// ===== Live measurement 2026-09-23 (GOAL 15) =====
+// Replaying EVERY gemini source on this box (vault osbulk, vault
+// merezarezaei@gmail.com, legacy data/gemini.google.com/.session) renders a
+// SIGNED-OUT session ("Sign in" / "Sign in to save activity" / "Sign in for
+// all models"): Google auth cookies are browser-bound (app-bound encryption),
+// the same measured phenomenon as youtube posting (AGENTS.md). In the signed-out
+// surface of this UI revision (boq_assistant-bard-web-server_20260914.08_p0)
+// there is NO standalone Search/Web-access toggle: composer toolbar = "Upload &
+// tools" + mode picker + "Dictate" only; the tools panel lists upload/create
+// entries then "Sign in to try tools" (no sources/extensions list); the mode
+// picker shows just 3.5 Flash-Lite / 3.6 Flash / 3.1 Pro. "Google Search"
+// grounding is a SIGNED-IN composer "sources"/extensions entry (otAQ7b
+// Search=1) exposed as a menuitemcheckbox; it rides the StreamGenerate tools
+// field. The toggle is therefore feature-unavailable to a replayed session:
+// drive it from the user's own signed-in Chrome (UI2API_ATTACH_PORT), exactly
+// like tencent-aistudio / youtube posting. Runner keeps a best-effort toggle
+// (standalone switch + tools-panel sources scan) so a signed-in session flips it.
+//
 // All RPC calls run inside the logged-in page (page.evaluate + fetch) so the
 // request carries the real session cookies + XSRF token; nothing synthetic.
 //
@@ -369,22 +387,65 @@ export class GeminiCapabilities {
     await waitForDomain(page, 4000);
     try {
       const enable = args.enable !== false;
-      const toggled = await page.evaluate((wantOn: boolean) => {
-        // The search/web-access switch: find the toggle button by aria-label or
-        // role, click it when its current state differs from `wantOn`.
-        const labels = ["search", "web access", "google search", "use google search", "search on the web"];
+      // Pass 1: standalone composer switch (aria-label / role / text).
+      let toggled = await page.evaluate((wantOn: boolean) => {
+        // Word-boundary match: "Deep research" must NOT register as a "search"
+        // toggle (measured 2026-09-23: the tools panel exposes a stateful
+        // menuitemcheckbox "Deep research" whose label contains the substring
+        // "search" — a naive includes() would fabricate ok:true on it).
+        const labels = ["web access", "use google search", "google search", "search on the web", "ground with google search"];
         const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']")).find((b) => {
           const t = ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").toLowerCase();
-          return labels.some((l) => t.includes(l));
+          return labels.some((l) => t.includes(l)) || (/\bsearch\b/i.test(t) && !/research/i.test(t));
         });
-        if (!btn) return { ok: false, reason: "no search toggle found — this UI revision has no standalone switch; set grounding via the composer 'sources' picker or the StreamGenerate tools field" };
-        const currentlyOn = (btn as HTMLElement).getAttribute("aria-checked") === "true" || (btn as HTMLElement).className.includes("active") || (btn as HTMLElement).className.includes("checked");
+        if (!btn) return null;
+        const el = btn as HTMLElement;
+        const currentlyOn = el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" || el.className.includes("active") || el.className.includes("checked");
+        const matched = { label: (el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 60), tag: el.tagName, role: el.getAttribute("role"), checked: el.getAttribute("aria-checked") };
         if (currentlyOn !== wantOn) {
-          (btn as HTMLElement).click();
-          return { ok: true, clicked: true, now: wantOn };
+          el.click();
+          return { ok: true, clicked: true, now: wantOn, source: "composer-standalone", matched };
         }
-        return { ok: true, clicked: false, now: wantOn };
+        return { ok: true, clicked: false, now: wantOn, source: "composer-standalone", matched };
       }, enable);
+      // Pass 2: the "Upload & tools" panel — on signed-in sessions the sources/
+      // extensions list (otAQ7b: Search=1) exposes a "Search" menuitemcheckbox
+      // that rides the StreamGenerate tools field.
+      if (!toggled) {
+        await page
+          .locator("button[aria-label*='Upload & tools']")
+          .first()
+          .click({ timeout: 5000 })
+          .catch(() => {});
+        await page.waitForTimeout(1200);
+        toggled = await page.evaluate((wantOn: boolean) => {
+          const labels = ["google search", "web access", "search on the web", "use google search", "ground with google search"];
+          const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']")).find((b) => {
+            const t = ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").toLowerCase();
+            return labels.some((l) => t.includes(l)) || (/\bsearch\b/i.test(t) && !/research/i.test(t));
+          });
+          if (!btn) return null;
+          const el = btn as HTMLElement;
+          const currentlyOn = el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" || el.className.includes("active") || el.className.includes("checked");
+          const matched = { label: (el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 60), tag: el.tagName, role: el.getAttribute("role"), checked: el.getAttribute("aria-checked") };
+          if (currentlyOn !== wantOn) {
+            el.click();
+            return { ok: true, clicked: true, now: wantOn, source: "tools-sources-list", matched };
+          }
+          return { ok: true, clicked: false, now: wantOn, source: "tools-sources-list", matched };
+        }, enable);
+        await page.keyboard.press("Escape").catch(() => {});
+      }
+      if (!toggled) {
+        return {
+          capability: "gemini_search_toggle",
+          ok: false,
+          data: undefined,
+          method: "dom.composer-toggle",
+          error:
+            "feature unavailable to this session (measured live 2026-09-23): replaying every stored gemini source renders SIGNED-OUT (Google auth cookies are browser-bound/app-bound — same phenomenon as youtube posting), and Gemini's 'Google Search' grounding is a signed-in-only composer sources/extensions entry (otAQ7b Search=1) surfaced as a menuitemcheckbox riding the StreamGenerate tools field. Drive it from the user's own signed-in Chrome (UI2API_ATTACH_PORT) to flip the real toggle.",
+        };
+      }
       return { capability: "gemini_search_toggle", ok: Boolean(toggled?.ok), data: toggled, method: "dom.composer-toggle" };
     } catch (e) {
       return this.fail("gemini_search_toggle", e);

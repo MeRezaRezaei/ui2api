@@ -85,8 +85,20 @@ via the `KimiCapabilities` runner + `ui2api proof --site kimi`. Headless-safe.
 | `kimi_web_search` | ✔ ok:true | `[data-testid="toolkit-trigger-btn"]` opens toolkit → click `button.toolkit-item` "Web Search". Pre-boot clicks are dropped — helper `openToolkitItem` polls/re-clicks the trigger up to 15s until the row renders. |
 | `kimi_file_upload` | ✔ chip "kimi-attach-test / TXT / 52 Bytes" | `label.toolkit-item` "Add files & images" wraps hidden `input[type="file"].hidden-input`; set via `locator('input[type="file"]').setInputFiles(path)` (Playwright filechooser event NEVER fired — do not rely on it). Method label: `dom.input.setFiles`. |
 
-Long-context (`kimi_long_context`) remains honest ok:false — the composer's
-context-length picker DOM is still unverified.
+Long-context (`kimi_long_context`) — live-verified mechanism **2026-09-23**: the
+context-length picker was measured through the real runner on the vault account.
+The picker is a model-panel submenu: `button[data-testid="model-context-length-item"]`
+(class `effort-item`, `data-close-on-select=false`) renders ONLY for models with
+`contextLengthOptions` (K3 family — "Instant" has none); clicking it opens
+`button[data-testid="model-context-length-option"]` rows carrying
+`data-context-length` (decoded `ContextLength` enum: **5=L "Standard"** default,
+**6=XL "Extra Long"** with footnote "Allegro/Max plan only · Up to 1M tokens; consumes
+more credits"). Applying Standard → **ok:true** with read-back. Applying **Extra Long
+is PLAN-GATED on this free account**: the site answers with the measured upgrade
+modal (`div[data-testid="confirm-dialog"]` under `div.modal-mask`:
+"Extra Long / Available to subscribers on the Max plan or higher / Cancel / Upgrade")
+→ the runner returns that measured honest blocker, never a fabricated ok. A Max-plan
+session (or the account owner's real browser) can apply XL via the same path.
 
 Cold-boot: on fresh contexts the toolkit/composer render before the app can
 dispatch; every interaction path polls for its target node (up to 15s) instead

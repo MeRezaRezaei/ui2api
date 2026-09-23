@@ -1,14 +1,15 @@
 {
   "capability": "gemini_search_toggle",
   "site": "gemini",
-  "flow": "ui-toggle (composer Search / Web-access / grounding switch)",
+  "flow": "ui-toggle (composer Search / Web-access / grounding switch) — drives the sources 'Google Search' entry that rides the StreamGenerate tools field",
   "steps": [
     { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected" },
-    { "step": 2, "action": "find-toggle", "note": "button / [role='switch'] / [role='checkbox'] / [role='menuitemcheckbox'] matching labels: search, web access, google search, use google search, search on the web" },
-    { "step": 3, "action": "click", "note": "if aria-checked/state != args.enable, click; else no-op" }
+    { "step": 2, "action": "find-toggle", "note": "pass 1 standalone switch: button / [role='switch'] / [role='checkbox'] / [role='menuitemcheckbox'] matching web access | use google search | google search | search on the web | ground with google search, or a word-boundary /search/ EXCLUDING 'research' (the tools panel's stateful 'Deep research' menuitemcheckbox contains the substring 'search' — a naive includes() would fabricate ok:true, measured 2026-09-23)" },
+    { "step": 3, "action": "open-tools", "note": "pass 2: click button[aria-label*='Upload & tools'], scan the sources/extensions list for the same labels (signed-in sessions expose the otAQ7b sources catalog: Search=1, Gmail=3, Drive=4, Chat=12 as menuitemcheckbox rows); Escape closes the drawer" },
+    { "step": 4, "action": "toggle", "note": "if aria-checked/aria-pressed/class state != args.enable, click; else no-op" }
   ],
-  "output": { "ok": "boolean", "clicked": "boolean", "now": "boolean" },
+  "output": { "ok": "boolean", "clicked": "boolean", "now": "boolean", "matched": "object|null (auditable: label/tag/role/aria-checked of the element flipped)" },
   "rpcEquivalent": "UpdateToolPermission / GetAllToolConsentData (BardFrontendService) — the switch's state feeds the tools field (field 2) of StreamGenerate",
-  "note": "Live probe 2026-09-15: this UI revision (boq_assistant-bard-web-server_20260914.08_p0) has NO standalone search toggle in the composer (toolbar = Upload & tools + Dictate only). Google Search grounding is a composer 'sources' picker entry (otAQ7b: Search=1, Gmail=3, Drive=4, Chat=12) exposed as a menuitemcheckbox on signed-in sessions; it then rides the StreamGenerate tools field. The toggle selector is UI-revision sensitive; re-tune per account after live capture.",
+  "note": "Live measurement 2026-09-23 (GOAL 15, replay of ALL stored sources): vault osbulk, vault merezarezaei@gmail.com and legacy data/gemini.google.com/.session ALL render SIGNED-OUT ('Sign in' / 'Sign in to save activity' / 'Sign in for all models') — Google auth cookies are browser-bound (app-bound encryption, same phenomenon as youtube posting). This UI revision (boq_assistant-bard-web-server_20260914.08_p0) has NO standalone search toggle in the signed-out composer (toolbar = Upload & tools + mode picker + Dictate only); the tools panel lists upload/create entries then 'Sign in to try tools' (no sources list); the mode picker shows only 3.5 Flash-Lite / 3.6 Flash / 3.1 Pro. Google Search grounding is a SIGNED-IN composer 'sources'/extensions entry (otAQ7b: Search=1) exposed as a menuitemcheckbox; it then rides the StreamGenerate tools field. The toggle is therefore feature-unavailable to a replayed session — the runner returns the measured honest blocker, ok:false; drive it from the user's own signed-in Chrome (UI2API_ATTACH_PORT), exactly like tencent-aistudio / youtube posting.",
   "sessionLock": "session.lock.json"
 }

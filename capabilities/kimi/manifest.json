@@ -67,10 +67,10 @@
       "id": "kimi_long_context",
       "name": "Long-context / long-context-only mode",
       "description": "Set context_length / context-length-only mode on ChatRequestOptions (kimi.common.v1.ContextLength) for long-input answers",
-      "method": "composer mode toggle or ChatService.Chat options",
-      "implementation": "ChatRequestOptions has thinking (bool, K3 mode), reasoning_effort (kimi.common.v1.ReasoningEffort), context_length (kimi.common.v1.ContextLength); frontend state key selectContextLength drives the picker. Exact ContextLength enum codes + toggle DOM NOT decoded — to be verified on first live capture.",
+      "method": "composer context-length picker (model panel submenu)",
+      "implementation": "MEASURED LIVE 2026-09-23: picker = button[data-testid='model-context-length-item'] (only renders for models carrying contextLengthOptions — K3 family, not Instant); options = button[data-testid='model-context-length-option'] with data-context-length=<ContextLength enum> (decoded: 5=L 'Standard' default, 6=XL 'Extra Long'). Applying Standard → ok:true; Extra Long is PLAN-GATED on free accounts (measured upgrade modal data-testid='confirm-dialog': 'Available to subscribers on the Max plan or higher') → honest blocker. Feeds ChatRequestOptions.context_length on the next ChatService.Chat send.",
       "recipe": "recipes/kimi_long_context.json",
-      "notes": "Toggle DOM + exact ContextLength codes to be verified on first live capture; recipe shipped"
+      "notes": "Picker + enum codes live-verified 2026-09-23 (runner proof); Extra Long plan-gated on this account; needs a Max-plan session to apply XL"
     },
     {
       "id": "kimi_model_list",
