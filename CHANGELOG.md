@@ -6,6 +6,20 @@ All notable changes to ui2api are tracked here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Last env-gated skip closed (GOAL 27): the live-registry test
+  (`test/install.test.ts`, "installs from the LIVE public registry") now runs in
+  CI — `UI2API_REGISTRY_LIVE: "1"` set on the `npm run test:unit` step of
+  `.github/workflows/ci.yml`, so every push executes the real
+  `fetchRegistryIndex(DEFAULT_REGISTRY_URL)` (catalog ≥30 sites) and
+  `ui2api install duckduckgo@0.3.0` over raw.githubusercontent.com instead of
+  silently skipping. Verified: local `UI2API_REGISTRY_LIVE=1 npm run test:unit`
+  → 599/599 pass / 0 skip; CI run 35975092989 **success** with the live test
+  executed (`✔ installs from the LIVE public registry …`, 1492ms — prior run
+  35974736251 had it skipped). Remaining CI skips are 8 pre-existing
+  environment-gated tests (3+1 vault tests need on-box `data/`, 4 wigolo-engine
+  tests need the separate wigolo repo) — unrelated to the registry surface.
+
 ### Docs
 - Production-truth pass (GOAL 21): `docs/ONBOARDING.md` Node floor row fixed
   `>="Node 20+"` → `>=22.13.0` (the real `node:sqlite` floor, CI runs 24);
