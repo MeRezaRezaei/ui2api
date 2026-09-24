@@ -24,7 +24,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolvePackagedProfile, listProfiles, isChatShapedProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, type StoredAccount } from "../runtime/session-store.js";
 
 export interface RegistryToolInputSchema {
@@ -232,28 +232,100 @@ export function resolveDataDir(): string {
 }
 
 /**
- * The daemon's DEFAULT configured chat-site set (GOAL 30): the builtin chat
- * catalog PLUS every installed, chat-shaped package profile
- * (capabilities/<id>/profile.json — the same canonical source /capability and
- * /registry serve). This is what `--site`-less promptd, `GET /sites`,
- * `GET /v1/models` and `ui2api prompt --sites` all reflect. Rules:
+ * Machine status of a SURFACED chat id (GOAL 32 truth-gate). "builtin" for the
+ * curated catalog (its verification lives in the profile's own note, not a
+ * machine field); packaged ids derive it from their manifest/metadata:
+ * "verified" ONLY from a real metadata.verified record with a live round-trip;
+ * "unverified-candidate" = driveable selectors, no recorded live round-trip
+ * (annotated, never claimed verified); "dormant"/"dead-end" = excluded from
+ * the chat surface until a live round-trip exists.
+ */
+export type ChatSurfaceStatus = "verified" | "unverified-candidate" | "dormant" | "dead-end" | "builtin";
+
+/** Per-id status of the SURFACED chat set. Unknown/id-less ids get the
+ *  conservative "unverified-candidate" (nothing beyond a packaged profile is
+ *  ever asserted). */
+export function chatSurfaceStatus(siteId: string): ChatSurfaceStatus {
+  if (listProfiles().some((p) => p.id === siteId)) return "builtin";
+  const status = packageStatusOf(siteId);
+  return status === "unknown" ? "unverified-candidate" : status;
+}
+
+/** The manifest/metadata status of an installed package: "dormant", "dead-end"
+ *  (both excluded from the chat surface), "verified" (real verified record) or
+ *  "unknown" (scaffold/unverified — no metadata or no record). */
+function packageStatusOf(siteId: string): ChatSurfaceStatus | "unknown" {
+  const pkgDir = findPackageDir(siteId);
+  if (!pkgDir) return "unknown";
+  let meta: Metadata | null = null;
+  try {
+    meta = JSON.parse(readFileSync(resolve(pkgDir, "metadata.json"), "utf8")) as Metadata;
+  } catch {
+    meta = null; // no metadata.json -> scaffold/experimental, unverified
+  }
+  if (typeof meta?.status === "string") {
+    if (meta.status === "dormant" || meta.status === "dead-end") return meta.status;
+  }
+  const v = meta?.verified;
+  if (v && typeof v === "object" && typeof v.since === "string" && typeof v.evidence === "string" && typeof v.via === "string") {
+    return "verified";
+  }
+  return "unknown";
+}
+
+export interface ChatSurfaceEntry {
+  id: string;
+  profile: ChatSiteProfile;
+  /** GOAL 32 status of this surfaced id (see ChatSurfaceStatus). Excluded
+   *  ids are NOT in this list — they stay on /registry with their honest
+   *  manifest status instead. */
+  status: ChatSurfaceStatus;
+  packaged: boolean;
+}
+
+/**
+ * The daemon's DEFAULT configured chat-site set (GOAL 30 merge + GOAL 32
+ * truth-gate): the builtin chat catalog PLUS every installed, driveable
+ * chat-shaped package profile (capabilities/<id>/profile.json — the same
+ * canonical source /capability and /registry serve). This is what
+ * `--site`-less promptd, `GET /sites`, `GET /v1/models` and
+ * `ui2api prompt --sites` all reflect. Rules:
  *   - a builtin id is authoritative for that id (packaged overrides never
  *     shadow the builtin profile);
- *   - a package only joins when `isChatShapedProfile` (composer + answer + url);
- *     capability-only surfaces (gmail/youtube/araprat/chatglm/tinycms/…) never
- *     become chat models;
+ *   - a package only joins when `isDriveableChatProfile` — chat-shaped
+ *     (composer + answer + url, GOAL 30) AND every composer/answer entry is a
+ *     PARSEABLE CSS selector (GOAL 32: prose entries like t3chat's former
+ *     "UNVERIFIED-SCAFFOLD — …" crash the driver's querySelectorAll at send
+ *     time); capability-only surfaces (gmail/youtube/araprat/chatglm/
+ *     tinycms/…) never become chat models;
+ *   - a packaged id whose manifest status is "dormant" or "dead-end"
+ *     (zenmux parked-origin, xiaomimimo DNS-pinned dead-end) is EXCLUDED from
+ *     the chat surface until live-verified — it stays fully served on
+ *     /registry + /capability/<id> with that honest status;
  *   - an explicit `--site`/`profiles` list stays authoritative (startPromptd
- *     only calls this in its default path).
+ *     only calls this in its default path; resolveProfile is untouched).
  */
-export function defaultChatProfiles(): ChatSiteProfile[] {
+export function defaultChatSurface(): ChatSurfaceEntry[] {
+  const entries: ChatSurfaceEntry[] = [];
   const byId = new Map<string, ChatSiteProfile>();
-  for (const p of listProfiles()) byId.set(p.id, p);
+  for (const p of listProfiles()) {
+    byId.set(p.id, p);
+    entries.push({ id: p.id, profile: p, status: "builtin", packaged: false });
+  }
   for (const id of listInstalledPackageIds()) {
     if (byId.has(id)) continue;
     const packaged = resolvePackagedProfile(id);
-    if (packaged && isChatShapedProfile(packaged)) byId.set(id, packaged);
+    if (!packaged || !isDriveableChatProfile(packaged)) continue;
+    const status = packageStatusOf(id);
+    if (status === "dormant" || status === "dead-end") continue; // honest exclusion until live-verified
+    byId.set(id, packaged);
+    entries.push({ id, profile: packaged, status: status === "verified" ? "verified" : "unverified-candidate", packaged: true });
   }
-  return [...byId.values()];
+  return entries;
+}
+
+export function defaultChatProfiles(): ChatSiteProfile[] {
+  return defaultChatSurface().map((e) => e.profile);
 }
 
 /** Build the registry 'packages' array from the installed capability packages. */

@@ -264,8 +264,8 @@ test("GOAL8(c): every real /capability/<site> runner validates the account BEFOR
   }
   // The server catch maps the guard's throw (and unknown-site) to 400:
   assert.ok(
-    HTTP_SOURCE.includes("send(res, e instanceof Error && /unknown site |no stored account /.test(e.message) ? 400 : 500"),
-    "http.ts catch must map the resolveCapabilityAccount throw to a 400 (never a 500 for a bad account)"
+    HTTP_SOURCE.includes("send(res, e instanceof Error && /unknown site |no stored account |is installed and serves POST \\/capability\\//.test(e.message) ? 400 : 500"),
+    "http.ts catch must map the resolveCapabilityAccount throw to a 400 (never a 500 for a bad account) — including the GOAL 32 installed-but-not-chat two-step error"
   );
 });
 

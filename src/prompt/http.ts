@@ -33,7 +33,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
-import { buildRegistryPackages, defaultChatProfiles, type RegistryPackage } from "./registry.js";
+import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
@@ -119,11 +119,23 @@ function send(res: ServerResponse, status: number, data: unknown): void {
 // Resolve a site id from the request. Accept only built-in ids or the ids of
 // profiles handed to the server at startup — NEVER an arbitrary URL, so the
 // service cannot be used to drive unintended origins.
+//
+// GOAL 32 two-step: an id that is NOT on the chat surface but IS an installed
+// capability package is a real thing this daemon serves — `/capability/<id>` —
+// so the error says so instead of calling it "unknown" (POST /prompt with
+// "youtube" used to 400 `unknown site "youtube"` though youtube is a
+// registry-listed package serving /capability/youtube). Truly-unknown ids keep
+// the plain "unknown site" 400.
 function idFrom(reqSite: unknown, resolved: Record<string, ChatSiteProfile>): ChatSiteProfile {
   const id = String(reqSite ?? "").trim() || defaultSiteId();
   const p = resolved[id];
-  if (!p) throw new Error(`unknown site "${id}" — try one of ${Object.keys(resolved).join(", ")}`);
-  return p;
+  if (p) return p;
+  const chatIds = Object.keys(resolved);
+  const pkg = registryPackageFor(id);
+  if (pkg) {
+    throw new Error(`"${id}" is installed and serves POST /capability/${id}, not /prompt — try one of ${chatIds.join(", ")}`);
+  }
+  throw new Error(`unknown site "${id}" — try one of ${chatIds.join(", ")}`);
 }
 
 // Resolve the installed capability package for a site (registry-first: the same
@@ -229,7 +241,19 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         return;
       }
       if (req.method === "GET" && req.url === "/sites") {
-        return send(res, 200, { sites: Object.values(profilesById).map((p) => ({ id: p.id, name: p.name, url: p.url, loginRequired: p.loginRequired })) });
+        return send(res, 200, {
+          sites: Object.values(profilesById).map((p) => ({
+            id: p.id,
+            name: p.name,
+            url: p.url,
+            loginRequired: p.loginRequired,
+            // GOAL 32: every surfaced id carries its status (builtin catalog
+            // entry, live-verified package, or unverified-candidate). Dormant/
+            // dead-end packages are excluded from this list entirely — their
+            // honest status lives on /registry + GET /capabilities/<site>.
+            status: chatSurfaceStatus(p.id),
+          })),
+        });
       }
       // REGISTRY — the installed ui2api packages (capabilities/<id>/), the
       // contract consumed by OmniRoute to materialize provider nodes (models)
@@ -1326,7 +1350,9 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
 
       send(res, 404, { error: "not found" });
     } catch (e) {
-      send(res, e instanceof Error && /unknown site |no stored account /.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
+      // 400 for request-shape/identity errors the caller can correct: unknown
+      // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
+      send(res, e instanceof Error && /unknown site |no stored account |is installed and serves POST \/capability\//.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
     }
   });
 

@@ -1,0 +1,12 @@
+{
+  "siteId": "zenmux",
+  "site": "zenmux.com",
+  "name": "ZenMux (zenmux.com) — free proxy/aggregator tier",
+  "url": "https://zenmux.com",
+  "version": "0.1.0",
+  "status": "dormant",
+  "verified": false,
+  "note": "GOAL 32 (2026-09-24): status \"dormant\" — zenmux.com is a parked origin (HTTPS :443 timeout, HTTP 94-byte empty shell identical to the 2026-06-14 Wayback capture). EXCLUDED from the default chat surface (defaultChatProfiles/defaultChatSurface) until a live round-trip exists; still fully served on /registry + /capability/zenmux with this honest status. verified:false — no live round-trip was ever possible against a dead origin.",
+  "author": "ui2api capability package",
+  "analyzed": "2026-09-16"
+}

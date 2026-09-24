@@ -1,0 +1,12 @@
+{
+  "siteId": "xiaomimimo",
+  "site": "aistudio.xiaomimimo.com",
+  "name": "Xiaomi MiMo (MiMo Studio)",
+  "url": "https://aistudio.xiaomimimo.com",
+  "version": "0.1.0",
+  "status": "dead-end",
+  "verified": false,
+  "note": "GOAL 32 (2026-09-24): status \"dead-end\" — aistudio.xiaomimimo.com is publicly DNS-pinned to 127.0.0.1 (DNSPod A record, TTL 600); the chat host is unreachable, so the profile selectors are unverified candidates with no possible live round-trip. EXCLUDED from the default chat surface (defaultChatProfiles/defaultChatSurface) until the host is routable and a live round-trip exists; still fully served on /registry + /capability/xiaomimimo with this honest status. verified:false — nothing claimed verified.",
+  "author": "ui2api capability package",
+  "analyzed": "2026-09-16"
+}

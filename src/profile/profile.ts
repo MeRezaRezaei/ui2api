@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { usingUserChrome } from "../runtime/browser.js";
 
 // --- Chat-site profiles: declarative "recipes" describing how to drive the web
@@ -444,6 +445,93 @@ export function isChatShapedProfile(p: ChatSiteProfile): boolean {
     typeof p.url === "string" &&
     p.url.length > 0
   );
+}
+
+// ─── GOAL 32 truth-gate: selectors, not prose ───────────────────────────────
+//
+// A surfaced chat id's composer/answer arrays are JOINED and fed to the
+// driver's engine at send time: `page.locator(sel)` for the composer
+// (src/prompt/driver.ts firstVisible) and `document.querySelectorAll(sel)`
+// for the answer read (src/runtime/dom-primitives.ts awaitAnswer). A literal
+// prose entry (e.g. t3chat's former "UNVERIFIED-SCAFFOLD — every selector
+// below is a guess…") passes the GOAL-30 arrays gate but THROWS a CSS
+// SyntaxError at runtime — a guaranteed crash on an advertised site.
+//
+// The gate reuses Playwright's OWN selector parser (the exact engine
+// locator() runs — static, no browser launched) plus a guard for
+// playwright-only pseudo-classes that the DOM's querySelectorAll rejects.
+let _selectorParser: ((s: string) => unknown) | null | undefined;
+function selectorParser(): ((s: string) => unknown) | null {
+  if (_selectorParser !== undefined) return _selectorParser;
+  try {
+    // playwright-core ships its parser in the internal isomorphic bundle.
+    // Lazy + cached; if a playwright upgrade moves it, the gate FAILS CLOSED
+    // (every entry is rejected → zero packaged ids surface, loudly caught by
+    // the merge regression tests) — never a silent pass-through.
+    const require = createRequire(import.meta.url);
+    let core: { iso?: Record<string, unknown> } | undefined;
+    try {
+      // 1) exported subpath (exports map exposes "./lib/coreBundle", extension-less):
+      core = require("playwright-core/lib/coreBundle") as { iso?: Record<string, unknown> };
+    } catch {
+      // 2) relative require rooted inside the package directory bypasses the
+      //    exports map entirely (probe-proven against playwright-core's layout):
+      const pkgRequire = createRequire(require.resolve("playwright-core/package.json"));
+      core = pkgRequire("./lib/coreBundle.js") as { iso?: Record<string, unknown> };
+    }
+    const parse = core?.iso?.parseSelector as ((s: string) => unknown) | undefined;
+    _selectorParser = typeof parse === "function" ? parse : null;
+  } catch {
+    _selectorParser = null;
+  }
+  return _selectorParser;
+}
+
+/**
+ * Static, browser-free check that a profile entry is a PARSEABLE CSS selector
+ * the driver can actually run (composer/answer contract, GOAL 32):
+ *  - parses under Playwright's own selector grammar (empty/non-string/prose
+ *    strings throw — t3chat's former prose entries fail here);
+ *  - contains no playwright-only pseudo-class (`:has-text`, `:text(`, …) —
+ *    those parse in locator() but THROW in the DOM querySelectorAll the
+ *    answer-reader runs.
+ */
+export function isParseableSelector(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const s = value.trim();
+  // Playwright-only pseudo-classes parse in locator() — the engine ADMITS them
+  // — but THROW in the DOM querySelectorAll the answer-reader runs. Guard both
+  // forms: paren (`:has-text("x")`, `:text("x")`) and bare (`:visible`,
+  // `:hidden`), attached directly to a compound or free-standing. A colon
+  // immediately before one of these words is never legit in this inventory.
+  if (/:{1,2}(has-text|text|visible|hidden)\b/.test(s)) return false;
+  const parse = selectorParser();
+  if (!parse) return false; // engine unavailable → fail closed (never admit entries we cannot prove runnable)
+  try {
+    parse(s);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every composer/answer entry must be a parseable selector (GOAL 32). */
+export function selectorsAreParseable(p: ChatSiteProfile): boolean {
+  return (
+    Array.isArray(p.composer) &&
+    p.composer.every((s) => isParseableSelector(s)) &&
+    Array.isArray(p.answer) &&
+    p.answer.every((s) => isParseableSelector(s))
+  );
+}
+
+/**
+ * The DRIVEABLE chat shape (GOAL 32 truth-gate): chat-shaped AND every
+ * composer/answer entry a runnable selector. This is what the default chat
+ * surface merges on — width (arrays non-empty, GOAL 30) is not truth.
+ */
+export function isDriveableChatProfile(p: ChatSiteProfile): boolean {
+  return isChatShapedProfile(p) && selectorsAreParseable(p);
 }
 
 /**

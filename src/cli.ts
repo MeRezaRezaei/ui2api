@@ -18,7 +18,7 @@ import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
 import { resolveProfile, defaultSiteId } from "./profile/profile.js";
-import { defaultChatProfiles } from "./prompt/registry.js";
+import { defaultChatProfiles, chatSurfaceStatus } from "./prompt/registry.js";
 import { ChatDriver } from "./prompt/driver.js";
 import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
 
@@ -355,7 +355,9 @@ async function cmdPluginServe(modulePath: string, flags: Flags): Promise<void> {
 async function cmdPrompt(text: string, flags: Flags): Promise<void> {
   if (flags.sites) {
     for (const p of defaultChatProfiles()) {
-      console.log(`${p.id.padEnd(12)} ${p.name} — ${p.loginRequired ? "login required" : "anonymous"}`);
+      const status = chatSurfaceStatus(p.id);
+      const statusSuffix = status === "builtin" ? "" : status === "verified" ? " — VERIFIED" : ` — ${status}`;
+      console.log(`${p.id.padEnd(12)} ${p.name} — ${p.loginRequired ? "login required" : "anonymous"}${statusSuffix}`);
     }
     console.log(`\ndefault: ${defaultSiteId()}`);
     return;
@@ -436,6 +438,7 @@ async function cmdPromptd(flags: Flags): Promise<void> {
   const shown = profiles ? profiles.map((p) => p.id).join(", ") : defaultChatProfiles().map((p) => p.id).join(", ");
   console.log(`[ui2api] promptd on http://127.0.0.1:${svc.port} · sites: ${shown} · default: ${defaultSiteId()}`);
   console.log(`[ui2api] POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}`);
+  console.log(`[ui2api] POST /capability/<site>  ·  GET /registry  ·  GET /sites  ·  GET /accounts?site=  ·  GET /v1/models  ·  POST /v1/chat/completions`);
   console.log(`[ui2api] GET  /status  -> pool (warm/idle/busy pages)  ·  UI2API_POOL_MIN/MAX=${flags.poolMin ?? "auto"}/${flags.poolMax ?? "auto"} · UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "off"}`);
   const shutdown = async (): Promise<void> => { await svc.close(); process.exit(0); };
   process.on("SIGINT", () => void shutdown());
@@ -952,7 +955,7 @@ async function main(): Promise<void> {
       console.log("  ui2api profile capture <url> [--data-dir DIR] [--login]  (login once, save cookies+localStorage+IndexedDB snapshot)");
       console.log("  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
-      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");
+      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
       process.exit(cmd ? 1 : 0);
   }

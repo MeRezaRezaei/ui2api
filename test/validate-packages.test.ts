@@ -4,6 +4,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isParseableSelector } from "../src/profile/profile.js";
+
 // Package-consistency validator for capabilities/<site-id>/ package directories.
 // Run with: node --import tsx --test test/validate-packages.test.ts
 //
@@ -234,6 +236,40 @@ for (const pkgName of pkgNames) {
           }
         }
       }
+    });
+
+    await t.test("G. composer/answer entries are parseable CSS selectors the ChatDriver can run (GOAL 32)", () => {
+      // GOAL 32 truth-gate: a surfaced chat id's composer/answer arrays are fed
+      // to page.locator() at send time and querySelectorAll at answer-read time.
+      // A literal prose row (t3chat's former "UNVERIFIED-SCAFFOLD — …") passed
+      // the old width-only arrays gate and THREW a CSS SyntaxError mid-send.
+      // Every entry must parse under Playwright's OWN selector grammar — prose,
+      // malformed CSS, and playwright-only pseudo-classes (:has-text/:text/
+      // :visible/:hidden) are all refused here.
+      const profilePath = join(pkgDir, "profile.json");
+      if (!existsSync(profilePath)) {
+        t.diagnostic(`warn ${pkgName}: no profile.json — not a chat package, GOAL 32 gate skipped`);
+        return;
+      }
+      const profile = readJsonFile(profilePath) as { composer?: unknown; answer?: unknown };
+      const composer = profile.composer;
+      const answer = profile.answer;
+      if (!Array.isArray(composer) && !Array.isArray(answer)) {
+        t.diagnostic(`info ${pkgName}: no composer/answer arrays — capability package, GOAL 32 gate skipped`);
+        return;
+      }
+      const bad: string[] = [];
+      if (Array.isArray(composer)) {
+        for (const s of composer) if (!isParseableSelector(s)) bad.push(`composer: ${JSON.stringify(s)}`);
+      }
+      if (Array.isArray(answer)) {
+        for (const s of answer) if (!isParseableSelector(s)) bad.push(`answer: ${JSON.stringify(s)}`);
+      }
+      assert.equal(
+        bad.length,
+        0,
+        `${relCap(profilePath)}: composer/answer entries must be PARSEABLE CSS selectors (GOAL 32) — prose or playwright-only pseudo-classes crash the driver at send/answer time:\n  ${bad.join("\n  ")}`
+      );
     });
   });
 }

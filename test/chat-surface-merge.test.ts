@@ -6,11 +6,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 
-import { defaultChatProfiles } from "../src/prompt/registry.js";
-import { isChatShapedProfile, listProfiles, resolvePackagedProfile, resolveProfile } from "../src/profile/profile.js";
+import { defaultChatProfiles, defaultChatSurface, chatSurfaceStatus, buildRegistryPackages, type ChatSurfaceEntry } from "../src/prompt/registry.js";
+import {
+  isChatShapedProfile,
+  isDriveableChatProfile,
+  isParseableSelector,
+  listProfiles,
+  resolvePackagedProfile,
+  resolveProfile,
+  type ChatSiteProfile,
+} from "../src/profile/profile.js";
 import { startPromptd } from "../src/prompt/http.js";
 import { handleOpenAIRoutes } from "../src/prompt/openai.js";
-import type { ChatSiteProfile } from "../src/profile/profile.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // GOAL 30 — installed chat-shaped packages reach the chat surface
@@ -63,6 +70,31 @@ function installedAll(): string[] {
     .map((d) => d.name);
 }
 
+/** The GOAL 32 gate on disk (independent of registry.ts's merge): the chat
+ *  shape AND every composer/answer entry a parseable CSS selector. */
+function installedDriveables(): Array<{ id: string; profile: ChatSiteProfile }> {
+  const out: Array<{ id: string; profile: ChatSiteProfile }> = [];
+  if (!existsSync(CAPABILITIES_DIR)) return out;
+  for (const name of readdirSync(CAPABILITIES_DIR, { withFileTypes: true })) {
+    if (!name.isDirectory() || !existsSync(join(CAPABILITIES_DIR, name.name, "manifest.json"))) continue;
+    const packed = resolvePackagedProfile(name.name);
+    if (packed && isDriveableChatProfile(packed)) out.push({ id: name.name, profile: packed });
+  }
+  return out;
+}
+
+/** Metadata.machine status read straight off the package (mirrors
+ *  packageStatusOf in registry.ts): "dormant"/"dead-end" = excluded from the
+ *  chat surface until live-verified. */
+function machineStatus(id: string): string | undefined {
+  try {
+    const meta = JSON.parse(readFileSync(join(CAPABILITIES_DIR, id, "metadata.json"), "utf8")) as { status?: string };
+    return typeof meta.status === "string" && meta.status ? meta.status : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface StubOpenAiHarness {
   server: Server;
   port: number;
@@ -110,21 +142,27 @@ test("GOAL30(a): defaultChatProfiles() = builtin catalog + every installed chat-
 
   // Fixture-anchored: whatever chat-shaped package the in-repo capabilities/
   // dir ships today must be reachable through the default set (= the surface
-  // /sites + /v1/models + POST /prompt now serve).
+  // /sites + /v1/models + POST /prompt now serve) — GOAL 32 qualified: only
+  // DRIVEABLE packages (chat shape + parseable composer/answer selectors) that
+  // are not status-excluded (dormant/dead-end metadata) merge; prose or
+  // playwright-only selectors (t3chat's former rows) and parked/dead packages
+  // (zenmux/xiaomimimo) never surface as chat models.
   const shapes = installedChatShapes();
   assert.ok(shapes.length >= 1, "expected at least one installed chat-shaped package fixture (duckduckgo)");
-  for (const { id, profile } of shapes) {
-    assert.ok(ids.includes(id), `installed chat-shaped package "${id}" must be merged into the default chat set`);
+  const driveables = installedDriveables().filter((s) => machineStatus(s.id) !== "dormant" && machineStatus(s.id) !== "dead-end");
+  assert.ok(driveables.length >= 1, "expected at least one driveable installed chat package fixture (duckduckgo)");
+  for (const { id, profile } of driveables) {
+    assert.ok(ids.includes(id), `installed driveable chat package "${id}" must be merged into the default chat set`);
     const merged = set.find((p) => p.id === id);
     assert.equal(merged?.url, profile.url, `${id}: merged profile must carry the packaged url`);
-    assert.ok(isChatShapedProfile(merged!), `${id}: every merged non-builtin must pass the chat shape`);
+    assert.ok(isDriveableChatProfile(merged!), `${id}: every merged non-builtin must pass the GOAL 32 driveable gate`);
   }
 
   // The merged set is the SAME one the daemon default path builds (registry.ts
   // posts builtin-first, so every builtin id is untouched by the package pass).
   // Shapes that repeat a builtin id are already counted in BUILTIN_IDS.
-  const nonBuiltinShapes = shapes.filter((s) => !BUILTIN_IDS.includes(s.id));
-  assert.equal(set.length, BUILTIN_IDS.length + nonBuiltinShapes.length, "set = builtins + non-builtin chat shapes, no more, no less");
+  const nonBuiltinShapes = driveables.filter((s) => !BUILTIN_IDS.includes(s.id));
+  assert.equal(set.length, BUILTIN_IDS.length + nonBuiltinShapes.length, "set = builtins + driveable non-excluded non-builtin chat shapes, no more, no less");
 });
 
 test("GOAL30(a): capability-only packages (gmail/youtube/araprat/chatglm/tinycms) are NOT chat shapes and never merge", () => {
@@ -141,6 +179,77 @@ test("GOAL30(a): capability-only packages (gmail/youtube/araprat/chatglm/tinycms
     assert.ok(!ids.includes(id), `${id}: must never become a default chat model`);
   }
   assert.ok(ids.includes("duckduckgo"), "control: duckduckgo IS in the set");
+});
+
+// ─── (a2) GOAL 32 TRUTH-GATE: STATUS + EXCLUSIONS ───────────────────────────
+
+test("GOAL32(a): dormant/dead-end packages (zenmux, xiaomimimo) are excluded from the chat surface but stay on /registry with their honest status", () => {
+  const surface = defaultChatSurface();
+  const ids = surface.map((e) => e.id);
+
+  // Fixture-anchored: these EXCLUDED ids must not surface as chat models, and
+  // their metadata status must read honestly (the registry consumer's gate).
+  for (const [id, expectedStatus] of [["zenmux", "dormant"], ["xiaomimimo", "dead-end"]] as Array<[string, string]>) {
+    if (!installedAll().includes(id)) continue; // not installed on this checkout
+    assert.ok(!ids.includes(id), `${id}: ${expectedStatus} package must NOT surface as a chat model`);
+    assert.equal(chatSurfaceStatus(id), expectedStatus, `${id}: chatSurfaceStatus must report "${expectedStatus}"`);
+    assert.equal(machineStatus(id), expectedStatus, `${id}: metadata.status must say "${expectedStatus}"`);
+    // …but the package is still a real installed surface: /registry carries it
+    // with that honest status (capability consumers gate on it themselves).
+    const reg = buildRegistryPackages().find((p) => p.id === id);
+    assert.ok(reg, `${id}: must stay on the registry`);
+    assert.equal(reg.status, expectedStatus, `${id}: /registry status must be "${expectedStatus}"`);
+  }
+
+  // t3chat: former prose rows removed → driveable → surfaced, honestly marked
+  // unverified-candidate (never claimed verified without a live round-trip).
+  if (installedAll().includes("t3chat")) {
+    assert.ok(ids.includes("t3chat"), "t3chat (prose removed) must surface through the GOAL 32 gate");
+    assert.equal(surface.find((e) => e.id === "t3chat")?.status, "unverified-candidate");
+  }
+
+  // duckduckgo keeps its live-verified status; no surfaced id may claim a
+  // dormant/dead-end status.
+  assert.equal(surface.find((e) => e.id === "duckduckgo")?.status, "verified", "duckduckgo must remain verified (its recorded live round-trip)");
+  for (const e of surface) {
+    assert.ok(["verified", "unverified-candidate", "builtin"].includes(e.status), `${e.id}: surfaced status must be verified/unverified-candidate/builtin (got ${e.status})`);
+  }
+
+  // Capability-only surfaces never become chat models either.
+  assert.ok(!ids.includes("youtube"), "youtube (capability-only) must never be a chat model");
+});
+
+test("GOAL32: isParseableSelector accepts runnable CSS and rejects prose, malformed CSS and playwright-only pseudo-classes", () => {
+  // Runnable CSS the driver actually executes.
+  assert.ok(isParseableSelector("textarea"));
+  assert.ok(isParseableSelector('div[contenteditable="true"][role="textbox"]'));
+  assert.ok(isParseableSelector(".markdown, [data-testid='answer']"));
+  assert.ok(isParseableSelector("form textarea, form [contenteditable]"));
+  assert.ok(isParseableSelector("a[href^='http'], [data-attrid='ai_web_answer'] a"));
+  assert.ok(isParseableSelector("#prompt-textarea [contenteditable] > div"));
+  // Prose / empty / non-string: refused — the exact former t3chat rows (GOAL 32
+  // removal) are multi-clause prose with semicolons/parens and FAIL the parser;
+  // a bare single-ident fragment may parse under the engine (em-dash is a valid
+  // CSS ident char) — realistic prose does not, which is what the gate catches.
+  assert.ok(!isParseableSelector("UNVERIFIED-SCAFFOLD — every selector below is a guess; confirm all on first live capture"));
+  assert.ok(!isParseableSelector("UNVERIFIED-SCAFFOLD — no DOM class proven by bundles (none recovered); confirm on first live capture"));
+  assert.ok(!isParseableSelector("The live site's actual composer element is unknown — a textarea or contenteditable is possible, but no evidence either way."));
+  assert.ok(!isParseableSelector(""));
+  assert.ok(!isParseableSelector("   "));
+  assert.ok(!isParseableSelector(42));
+  assert.ok(!isParseableSelector(null));
+  assert.ok(!isParseableSelector(undefined));
+  // Playwright-only pseudo-classes: parse in locator() but THROW in the DOM
+  // querySelectorAll the answer-reader runs. Paren + bare forms both refused.
+  assert.ok(!isParseableSelector(":has-text('New chat')"));
+  assert.ok(!isParseableSelector("button:has-text(\"Continue\")"));
+  assert.ok(!isParseableSelector("div:visible"));
+  assert.ok(!isParseableSelector("div:not(.x):hidden"));
+  assert.ok(!isParseableSelector(":text('Answer')"));
+  // Legitimate CSS that merely CONTAINS similar substrings must NOT be refused.
+  assert.ok(isParseableSelector("[data-textid='visible-answer'] .markdown"));
+  assert.ok(isParseableSelector("textarea:focus, input:not(.hidden-submit)"));
+  assert.ok(isParseableSelector("button.scroll-marker"));
 });
 
 test("GOAL30(a): resolveProfile resolves packaged chat sites by id and still throws for capability-only ids", () => {
@@ -177,11 +286,51 @@ test("GOAL30(b): a REAL default daemon serves duckduckgo on /sites + /v1/models 
       // GET /sites lists the merged chat-shaped package.
       const sitesRes = await fetch(`${base}/sites`);
       assert.equal(sitesRes.status, 200);
-      const sites = (await sitesRes.json()) as { sites: Array<{ id: string }> };
+      const sites = (await sitesRes.json()) as { sites: Array<{ id: string; status?: string }> };
       const ids = sites.sites.map((s) => s.id);
       assert.ok(ids.includes("duckduckgo"), "GET /sites must include the merged duckduckgo chat package");
       for (const builtin of ["gemini", "copilot", "deepseek", "kimi"]) assert.ok(ids.includes(builtin), `GET /sites keeps builtin ${builtin}`);
       assert.ok(!ids.includes("gmail"), "GET /sites must not include capability-only gmail");
+
+      // GOAL 32: every surfaced id carries its status; excluded packages are absent.
+      for (const s of sites.sites) {
+        assert.ok(s.status && ["verified", "unverified-candidate", "builtin"].includes(s.status!), `GET /sites ${s.id} must carry an honest status (got ${JSON.stringify(s.status)})`);
+      }
+      assert.equal(sites.sites.find((s) => s.id === "duckduckgo")?.status, "verified", "duckduckgo status on /sites must be verified");
+      assert.ok(!ids.includes("zenmux") && !ids.includes("xiaomimimo"), "GET /sites must NOT include dormant/dead-end packages");
+
+      // GOAL 32: the excluded packages keep their honest surface on /registry.
+      const regRes = await fetch(`${base}/registry`);
+      assert.equal(regRes.status, 200);
+      const reg = (await regRes.json()) as { packages: Array<{ id: string; status: string }> };
+      const zenmux = reg.packages.find((p: { id: string }) => p.id === "zenmux");
+      assert.ok(zenmux, "zenmux must stay on /registry after exclusion");
+      assert.equal(zenmux.status, "dormant");
+      const xiaomi = reg.packages.find((p: { id: string }) => p.id === "xiaomimimo");
+      assert.ok(xiaomi, "xiaomimimo must stay on /registry after exclusion");
+      assert.equal(xiaomi.status, "dead-end");
+
+      // GOAL 32 two-step: POST /prompt distinguishes installed-but-not-chat ids
+      // (youtube → /capability pointer) from truly-unknown ids (plain unknown).
+      const youtube = await fetch(`${base}/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site: "youtube", prompt: "hi" }),
+      });
+      assert.equal(youtube.status, 400, "youtube is not a chat model — must 400 (no browser launched)");
+      const youtubeBody = (await youtube.json()) as { error?: string };
+      assert.ok(
+        /is installed and serves POST \/capability\/youtube/.test(youtubeBody.error ?? ""),
+        `youtube 400 must point at /capability/youtube: ${youtubeBody.error}`
+      );
+      const nonsense = await fetch(`${base}/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site: "no-such-site-xyz", prompt: "hi" }),
+      });
+      assert.equal(nonsense.status, 400);
+      const nonsenseBody = (await nonsense.json()) as { error?: string };
+      assert.ok(/unknown site "no-such-site-xyz"/.test(nonsenseBody.error ?? ""), `nonsense 400 must stay plain unknown-site: ${nonsenseBody.error}`);
 
       // GET /v1/models includes duckduckgo as a model.
       const modelsRes = await fetch(`${base}/v1/models`);
