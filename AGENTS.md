@@ -85,7 +85,10 @@ gate (`UI2API_PROMPTD_TOKEN`).
 and `POST /prompt` accept an optional `"account":"<slug|email>"` — the account is
 validated against the vault (`listAccounts`+`slugifyIdentity`) BEFORE any browser
 launches; unknown account → 400 `no stored account "<acct>" for "<host>"; available: [<slugs>]`.
-`GET /accounts?site=<site>` lists vault accounts; each `GET /registry` package
+`GET /accounts?site=<id>` lists vault accounts — chat-profile set first, then any
+installed capability package (GOAL 31: the same registryPackageFor vault /registry
++ /capabilities/<site> serve; host = the packaged url's host, null when url-less);
+each `GET /registry` package
 carries `accounts: [{slug, identity, host, source, capturedAt}]` (same list in the
 `GET /capabilities/<site>` path form). Vault path `data/sessions/<host>/<slug>/state.json`;
 `"default"` = the legacy flat session.
@@ -120,8 +123,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
 
 ## Site status (2026-09-19)
 
-- **Builtin profiles** (`src/profile/profile.ts`): gemini, chatgpt, claude,
-  copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more.
+- **Default chat set** (`defaultChatProfiles()`, `src/prompt/registry.ts`,
+  GOAL 30): 25 sites — the builtin profile catalog (gemini, chatgpt, claude,
+  copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more)
+  merged with every installed chat-shaped package (duckduckgo, poe, grok, …);
+  capability-only packages (gmail/youtube/araprat/…) never become chat models.
 - **Session-locked + live-verified round-trips**:
   - `deepseek` (chat.deepseek.com) — localStorage `userToken` Bearer auth;
     AWS WAF + PoW; verified answering (proof PASS 11462, 2026-09-19). Full

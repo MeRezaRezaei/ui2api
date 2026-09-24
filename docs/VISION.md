@@ -40,8 +40,10 @@ the site's own JS (trusted CDP input primitives, `keyboard.insertText`/`press`),
 read the streamed answer off the page until it stops growing, return it. The
 per-site knowledge is a `ChatSiteProfile` (`src/profile/profile.ts`: composer /
 send / answer selectors, dismiss list, delays) — declarative, overridable via
-JSON with `--profile FILE`. Builtin profiles: gemini, chatgpt, claude,
-copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more.
+JSON with `--profile FILE`. The default chat set is
+`defaultChatProfiles()` (`src/prompt/registry.ts`): the builtin catalog merged
+with every installed chat-shaped package (25 sites incl. duckduckgo, poe, grok,
+…) — capability-only packages never become chat models.
 
 - One-shot: `ui2api prompt 'hello' --site gemini`
 - Daemon: `ui2api promptd` → `POST /prompt`, `POST /v1/chat/completions` (OpenAI-compatible, `stream:true` replays the finished DOM-read answer as SSE — honest: it is a page read, not synthesized traffic).
