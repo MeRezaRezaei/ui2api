@@ -13,7 +13,7 @@
 // cmdProfileAddAll), so a fake vault + fake scan proves the "imported" /
 // "decrypt-limited" / "skipped-no-auth" verdict ladder without a browser.
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +29,17 @@ import {
   importSiteSnapshot,
   withCopyCookiesForReading,
 } from "../src/runtime/profile-scan.js";
+
+// The residue assertions below list `os.tmpdir()`, but `node --test` runs each
+// test FILE in its own process, and sibling files (profile-scan, profile-ingest)
+// create/remove their own `u2a-*` temp dirs in the SAME shared tmpdir. A scan
+// that checks "no new u2a-* entries" can therefore spuriously flag a sibling's
+// in-flight dir as residue (cross-process race, not a leak). Isolate this
+// process's marker namespace behind a private TMPDIR before any tmpdir() call
+// (`os.tmpdir()` caches its first result, so this must run before tests):
+const PRIV_TMP = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "ui2api-test-"));
+process.env.TMPDIR = PRIV_TMP;
+after(() => rmSync(PRIV_TMP, { recursive: true, force: true }));
 
 // --- Chrome cookie encryption mirror (same as xhost-capture.test.ts) ---
 
