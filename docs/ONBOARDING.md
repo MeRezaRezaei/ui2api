@@ -172,13 +172,16 @@ $ curl http://127.0.0.1:9797/v1/models
  "url":"https://gemini.google.com","loginRequired":true},
  {"id":"duckduckgo","object":"model","created":0,"owned_by":"ui2api","permission":[],
  "root":"duckduckgo","parent":null,"site":"DuckDuckGo AI Chat (duck.ai)",
- "url":"https://duck.ai/chat","loginRequired":false},
- ... 23 more entries ... ]}
- # 25 models = the 11 builtin chat sites + every installed chat-shaped package
- # (id list measured 2026-09-24, GOAL 30): gemini, google-ai-search, chatgpt, claude,
- # copilot, perplexity, huggingchat, kimi, deepseek, tencent-aistudio, hunyuan,
- # blackbox, codex, copilot-m365, duckduckgo, grok, inner-ai, manus, notion, poe,
- # t3chat, v0, venice, xiaomimimo, zenmux
+"url":"https://duck.ai/chat","loginRequired":false},
+  ... 21 more entries ... ]}
+  # 23 models = the servable chat set (count measured 2026-09-24 on a real default
+  # daemon — GOAL 35): the 11 builtin chat sites + every installed DRIVEABLE
+  # chat-shaped package. Dormant/dead-end or capability-only packages are NOT
+  # models — /v1/chat/completions 404s ids it cannot serve, so /v1/models never
+  # lists them (id list = the daemon's measured /v1/models order):
+  # gemini, google-ai-search, chatgpt, claude, copilot, perplexity, huggingchat,
+  # kimi, deepseek, tencent-aistudio, hunyuan, blackbox, codex, copilot-m365,
+  # duckduckgo, grok, inner-ai, manus, notion, poe, t3chat, v0, venice
 
 $ curl -X POST http://127.0.0.1:9797/v1/chat/completions \
     -H 'Content-Type: application/json' \
@@ -200,15 +203,18 @@ Other daemon endpoints:
 |---|---|
 | `GET /health` | liveness |
 | `GET /status` | pool state (browser up, warm/idle/busy) |
-| `GET /sites` | configured profiles |
-| `GET /registry` | installed packages + `verified` records (truth, fold #8) |
+| `GET /sites` | configured chat profiles (per-id status) |
+| `GET /v1/models` | OpenAI-compatible model list over the servable chat set (`{object:"list",data:[{id,...}]}` — model id = site id; the 23 ids above are exactly what `/v1/chat/completions` answers) |
+| `GET /registry` | installed packages + `verified` records + per-package `chat.model` (truth, folds #8/#34) |
+| `GET /requirements` | OS-level readiness report (GOAL 33 — same data as `ui2api requirements`: per-package verdict ready/working/on-hold/not-ready with named reasons, before any browser work) |
 | `GET /accounts?site=<id>` | vault accounts for a profile |
-| `GET /capabilities?site=&account=` | what an account can do |
+| `GET /capabilities/<site>` | path form — the installed package's manifest capability surface `{site,name,url,capabilities:[{id,name,description,method}],source:"manifest",accounts[]}` (works for EVERY installed package, capability-only ones too) |
+| `GET /capabilities?site=&account=` | query form — the stored per-account fingerprint (`models`, tier, restrictions) captured by `ui2api profile capabilities` |
 | `POST /capability/<site>` | non-chat capabilities (list_conversations, web_search, …) |
 | `POST /prompt` | `{"site","prompt"}` chat |
-| `POST /v1/chat/completions` | OpenAI-compatible |
+| `POST /v1/chat/completions` | OpenAI-compatible (404 `unknown_model` for any id not on `/v1/models`) |
 
-## 6. Registry truth (the `verified` flag)
+## 6. Registry truth (`verified` + `chat.model`)
 
 `GET /registry` exposes, per package, a `verified` record or `false`:
 
@@ -221,6 +227,17 @@ claude    verified: false          (Cloudflare-walled, not yet captured)
 
 A package earns `verified` only by a **real** recorded live round-trip —
 never by claim. `false`/absent = honestly not verified.
+
+**The `chat.model` contract (GOAL 34)** — `chat.model` is present on a
+`/registry` package **ONLY** when that id is on the servable chat set (the
+23 ids in §5 — the exact gate `/v1` builds its allow-list from). Absence means
+**no chat**: capability-only / url-less / dormant / dead-end packages
+(gmail, youtube, araprat, chatglm, zenmux, xiaomimimo, …) keep their
+status/tools/accounts on `/registry` but carry **no** `chat` key, because
+`POST /v1/chat/completions` would refuse them with `404 unknown_model` — an
+honest registry never advertises chat it cannot serve. Consumers must key on
+`pkg.chat?.model` (never `pkg.chat.model`) and treat absence as "this package
+has no chat surface".
 
 ## 7. Per-site state (source: capabilities/README.md + fold #9 live sweep)
 

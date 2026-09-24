@@ -120,7 +120,7 @@ ui2api install --catalog
 # Install a package — DuckDuckGo AI chat (anonymous, no login)
 ui2api install duckduckgo
 
-# Serve it — the daemon answers GET /registry, POST /capability/<site>
+# Serve it — the daemon answers GET /registry, POST /capability/<site>, GET /v1/models
 ui2api promptd
 
 # Run a real installed capability (duck.ai's own browser session + UI)
@@ -229,7 +229,10 @@ own real Chrome attached with mail.google.com signed in,
 kimi Extra Long, tencent-aistudio's no-UI caps) has its measured blocker and
 copy-paste unblock in **`docs/UNLOCK.md`**.
 A machine-checkable `verified` record (since/evidence/via) rides on every
-`/registry` package — absent or `false` = honestly not verified. Each verified
+`/registry` package — absent or `false` = honestly not verified. Each package's
+`chat.model` is present **only** on the servable chat ids `GET /v1/models`
+lists (23 on a default daemon, GOAL 34) — absence = no chat surface, and
+`POST /v1/chat/completions` 404s refused ids. Each verified
 chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
 Sending is always the site's **own JS**: paste event + Enter — no synthetic
 mouse clicks; the answer is read from the page's event bus until it stops
