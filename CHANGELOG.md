@@ -7,6 +7,23 @@ All notable changes to ui2api are tracked here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- wigolo-engine tests run in CI (GOAL 28): the 4 wigolo-engine integration tests
+  (`test/wigolo-engine.test.ts`) no longer skip on GitHub Actions — the last
+  non-vault CI skips are closed. `.github/workflows/ci.yml` clones the canonical
+  public upstream **KnockOutEZ/wigolo pinned to `d69bf773`** (fork
+  MeRezaRezaei/wigolo carries no committed 1.61 alignment — its remote pins
+  playwright 1.60.0 like upstream, so upstream wins), `npm ci`s its own deps
+  and installs its **own playwright-1.60 chromium (rev 1223)**, and exports
+  `WIGOLO_REPO` for the `npm run test:unit` step. `runs-on` pinned to
+  `ubuntu-24.04`: a rolled-forward ubuntu-latest (26.04) is refused by
+  playwright 1.60's chromium installer. Verified: CI run 35977799488
+  **success** — all 4 subtests executed through the real wigolo daemon browser
+  tier (`✔ dom.extract … 2010ms`, `✔ replay …`, `✔ generated map tool … 2217ms`,
+  `✔ dom.click … 2024ms`), suite `tests 599 / pass 595 / fail 0 / skipped 4`,
+  the 4 remaining skips being exactly the GOAL-20 vault guards (`data/`
+  gitignored — permanent, never committed). Local parity with the same ref and
+  env (`UI2API_REGISTRY_LIVE=1 WIGOLO_REPO=…upstream`) → 599/599, 0 skip.
+  No test file changed; no wigolo change is a dependency of the green run.
 - Last env-gated skip closed (GOAL 27): the live-registry test
   (`test/install.test.ts`, "installs from the LIVE public registry") now runs in
   CI — `UI2API_REGISTRY_LIVE: "1"` set on the `npm run test:unit` step of
@@ -16,9 +33,10 @@ All notable changes to ui2api are tracked here. Format follows
   silently skipping. Verified: local `UI2API_REGISTRY_LIVE=1 npm run test:unit`
   → 599/599 pass / 0 skip; CI run 35975092989 **success** with the live test
   executed (`✔ installs from the LIVE public registry …`, 1492ms — prior run
-  35974736251 had it skipped). Remaining CI skips are 8 pre-existing
+  35974736251 had it skipped). Remaining CI skips were 8 pre-existing
   environment-gated tests (3+1 vault tests need on-box `data/`, 4 wigolo-engine
-  tests need the separate wigolo repo) — unrelated to the registry surface.
+  tests need the separate wigolo repo) — unrelated to the registry surface
+  (the wigolo-engine 4 are the GOAL 28 fix above).
 
 ### Docs
 - Production-truth pass (GOAL 21): `docs/ONBOARDING.md` Node floor row fixed
