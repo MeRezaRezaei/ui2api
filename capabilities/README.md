@@ -72,6 +72,23 @@ future fold with an attached real Chrome knows exactly where to begin.
 
 ## Inventory status (2026-09-15 — JS bundle analysis, no browser launched)
 
+Chat-surface status of the 14 chat-shaped packaged ids (GOAL 32 truth-gate,
+2026-09-24 — `defaultChatSurface()` in src/prompt/registry.ts; every surfaced
+id carries this status on GET /sites + `prompt --sites`):
+
+| id | chat-surface status | why |
+|---|---|---|
+| `duckduckgo` | **VERIFIED** | full surface live-verified (2026-09-23, headed Xvfb ALL_OK=true); metadata.verified record |
+| `blackbox`, `codex`, `copilot-m365`, `grok`, `inner-ai`, `manus`, `notion`, `poe`, `t3chat`, `v0`, `venice` | unverified-candidate | driveable selectors (parseable CSS), NO recorded live round-trip — surfaced + annotated, never claimed verified |
+| `zenmux` | **dormant — EXCLUDED from chat surface** | zenmux.com parked (CSC registrar, empty shell since ≥2026-06); HTTPS :443 timeout — honest blocked until a live round-trip exists; stays on /registry + /capability/zenmux |
+| `xiaomimimo` | **dead-end — EXCLUDED from chat surface** | aistudio.xiaomimimo.com DNS-pinned to 127.0.0.1 (DNSPod A record, TTL 600) — host unreachable, no live round-trip possible; stays on /registry + /capability/xiaomimimo |
+
+The 11 builtin chat profiles (gemini, chatgpt, claude, copilot, perplexity,
+huggingchat, deepseek, kimi, tencent-aistudio, google-ai-search, hunyuan) are
+"builtin" — their verification lives in the profile's own note, not a machine
+field. Capability-only packages (gmail/youtube/araprat/…) never become chat
+models.
+
 | Package | Status | Key discovery |
 |---|---|---|
 | `google-ai-search` | ✅ implemented | **AI Mode = `/search?q=…&udm=14`**, urlTemplate flow (one page load per query → `{answer, citations[]}`); session snapshot (www.google.com) pending first capture |

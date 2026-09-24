@@ -124,10 +124,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
 ## Site status (2026-09-19)
 
 - **Default chat set** (`defaultChatProfiles()`, `src/prompt/registry.ts`,
-  GOAL 30): 25 sites — the builtin profile catalog (gemini, chatgpt, claude,
-  copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more)
-  merged with every installed chat-shaped package (duckduckgo, poe, grok, …);
-  capability-only packages (gmail/youtube/araprat/…) never become chat models.
+  GOAL 30 + GOAL 32 truth-gate): **23 sites** — the builtin profile catalog
+  (gemini, chatgpt, claude, copilot, perplexity, huggingchat, deepseek, kimi,
+  tencent-aistudio, + more) merged with every installed **driveable** chat-shaped
+  package whose composer/answer selectors parse under Playwright's own selector
+  grammar (t3chat's former prose rows refused; duckduckgo, poe, grok, …);
+  dormant/dead-end packages (zenmux parked origin, xiaomimimo DNS dead-end) are
+  EXCLUDED from the chat surface until live-verified but stay fully served on
+  /registry + /capability/<id> with their honest metadata status; every surfaced
+  packaged id carries its status (`verified` / `unverified-candidate`) on
+  GET /sites + `prompt --sites`; capability-only packages (gmail/youtube/
+  araprat/…) never become chat models.
 - **Session-locked + live-verified round-trips**:
   - `deepseek` (chat.deepseek.com) — localStorage `userToken` Bearer auth;
     AWS WAF + PoW; verified answering (proof PASS 11462, 2026-09-19). Full
