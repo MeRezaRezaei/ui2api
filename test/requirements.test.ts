@@ -68,6 +68,8 @@ function makeDeps(overrides: Partial<RequirementsDeps> = {}): RequirementsDeps {
     probeAttachPort: async () => true,
     listAccounts: () => [],
     legacySessionPresent: () => false,
+    legacySnapshotCapturedAt: () => null,
+    now: () => new Date("2026-09-25T00:00:00.000Z"),
     packages: () => [],
     registryVerified: () => false,
     ...overrides,
@@ -335,6 +337,126 @@ test("vault: unparsable url → skip naming the missing host (never guessed)", (
   const v = resolveVault(pkg({ host: null }), deps);
   assert.equal(v.status, "skip");
   assert.match(v.reason ?? "", /no resolvable url — no host to key the vault by/);
+});
+
+// --- (GOAL 39) vault capture-age freshness ---
+
+// FIXED clock for every freshness case: injected now = 2026-09-25, fixtures
+// captured 2026-09-01 → 24 days → stale at SESSION_STALE_DAYS = 14.
+
+test("vault freshness: fresh account (capturedAt = now) → pass, age 0, NO stale flag", () => {
+  const deps = makeDeps({
+    listAccounts: () => [{ ...ACC[0], capturedAt: "2026-09-25T00:00:00.000Z" }],
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, false);
+  assert.equal(v.ageDays, 0);
+  assert.equal(v.reason, undefined); // no warn reason when fresh
+  assert.match(v.detail ?? "", /1 stored account\(s\) for gemini\.google\.com \(me\) — captured 2026-09-25 \(0 days ago\)/);
+});
+
+test("vault freshness: aged account (captured 2026-09-01, now 2026-09-25) → stale true + NAMED reason with re-capture", () => {
+  const deps = makeDeps({ listAccounts: () => ACC }); // ACC capturedAt 2026-09-01
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass"); // age ≠ expiry — status stays pass
+  assert.equal(v.stale, true);
+  assert.equal(v.ageDays, 24);
+  assert.match(v.detail ?? "", /captured 2026-09-01 \(24 days ago\)/);
+  assert.match(v.reason ?? "", /stale: captured 2026-09-01 \(24 days ago\)/);
+  assert.match(v.reason ?? "", /profile add-all --known/);
+  assert.match(v.reason ?? "", /profile capture\/import gemini\.google\.com/);
+  assert.doesNotMatch(v.reason ?? "", /expired/); // NEVER an "expired" verdict
+});
+
+test("vault freshness: the OLDEST account wins (oldest = the limiting session)", () => {
+  const deps = makeDeps({
+    listAccounts: () => [
+      { ...ACC[0], slug: "fresh", identity: "fresh@x.test", capturedAt: "2026-09-24T00:00:00.000Z" },
+      { ...ACC[0], slug: "old", identity: "old@x.test", capturedAt: "2026-09-01T00:00:00.000Z" },
+    ],
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.stale, true);
+  assert.equal(v.ageDays, 24);
+  assert.match(v.detail ?? "", /captured 2026-09-01 \(24 days ago\)/);
+});
+
+test("vault freshness: aged legacy flat snapshot → stale true + NAMED reason", () => {
+  const deps = makeDeps({
+    legacySessionPresent: () => true,
+    legacySnapshotCapturedAt: () => "2026-09-01T00:00:00.000Z",
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, true);
+  assert.equal(v.ageDays, 24);
+  assert.match(v.detail ?? "", /legacy flat session present for gemini\.google\.com — captured 2026-09-01 \(24 days ago\)/);
+  assert.match(v.reason ?? "", /stale: captured 2026-09-01 \(24 days ago\)/);
+  assert.match(v.reason ?? "", /profile add-all --known/);
+});
+
+test("vault freshness: fresh legacy snapshot → pass, no stale flag", () => {
+  const deps = makeDeps({
+    legacySessionPresent: () => true,
+    legacySnapshotCapturedAt: () => "2026-09-25T00:00:00.000Z",
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, false);
+  assert.equal(v.ageDays, 0);
+  assert.equal(v.reason, undefined);
+});
+
+test("vault freshness: no-date account (capturedAt empty) → NO flag, detail keeps no age (never guessed)", () => {
+  const deps = makeDeps({
+    listAccounts: () => [{ ...ACC[0], capturedAt: "" }],
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, undefined);
+  assert.equal(v.capturedAt, undefined);
+  assert.equal(v.ageDays, undefined);
+  assert.equal(v.reason, undefined);
+  assert.match(v.detail ?? "", /1 stored account\(s\) for gemini\.google\.com \(me\)/);
+  assert.doesNotMatch(v.detail ?? "", /days ago/);
+});
+
+test("vault freshness: legacy snapshot with NO date → NO flag (never guessed)", () => {
+  const deps = makeDeps({
+    legacySessionPresent: () => true,
+    legacySnapshotCapturedAt: () => null,
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, undefined);
+  assert.equal(v.capturedAt, undefined);
+  assert.equal(v.reason, undefined);
+  assert.doesNotMatch(v.detail ?? "", /days ago/);
+});
+
+test("vault freshness: unparsable capturedAt → NO flag (never guessed)", () => {
+  const deps = makeDeps({
+    listAccounts: () => [{ ...ACC[0], capturedAt: "not-a-date" }],
+  });
+  const v = resolveVault(pkg({}), deps);
+  assert.equal(v.status, "pass");
+  assert.equal(v.stale, undefined);
+  assert.equal(v.capturedAt, undefined);
+});
+
+test("vault freshness: aged session keeps the verdict ready/working (stale is a risk signal, not an expiry)", () => {
+  const deps = makeDeps({ listAccounts: () => ACC });
+  const vault = resolveVault(pkg({}), deps);
+  assert.equal(vault.stale, true);
+  const ready = packageVerdict(pkg({}), PASS_OS, vault, false);
+  assert.equal(ready.verdict, "ready");
+  const working = packageVerdict(pkg({ id: "deepseek", siteStatus: "verified" }), PASS_OS, vault, {
+    since: "2026-09-19",
+    evidence: "proof PASS 11462",
+    via: "session-locked vault replay",
+  });
+  assert.equal(working.verdict, "working");
 });
 
 // --- per-package verdicts (the four-word verbatim vocabulary) ---

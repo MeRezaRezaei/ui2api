@@ -68,7 +68,24 @@ export interface VaultResult {
   status: CheckStatus;
   detail?: string;
   reason?: string;
+  /** Capture date of the limiting (OLDEST) stored session — present only when
+   *  the snapshot/account carries one (never guessed). */
+  capturedAt?: string;
+  /** Whole days since capture (clamped >= 0) — absent when no date is known. */
+  ageDays?: number;
+  /** Honest risk signal ONLY (GOAL 39): ageDays > SESSION_STALE_DAYS. Age is
+   *  NOT expiry — site-dependent lifetimes — so the verdict stays pass/ready;
+   *  the flag exists to make the pre-flight gate name what `profile list` has
+   *  always shown. Absent when no date is known (skip silently, never guess). */
+  stale?: boolean;
 }
+
+/** Capture-age risk flag threshold (days). A session older than this is flagged
+ *  `stale` in the requirements report — an honest risk signal, never an
+ *  "expired" verdict (age ≠ expiry: cookie/session lifetimes are
+ *  site-dependent, so the flag never changes the ready/working verdict). */
+export const SESSION_STALE_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface PackageRequirements extends RequirementPackage {
   verdict: Verdict;
@@ -105,6 +122,13 @@ export interface RequirementsDeps {
   probeAttachPort: (port: number) => Promise<boolean>;
   listAccounts: (dataDir: string, host: string) => StoredAccount[];
   legacySessionPresent: (dataDir: string, host: string) => boolean;
+  /** The legacy flat snapshot's capturedAt (ProfileSnapshot.capturedAt) — the
+   *  freshness source when no identity-keyed account exists. Default reads the
+   *  snapshot; tests inject. Null/empty = no date → flag skipped, never guessed. */
+  legacySnapshotCapturedAt: (dataDir: string, host: string) => string | null;
+  /** Injectable clock for capture-age math (GOAL 39) — tests pin time; the
+   *  default is the real wall clock. */
+  now: () => Date;
   packages: () => RequirementPackage[];
   registryVerified: (id: string) => RegistryVerified | false;
 }
@@ -159,6 +183,10 @@ async function defaultProbeAttachPort(port: number): Promise<boolean> {
 
 function defaultLegacySessionPresent(dataDir: string, host: string): boolean {
   return loadSnapshot(snapshotPath(dataDir, host)) !== null;
+}
+
+function defaultLegacySnapshotCapturedAt(dataDir: string, host: string): string | null {
+  return loadSnapshot(snapshotPath(dataDir, host))?.capturedAt ?? null;
 }
 
 // --- package surface derivation (the same /sites + /registry coverage) ---
@@ -387,20 +415,80 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
   return { node, checks };
 }
 
+/** The limiting capture: the OLDEST date wins (oldest = the session most at
+ *  risk of having drifted). Lexicographic compare is valid for ISO-8601. */
+function oldestCapturedAt(accounts: StoredAccount[]): string | undefined {
+  let oldest: string | undefined;
+  for (const a of accounts) {
+    if (!a.capturedAt) continue;
+    if (oldest === undefined || a.capturedAt < oldest) oldest = a.capturedAt;
+  }
+  return oldest;
+}
+
+/**
+ * GOAL 39: freshness math from a capture date. Missing/empty/unparsable dates
+ * return {} — the flag is SKIPPED silently, never guessed. ageDays is clamped
+ * >= 0 (a clock-skewed future date is not "minus N days stale").
+ */
+function freshnessFor(
+  capturedAt: string | undefined | null,
+  now: Date
+): { capturedAt?: string; ageDays?: number; stale?: boolean } {
+  if (!capturedAt) return {};
+  const t = Date.parse(capturedAt);
+  if (!Number.isFinite(t)) return {};
+  const ageDays = Math.max(0, Math.floor((now.getTime() - t) / DAY_MS));
+  return { capturedAt, ageDays, stale: ageDays > SESSION_STALE_DAYS };
+}
+
+/** Spread the freshness fields onto a pass VaultResult + the human-readable
+ *  age detail ("captured <date> (N days ago)") and, when stale, the NAMED warn
+ *  reason with the re-capture instruction. No date → base returned untouched. */
+function withFreshness(
+  base: VaultResult,
+  f: { capturedAt?: string; ageDays?: number; stale?: boolean },
+  host: string
+): VaultResult {
+  if (!f.capturedAt || f.ageDays === undefined) return base;
+  const date = f.capturedAt.slice(0, 10);
+  const v: VaultResult = {
+    ...base,
+    capturedAt: f.capturedAt,
+    ageDays: f.ageDays,
+    stale: f.stale,
+    detail: `${base.detail} — captured ${date} (${f.ageDays} days ago)`,
+  };
+  if (f.stale) {
+    v.reason = `stale: captured ${date} (${f.ageDays} days ago) — re-capture: profile add-all --known (or 'profile capture/import ${host}')`;
+  }
+  return v;
+}
+
 /** (e) vault session per host: identity-keyed accounts first, legacy flat
- *  snapshot second. Anonymous packages skip (no stored session needed). */
+ *  snapshot second. Anonymous packages skip (no stored session needed). The
+ *  pass result carries capture-age freshness (GOAL 39): capturedAt, ageDays and
+ *  the stale risk flag — age is surfaced honestly, never an expiry verdict. */
 export function resolveVault(pkg: RequirementPackage, deps: RequirementsDeps): VaultResult {
   if (!pkg.host) return { status: "skip", reason: "no resolvable url — no host to key the vault by" };
   if (!pkg.loginRequired) return { status: "skip", reason: "anonymous — no stored session needed" };
   const accounts = deps.listAccounts(deps.dataDir, pkg.host);
   if (accounts.length > 0) {
-    return {
-      status: "pass",
-      detail: `${accounts.length} stored account(s) for ${pkg.host} (${accounts.map((a) => a.slug).join(", ")})`,
-    };
+    return withFreshness(
+      {
+        status: "pass",
+        detail: `${accounts.length} stored account(s) for ${pkg.host} (${accounts.map((a) => a.slug).join(", ")})`,
+      },
+      freshnessFor(oldestCapturedAt(accounts), deps.now()),
+      pkg.host
+    );
   }
   if (deps.legacySessionPresent(deps.dataDir, pkg.host)) {
-    return { status: "pass", detail: `legacy flat session present for ${pkg.host}` };
+    return withFreshness(
+      { status: "pass", detail: `legacy flat session present for ${pkg.host}` },
+      freshnessFor(deps.legacySnapshotCapturedAt(deps.dataDir, pkg.host), deps.now()),
+      pkg.host
+    );
   }
   return {
     status: "fail",
@@ -473,6 +561,8 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
     probeAttachPort: defaultProbeAttachPort,
     listAccounts,
     legacySessionPresent: defaultLegacySessionPresent,
+    legacySnapshotCapturedAt: defaultLegacySnapshotCapturedAt,
+    now: () => new Date(),
     packages: defaultPackages,
     registryVerified: defaultRegistryVerified,
     ...overrides,

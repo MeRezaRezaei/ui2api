@@ -296,6 +296,10 @@ blocker listed above — do not invent a green for it.
   overlay; add its dismiss button to the profile's `dismiss` list.
 - The vault snapshot was captured but the site asks you to sign in again —
   sessions expire; re-capture with `--assist` (headed) as the wall instructs.
+  The pre-flight gate names the age honestly too: `ui2api requirements` prints
+  every vault-backed package's `captured <date> (N days ago)` and flags
+  sessions older than 14 days with a `⚠ stale: … — re-capture: profile
+  add-all --known` warn (a risk signal, never an "expired" verdict).
 - The daemon answers stale `/registry` — restart it: kill the promptd process,
   then `npx tsx src/cli.ts promptd` (it must run the CURRENT code).
 

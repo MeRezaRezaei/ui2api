@@ -293,7 +293,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   verdict), and the checker itself NEVER launches a browser (chrome = the
   `resolveChromeExec` ladder + a `chrome --version` execute-only probe;
   attach = a short HTTP GET to an already-running Chrome's CDP endpoint;
-  sessions = vault reads only).
+  sessions = vault reads only). Capture age is surfaced honestly in the same
+  gate (GOAL 39): every vault-backed package prints `captured <date> (N days
+  ago)`, and a session older than the `SESSION_STALE_DAYS` risk threshold (14)
+  gets a `⚠ stale` warn with the re-capture instruction — age ≠ expiry, so the
+  flag never changes the ready/working verdict (site-dependent lifetimes).
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use).

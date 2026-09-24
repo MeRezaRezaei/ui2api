@@ -679,6 +679,11 @@ async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void>
   for (const p of rows) {
     const reasons = p.reasons.length > 0 ? p.reasons.join("; ") : "driveable now (honestly unverified)";
     console.log(`${p.id.padEnd(24)} ${p.kind.padEnd(14)} ${p.verdict.padEnd(11)} ${reasons}`);
+    // GOAL 39: capture-age honesty — the age line for every vault-backed
+    // package and the ⚠ stale warn (risk signal only, never an expiry verdict)
+    // when the limiting session is older than SESSION_STALE_DAYS.
+    if (p.vault.detail) console.log(`  vault: ${p.vault.detail}`);
+    if (p.vault.stale && p.vault.reason) console.log(`  ⚠ ${p.vault.reason}`);
   }
   console.log("");
   const scoped = rows.length === report.packages.length ? report.summary : summarizeVerds(rows);
