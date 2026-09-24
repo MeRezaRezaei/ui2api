@@ -439,7 +439,7 @@ async function cmdPromptd(flags: Flags): Promise<void> {
   console.log(`[ui2api] promptd on http://127.0.0.1:${svc.port} · sites: ${shown} · default: ${defaultSiteId()}`);
   console.log(`[ui2api] POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}`);
   console.log(`[ui2api] POST /capability/<site>  ·  GET /registry  ·  GET /sites  ·  GET /accounts?site=  ·  GET /v1/models  ·  POST /v1/chat/completions`);
-  console.log(`[ui2api] GET  /status  -> pool (warm/idle/busy pages)  ·  UI2API_POOL_MIN/MAX=${flags.poolMin ?? "auto"}/${flags.poolMax ?? "auto"} · UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "off"}`);
+  console.log(`[ui2api] GET  /status  -> pool (warm/idle/busy pages)  ·  GET /requirements -> OS-level readiness (GOAL 33)  ·  UI2API_POOL_MIN/MAX=${flags.poolMin ?? "auto"}/${flags.poolMax ?? "auto"} · UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "off"}`);
   const shutdown = async (): Promise<void> => { await svc.close(); process.exit(0); };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
@@ -643,6 +643,55 @@ async function cmdProfileList(host: string, flags: Flags): Promise<void> {
   }
   console.log("");
   console.log("Drive one with:  ui2api prompt '...' --site <id> --account <slug|email>");
+}
+
+// OS-level requirements readiness check (GOAL 33, the `requirements`/`doctor`
+// command): reports every package's verdict — ready / working / on-hold /
+// not-ready — with the NAMED reason, BEFORE any browser work. Pure checker
+// (src/runtime/requirements.ts): no browser is ever launched (the attach probe
+// is an HTTP GET against an already-running Chrome; chrome version is an
+// execute-only --version probe). Exit is non-zero when any requested-scope
+// package is not-ready (scriptable gates).
+function summarizeVerds(rows: { verdict: string }[]): Record<string, number> {
+  const s: Record<string, number> = { ready: 0, working: 0, "on-hold": 0, "not-ready": 0 };
+  for (const r of rows) s[r.verdict] = (s[r.verdict] ?? 0) + 1;
+  return s;
+}
+
+async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void> {
+  const { checkRequirements } = await import("./runtime/requirements.js");
+  const report = await checkRequirements({
+    deps: { dataDir: resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data") },
+  });
+  console.log(`[ui2api] OS-level requirements (doctor) — node ${report.node}`);
+  for (const c of report.checks) {
+    const mark = c.status === "pass" ? "[ok]  " : c.status === "fail" ? "[FAIL]" : "[skip]";
+    console.log(`  ${mark} ${c.id.padEnd(13)} ${c.detail ?? c.reason ?? ""}`);
+  }
+  console.log("");
+  const rows = siteOrEmpty
+    ? report.packages.filter((p) => p.id === siteOrEmpty)
+    : report.packages;
+  if (siteOrEmpty && rows.length === 0) {
+    throw new Error(`unknown site "${siteOrEmpty}" for requirements`);
+  }
+  console.log(`${"site".padEnd(24)} kind            verdict     reasons`);
+  for (const p of rows) {
+    const reasons = p.reasons.length > 0 ? p.reasons.join("; ") : "driveable now (honestly unverified)";
+    console.log(`${p.id.padEnd(24)} ${p.kind.padEnd(14)} ${p.verdict.padEnd(11)} ${reasons}`);
+  }
+  console.log("");
+  const scoped = rows.length === report.packages.length ? report.summary : summarizeVerds(rows);
+  console.log(
+    `summary: ${scoped.ready} ready · ${scoped.working} working · ${scoped["on-hold"]} on-hold · ${scoped["not-ready"]} not-ready`
+  );
+  const notReady = rows.filter((p) => p.verdict === "not-ready");
+  if (notReady.length > 0) {
+    console.error(
+      `[ui2api] ${notReady.length} package(s) NOT READY (${notReady.map((p) => p.id).join(", ")}) — fix the named reasons, then re-run.`
+    );
+    process.exitCode = 1;
+  }
 }
 
 // Import EVERY site session found in the OS's Chrome profiles into the vault in
@@ -936,6 +985,9 @@ async function main(): Promise<void> {
       return cmdPrompt(arg ?? "", flags);
     case "promptd":
       return cmdPromptd(flags);
+    case "requirements":
+    case "doctor":
+      return cmdRequirements(arg ?? "", flags);
     case "proof":
     case "live-proof":
       return cmdLiveProof(flags);
@@ -955,8 +1007,9 @@ async function main(): Promise<void> {
       console.log("  ui2api profile capture <url> [--data-dir DIR] [--login]  (login once, save cookies+localStorage+IndexedDB snapshot)");
       console.log("  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
-      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /health)");
+      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
+      console.log("  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready)");
       process.exit(cmd ? 1 : 0);
   }
 }

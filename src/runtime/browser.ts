@@ -84,10 +84,18 @@ export interface LaunchOpts {
 // `chromium.launch()` dies with "Executable doesn't exist". We auto-detect that
 // so launchBrowser can fall back to the system Chrome instead of failing.
 function bundledChromiumMissing(): boolean {
+  return bundledChromiumPath() === null;
+}
+
+// Exported for the requirements/doctor checker (GOAL 33): the bundled Chromium
+// binary path when Playwright's cache has it, else null. Never spawns anything —
+// a pure fs existence check, no browser launch.
+export function bundledChromiumPath(): string | null {
   try {
-    return !existsSync(chromium.executablePath());
+    const p = chromium.executablePath();
+    return existsSync(p) ? p : null;
   } catch {
-    return true;
+    return null;
   }
 }
 
@@ -177,8 +185,10 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
 // --- Managed Chrome spawn + CDP attach (wigolo cdp-direct pattern) ---
 
 // Resolve a real Chrome executable. Order: explicit path flag/env, then Playwright's
-// `channel: "chrome"` registry, then the two common linux locations.
-function resolveChromeExec(overrides: LaunchOpts): string | undefined {
+// `channel: "chrome"` registry, then the two common linux locations. Exported for
+// the requirements/doctor checker (GOAL 33) so the readiness check folds the SAME
+// ladder launchBrowser uses instead of duplicating it.
+export function resolveChromeExec(overrides: LaunchOpts): string | undefined {
   const explicit = overrides.executablePath ?? process.env.UI2API_CHROME_PATH;
   if (explicit && existsSync(explicit)) return explicit;
   for (const cand of [

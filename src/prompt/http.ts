@@ -24,6 +24,11 @@
 //   GET  /sites   -> the available chat-site profiles
 //   GET  /accounts?site=gemini  -> identity-keyed accounts stored for the site
 //   GET  /status  -> pool health (warm/idle/busy pages)
+//   GET  /requirements -> OS-level readiness report (GOAL 33 — the same data
+//                 `ui2api requirements` prints: per-package verdict
+//                 ready/working/on-hold/not-ready with named reasons, BEFORE
+//                 any browser work), scoped to this daemon's profilesById gate
+//                 + every installed capability package
 //   GET  /health  -> {ok, defaultSite}
 //
 // Bound to 127.0.0.1 by default; optionally guarded by a bearer token
@@ -34,6 +39,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ChatPool } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
+import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
@@ -359,6 +365,25 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       if (req.method === "GET" && req.url === "/status") {
         return send(res, 200, { ok: true, pool: pool.status });
+      }
+      // OS-level requirements readiness (GOAL 33): the same report the
+      // `requirements`/`doctor` command prints, scoped to THIS daemon's surface —
+      // the profilesById gate (explicit --site allow-list or the default chat
+      // set) as chat packages first, then every installed capability package.
+      // Plain GET: no browser, no pool involvement; the only network it may
+      // touch is the optional UI2API_ATTACH_PORT probe (an HTTP GET against an
+      // already-running Chrome's CDP endpoint).
+      if (req.method === "GET" && req.url === "/requirements") {
+        const report = await checkRequirements({
+          deps: {
+            dataDir,
+            packages: () =>
+              requirementPackagesFor(
+                Object.values(profilesById).map((p) => ({ id: p.id, url: p.url, loginRequired: p.loginRequired }))
+              ),
+          },
+        });
+        return send(res, 200, report);
       }
       if (req.method === "GET" && (req.url === "/health" || req.url === "/")) {
         return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: pool.status });
