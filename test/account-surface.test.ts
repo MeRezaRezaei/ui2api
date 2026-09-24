@@ -71,8 +71,14 @@ test("GOAL8(a): /capabilities/<site> exposes accounts via the registry field, no
     HTTP_SOURCE.includes(accountsLine),
     "http.ts path-form branch must expose `accounts: pkg.accounts ?? []` (parity with the registry field; undefined -> [])"
   );
-  const sourceIdx = HTTP_SOURCE.indexOf('source: "manifest",');
-  const accountsIdx = HTTP_SOURCE.indexOf(accountsLine);
+  // Scoped to the /capabilities/<site> handler block: the /accounts?site=
+  // installed-package fallback (GOAL 31) uses the same expression earlier in
+  // the file, so both searches must anchor inside the path-form branch to keep
+  // pinning THAT response object's shape.
+  const pathForm = HTTP_SOURCE.indexOf("const pathCap = ");
+  assert.ok(pathForm >= 0, "path-form branch must exist in http.ts");
+  const sourceIdx = HTTP_SOURCE.indexOf('source: "manifest",', pathForm);
+  const accountsIdx = HTTP_SOURCE.indexOf(accountsLine, pathForm);
   assert.ok(sourceIdx >= 0, "path-form branch still carries source:\"manifest\"");
   assert.ok(
     accountsIdx > sourceIdx,
@@ -497,4 +503,145 @@ test("GOAL29(d): CLI prompt --account with an unknown account exits non-zero wit
   assert.ok(out.stderr.includes("no stored account"), out.stderr);
   assert.match(out.stderr, /available: \[/);
   for (const a of stored) assert.ok(out.stderr.includes(a.slug), `CLI error must list the real stored slug ${a.slug}: ${out.stderr}`);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// GOAL 31 — GET /accounts?site= serves the identity-keyed vault for installed
+// capability-only packages (the SAME vault /registry + /capabilities/<site>
+// serve) + the youtube packaged-url host drift (www.youtube.com in the package
+// vs the real vault host youtube.com at data/sessions/youtube.com/).
+//
+// Before GOAL 31 /accounts resolved ONLY via the chat-profile set (idFrom →
+// profilesById), so capability-only installed packages (youtube/gmail/adapta/
+// araprat/chatglm/conol/doubao/tinycms) 400'd "unknown site" even when a real
+// vault existed — while /registry + /capabilities/<site> already listed those
+// accounts (a direct contradiction of the documented three-surface contract).
+// Now: profile-first (byte-identical legacy contract), then the installed
+// package via registryPackageFor (http.ts) — the exact gate the peer surfaces
+// use. youtube additionally drifted: packaged profile/manifest url pinned
+// https://www.youtube.com while the vault lives at youtube.com (GOAL-8 kimi
+// class, precedent 207e134), so the stored account merezarezaei@gmail.com was
+// invisible AND unvalidatable everywhere. Tests below run on a REAL default
+// daemon with UI2API_ATTACH_PORT=1 (boot-warm connect-refused → NO browser is
+// ever spawned), the GOAL 30 pattern.
+// ────────────────────────────────────────────────────────────────────────────
+
+const GOAL31_CAPABILITY_ONLY = ["youtube", "gmail", "adapta", "araprat", "chatglm", "conol", "doubao", "tinycms"];
+
+/** Start a real default daemon (no --site allow-list) with the attach-refused warm. */
+async function startGoal31Daemon() {
+  const prevAttach = process.env.UI2API_ATTACH_PORT;
+  process.env.UI2API_ATTACH_PORT = "1"; // nothing listens: boot-warm fails fast, no browser spawned
+  try {
+    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: "data" });
+    return {
+      base: `http://127.0.0.1:${svc.port}`,
+      close: () => svc.close(),
+    };
+  } finally {
+    if (prevAttach === undefined) delete process.env.UI2API_ATTACH_PORT;
+    else process.env.UI2API_ATTACH_PORT = prevAttach;
+  }
+}
+
+test("GOAL31(a): /accounts?site=youtube serves the installed-package vault — youtube.com host + stored account (vault-gated)", async (t) => {
+  const { base, close } = await startGoal31Daemon();
+  try {
+    const res = await fetch(`${base}/accounts?site=youtube`);
+    const body = (await res.json()) as { site?: string; host?: string | null; accounts?: unknown[] };
+    assert.equal(res.status, 200, "/accounts?site=youtube must be 200 (package fallback, never the old unknown-site 400)");
+    assert.equal(body.site, "youtube");
+    assert.equal(body.host, "youtube.com", "host must derive from the flipped packaged url — the vault-canonical youtube.com, not www.youtube.com");
+    if (!vaultPresent("youtube.com")) {
+      t.skip("no vault for youtube.com (data/ is gitignored — clean checkout has none)");
+      return;
+    }
+    assert.ok(Array.isArray(body.accounts), "accounts must be an array");
+    assert.ok(
+      (body.accounts as Array<{ slug: string; identity: string }>).some(
+        (a) => a.slug === "merezarezaei@gmail.com" && a.identity === "merezarezaei@gmail.com"
+      ),
+      "the real stored youtube account merezarezaei@gmail.com must surface (identity-keyed vault at youtube.com)"
+    );
+  } finally {
+    await close();
+  }
+  t.diagnostic("real daemon exercised read-only /accounts surface (no browser launched)");
+});
+
+test("GOAL31(a): /accounts?site=nonsense keeps the 400 (neither a profile nor an installed package)", async () => {
+  const { base, close } = await startGoal31Daemon();
+  try {
+    const res = await fetch(`${base}/accounts?site=no-such-site-xyz`);
+    assert.equal(res.status, 400, "unknown site must stay a 400 (byte-identical legacy contract)");
+    const body = (await res.json()) as { error?: string };
+    assert.ok((body.error ?? "").includes("unknown site"), body.error);
+  } finally {
+    await close();
+  }
+});
+
+test("GOAL31(b): three-way parity — /accounts?site=youtube == /capabilities/youtube == /registry youtube.accounts (vault-gated)", async (t) => {
+  if (!vaultPresent("youtube.com")) {
+    t.skip("no vault for youtube.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const { base, close } = await startGoal31Daemon();
+  try {
+    const acc = (await (await fetch(`${base}/accounts?site=youtube`)).json()) as { accounts: unknown[]; host: string | null };
+    const cap = (await (await fetch(`${base}/capabilities/youtube`)).json()) as { accounts: unknown[]; url: string };
+    const reg = (await (await fetch(`${base}/registry`)).json()) as {
+      packages: Array<{ id: string; url: string; accounts?: unknown[] }>;
+    };
+    const regPkg = reg.packages.find((p) => p.id === "youtube");
+    assert.ok(regPkg, "/registry must carry the youtube package");
+    assert.equal(regPkg.url, "https://youtube.com", "/registry youtube url must show the flipped vault-canonical url");
+    assert.equal(cap.url, "https://youtube.com", "/capabilities/youtube url must show the flipped url");
+    assert.deepEqual(acc.accounts, cap.accounts, "/accounts and /capabilities/youtube must list the SAME accounts");
+    assert.deepEqual(acc.accounts, regPkg.accounts ?? [], "/accounts and /registry youtube.accounts must list the SAME accounts");
+    assert.ok((acc.accounts as unknown[]).length >= 1, "the on-box youtube vault must surface its stored account");
+    assert.equal(acc.host, "youtube.com", "/accounts host stays the vault-canonical youtube.com");
+    for (const a of acc.accounts as Array<{ host: string }>) {
+      assert.equal(a.host, "youtube.com", "each stored account's host field must be youtube.com");
+    }
+  } finally {
+    await close();
+  }
+});
+
+test("GOAL31(c): all 8 capability-only ids resolve 200 on /accounts; chat-shaped ids keep the byte-identical profile path", async () => {
+  const pkgs = buildRegistryPackages();
+  const byId = new Map(pkgs.map((p) => [p.id, p]));
+  const { base, close } = await startGoal31Daemon();
+  try {
+    // Capability-only installed packages — the GOAL 31 fallback branch.
+    for (const id of GOAL31_CAPABILITY_ONLY) {
+      const pkg = byId.get(id);
+      assert.ok(pkg, `${id}: installed package must be present in buildRegistryPackages()`);
+      const res = await fetch(`${base}/accounts?site=${id}`);
+      assert.equal(res.status, 200, `/accounts?site=${id} must resolve via the installed-package fallback`);
+      const body = (await res.json()) as { site: string; host: string | null; accounts: unknown[] };
+      assert.equal(body.site, id);
+      const expectedHost = pkg.url ? new URL(pkg.url).host : null;
+      assert.equal(body.host, expectedHost, `${id}: host must derive from the packaged url (null when url-less)`);
+      assert.ok(Array.isArray(body.accounts), `${id}: accounts must be an array`);
+      assert.deepEqual(body.accounts, pkg.accounts ?? [], `${id}: /accounts must list the SAME accounts as the registry field`);
+    }
+    // url-less chatglm/tinycms pin: no url -> no host to key the vault by -> null + [].
+    const gl = (await (await fetch(`${base}/accounts?site=chatglm`)).json()) as { host: string | null; accounts: unknown[] };
+    assert.equal(gl.host, null, "url-less chatglm must surface host null");
+    assert.deepEqual(gl.accounts, [], "url-less chatglm must surface accounts [] (never fabricated)");
+
+    // Chat-shaped ids (builtin + packaged) keep the profile path, byte-identical.
+    for (const id of ["duckduckgo", "gemini", "deepseek", "kimi"]) {
+      const res = await fetch(`${base}/accounts?site=${id}`);
+      assert.equal(res.status, 200, `chat-shaped ${id} must still resolve (profile path)`);
+      const body = (await res.json()) as { site: string; host: string; accounts: unknown[] };
+      assert.equal(body.site, id);
+      assert.equal(body.host, new URL(resolveProfile(id).url).host, `${id}: host must come from the chat profile`);
+      assert.ok(Array.isArray(body.accounts), `${id}: accounts must be an array`);
+    }
+  } finally {
+    await close();
+  }
 });

@@ -2,7 +2,7 @@
   "id": "youtube",
   "name": "YouTube (www.youtube.com)",
   "site": "www.youtube.com",
-  "url": "https://www.youtube.com",
+  "url": "https://youtube.com",
   "description": "YouTube as a capability surface (NOT an AI chat site): video search via the site's own results page and transcript read-back from the watch page's own transcript panel. No chat composer exists; no chat capability is registered.",
   "version": "0.1.0",
   "author": "ui2api capabilities",

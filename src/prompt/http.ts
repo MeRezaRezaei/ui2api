@@ -245,13 +245,38 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       //   GET /accounts?site=gemini  -> { site, accounts: [{slug, identity, capturedAt, source}] }
       // A `/prompt` may then pass `account: <slug|identity>` to drive that
       // specific logged-in session.
+      //
+      // Resolution (GOAL 31): the chat-profile set first (byte-identical legacy
+      // contract), then the installed capability package — the SAME
+      // registryPackageFor → buildRegistryPackages source /registry and
+      // /capabilities/<site> serve — so capability-only installed packages
+      // (gmail/youtube/araprat/chatglm/…) surface their identity-keyed vault
+      // here too. 400 ONLY when neither a profile nor a package exists (the
+      // unknown-site throw keeps flowing to the server catch).
       if (req.method === "GET" && req.url?.startsWith("/accounts")) {
         const q = new URL(req.url, "http://localhost");
         const site = q.searchParams.get("site") ?? "";
-        const profile = site ? idFrom(site, profilesById) : undefined;
-        if (!profile) return send(res, 400, { error: "site is required" });
-        const host = new URL(profile.url).host;
-        return send(res, 200, { site: profile.id, host, accounts: listAccounts(dataDir, host) });
+        if (!site) return send(res, 400, { error: "site is required" });
+        let profile: ChatSiteProfile | undefined;
+        let idError: unknown;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch (e) {
+          idError = e; // not a chat profile — maybe an installed capability-only package
+        }
+        if (profile) {
+          const host = new URL(profile.url).host;
+          return send(res, 200, { site: profile.id, host, accounts: listAccounts(dataDir, host) });
+        }
+        const pkg = registryPackageFor(site);
+        if (pkg) {
+          return send(res, 200, {
+            site: pkg.id,
+            host: pkg.url ? new URL(pkg.url).host : null,
+            accounts: pkg.accounts ?? [],
+          });
+        }
+        throw idError ?? new Error(`unknown site "${site}"`);
       }
       // Capability reflection, path form: GET /capabilities/<site> -> the
       // installed package's declared capability surface (the same manifest the

@@ -1,7 +1,7 @@
 {
   "id": "youtube",
   "name": "YouTube (www.youtube.com)",
-  "url": "https://www.youtube.com",
+  "url": "https://youtube.com",
   "loginRequired": false,
   "loginHint": "optional: capture a www.youtube.com session once (ui2api profile capture \"https://www.youtube.com\") so consent walls are pre-answered; anonymous works for search",
   "composer": [],
