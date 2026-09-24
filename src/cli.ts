@@ -19,7 +19,7 @@ import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
 import { resolveProfile, listProfiles, defaultSiteId } from "./profile/profile.js";
 import { ChatDriver } from "./prompt/driver.js";
-import { startPromptd } from "./prompt/http.js";
+import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -366,6 +366,10 @@ async function cmdPrompt(text: string, flags: Flags): Promise<void> {
   }
   const profile = resolveProfile(flags.site ?? flags.profile);
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  // Same vault-validated account guard as the daemon surfaces: an unknown
+  // account fails loudly (non-zero) BEFORE any browser work, never a silent
+  // fallback to the legacy default session.
+  resolveCapabilityAccount(flags.account, profile, dataDir);
   const driver = new ChatDriver(profile, { dataDir, account: flags.account });
   try {
     const r = await driver.ask(text, { newChat: flags.newChat, timeoutMs: flags.timeoutMs, ...(flags.model ? { model: flags.model } : {}) });
@@ -387,6 +391,8 @@ async function cmdLiveProof(flags: Flags): Promise<void> {
   console.log(`[proof] a=${a} b=${b} expected=${expected}`);
   const profile = resolveProfile(flags.site ?? "copilot");
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  // Same vault-validated account guard as `prompt` (live-proof rides accounts too).
+  resolveCapabilityAccount(flags.account, profile, dataDir);
   const question = `What is ${a} + ${b}? Reply with ONLY the number, no words or explanation.`;
   // The host can hard-kill a fresh browser seconds after spawn (int3 trap), so
   // a live proof must ride fresh spawns until one survives the streamed answer.

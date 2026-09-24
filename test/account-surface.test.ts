@@ -1,12 +1,16 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer, type Server } from "node:http";
 
 import { buildRegistryPackages, resolveDataDir } from "../src/prompt/registry.js";
-import { resolvePackagedProfile } from "../src/profile/profile.js";
+import { resolvePackagedProfile, resolveProfile } from "../src/profile/profile.js";
 import { listAccounts, loadAccountSnapshot, slugifyIdentity } from "../src/runtime/session-store.js";
+import { startPromptd, resolveCapabilityAccount } from "../src/prompt/http.js";
+import { handleOpenAIRoutes } from "../src/prompt/openai.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -257,4 +261,240 @@ test("GOAL8(c): every real /capability/<site> runner validates the account BEFOR
     HTTP_SOURCE.includes("send(res, e instanceof Error && /unknown site |no stored account /.test(e.message) ? 400 : 500"),
     "http.ts catch must map the resolveCapabilityAccount throw to a 400 (never a 500 for a bad account)"
   );
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// GOAL 29 — close the account-validation ASYMMETRY on the chat/consumer
+// surfaces. POST /prompt, POST /v1/chat/completions, and the CLI
+// `prompt --account` used to hand body.account straight to pool.acquire /
+// ChatDriver without resolveCapabilityAccount, so an unknown account silently
+// fell back to the legacy default session (answers ok:true, wrong session
+// attribution) — while /capability/<site> rejects it with a 400 BEFORE any
+// browser work. This section pins the SAME vault-validated 400 on both daemon
+// surfaces + the CLI:
+//
+//   (a) GUARD PREDICATE over the REAL on-box vault: an unknown account throws
+//       the exact 400-shaped message ('no stored account "<acct>" for "<host>";
+//       available: [<slugs>]'); every stored slug passes; absent / "default"
+//       leave the legacy default path untouched (no-op).
+//   (b) WIRE, REAL DAEMON (real dataDir): unknown account on POST /prompt AND
+//       POST /v1/chat/completions → 400 from the production server catch with
+//       the throw's message + the real available slug list — before the pool
+//       is ever asked for a worker.
+//   (c) /v1 stub-pool harness with the injected validator: unknown account →
+//       400 and pool.acquire NEVER called (validation-before-browser); a
+//       stored slug → 200 passthrough; no account → the default path keeps
+//       working (acquire called).
+//   (d) CLI `ui2api prompt --site deepseek --account <unknown>` → non-zero
+//       exit, stderr carries the same 'no stored account' + available list.
+//
+// Vault-backed cases skip when data/sessions/<host>/accounts.json is absent
+// (clean checkout / CI): nothing fabricated, GOAL-20 skip-when-absent guard.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Builtin deepseek ChatSiteProfile (its url hosts the on-box vault). */
+function deepseekProfile(): ChatSiteProfile {
+  const p = resolveProfile("deepseek");
+  assert.ok(p, "GOAL29: builtin deepseek profile must resolve");
+  return p!;
+}
+
+test("GOAL29(a): resolveCapabilityAccount over the real vault — unknown throws the exact 400 message, stored slugs pass, absent/default no-op", (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const host = registryVaultHost("deepseek");
+  const dataDir = resolveDataDir();
+  const profile = deepseekProfile();
+  assert.equal(new URL(profile.url).host, host, "deepseek profile must key the vault host the registry uses");
+  const stored = listAccounts(dataDir, host);
+  assert.ok(stored.length >= 1, `expected a real on-box vault at ${host}`);
+  const bogus = "no-such-account@example.com";
+  const expected = `no stored account "${bogus}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`;
+
+  // Unknown account -> the exact 400-shaped throw (the /capability contract).
+  let threw = "";
+  try {
+    resolveCapabilityAccount(bogus, profile, dataDir);
+  } catch (e) {
+    threw = e instanceof Error ? e.message : String(e);
+  }
+  assert.equal(threw, expected, "unknown account must throw the exact 400-shaped message");
+
+  // Every stored slug passes (known accounts are never wrongly rejected).
+  for (const a of stored) {
+    assert.doesNotThrow(() => resolveCapabilityAccount(a.slug, profile, dataDir), `stored slug ${a.slug} must pass`);
+    assert.doesNotThrow(() => resolveCapabilityAccount(a.identity, profile, dataDir), `stored identity ${a.identity} must pass`);
+  }
+  // Absent / "default" = the legacy default path, unchanged.
+  assert.doesNotThrow(() => resolveCapabilityAccount(undefined, profile, dataDir));
+  assert.doesNotThrow(() => resolveCapabilityAccount("default", profile, dataDir));
+});
+
+test("GOAL29(b): a real daemon rejects an unknown account with 400 on BOTH /prompt and /v1/chat/completions (before any pool work)", async (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const host = registryVaultHost("deepseek");
+  const dataDir = resolveDataDir();
+  const stored = listAccounts(dataDir, host);
+  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir, profiles: [deepseekProfile()] });
+  const base = `http://127.0.0.1:${svc.port}`;
+  const bogus = "no-such-account@example.com";
+  try {
+    // POST /prompt — the guarded branch now throws before pool.acquire.
+    const p = await fetch(`${base}/prompt`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ site: "deepseek", prompt: "hi", account: bogus }),
+    });
+    assert.equal(p.status, 400, "POST /prompt with an unknown account must be a 400, never a silent default fallback");
+    const pbody = (await p.json()) as { error: string };
+    assert.ok(pbody.error.includes("no stored account"), pbody.error);
+    assert.ok(pbody.error.includes(`for "${host}"`), pbody.error);
+    assert.match(pbody.error, /available: \[/);
+    for (const a of stored) assert.ok(pbody.error.includes(a.slug), `400 must list the real stored slug ${a.slug}: ${pbody.error}`);
+
+    // POST /v1/chat/completions — same guard through the injected validator.
+    const v = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "ui2api/deepseek", messages: [{ role: "user", content: "hi" }], account: bogus }),
+    });
+    assert.equal(v.status, 400, "POST /v1/chat/completions with an unknown account must be a 400 via the daemon catch");
+    const vbody = (await v.json()) as { error: string };
+    assert.ok(vbody.error.includes("no stored account"), vbody.error);
+    assert.ok(vbody.error.includes(`for "${host}"`), vbody.error);
+    for (const a of stored) assert.ok(vbody.error.includes(a.slug), `v1 400 must list the real stored slug ${a.slug}: ${vbody.error}`);
+  } finally {
+    await svc.close();
+  }
+});
+
+// A stub-pool OpenAI harness wired with the REAL injected validator (the same
+// closure http.ts hands handleOpenAIRoutes) so the /v1 surface is exercised
+// braintlessly and fast — the validator reads the real vault, the pool is a
+// counting stub proving validation runs BEFORE any acquire.
+interface StubOpenAiHarness {
+  server: Server;
+  port: number;
+  acquires: () => number;
+}
+
+function startStubOpenAiHarness(): Promise<StubOpenAiHarness> {
+  let acquires = 0;
+  return new Promise((resolve) => {
+    const server = createServer(async (req, res) => {
+      try {
+        await handleOpenAIRoutes(req, res, {
+          pool: {
+            acquire: async () => {
+              acquires++;
+              return { driver: { ask: async () => ({ answer: "2 + 2 = 4", chunkCount: 1, doneReason: "stop", url: "https://chat.deepseek.com/chat/1", title: "t" }) } };
+            },
+            release: async () => undefined,
+          } as never,
+          profilesById: { deepseek: deepseekProfile() } as Record<string, ChatSiteProfile>,
+          validateAccount: (account, profile) => resolveCapabilityAccount(account, profile, resolveDataDir()),
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.writeHead(/unknown site |no stored account /.test(msg) ? 400 : 500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: msg }));
+      }
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve({ server, port: typeof address === "object" && address ? address.port : 0, acquires: () => acquires });
+    });
+  });
+}
+
+test("GOAL29(c): /v1/chat/completions with an unknown account -> 400 BEFORE pool.acquire is ever called", async (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const host = registryVaultHost("deepseek");
+  const { server, port, acquires } = await startStubOpenAiHarness();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "deepseek",
+        messages: [{ role: "user", content: "hi" }],
+        account: "no-such-account@example.com",
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.ok(body.error.includes("no stored account"), body.error);
+    assert.ok(body.error.includes(`for "${host}"`), body.error);
+    assert.match(body.error, /available: \[/);
+    assert.equal(acquires(), 0, "unknown account must be rejected BEFORE pool.acquire (never a browser)");
+  } finally {
+    server.close();
+  }
+});
+
+test("GOAL29(c): /v1/chat/completions with a STORED account passes validation and flows to the pool (200, no 400)", async (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const stored = listAccounts(resolveDataDir(), registryVaultHost("deepseek"));
+  assert.ok(stored.length >= 1);
+  const { server, port, acquires } = await startStubOpenAiHarness();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek", messages: [{ role: "user", content: "hi" }], account: stored[0].slug }),
+    });
+    assert.equal(res.status, 200, "a stored account must pass validation (never a 400)");
+    assert.ok(acquires() >= 1, "a stored account flows through to pool.acquire unchanged");
+  } finally {
+    server.close();
+  }
+});
+
+test("GOAL29(c): /v1/chat/completions with NO account keeps the legacy default path (200, pool acquire)", async () => {
+  const { server, port, acquires } = await startStubOpenAiHarness();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(res.status, 200, "no account must keep the old default behavior (200 pool path)");
+    assert.ok(acquires() >= 1, "no account -> pool.acquire as before (default session)");
+  } finally {
+    server.close();
+  }
+});
+
+test("GOAL29(d): CLI prompt --account with an unknown account exits non-zero with the 400-shaped error", async (t) => {
+  if (!vaultPresent("chat.deepseek.com")) {
+    t.skip("no vault for chat.deepseek.com (data/ is gitignored — clean checkout has none)");
+    return;
+  }
+  const stored = listAccounts(resolveDataDir(), registryVaultHost("deepseek"));
+  const out = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", join(ROOT, "src", "cli.ts"), "prompt", "hi", "--site", "deepseek", "--account", "no-such-account@example.com"],
+      { cwd: ROOT }
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (c) => (stderr += c));
+    child.on("close", (code) => resolve({ code, stderr }));
+  });
+  assert.notEqual(out.code, 0, "unknown account on CLI prompt must exit non-zero (never silently fall back)");
+  assert.ok(out.stderr.includes("no stored account"), out.stderr);
+  assert.match(out.stderr, /available: \[/);
+  for (const a of stored) assert.ok(out.stderr.includes(a.slug), `CLI error must list the real stored slug ${a.slug}: ${out.stderr}`);
 });

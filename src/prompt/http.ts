@@ -137,7 +137,7 @@ function registryPackageFor(siteId: string): RegistryPackage | undefined {
 // else must resolve to a stored vault snapshot for this site's host, else the
 // request is rejected (400, thrown up to the server catch) BEFORE any browser
 // work — never launch a browser for a nonexistent account.
-function resolveCapabilityAccount(account: string | undefined, profile: ChatSiteProfile, dataDir: string): void {
+export function resolveCapabilityAccount(account: string | undefined, profile: ChatSiteProfile, dataDir: string): void {
   if (!account || account === "default") return;
   const host = new URL(profile.url).host;
   const slug = slugifyIdentity(account);
@@ -211,7 +211,18 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       // OpenAI-compatible surface: /v1/models + /v1/chat/completions
       if (req.url?.startsWith("/v1/")) {
-        return handleOpenAIRoutes(req, res, { pool, profilesById });
+        // Await (not `return`) so a rejected handler (e.g. an unknown-account
+        // guard throw) lands in this handler's catch as a response — a bare
+        // `return <promise>` would orphan the rejection and hang the client.
+        await handleOpenAIRoutes(req, res, {
+          pool,
+          profilesById,
+          // The OpenAI surface resolves its profile from the requested model
+          // inside the route, so it receives the SAME vault-validating helper
+          // the /capability and /prompt branches call directly.
+          validateAccount: (account, profile) => resolveCapabilityAccount(account, profile, dataDir),
+        });
+        return;
       }
       if (req.method === "GET" && req.url === "/sites") {
         return send(res, 200, { sites: Object.values(profilesById).map((p) => ({ id: p.id, name: p.name, url: p.url, loginRequired: p.loginRequired })) });
@@ -308,6 +319,10 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // Identity-keyed account (email or vault slug). A dedicated worker
         // carries the requested account's snapshot; "default" = legacy path.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        // Same identity-keyed guard the /capability routes run: an unknown
+        // account is rejected (400) BEFORE any browser work — never a silent
+        // fallback to the legacy default session.
+        resolveCapabilityAccount(account, profile, dataDir);
         const model = typeof body.model === "string" && body.model ? body.model : undefined;
         const worker = await pool.acquire(profile.id, account);
         try {

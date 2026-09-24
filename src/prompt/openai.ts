@@ -29,6 +29,11 @@ import type { ChatSiteProfile } from "../profile/profile.js";
 export interface OpenAIOptions {
   pool: ChatPool;
   profilesById: Record<string, ChatSiteProfile>;
+  /** Identity-keyed account validation, injected by the daemon (http.ts) so the
+   *  /v1 surface enforces the SAME vault check as /prompt and /capability/<site>:
+   *  an unknown account throws (→ 400 in the server catch) BEFORE any browser
+   *  work. Absent → no account was requested (legacy default path). */
+  validateAccount?: (account: string | undefined, profile: ChatSiteProfile) => void;
 }
 
 const PREFIX = "ui2api/";
@@ -134,6 +139,10 @@ export async function handleOpenAIRoutes(
     }
     const newChat = Boolean(body.new_chat);
     const account = typeof body.account === "string" && body.account ? body.account : undefined;
+    // Validate the identity-keyed account BEFORE any browser work (the same
+    // guard /prompt runs): unknown -> the throw propagates to the server catch
+    // for a 400, never a silent fallback to the legacy default session.
+    opts.validateAccount?.(account, profile);
     const worker = await pool.acquire(profile.id, account);
     try {
       const result = await worker.driver.ask(prompt, { newChat });
