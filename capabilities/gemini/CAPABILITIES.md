@@ -12,6 +12,10 @@
 > signed-out SSR leaf and remains unpinned via the vault (v1 full paths listed
 > at §0).
 
+**ATTACH-CLASS cap** — `gemini_search_toggle` is login-bound (every stored
+source replays signed-out); the two-step with your signed-in Chrome attached
+(`UI2API_ATTACH_PORT=9222`) is in [`docs/UNLOCK.md`](../../docs/UNLOCK.md).
+
 Bundles analyzed (fetched read-only with curl, no login/execution):
 - `gemini-home.html` (840 KB; `WIZ_global_data`, `bard-initial-data`, `_F_toggles_default_BardChatUi`)
 - `main.js` = `boq-bard-web.BardChatUi` base/bootstrap (115 KB; `m=_b`)

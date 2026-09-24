@@ -22,6 +22,10 @@
 > OS-Chrome login) or per-host `ui2api profile capture
 > "https://www.google.com" --login`, then a **live re-verify** of AI Mode. Until
 > then the status stays honest unknown/not-verified.
+>
+> **ATTACH-CLASS site** — the unlock is external (the user signs in where
+> ui2api can attach): the two-step in [`docs/UNLOCK.md`](../../docs/UNLOCK.md)
+> is the only honest path; a captured replay renders signed-out (measured).
 
 Research notes: all findings below are from this host (geolocated Germany, Google auto-serves `lang=de`), fetched with a real Chrome 131 UA via `curl`. Nothing was logged in; no browser was launched. "Verified" = reproduced with curl in this session; "bundle" = found in the downloaded `boq-bard-web` JS bundles; "prior art" = from public reverse-engineering/press, NOT reproducible here because the endpoint needs a live session. Fingerprints are byte-counts/HTTP codes/marker strings so future runs can diff against them.
 

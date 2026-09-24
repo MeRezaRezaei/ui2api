@@ -16,6 +16,11 @@
 > capabilities are implemented as real Playwright UI paths in
 > `src/capabilities/gmail.ts` and will honestly report whatever a real session
 > actually shows — never a fabricated ok:true.
+>
+> **ATTACH-CLASS site** — Google auth cookies are app-bound; the only honest
+> two-step is the user's own signed-in Chrome attached over CDP
+> (`UI2API_ATTACH_PORT=9222`). See [`docs/UNLOCK.md`](../../docs/UNLOCK.md) §1
+> for the copy-paste commands. No captured replay is promised.
 
 ## Static wire analysis (2026-09-23, no browser, no login probe)
 

@@ -9,6 +9,10 @@ result anchors on `/search/موزیک`**; homepage `/home` → 52 anchors; typed
 search "طنز" via header input + Enter → 58 anchors; `/v/mindkye` → `h1` title
 `کالکشن 20 موزیک ویدیوی فانک کلاسیک و رقص- شماره 174` + 22 related anchors.
 
+> **ATTACH-CLASS site** — this session was captured over an attached real
+> Chrome (`UI2API_ATTACH_PORT=9222`); same two-step in
+> [`docs/UNLOCK.md`](../../docs/UNLOCK.md).
+
 ## Identity resolution ("what did the user mean by 'araprat'?")
 
 The user's word "araprat" does not name a resolvable site directly:

@@ -1,6 +1,7 @@
 # UI2API
 
 [![CI](https://github.com/MeRezaRezaei/ui2api/actions/workflows/ci.yml/badge.svg)](https://github.com/MeRezaRezaei/ui2api/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/ui2api.svg)](https://npmjs.com/package/ui2api)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > Turn any site you use into AI tools — analyze a website once, then generate a per-site MCP or ACP server so your AI agent can drive it by calling tools.
@@ -411,9 +412,28 @@ UI2API is an automation tool. You are responsible for how you use it. Only
 automate sites you are authorized to use, respect each site's terms of service,
 and comply with applicable law. Use it at your own risk.
 
+## Contributing
+
+UI2API is an open-source project. Anyone can add a site — the mechanism is an
+**in-repo capability package** (`capabilities/<site-id>/` +
+`src/capabilities/<site-id>.ts`), which keeps the work discoverable,
+reviewable, and installed the same way as every built-in site.
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the complete "Add a site /
+capability package" workflow — every step mapped to a real file in this repo
+(analyze → package → runner → route → capture/lock → live-verify → registry →
+docs) — plus the honesty red lines every contribution must pass.
+
+- First PR? Start with the add-a-site pathway in `CONTRIBUTING.md` and the
+  checklist in `.github/PULL_REQUEST_TEMPLATE.md`.
+- The repo publishes `ui2api` to npm — the version shield at the top tracks the
+  live package.
+- Sponsor this work if you find it useful: see `.github/FUNDING.yml`.
+
 ## Docs & links
 
 - Documentation: [`docs/`](docs/) — start with [`docs/VISION.md`](docs/VISION.md)
+- Contributing & "Add a site / capability package": [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Attach / plan / login-bound capabilities unblocked: [`docs/UNLOCK.md`](docs/UNLOCK.md)
 - Hard-won field notes: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — includes the
   `chrome-cdp.service` pkill loop that silently killed every CDP browser for days

@@ -12,6 +12,12 @@
 >   **implemented + dispatched 2026-09-21 but LOGIN-BOUND** (Google
 >   app-bound auth; the only credentialed path is the user's OWN real Chrome
 >   attached — see below). Never claimed verified.
+>
+> **ATTACH-CLASS site** — transcript read-back + all posting caps are
+> login-bound to your own signed-in Chrome attached over CDP
+> (`UI2API_ATTACH_PORT=9222`); the two-step is in
+> [`docs/UNLOCK.md`](../../docs/UNLOCK.md). Never fabricate a post until a real
+> attached session proves the flip.
 
 ## What YouTube is (and is not) here
 
