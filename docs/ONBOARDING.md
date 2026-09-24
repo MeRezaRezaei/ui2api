@@ -160,8 +160,18 @@ Real outputs against 127.0.0.1:9797 (fold #11, current code):
 
 ```
 $ curl http://127.0.0.1:9797/v1/models
-["gemini","google-ai-search","chatgpt","claude","copilot","perplexity",
- "huggingchat","kimi","deepseek","tencent-aistudio","hunyuan"]
+{"object":"list","data":[{"id":"gemini","object":"model","created":0,"owned_by":"ui2api",
+ "permission":[],"root":"gemini","parent":null,"site":"Gemini (gemini.google.com)",
+ "url":"https://gemini.google.com","loginRequired":true},
+ {"id":"duckduckgo","object":"model","created":0,"owned_by":"ui2api","permission":[],
+ "root":"duckduckgo","parent":null,"site":"DuckDuckGo AI Chat (duck.ai)",
+ "url":"https://duck.ai/chat","loginRequired":false},
+ ... 23 more entries ... ]}
+ # 25 models = the 11 builtin chat sites + every installed chat-shaped package
+ # (id list measured 2026-09-24, GOAL 30): gemini, google-ai-search, chatgpt, claude,
+ # copilot, perplexity, huggingchat, kimi, deepseek, tencent-aistudio, hunyuan,
+ # blackbox, codex, copilot-m365, duckduckgo, grok, inner-ai, manus, notion, poe,
+ # t3chat, v0, venice, xiaomimimo, zenmux
 
 $ curl -X POST http://127.0.0.1:9797/v1/chat/completions \
     -H 'Content-Type: application/json' \

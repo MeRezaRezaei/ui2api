@@ -48,6 +48,14 @@ export interface ChatSiteProfile {
   // `preComposeDelayMs` (+ a random jitter up to 600ms — human-dwell-plausible)
   // after the composer becomes visible and before composing.
   preComposeDelayMs?: number;
+  // First-send consent wall on anonymous sites (e.g. duck.ai: the very first
+  // send is intercepted by the site's own "By clicking 'Continue' you agree to
+  // our Privacy Policy and Terms of Service" overlay — which must be answered
+  // by the SAME code path a human uses). When set, the driver sends once, waits
+  // `waitMs` for the overlay, clicks `accept` (the site's own button), waits
+  // `settleMs`, then re-presses send on the still-filled composer. The wall's
+  // own JS does the real dispatch; this only acknowledges the site's prompt.
+  consentWall?: { accept: string; waitMs?: number; settleMs?: number };
   // Real-profile-only sites: their anti-bot (e.g. Tencent Cloud EdgeOne on
   // aistudio.tencent.ai) serves "Access Restricted" to ephemeral snapshot
   // contexts even with valid auth cookies. When true the driver uses the
@@ -408,8 +416,33 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
       answer: raw.answer ?? base?.answer ?? [],
     } as ChatSiteProfile;
   }
+  // Installed chat-shaped package profile (capabilities/<site>/profile.json):
+  // same canonical source /capability and /registry serve. Only chat-shaped
+  // packages resolve — non-chat capability surfaces (youtube, araprat, gmail,
+  // …) keep the "unknown AI site" error so a prompt is never aimed at a site
+  // the driver cannot drive.
+  const packaged = resolvePackagedProfile(value);
+  if (packaged && isChatShapedProfile(packaged)) return packaged;
   throw new Error(
     `unknown AI site "${value}" — expected one of ${PROFILE_IDS.join(", ")} or a path to a *.json profile`
+  );
+}
+
+// A profile is driver-drivable (chat-shaped) when it actually drives a chat
+// composer and reads an answer container — `composer.length > 0 && answer.length > 0`
+// (GOAL 30 discriminator) plus a resolvable site url. Capability-only packages
+// (gmail/youtube/araprat/chatglm/tinycms/…) are deliberately NOT chat shapes:
+// they must never become daemon chat models.
+export function isChatShapedProfile(p: ChatSiteProfile): boolean {
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    Array.isArray(p.composer) &&
+    p.composer.length > 0 &&
+    Array.isArray(p.answer) &&
+    p.answer.length > 0 &&
+    typeof p.url === "string" &&
+    p.url.length > 0
   );
 }
 

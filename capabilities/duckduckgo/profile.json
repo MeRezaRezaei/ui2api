@@ -26,6 +26,7 @@
     "button[aria-label*=\"Skip\"]",
     "button[aria-label*=\"Close\"]"
   ],
+  "consentWall": { "accept": "button:has-text('Continue')", "waitMs": 1800, "settleMs": 900 },
   "modelPicker": [
     "button[class*=\"model\"]",
     "[class*=\"model-picker\"]",
@@ -47,7 +48,8 @@
       "VERIFIED live 2026-09-23 — the model chip hides after a chat; 'New Chat' returns the empty composer. Runner handles via [aria-label*='New chat'] + retry loop, not the unverified CSS classes."
     ],
     "dismiss": [
-      "VERIFIED live — first-send consent wall: \"By clicking 'Continue' you agree…\" with a *Continue* button (the onboarding overlay 'Got It!' appears per chat; runner finds and clicks it by content text)."
+      "VERIFIED live — first-send consent wall: \"By clicking 'Continue' you agree…\" with a *Continue* button (the onboarding overlay 'Got It!' appears per chat; runner finds and clicks it by content text).",
+      "GOAL 30 — the wall is now ALSO declared profile-driven via consentWall (accept button:has-text('Continue')) so the shared ChatDriver answers it on first send (waitMs 1800 -> click Continue -> settleMs 900 -> resend), same proven dance as the capability runner."
     ],
     "modelPicker": [
       "VERIFIED live 2026-09-23 — composer model chip (plain button, text like '5.6 Luna'); opens [role='menu'][aria-label='Choose a model'] with [role='menuitemradio'] rows (data-testid='model-picker-row-<id>')."

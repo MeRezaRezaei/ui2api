@@ -24,7 +24,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolvePackagedProfile } from "../profile/profile.js";
+import { resolvePackagedProfile, listProfiles, isChatShapedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, type StoredAccount } from "../runtime/session-store.js";
 
 export interface RegistryToolInputSchema {
@@ -229,6 +229,31 @@ export function capabilityInputSchema(
 /** Resolve the daemon's data dir the same way promptd/pool do (env → "data"). */
 export function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
+}
+
+/**
+ * The daemon's DEFAULT configured chat-site set (GOAL 30): the builtin chat
+ * catalog PLUS every installed, chat-shaped package profile
+ * (capabilities/<id>/profile.json — the same canonical source /capability and
+ * /registry serve). This is what `--site`-less promptd, `GET /sites`,
+ * `GET /v1/models` and `ui2api prompt --sites` all reflect. Rules:
+ *   - a builtin id is authoritative for that id (packaged overrides never
+ *     shadow the builtin profile);
+ *   - a package only joins when `isChatShapedProfile` (composer + answer + url);
+ *     capability-only surfaces (gmail/youtube/araprat/chatglm/tinycms/…) never
+ *     become chat models;
+ *   - an explicit `--site`/`profiles` list stays authoritative (startPromptd
+ *     only calls this in its default path).
+ */
+export function defaultChatProfiles(): ChatSiteProfile[] {
+  const byId = new Map<string, ChatSiteProfile>();
+  for (const p of listProfiles()) byId.set(p.id, p);
+  for (const id of listInstalledPackageIds()) {
+    if (byId.has(id)) continue;
+    const packaged = resolvePackagedProfile(id);
+    if (packaged && isChatShapedProfile(packaged)) byId.set(id, packaged);
+  }
+  return [...byId.values()];
 }
 
 /** Build the registry 'packages' array from the installed capability packages. */

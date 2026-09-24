@@ -33,8 +33,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
-import { buildRegistryPackages, type RegistryPackage } from "./registry.js";
-import { defaultSiteId, listProfiles, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { buildRegistryPackages, defaultChatProfiles, type RegistryPackage } from "./registry.js";
+import { defaultSiteId, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
@@ -153,8 +153,12 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
   const dataDir = opts.dataDir ?? process.env.UI2API_DATA_DIR ?? "data";
 
   // Build a per-id profile map. When explicit profiles are handed in (CLI
-  // `--site X`), serve ONLY those; otherwise serve the built-in catalog. A
-  // promptd instance therefore never drives an origin nobody configured.
+  // `--site X`), serve ONLY those; otherwise serve the full default chat set —
+  // builtin catalog + every installed chat-shaped package (duckduckgo, poe,
+  // grok, …) so a freshly installed chat package reaches GET /sites, /v1/models
+  // and POST /prompt without a restart-wide special-case. A promptd instance
+  // still never drives an origin nobody configured: the merged set is exactly
+  // what defaultChatProfiles() enumerates (builtin + packaged chat shapes).
   const profileList: ChatSiteProfile[] = [];
   if (opts.profiles) {
     if (Array.isArray(opts.profiles)) {
@@ -163,7 +167,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       profileList.push(...Object.values(opts.profiles));
     }
   } else {
-    profileList.push(...listProfiles());
+    profileList.push(...defaultChatProfiles());
   }
   const profilesById: Record<string, ChatSiteProfile> = {};
   for (const p of profileList) profilesById[p.id] = p;

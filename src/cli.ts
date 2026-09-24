@@ -17,7 +17,8 @@ import { HubRuntime } from "./hub/runtime.js";
 import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
-import { resolveProfile, listProfiles, defaultSiteId } from "./profile/profile.js";
+import { resolveProfile, defaultSiteId } from "./profile/profile.js";
+import { defaultChatProfiles } from "./prompt/registry.js";
 import { ChatDriver } from "./prompt/driver.js";
 import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
 
@@ -353,7 +354,7 @@ async function cmdPluginServe(modulePath: string, flags: Flags): Promise<void> {
 
 async function cmdPrompt(text: string, flags: Flags): Promise<void> {
   if (flags.sites) {
-    for (const p of listProfiles()) {
+    for (const p of defaultChatProfiles()) {
       console.log(`${p.id.padEnd(12)} ${p.name} — ${p.loginRequired ? "login required" : "anonymous"}`);
     }
     console.log(`\ndefault: ${defaultSiteId()}`);
@@ -432,7 +433,7 @@ async function cmdPromptd(flags: Flags): Promise<void> {
     min: flags.poolMin,
     max: flags.poolMax,
   });
-  const shown = profiles ? profiles.map((p) => p.id).join(", ") : listProfiles().map((p) => p.id).join(", ");
+  const shown = profiles ? profiles.map((p) => p.id).join(", ") : defaultChatProfiles().map((p) => p.id).join(", ");
   console.log(`[ui2api] promptd on http://127.0.0.1:${svc.port} · sites: ${shown} · default: ${defaultSiteId()}`);
   console.log(`[ui2api] POST /prompt  {"prompt":"...", "site":"gemini", "newChat":true}`);
   console.log(`[ui2api] GET  /status  -> pool (warm/idle/busy pages)  ·  UI2API_POOL_MIN/MAX=${flags.poolMin ?? "auto"}/${flags.poolMax ?? "auto"} · UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "off"}`);

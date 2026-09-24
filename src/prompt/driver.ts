@@ -342,6 +342,26 @@ export class ChatDriver {
         await this.page!.waitForTimeout(50 + Math.floor(Math.random() * 150));
         await this.dom.press(composer, ["Enter"]);
       }
+      // First-send consent wall (anonymous sites, live-verified on duck.ai):
+      // the first send surfaces the site's own "Continue" overlay instead of
+      // dispatching — acknowledging that button and pressing send again runs
+      // the REAL send through the site's own JS. The wall's JS stays in charge;
+      // this only answers the site's prompt, exactly like the user would.
+      if (!this.profile.urlTemplate && this.profile.consentWall?.accept) {
+        const wall = this.profile.consentWall;
+        await this.page!.waitForTimeout(wall.waitMs ?? 1800);
+        const accept = this.page!.locator(wall.accept).first();
+        const wallVisible = await accept.isVisible({ timeout: 1500 }).catch(() => false);
+        if (wallVisible) {
+          await accept.click({ timeout: 3000 }).catch(() => undefined);
+          await this.page!.waitForTimeout(wall.settleMs ?? 900);
+          if (this.profile.send.kind === "click" && this.profile.send.selector) {
+            await this.dom.click(this.profile.send.selector);
+          } else {
+            await this.dom.press(composer, ["Enter"]);
+          }
+        }
+      }
     }
     // Read the streamed answer off the page: stop when text stops growing.
     const answerSel = this.profile.answer.join(", ") || "body";
