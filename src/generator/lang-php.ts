@@ -209,7 +209,13 @@ function mapFile(siteId: string, pkg: RegistryPackage): string {
       const params = schemaParamsFor(siteId, tool);
       const body = bodyForParams(tool.inputSchema);
       const isChat = /_chat$/.test(tool.id) || tool.id === "chat";
-      const call = isChat
+      // A chat-shaped tool only gets the /v1 chat call when the registry stamps
+      // `chat` on this package (GOAL 34: chat.model exists ONLY on the servable
+      // chat surface). Packages refused that claim (capability-only, url-less,
+      // dormant/dead-end) fall back to the honest /capability/<site> route,
+      // which is the path their runner actually serves (login-gated ok:false
+      // where the site is not signed in) — never an `'undefined'` model to /v1.
+      const call = isChat && pkg.chat
         ? `$this->client->chat('${pkg.chat.model}', [['role' => 'user', 'content' => $prompt]], false, $newChat ?? false)`
         : `$this->client->capability('${siteId}', '${tool.id}', ${body})`;
       return `    /**
@@ -274,7 +280,8 @@ function composerFile(siteId: string, pkg: RegistryPackage): string {
         ui2api: {
           site: siteId,
           url: pkg.url,
-          chatModel: pkg.chat.model,
+          // null when the registry stamps no chat claim on this package (GOAL 34).
+          chatModel: pkg.chat?.model ?? null,
         },
       },
     },
@@ -300,8 +307,9 @@ return [
     // Timeout (seconds) for one daemon round trip (chat answers stream live).
     'timeout' => env('UI2API_TIMEOUT', 120.0),
 
-    // Chat model id advertised by the registry for this site.
-    'chat_model' => '${pkg.chat.model}',
+    // Chat model id advertised by the registry for this site (null when the
+    // registry stamps no chat claim — capability-only packages, GOAL 34).
+    'chat_model' => ${pkg.chat ? `'${pkg.chat.model}'` : "null"},
 ];
 `;
 }

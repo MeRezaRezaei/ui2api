@@ -10,7 +10,7 @@
 //   GET /registry
 //   -> { packages: [
 //        { id, name, url, description, version, site, authRequired,
-//          chat:   { model: <siteId>, streaming: true },
+//          chat:   { model: <siteId>, streaming: true },   // ONLY on driveable chat packages
 //          tools:  [ { name, description, method,
 //                      inputSchema: {type:"object", properties, required} } ]
 //        }, ...
@@ -21,6 +21,15 @@
 // definitions. Tool naming: "<site>_<capability>" (capability ids already
 // carry the site prefix, e.g. deepseek_chat); consumers prefix their own
 // namespace (OmniRoute registers them as ui2api_<site>_<capability>).
+//
+// `chat` is stamped ONLY on ids in the servable chat set — the exact
+// `defaultChatSurface()` gate promptd builds its `/v1` (profilesById) allow-list
+// from (GOAL 34 truth-gate). Every other installed package (capability-only
+// surfaces like gmail/youtube/araprat, url-less chatglm, dormant zenmux,
+// dead-end xiaomimimo, …) carries NO `chat` key at all: `/v1/chat/completions`
+// would refuse it with 404 unknown_model, so an honest registry must not
+// advertise it as chat. Consumers treat absence as "no chat" — never
+// materialize a chat provider from a package without `chat.model`.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +93,18 @@ export interface RegistryPackage {
    * real recorded live round-trip in this repo.
    */
   verified: RegistryVerified | false;
-  chat: RegistryChat;
+  /**
+   * Chat claim of this package — ABSENT (undefined) on every package NOT in
+   * the servable chat set. Present ONLY when `id` is on `defaultChatSurface()`
+   * (the SAME gate promptd builds its /v1 profilesById allow-list from): then
+   * `model` = the site id `/v1/chat/completions` actually answers for.
+   * Capability-only / url-less / dormant / dead-end packages (gmail, youtube,
+   * araprat, chatglm, zenmux, xiaomimimo, …) keep status/tools/accounts but
+   * carry NO chat key — /v1 would refuse them with 404 unknown_model, so an
+   * honest registry never advertises them as chat (GOAL 34). Consumers must
+   * treat absence as "no chat" (key on `pkg.chat?.model`, never `pkg.chat.model`).
+   */
+  chat?: RegistryChat;
   tools: RegistryTool[];
   /**
    * The identity-keyed vault accounts stored for this site — the SAME source
@@ -333,6 +353,11 @@ export function buildRegistryPackages(): RegistryPackage[] {
   const ids = listInstalledPackageIds();
   const dataDir = resolveDataDir();
   const packages: RegistryPackage[] = [];
+  // The ONLY servable chat set — the same gate promptd's /v1 profilesById is
+  // built from (defaultChatProfiles → defaultChatSurface). A package is marked
+  // chat iff its id is on this surface (GOAL 34 truth-gate): registry chat
+  // claims must never exceed what /v1/chat/completions can actually answer.
+  const chatSurfaceIds = new Set(defaultChatSurface().map((e) => e.id));
   for (const siteId of ids) {
     // Only packages the daemon can actually serve (has a packaged ChatSiteProfile).
     const profile = resolvePackagedProfile(siteId);
@@ -394,7 +419,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       authRequired: manifest?.auth?.required !== false,
       status,
       verified,
-      chat: { model: siteId, streaming: true },
+      ...(chatSurfaceIds.has(siteId) ? { chat: { model: siteId, streaming: true } } : {}),
       tools,
       ...(accounts !== undefined ? { accounts } : {}),
     });

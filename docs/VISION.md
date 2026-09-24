@@ -48,7 +48,9 @@ composer/answer entry is a parseable CSS selector under Playwright's own
 selector grammar (prose rows and playwright-only pseudo-classes are refused)
 and the package's metadata status is not dormant/dead-end (zenmux, xiaomimimo
 stay on /registry + /capability/<id> with their honest status until
-live-verified) — capability-only packages never become chat models.
+live-verified) — capability-only packages never become chat models. GOAL 34:
+`/registry` stamps `chat.model` ONLY on these surfaced ids, so a consumer
+never sees a chat provider that `/v1` would refuse.
 
 - One-shot: `ui2api prompt 'hello' --site gemini`
 - Daemon: `ui2api promptd` → `POST /prompt`, `POST /v1/chat/completions` (OpenAI-compatible, `stream:true` replays the finished DOM-read answer as SSE — honest: it is a page read, not synthesized traffic).

@@ -20,6 +20,15 @@ All notable changes to ui2api are tracked here. Format follows
   `GET /requirements` behind the profilesById trust gate. Suite 651 → 687.
 
 ### Fixed
+- `/registry` truth-gates `chat.model` (GOAL 34): stamped ONLY on ids in the
+  servable chat surface (`defaultChatSurface()` — the same gate
+  `/v1/chat/completions` serves). Capability-only / url-less / dormant /
+  dead-end packages (adapta, araprat, chatglm, conol, doubao, gmail, tinycms,
+  xiaomimimo, youtube, zenmux) keep status/tools/accounts but carry NO `chat`
+  key — consumers key on `pkg.chat?.model` and must treat absence as "no
+  chat". Registry↔/v1 parity test + the named-10 refusal pin + all-33-listed
+  regression (suite 687 → 689); lang-php generator falls back to the honest
+  `/capability/<site>` call when a chat-shaped tool's package has no `chat`.
 - wigolo-engine tests run in CI (GOAL 28): the 4 wigolo-engine integration tests
   (`test/wigolo-engine.test.ts`) no longer skip on GitHub Actions — the last
   non-vault CI skips are closed. `.github/workflows/ci.yml` clones the canonical
