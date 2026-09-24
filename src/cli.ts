@@ -496,6 +496,17 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     return;
   }
 
+  // --login is the DEFAULT capture mode and is implied: `profile capture` is
+  // login-first by design — its whole purpose is saving the user's sign-in. The
+  // default path below runs the SAME interactive sign-in flow `analyse --login`
+  // uses (doInteractiveLogin: headed browser via the buildLaunchOptions/launchBrowser
+  // seam, the user signs in, presses Enter, and cookies + full profile snapshot
+  // are saved). Accept the flag explicitly so `profile capture <url> --login` is a
+  // real documented command (it was parsed by parseFlags but silently ignored here).
+  if (flags.login) {
+    console.log(`[ui2api] capture is login-first — opening the sign-in flow for ${host} (--login is the default capture mode)`);
+  }
+
   // Default capture: headed browser as current user (existing flow).
   const session = await doInteractiveLogin(url, host);
   const identity = flags.identity;
@@ -884,7 +895,7 @@ async function main(): Promise<void> {
     }
     case "profile": {
       if (arg === "capture") {
-        if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--assist] [--identity email] [--data-dir DIR]");
+        if (!rest[0]) throw new Error("usage: ui2api profile capture <url> [--assist] [--login] [--identity email] [--data-dir DIR]");
         return cmdProfileCapture(rest[0], flags);
       }
       if (arg === "ingest") {
@@ -909,7 +920,7 @@ async function main(): Promise<void> {
         if (!rest[0]) throw new Error("usage: ui2api profile capabilities <host> [--account email] [--data-dir DIR]");
         return cmdProfileCapabilities(rest[0], flags);
       }
-      throw new Error("usage: ui2api profile capture <url> [--assist] | ingest <host> [--profile DIR] | scan | import <host> | add-all [--known|--interactive] [--identity-prefix STR] | list <host> | capabilities <host> [--account email]");
+      throw new Error("usage: ui2api profile capture <url> [--assist] [--login] | ingest <host> [--profile DIR] | scan | import <host> | add-all [--known|--interactive] [--identity-prefix STR] | list <host> | capabilities <host> [--account email]");
     }
     case "prompt":
       return cmdPrompt(arg ?? "", flags);
@@ -931,7 +942,7 @@ async function main(): Promise<void> {
       console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
       console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
-      console.log("  ui2api profile capture <url> [--data-dir DIR]  (login once, save cookies+localStorage+IndexedDB snapshot)");
+      console.log("  ui2api profile capture <url> [--data-dir DIR] [--login]  (login once, save cookies+localStorage+IndexedDB snapshot)");
       console.log("  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)");
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
       console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, GET /sites, GET /health)");

@@ -1,98 +1,200 @@
 # Vision
 
-> Status: live. This file is the design contract for anyone (human or AI) working
-> on UI2API. Read it before touching analyze, generate, serve, or the hub.
+> Status: live. This is the design contract for anyone (human or AI) working on
+> UI2API. Read [`AGENTS.md`](../AGENTS.md) first (the current-architecture source
+> of truth and command list), then this file. Cold-start order:
+> `AGENTS.md` → `docs/ONBOARDING.md` → `docs/UNLOCK.md` → this file →
+> [`CONTRIBUTING.md`](../CONTRIBUTING.md) (add a site) → the registry landing
+> (`ui2api-registry`'s README, the install catalog).
 
 ## The core idea
 
-**UI2API turns any website the user is logged into into an API — where the
-"browser" is the user's own Chrome, with the user's own data.**
+**UI2API turns any website into an API driven by the user's own browser
+session.** The flagship use-case: an AI chat site (Gemini, Kimi, DeepSeek,
+Hunyuan, Claude, ChatGPT, …) becomes an OpenAI-compatible `POST /prompt`
+endpoint whose requests are executed by the site's **own JavaScript** in the
+**user's real logged-in session** — the same cookies, localStorage, and origin
+code paths a human would use.
 
-The service must be able to:
+Non-negotiable core property: **no fabricated traffic.** We never synthesize
+requests or send fake inputs that could look foreign to the site's anti-bot
+stack. We drive the site through its own UI/JS and read answers back off the
+page. From the site's perspective nothing is wrong — it is just a user
+interacting. There is nothing synthetic to fingerprint, and existing auth
+(cookies, session storage, device trust) is already in place because it is the
+user's own account (captured once, replayed faithfully, or driven through the
+user's actually-running Chrome).
 
-1. **Drive the user's Chrome** — the *user's* installed Chrome, running with the
-   *user's* profile/data. Not a bundled Chromium, not a synthetic profile.
-2. **Automate any site** through that Chrome, with **zero bot fingerprint**.
-3. Because the Chrome and the data are real, **captchas are not a concern**; the
-   session is indistinguishable from the user's own browsing.
+What we do **not** do: captcha-bypass services, BYOIP/residential-proxy
+tricks, or any "bot traffic" business. Only sites the user owns or is
+authorized to use. See `CONTRIBUTING.md` red lines.
 
-### Why "real Chrome + real data" is the whole trick
+## The two execution models
 
-Every action our tools perform runs inside the user's genuine browser session and
-reflects the code the site owner wrote. From the site's perspective nothing is
-wrong — it is just a user interacting. There is nothing synthetic to fingerprint,
-and existing auth (cookies, session storage, device trust) is already in place
-because it is the user's own account.
+Everything live in this repo is one of these (per `AGENTS.md`).
 
-**The single requirement:** the user signs into their accounts in their own Chrome
-*before* letting UI2API act on those sites (one `ui2api analyse --login`). After
-that, analyse / serve / hub / wigolo all run inside that same session.
+### 1. ChatDriver — declarative profiles, one driver for every chat site
 
-## How this is implemented
+`src/prompt/driver.ts` implements the shared loop: paste a prompt + Enter via
+the site's own JS (trusted CDP input primitives, `keyboard.insertText`/`press`),
+read the streamed answer off the page until it stops growing, return it. The
+per-site knowledge is a `ChatSiteProfile` (`src/profile/profile.ts`: composer /
+send / answer selectors, dismiss list, delays) — declarative, overridable via
+JSON with `--profile FILE`. Builtin profiles: gemini, chatgpt, claude,
+copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, + more.
 
-- **`--login` / "cookie capture" is a means, not an end.** The durable truth is:
-  drive the user's Chrome, reuse the user's profile. Cookie capture is only the
-  fallback for environments that cannot attach to a real profile (CIs, servers).
-- `UI2API_CHROME=1` (or `UI2API_CHROME_PATH=...`) + `UI2API_USER_DATA_DIR=...`
-  select the user's real Chrome and profile everywhere:
-  - `analyse` runs in it (analysis of authenticated apps needs the login);
-  - generated `serve`/`hub run` contexts launch it and reuse the profile;
-  - **wigolo daemon** gets the same profile via `WIGOLO_CHROME_PROFILE_PATH`
-    (copies of the user profile) or `WIGOLO_CDP_URL` (drives the user's actually
-    running Chrome). `use_auth` is only ever on in this mode.
-- The bundled Chromium stays ONLY as a zero-config fallback (quick demos/CI).
-  It must never be presented as the product's "mode of operation".
+- One-shot: `ui2api prompt 'hello' --site gemini`
+- Daemon: `ui2api promptd` → `POST /prompt`, `POST /v1/chat/completions` (OpenAI-compatible, `stream:true` replays the finished DOM-read answer as SSE — honest: it is a page read, not synthesized traffic).
 
-### Fingerprint discipline (read before changing args)
+### 2. Capability runners — per-site capability surfaces
 
-- The user's real Chrome is launched with **no hardening flags**
-  (`--no-sandbox`, `--disable-gpu`, `--disable-dev-shm-usage` are ONLY for the
-  bundled headless Chromium). `--window-size` only. See
-  `buildLaunchOptions()/userChromeLaunchArgs()` in `src/runtime/browser.ts`.
-- Do not spoof anything. The whole point is there is nothing to spoof — it IS the
-  user's browser. Adding UA/WebGL/navigator trickery would be a fingerprint tell
-  and a violation of the vision.
-- Never "improve" stealth by injecting into the real user session beyond what
-  ui2api's instrumentation needs to record action recipes (the `__ui2api`
-  capture buffer during `analyse`, removed for normal serving flows by design).
+`src/capabilities/*.ts` expose a site's non-chat (and chat) surface as
+`/capability/<site>` endpoints wired in `src/prompt/http.ts`: e.g.
+`deepseek_reasoner`/`deepseek_web_search` (real composer toggles),
+`kimi_list_conversations` (sidebar DOM), `youtube_search` (result grid),
+`araprat_search`/`trending`/`video_detail`, `duckduckgo_*` (all six caps,
+anonymous). Each package carries a `manifest.json`; the dispatch is kept
+in-sync with the manifests by `test/capability-dispatch.test.ts`. Unknown
+capability = `ok:false` before any browser; posting/login-bound caps answer
+honestly `ok:false loginGated:true` (a browser may launch, a fabricated result
+never does).
 
-## The engines
+Both models launch their browsers through the one seam below and replay
+snapshot-injected vault sessions the same way.
 
-| Work                         | Runtime                                                        |
-|------------------------------|----------------------------------------------------------------|
-| `analyse` (capture recipes)  | user Chrome + profile (fallback: bundled Chromium + captured cookies) |
-| `replay` (captured API call) | plain HTTP + same session cookies/user profile; SSRF-guarded   |
-| `call` / `live-js`           | in-page JS on the live user session                            |
-| `dom.click/type/waitFor`     | user Chrome (native) or wigolo daemon browser actions          |
-| `dom.extract`                | wigolo extract (selector) or native page read                  |
-| wigolo delegation            | loopback HTTP to a local `wigolo serve`; auth reuse on the SAME profile (WIGOLO_CHROME_PROFILE_PATH / WIGOLO_CDP_URL) |
+## The single browser seam
 
-`native` engine = UI2API drives the browser itself (still with the user's Chrome
-when configured). `wigolo` engine = the wigolo daemon drives the browser for
-fetch/extract/actions; the daemon is pointed at the same user profile, so the
-"real user session" property holds for both engines.
+Every browser launch goes through **`launchBrowser()`** in
+`src/runtime/browser.ts`. Never `launch()` a browser ad-hoc. It resolves, in
+order:
+
+1. **Attach** — `UI2API_ATTACH_PORT=9222` adopts the operator's already-running
+   Chrome over CDP (zero spawn, zero flags, the user's real default context).
+   The honest path for app-bound/login-gated sites (`docs/UNLOCK.md`).
+2. **Managed spawn + CDP connect** — the default; a clean flag stack is used;
+   real-profile/headed mode omits `--disable-gpu`/viewport/synthetic access so
+   the page JS sees the user's real GPU, screen, and assets (see `STEALTH.md`).
+3. **Playwright fallback** — bundled Chromium / system Chrome only, and never
+   for the user's real profile (`--enable-automation` would leak as a tell).
+
+Environment knobs (full table in `AGENTS.md`): `UI2API_HEADED`, `UI2API_CHROME`
+(+`UI2API_CHROME_PATH`), `UI2API_USER_DATA_DIR`, `UI2API_ATTACH_PORT`,
+`UI2API_POOL_MIN`.
+
+## The session model (capture → lock → replay)
+
+Sessions are **snapshot-injected**: capture once into the identity-keyed vault,
+lock it in the package (`capabilities/<site>/session.lock.json`), and replay
+cookies + localStorage + sessionStorage + IndexedDB into fresh browser contexts
+at runtime (`injectSnapshot`). Capture surfaces:
+
+- `ui2api profile add-all --known` — one-command bulk import of every KNOWN AI
+  host session your OS Chrome profiles already hold, with a per-account
+  read-back verdict table and zero temp residue (GOAL 9).
+- `ui2api profile capture <url> [--assist]` — fresh headed login + capture for
+  one host (`--assist` = xhost display-share, prefers the ui2api user's data
+  dir when genuinely writable, says so honestly).
+- `ui2api profile ingest <host> [--profile DIR]` — offline read of a live
+  Chrome profile's DBs (cookies + localStorage), no browser launched.
+- `ui2api profile import <host>` — one host from a scanned OS Chrome profile.
+- `scan` / `list` / `capabilities` — discover hosts, vault accounts, and what
+  an account can do.
+
+Vault: `data/sessions/<host>/<slug>/state.json` (gitignored — never commit,
+never paste; snapshots contain real credentials). Multi-account is live on the
+wire: `"account":"<slug|email>"` on `POST /prompt` and `POST /capability/<site>`
+(validated against the vault before any browser), `GET /accounts?site=`, and
+each registry package carries `accounts[]`.
+
+**Honest caveat measured in this project (fold #17f, GOAL 19/21):** some auth
+classes are **not portable**. Google's auth cookies are browser/app-bound
+(Chrome-152 portal v20) — importing/replaying them into fresh ephemeral
+contexts renders anonymous (and can trip "confirm you're not a bot"). Those
+capabilities can only run through the user's own real Chrome via the
+`UI2API_ATTACH_PORT` **attach seam** — see `docs/UNLOCK.md`. Never claim a
+portable replay for a site whose session is app-bound.
+
+## Serving surfaces (the daemon)
+
+`ui2api promptd` binds `127.0.0.1` only (optional bearer token via
+`UI2API_PROMPTD_TOKEN`), trusts only configured profiles (`src/runtime/ssrf.ts`
+origin-pinning — never arbitrary URLs), and exposes:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` / `GET /status` | liveness / pool state |
+| `GET /sites` | configured profiles |
+| `GET /registry` | installed packages (`<site>_<capability>` tools + `verified` records + `accounts[]`) — the only info source consumers need |
+| `GET /accounts?site=` | vault accounts for a profile |
+| `GET /v1/models`, `POST /v1/chat/completions` | OpenAI-compatible chat (model = site id; `stream:true` replays the DOM-read answer as SSE) |
+| `POST /prompt` | `{"site","prompt","account"?}` chat |
+| `POST /capability/<site>` | non-chat capabilities |
+
+External consumers: MCP over stdio via `ui2api plugin serve <module.ts>`
+(live-proven end-to-end against a generated tool, GOAL 17); ACP via
+`generate --acp` (unit-covered). The registry is the single source of truth for
+consumers — no site knowledge lives in the caller.
+
+## The install loop (community → local)
+
+The public package registry is the `ui2api-registry` repo (default branch
+`master`); every site there is a full capability package (manifest / profile /
+recipes / session.lock / CAPABILITIES.md / metadata). Two halves of one loop:
+
+1. **Add a site** (contributor → registry): the complete copy-paste workflow is
+   `CONTRIBUTING.md` "Add a site / capability package" — analyze → package
+   under `capabilities/<id>/` → runner in `src/capabilities/` → wire
+   `/capability/<id>` → builtin profile (chat sites only) → capture+lock →
+   live-verify → registry sync (site + docs rows) → gates + PR. Never claim
+   verified without a live round-trip.
+2. **Install** (stranger, one command, no analyse/generate): `npm i -g ui2api`;
+   `ui2api install --catalog` lists; `ui2api install <site-id>` fetches
+   `packages/<site-id>/` into `capabilities/<site-id>/` — the same layout
+   `promptd` already serves, so `GET /registry` picks it up with no extra step.
+   `trust` stays `unreviewed` until a maintainer reviews a package; login-bound
+   capabilities still need your real session (`docs/UNLOCK.md`).
+
+`ui2api` is published on **npm** (`ui2api@0.2.0`, running from source in a dev
+checkout as `npx tsx src/cli.ts`); CI runs `build` + `integration` + full unit
+suite on every push to `main` (one green GitHub Actions run against
+`origin/main` is a GOAL-26-style completion gate).
+
+## Honest per-site status (measured; a site is never "verified" by claim)
+
+- **Live-verified round-trips on this box**: `gemini`, `deepseek` (reasoner +
+  web_search toggles), `kimi` (chat + list_conversations + model_list +
+  web_search + file_upload) via session-locked vault replay; `tencent-aistudio`
+  chat (headed/real-Chrome only — EdgeOne blocks headless, HTTP 567);
+  `duckduckgo` (duck.ai, anonymous — all six caps);
+  `youtube_search`; `araprat_search`/`trending`/`video_detail`.
+- **Honest dead-ends (never claimed verified)**: `google-ai-search` (portal v20,
+  external sign-in required); `gmail` and youtube posting/transcript
+  (app-bound — attach-only, UNLOCK.md); the tencent-aistudio
+  web_search/deep_think/file_upload/tts/etc. surface (the product has no UI);
+  `hunyuan` (yuanbao.tencent.com — no session exists anywhere); claude/chatgpt/
+  poe/perplexity on this network (Cloudflare/OAuth walls). Full inventory:
+  `capabilities/README.md`.
 
 ## Guardrails (non-negotiable)
 
-- **Only sites the user owns or is authorized to use.** The project's responsibility
-  statement applies; bots/BYOIP/captcha-bypass services are out of scope.
-- **Privacy boundary:** the user's profile is used in place; ui2api only persists
-  what the flow needs (session cookies for cookie-gated sites, gitignored). Never
-  exfiltrate or share the user's login data.
-- **`trusted:false` maps require `--trust`** before they can run — generated tool
-  surfaces are reviewed, not blindly executed.
-- **Engine swap is license-clean:** MIT ui2api + AGPL wigolo talk over loopback
-  HTTP only; no wigolo code is imported or vendored.
+- **No fabricated traffic; only authorized sites.** Never synthesize requests;
+  answer reads come off the real page. Stealth posture = use the user's real
+  browser/session faithfully (`docs/STEALTH.md`), never spoofing (no UA/WebGL/
+  navigator trickery — the session IS real, so there is nothing to fake).
+- **Privacy boundary:** `data/` and session snapshots are gitignored and never
+  committed or pasted; the daemon binds localhost and answers only configured
+  sites; `UI2API_PROMPTD_TOKEN` optionally gates with a bearer token.
+- **Honesty rule:** a capability is verified only by a real recorded live
+  round-trip; everything else is `ok:false` with the measured reason
+  (`loginGated`, the wall's own text), never a fabricated green.
 
 ## Definition of done for a change
 
-A change to UI2API is "vision-correct" when a user can:
-
-1. run `ui2api analyse --login https://their-app.com` with their Chrome/profile,
-2. `generate` + `serve` (or `hub run`), and
-3. have their AI agent call the site's actions as MCP/ACP tools — all inside the
-   user's own logged-in Chrome, no bundled browser, no captchas, no fingerprint
-   difference from just using the site.
-
-If a change makes the demo work only with the bundled Chromium + cookie capture,
-it is a fallback, not the feature — call it out as such.
+A change is vision-correct when a cold-start AI (or new contributor) can:
+`npm i -g ui2api` (or `npx tsx src/cli.ts` from the checkout) → `ui2api prompt`
+and `ui2api promptd` against a captured or installed session → reach the
+site's real answer through the site's own JS — with the operations, session
+model, and honesty rules above unchanged and documented. Every doc ships the
+REAL command set (`src/cli.ts` is the source of truth; docs never invent
+flags). A change that only works via fabricated traffic or a synthetic profile
+is a fallback, not the feature — call it out as such.
