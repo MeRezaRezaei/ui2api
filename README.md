@@ -392,6 +392,20 @@ npx tsx src/cli.ts profile list gemini.google.com   # accounts stored for the si
 Every `add-all` row is read back from the vault and reported honestly —
 `imported` / `decrypt-limited` / `skipped-no-auth` — never a blind "ok".
 
+**Not sure the machine is ready?** One command, before any browser work:
+
+```bash
+npx tsx src/cli.ts requirements            # alias: doctor — per-package verdict
+npx tsx src/cli.ts requirements gemini     # one site (exit nonzero on not-ready)
+curl http://127.0.0.1:9797/requirements    # same report from a running promptd
+```
+
+Every check runs for real (Chrome binary + version via the launchBrowser
+ladder's execute-only probe, display/Xvfb, Playwright browser cache, the
+`ui2api` OS user + copied-profile dir, per-host vault sessions, attach port,
+env-knob conflicts) — verdicts are **ready / working / on-hold / not-ready**
+with the named reason, and the checker never launches a browser.
+
 ### 3. Identity-keyed multi-account sessions
 
 One user often has several accounts for one site (several Gemini accounts).

@@ -6,6 +6,19 @@ All notable changes to ui2api are tracked here. Format follows
 
 ## [Unreleased]
 
+### Added
+- OS-level requirements readiness check (GOAL 33): `ui2api requirements`
+  (alias `doctor`) + `src/runtime/requirements.ts` — a checker that never
+  launches a browser and reports every package's verdict as **ready /
+  working / on-hold / not-ready** with the NAMED reason, BEFORE any browser
+  work: Node >= 22.13.0, Chrome binary via the `launchBrowser` resolution
+  ladder + `chrome --version` execute-only probe, display/Xvfb when headed,
+  Playwright browser cache, the `ui2api` OS user + copied-profile dir,
+  per-host vault sessions (`listAccounts`), attach port when
+  `UI2API_ATTACH_PORT` is set, and env-knob conflicts. CLI: full table /
+  per-site (`requirements <site>`), nonzero exit on any not-ready; daemon:
+  `GET /requirements` behind the profilesById trust gate. Suite 651 → 687.
+
 ### Fixed
 - wigolo-engine tests run in CI (GOAL 28): the 4 wigolo-engine integration tests
   (`test/wigolo-engine.test.ts`) no longer skip on GitHub Actions — the last
@@ -39,6 +52,13 @@ All notable changes to ui2api are tracked here. Format follows
   (the wigolo-engine 4 are the GOAL 28 fix above).
 
 ### Docs
+- New `requirements` command (GOAL 33): `docs/ONBOARDING.md` §2 gains a
+  "Verify before you start" blockquote pointing at `ui2api requirements`
+  (alias `doctor`); AGENTS.md Commands row + serving-line `GET /requirements` +
+  Conventions "Readiness checks are never fabricated" bullet; README
+  `requirements` one-liner block (incl. `GET /requirements` on a running
+  promptd); ledger wave row. The checker itself never launches a browser
+  (execute-only probes).
 - Production-truth pass (GOAL 21): `docs/ONBOARDING.md` Node floor row fixed
   `>="Node 20+"` → `>=22.13.0` (the real `node:sqlite` floor, CI runs 24);
   README "not published to npm yet — install from source" banner replaced with

@@ -26,6 +26,13 @@ sees it.
 | A Linux system user named `ui2api` | verbatim 1495: login data belongs to the ui2api user | `sudo useradd -m ui2api`; the flow can also just run as you for the first try |
 | Real Chrome (optional but recommended) | some sites block bundled Chromium | `UI2API_CHROME=1` / `UI2API_CHROME_PATH` (see §8) |
 
+> **Verify before you start:** `npx tsx src/cli.ts requirements` (alias `doctor`)
+> checks every row above — and the Playwright browser cache, the `ui2api` OS
+> user + its copied-profile dir, per-host vault sessions, the attach port when
+> set, and env-knob conflicts — printing each package's verdict
+> **ready / working / on-hold / not-ready** with the named reason. Never a
+> fabricated check and never a browser launch (execute-only probes).
+
 ## 3. The 30-second path (anonymous)
 
 Not every site needs a login. For a zero-setup smoke test:

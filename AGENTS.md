@@ -70,6 +70,7 @@ npx tsx src/cli.ts promptd                           # daemon: POST /prompt, /st
 npx tsx src/cli.ts analyse <url> [--login] [--llm]   # recorder + action map
 npx tsx src/cli.ts profile scan|import|capture|ingest|list  # session management
 npx tsx src/cli.ts profile add-all [--known|--interactive]  # one-command bulk import: ALL Chrome-profile site sessions → vault (read-back verified, no per-host loop)
+npx tsx src/cli.ts requirements [site] (alias: doctor)     # OS-level readiness gates BEFORE any browser work: per-package verdict ready/working/on-hold/not-ready with the NAMED reason; exit nonzero on any not-ready
 npx tsx src/cli.ts package | install | plugin serve  # package + hub workflows
 npx tsx src/cli.ts hub | serve | remap | generate    # server generation pipeline
 npm test                  # integration (test/integration.ts)
@@ -78,8 +79,8 @@ npm run test:unit         # full unit suite incl. validate-packages + capability
 
 Serving: `src/prompt/http.ts` exposes `POST /prompt` (`{"site","prompt"}`),
 `GET /sites`, `GET /capabilities/<site>`, `POST /capability/<site>`,
-`GET /status`, `GET /health`. Binds `127.0.0.1` only, configurable bearer-token
-gate (`UI2API_PROMPTD_TOKEN`).
+`GET /status`, `GET /requirements`, `GET /health`. Binds `127.0.0.1` only,
+configurable bearer-token gate (`UI2API_PROMPTD_TOKEN`).
 
 **Multi-account** (live-verified 2026-09-22, GOAL 8): `POST /capability/<site>`
 and `POST /prompt` accept an optional `"account":"<slug|email>"` — the account is
@@ -280,6 +281,14 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `npm test`, `npm run test:unit`. Package + runner sync is enforced by
   `test/capability-dispatch.test.ts` (18/18) and package shape by
   `test/validate-packages.test.ts` (211/211).
+- **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
+  `src/runtime/requirements.ts`) only reports verdicts a real check can stand
+  behind — every check runs for real (execute-only probes; a check that cannot
+  run reports `not-ready`/`on-hold` + the NAMED reason, never a guessed
+  verdict), and the checker itself NEVER launches a browser (chrome = the
+  `resolveChromeExec` ladder + a `chrome --version` execute-only probe;
+  attach = a short HTTP GET to an already-running Chrome's CDP endpoint;
+  sessions = vault reads only).
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use).
