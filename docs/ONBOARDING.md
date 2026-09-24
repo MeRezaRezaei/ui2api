@@ -20,7 +20,7 @@ sees it.
 
 | Need | Why | Notes |
 |---|---|---|
-| Node 20+ | runtime | `npm run build` needs tsc/tsx |
+| Node >=22.13.0 | runtime | real floor: `node:sqlite` (profile scan/ingest) is unflagged from 22.13.0; CI proves on node 24 |
 | An X display | headed `--assist` capture + xhost flow | headless works for anonymous sites only |
 | `x11-xserver-utils` | `xhost` command for display sharing | `sudo apt install x11-xserver-utils` |
 | A Linux system user named `ui2api` | verbatim 1495: login data belongs to the ui2api user | `sudo useradd -m ui2api`; the flow can also just run as you for the first try |
@@ -237,6 +237,13 @@ blocker listed above — do not invent a green for it.
   (`google-chrome --remote-debugging-port=9222`) instead of launching.
 - `UI2API_POOL_MIN` — warm browser pool size for promptd.
 
+> **App-bound / login-gated capabilities** (gmail, google-ai-search, youtube
+> posting + transcript, tencent-aistudio, gemini search toggle, kimi Extra
+> Long) can only be unblocked by driving the **user's own real Chrome** — the
+> copy-paste attach playbook is **`docs/UNLOCK.md`**. It is the one-page
+> version of the two-step fix that also lives in each site's
+> `capabilities/<site>/CAPABILITIES.md`.
+
 ## 9. Security posture (automatic, but know it)
 
 | Rule | Status |
@@ -324,7 +331,7 @@ export default {
   version: "1.0.0",
   manifest: { name: "deepseek-capabilities", version: "1.0.0", author: "you",
     description: "DeepSeek live capabilities over MCP.", authorizedUse: "your own account",
-    license: "MIT", ui2api: "0.1.0" },
+    license: "MIT", ui2api: "0.2.0" },
   setup(ctx) {
     ctx.registerTool(
       { name: "deepseek_list_conversations",

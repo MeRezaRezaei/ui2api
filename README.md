@@ -80,37 +80,39 @@ returns the result — no brittle screen-scraping.
 
 ## Quick start
 
-> **ui2api is not published to npm yet** — install from source until the first
-> release lands:
+> **Published on npm** — `ui2api@0.2.0` is live (dist-tag `latest`, registry.npmjs.org/ui2api).
+> Install globally, or run it on the spot with `npx`:
 
 ```bash
-git clone https://github.com/MeRezaRezaei/ui2api.git
-cd ui2api
-npm install
-npx playwright install chromium   # one-time browser download
+npm install -g ui2api            # the ui2api CLI (bin: ui2api)
+npx playwright install chromium  # one-time browser download
 ```
 
-The CLI runs via `tsx` (no global install needed):
+Then analyze, generate, and serve a site:
 
 ```bash
 # 1. Analyze a site once  (drop --llm to run fully offline)
-npx tsx src/cli.ts analyse https://app.example.com --llm
+ui2api analyse https://app.example.com --llm
 
 # 2. Generate a per-site MCP server
-npx tsx src/cli.ts generate app.example.com
+ui2api generate app.example.com
 
 # 3. Serve it — your AI agent now calls the site as tools
-npx tsx src/cli.ts serve app.example.com
+ui2api serve app.example.com
 ```
+
+From a source clone (contributors / development), `npx tsx src/cli.ts …` works
+identically to every `ui2api …` below.
 
 Then connect any MCP/ACP client to the generated server and call tools like
 `send_prompt`. Re-run `analyse`/`generate` when the site changes.
 
-**Validate your install without owning a site** — these run against a local
-fixture and print `INTEGRATION OK` / `X tests … pass`:
+**Validate the build against the fixture suite (source clone only)** — the
+published npm package ships no test suite (`test/` is not in the tarball), so
+these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 30 hermetic unit-test files (340+ tests) — no browser needed
+npm run test:unit   # 37 hermetic unit-test files (595+ tests) — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
@@ -190,7 +192,10 @@ login-bound), `araprat` (search/trending/video_detail verified 2026-09-20) and
 search + composer, all **DOM-unverified** because mail.google.com is 100%
 auth-walled statically (GOAL 19 measured 2026-09-23); drive it via the user's
 own real Chrome attached with mail.google.com signed in,
-`UI2API_ATTACH_PORT=9222`).
+`UI2API_ATTACH_PORT=9222`). Every attach / plan / login-bound capability
+(gmail, google-ai-search, youtube posting + transcript, gemini search toggle,
+kimi Extra Long, tencent-aistudio's no-UI caps) has its measured blocker and
+copy-paste unblock in **`docs/UNLOCK.md`**.
 A machine-checkable `verified` record (since/evidence/via) rides on every
 `/registry` package — absent or `false` = honestly not verified. Each verified
 chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
@@ -409,6 +414,7 @@ and comply with applicable law. Use it at your own risk.
 ## Docs & links
 
 - Documentation: [`docs/`](docs/) — start with [`docs/VISION.md`](docs/VISION.md)
+- Attach / plan / login-bound capabilities unblocked: [`docs/UNLOCK.md`](docs/UNLOCK.md)
 - Hard-won field notes: [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — includes the
   `chrome-cdp.service` pkill loop that silently killed every CDP browser for days
 - License: [MIT](LICENSE)

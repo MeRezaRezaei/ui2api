@@ -4,6 +4,23 @@ All notable changes to ui2api are tracked here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Docs
+- Production-truth pass (GOAL 21): `docs/ONBOARDING.md` Node floor row fixed
+  `>="Node 20+"` → `>=22.13.0` (the real `node:sqlite` floor, CI runs 24);
+  README "not published to npm yet — install from source" banner replaced with
+  the real npm install path (`ui2api@0.2.0`, dist-tag latest); README test
+  count corrected to 37 files / 595+ tests; `package-lock.json` root engines
+  aligned `>=18.19.0` → `>=22.13.0` (+ root version 0.2.0) to match
+  package.json.
+- New `docs/UNLOCK.md` — the consolidated end-user playbook for every
+  attach / plan / login-bound capability (gmail, google-ai-search, youtube
+  posting + transcript, gemini search toggle, kimi Extra Long, tencent
+  no-UI caps): one copy-paste real-Chrome-attached path, per-capability
+  measured blockers, honest "no unblock exists" where the product lacks the
+  surface. Linked from README + ONBOARDING §8.
+
 ## [0.2.0] — 2026-09-23
 
 GOAL 15/16/17 verified surface (full-functionality live verification + registry
