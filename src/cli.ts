@@ -9,7 +9,7 @@ import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
 import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
-import { installPackage } from "./registry/install.js";
+import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
 import { pushToMirror } from "./hub/mirror.js";
 import { RegistryStore } from "./hub/store.js";
@@ -51,6 +51,7 @@ interface Flags {
   timeoutMs?: number;
   sites?: boolean;
   assist?: boolean;
+  catalog?: boolean;
   account?: string;
   identity?: string;
   identityPrefix?: string;
@@ -90,6 +91,7 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--pool-max") f.poolMax = Number(argv[++i]) || undefined;
     if (argv[i] === "--sites") f.sites = true;
     if (argv[i] === "--assist") f.assist = true;
+    if (argv[i] === "--catalog") f.catalog = true;
     if (argv[i] === "--account") f.account = argv[++i];
     if (argv[i] === "--identity") f.identity = argv[++i];
     if (argv[i] === "--identity-prefix") f.identityPrefix = argv[++i];
@@ -230,11 +232,40 @@ async function cmdPackage(host: string, flags: Flags): Promise<void> {
   console.log(`Packaged ${host} -> ${dir}`);
 }
 
+async function cmdInstallCatalog(flags: Flags): Promise<void> {
+  const reg = flags.registry ?? process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
+  const index = await fetchRegistryIndex(reg);
+  const rows = Object.entries(index).sort(([a], [b]) => a.localeCompare(b));
+  if (rows.length === 0) {
+    console.log(`(registry catalog is empty at ${reg})`);
+    return;
+  }
+  console.log(`Registry catalog (${reg}):`);
+  for (const [site, e] of rows) {
+    const url = typeof e.url === "string" ? e.url : "(no url)";
+    console.log(`${site.padEnd(28)} v${(e.version ?? "?").padEnd(8)} ${(e.trust ?? "?").padEnd(10)} ${url}`);
+  }
+}
+
 async function cmdInstall(host: string, flags: Flags): Promise<void> {
-  const root = sitesRoot(flags);
-  const reg = flags.registry || "https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/main";
-  const dir = await installPackage(host, reg, root);
-  console.log(`Installed ${host} -> ${dir}; run: ui2api serve ${host}`);
+  const reg = flags.registry ?? process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
+  // The install target is the packages root (capabilities/<site>/) — the same
+  // layout the daemon serves from (resolvePackagedProfile / buildRegistryPackages).
+  // --out overrides it (e.g. into a temp dir for a clean/isolated install).
+  const root = flags.out ?? defaultPackagesRoot();
+  const result = await installPackage(host, reg, root);
+  const profileAbs = existsSync(resolve(result.dir, "profile.json"))
+    ? resolve(result.dir, "profile.json")
+    : undefined;
+  console.log(`Installed ${host} v${result.version} (${result.trust}) -> ${result.dir}`);
+  console.log(`Files: ${result.files.join(", ")}`);
+  console.log(`The daemon serves installed capability packages (package dir = defaultPackagesRoot):`);
+  console.log(`  ui2api promptd`); // GET /sites, GET /capabilities/<site>, POST /capability/<site>
+  console.log(`  curl -s localhost:${process.env.PORT ? Number(process.env.PORT) : 9797}/registry`);
+  if (profileAbs) {
+    console.log(`Or prompt it directly via the ChatDriver with its packaged profile:`);
+    console.log(`  ui2api prompt "hello" --site ${host} --profile ${profileAbs}`);
+  }
 }
 
 async function cmdLangGen(host: string | undefined, flags: Flags): Promise<void> {
@@ -821,7 +852,7 @@ async function main(): Promise<void> {
       const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
       const token = process.env.UI2API_HUB_TOKEN ?? "";
       const port = Number(flags.port ?? process.env.PORT ?? 8787);
-      const registryUrl = process.env.UI2API_REGISTRY_URL ?? "https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/main";
+      const registryUrl = process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
       startHub({ port, dataDir, token, registryUrl });
       return;
     }
@@ -844,7 +875,8 @@ async function main(): Promise<void> {
       // Optional <host> targets one package; without it, every served package.
       return cmdLangGen(arg || undefined, flags);
     case "install":
-      if (!arg) throw new Error("usage: ui2api install <host> [--registry URL]");
+      if (flags.catalog) return cmdInstallCatalog(flags);
+      if (!arg) throw new Error("usage: ui2api install <host> [--registry URL] | ui2api install --catalog [--registry URL]");
       return cmdInstall(arg, flags);
     case "plugin": {
       if (arg === "serve") return cmdPluginServe(rest[0] ?? "", flags);
@@ -893,7 +925,8 @@ async function main(): Promise<void> {
       console.log("  ui2api serve    <host>  [--out DIR] [--engine native|wigolo]  (wigolo = drive the browser side through a local wigolo daemon)");
       console.log("  ui2api remap    <host>  [--out DIR]");
       console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
-      console.log("  ui2api install  <host>  [--registry URL]");
+      console.log("  ui2api install  <host>  [--registry URL] [--out DIR]  (install a site package from the community registry; default = master branch)");
+      console.log("  ui2api install  --catalog [--registry URL]  (list the registry catalog: site, version, trust)");
       console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
       console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
       console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");

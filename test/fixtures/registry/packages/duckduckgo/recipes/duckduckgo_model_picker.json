@@ -1,0 +1,38 @@
+{
+  "capability": "duckduckgo_model_picker",
+  "site": "duckduckgo",
+  "flow": "ui-path — click the composer model chip and read the picker panel (VERIFIED live 2026-09-23)",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "No session snapshot needed — anonymous chat. Post-chat composer hides the chip, so start a New Chat if the previous step left one open."
+    },
+    {
+      "step": 2,
+      "action": "click",
+      "target": "composer model chip",
+      "note": "Plain button, text like \"5.6 Luna\" (w≈100 h≈32, no aria-label), matching /(^|\\s)(luna|gpt|claude|haiku|llama|mistral|kimi|gemma)(\\s|$)|[0-9]+\\.[0-9]+/i. If absent, click \"New Chat\" and retry once."
+    },
+    {
+      "step": 3,
+      "action": "read",
+      "selector": "[role='menu'][aria-label='Choose a model'] [role='menuitemradio']",
+      "note": "Row carries data-testid=\"model-picker-row-<id>\", aria-checked=\"true\" on the active model, text = \"GPT-5.6 Luna\\nBest for everyday use\" (name + note)."
+    },
+    {
+      "step": 4,
+      "action": "close",
+      "note": "Escape to close the panel."
+    }
+  ],
+  "output": {
+    "selected": "string|null",
+    "count": "number",
+    "models": "Array<{name, full, testId, reaction}>"
+  },
+  "rpc": "No endpoint — the model catalog is EMBEDDED in the JS bundle (CAPABILITIES.md §1); the picker panel is the honest live surface. Selecting also rides the chat POST body 'model' field.",
+  "stealth": "real DOM interaction with the site's own picker panel; chip click + row read are exactly what a user does. No synthetic request.",
+  "sessionLock": "session.lock.json"
+}

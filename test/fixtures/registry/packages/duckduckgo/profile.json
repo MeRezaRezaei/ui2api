@@ -1,0 +1,57 @@
+{
+  "id": "duckduckgo",
+  "name": "DuckDuckGo AI Chat (duck.ai)",
+  "url": "https://duck.ai/chat",
+  "loginRequired": false,
+  "loginHint": "No login required — anonymous chat works out of the box. If you want chat history sync, sign in to a DDG account once: ui2api profile capture \"https://duck.ai\" --login. For anonymous-only use, no capture is needed.",
+  "composer": [
+    "textarea",
+    "[contenteditable=\"true\"]",
+    "div[class*=\"chat-input\"] textarea",
+    "div[class*=\"composer\"] textarea"
+  ],
+  "send": { "kind": "keyEnter" },
+  "answer": [
+    "[id*=\"assistant-message\"]"
+  ],
+  "newChat": [
+    "[aria-label*=\"New chat\"]",
+    "[aria-label*=\"new chat\"]",
+    "button[class*=\"new-chat\"]",
+    "[class*=\"sidebar\"] button:first-child"
+  ],
+  "dismiss": [
+    "[class*=\"onboarding\"] button",
+    "[class*=\"welcome\"] button",
+    "button[aria-label*=\"Skip\"]",
+    "button[aria-label*=\"Close\"]"
+  ],
+  "modelPicker": [
+    "button[class*=\"model\"]",
+    "[class*=\"model-picker\"]",
+    "[class*=\"model-selector\"]",
+    "[aria-label*=\"Model\"]"
+  ],
+  "captureMs": 45000,
+  "stableMs": 2000,
+  "selectorNotes": {
+    "composer": [
+      "VERIFIED live 2026-09-22/23 — composer is a plain <textarea> (no contenteditable needed). First send on a fresh context hits the consent wall (Continue button); runner dismisses + refocuses + resends.",
+      "VERIFIED live — placeholder text is locale dust; not needed for driving."
+    ],
+    "answer": [
+      "VERIFIED live 2026-09-22 — assistant answer renders at [id*=\"assistant-message\"]; innerText = <model chip>\\n\\n<answer>[ \\n\\n2nd opinion]; runner strips the chip + footer.",
+      "VERIFIED live — answer appears above the composer; [id*='assistant-message'] is stable across chats."
+    ],
+    "newChat": [
+      "VERIFIED live 2026-09-23 — the model chip hides after a chat; 'New Chat' returns the empty composer. Runner handles via [aria-label*='New chat'] + retry loop, not the unverified CSS classes."
+    ],
+    "dismiss": [
+      "VERIFIED live — first-send consent wall: \"By clicking 'Continue' you agree…\" with a *Continue* button (the onboarding overlay 'Got It!' appears per chat; runner finds and clicks it by content text)."
+    ],
+    "modelPicker": [
+      "VERIFIED live 2026-09-23 — composer model chip (plain button, text like '5.6 Luna'); opens [role='menu'][aria-label='Choose a model'] with [role='menuitemradio'] rows (data-testid='model-picker-row-<id>')."
+    ]
+  },
+  "note": "Selectors live-verified (headed Xvfb, 2026-09-22/23) — the pre-verification note marked everything unverified because the bundles expose only hashed CSS classes; the real DOM (seen live) is what the runner now uses. Anonymous chat works without login — loginRequired=false, no session snapshot injection. The VQD token is obtained at runtime by the app (GET /duckchat/v1/status) and is NOT a static capture — ui2api driver lets the page handle this internally."
+}

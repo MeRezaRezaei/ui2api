@@ -108,6 +108,37 @@ identically to every `ui2api …` below.
 Then connect any MCP/ACP client to the generated server and call tools like
 `send_prompt`. Re-run `analyse`/`generate` when the site changes.
 
+**Install a site package from the community registry** — the one-command path with
+no analyse/generate needed. The registry is `ui2api-registry` (default branch
+**`master`**): a catalog of per-site capability packages served to your agents by
+the same daemon that serves built-in sites.
+
+```bash
+# Discover what's installable: site, version, trust (reviewed / unreviewed)
+ui2api install --catalog
+
+# Install a package — DuckDuckGo AI chat (anonymous, no login)
+ui2api install duckduckgo
+
+# Serve it — the daemon answers GET /registry, POST /capability/<site>
+ui2api promptd
+
+# Run a real installed capability (duck.ai's own browser session + UI)
+curl -s localhost:9797/capability/duckduckgo \
+  -H 'content-type: application/json' \
+  -d '{"capability":"duckduckgo_web_search","args":{"query":"ui2api"}}'
+```
+
+Installed packages land in `capabilities/<site-id>/` — the exact layout
+`promptd` already serves, so there is no "install dir vs. serve dir" split and
+`GET /registry` picks the package up automatically. `--registry <url>` (or
+`UI2API_REGISTRY_URL`) point install at a fork; the URL must be a **raw** base
+ending in the branch (`…/ui2api-registry/master`) — a stale `/main` URL fails
+loudly with the corrective hint. Check the package's `trust` (`unreviewed`
+until the operator reviews it) before running it, and note login-bound
+capabilities need your real session (see `docs/UNLOCK.md`), exactly like every
+built-in site.
+
 **Validate the build against the fixture suite (source clone only)** — the
 published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:

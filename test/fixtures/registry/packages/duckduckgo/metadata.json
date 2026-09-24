@@ -1,0 +1,21 @@
+{
+  "siteId": "duckduckgo",
+  "site": "duck.ai",
+  "name": "DuckDuckGo AI Chat (duck.ai)",
+  "url": "https://duck.ai/chat",
+  "siteVersion": "React SPA (serp_20260915_052329_ET, SHA af41a90799e2d64643c19a933f25b799c589b2df)",
+  "version": "0.3.0",
+  "status": "active",
+  "verified": {
+    "since": "2026-09-23",
+    "evidence": "duckduckgo_chat VERIFIED live (headed Xvfb round-trip): composer textarea + Enter -> first-send consent wall (Continue button) -> refocus + Enter -> site's own JS GET /duckchat/v1/status (VQD) + POST /duckchat/v1/chat (SSE, HTTP 200) -> answer read via [id*='assistant-message']. Proofs: 'say hi' -> 'Hi' (model 'GPT-5.6 Luna'), 'what is 2+2?' -> '2 + 2 = 4'; ok:true 7-9s. Full surface live-verified 2026-09-23 through the real DuckduckgoCapabilities runner (ALL_OK=true): model_picker (6 rows read, GPT-5.6 Luna selected, testId model-picker-row-gpt-5.6-luna, aria-checked=true), web_search enable+disable (composer Tools -> Web Search row -> chip button[aria-label='Remove Web Search'] read-back; enabling then driving a chat carried a REAL WebSearch tool-invocation with 5 citations stored in saved-chats), file_upload (1x1 PNG via setInputFiles -> chip 'Remove image 1'), reasoning fast<->reasoning (button[aria-label='Reasoning mode'] text flip; 'extended' NOT offered on free GPT-5.6 Luna composer -> honest ok:false), chat_history (real IndexedDB savedAIChatData saved-chats/pre-canonical-chats read + sidebar input[aria-label='Search chats']/button[aria-label='Delete Chat'] corroboration; sendProbe rows match across IDB + sidebar). Anonymous site — never login-gated.",
+    "via": "headed Xvfb browser (UI2API_HEADED=1 posture), anonymous session, no credentials",
+    "scope": "all six capabilities (chat, model_picker, web_search, file_upload, reasoning, chat_history) VERIFIED live 2026-09-23 through the real DuckduckgoCapabilities runner"
+  },
+  "author": "ui2api capability package",
+  "authorizedUse": "Automate my own anonymous DuckDuckGo AI Chat session (no account, no credentials) to send prompts and read streamed answers the site itself renders.",
+  "license": "MIT",
+  "ui2api": "0.1.0",
+  "trust": "unreviewed",
+  "publishedAt": "2026-09-22"
+}

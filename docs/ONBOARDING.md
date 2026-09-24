@@ -376,3 +376,37 @@ ACP: the generated stdio ACP server surface (`generate --acp` →
 (`test/acp.test.ts`, initialize + list_tools over JSON-RPC), but a *live* ACP
 tool call needs a real captured action map for a site — none is installed on
 this box out of the box — so MCP stdio is the live-proven consumer surface.
+
+## 12. Community install — `ui2api install <site>` (GOAL 24, 2026-09-24)
+
+The registry that backs install is the public `ui2api-registry` repo, whose
+default branch is **`master`**; every site there is a full capability package.
+Install is one command and needs no analyse/generate:
+
+```bash
+# Discover: site | version | trust (reviewed until the operator reviews it)
+npx tsx src/cli.ts install --catalog
+
+# Install an anonymous site package (no login, no captured session needed)
+npx tsx src/cli.ts install duckduckgo
+
+# Serve it — the daemon answers GET /registry + POST /capability/<site>
+npx tsx src/cli.ts promptd
+
+# Run a REAL capability against duck.ai (its own browser + UI)
+curl -s localhost:9797/capability/duckduckgo \
+  -H 'content-type: application/json' \
+  -d '{"capability":"duckduckgo_web_search","args":{"query":"ui2api"}}'
+```
+
+- Installed packages land in `capabilities/<site-id>/` — the same layout
+  `promptd` already serves, so `GET /registry` picks the package up with no
+  extra step.
+- `--registry <url>` or `UI2API_REGISTRY_URL` point install at a fork; the raw
+  base must end in the branch (`…/ui2api-registry/master`). A stale `/main` URL
+  fails loudly with the correction hint.
+- `trust` = `unreviewed` until a maintainer reviews a package; check it before
+  running. Login-bound capabilities still need your real session
+  (`docs/UNLOCK.md`).
+- Same privacy rules: never commit `capabilities/<site>/session.lock.json`
+  snapshots (they can contain captured credentials).

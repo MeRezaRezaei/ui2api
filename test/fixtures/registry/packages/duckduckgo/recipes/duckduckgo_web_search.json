@@ -1,0 +1,46 @@
+{
+  "capability": "duckduckgo_web_search",
+  "site": "duckduckgo",
+  "flow": "ui-path — flip the composer Tools -> Web Search toggle and read the chip back (VERIFIED live 2026-09-23)",
+  "steps": [
+    {
+      "step": 1,
+      "action": "open",
+      "url": "https://duck.ai/chat",
+      "note": "Anonymous chat — no session snapshot needed."
+    },
+    {
+      "step": 2,
+      "action": "read",
+      "target": "button[aria-label='Remove Web Search']",
+      "note": "Empty composer has NO chip (web search off). If args.enable matches the current chip state, return immediately."
+    },
+    {
+      "step": 3,
+      "action": "click",
+      "target": "composer 'Tools' button",
+      "note": "Button whose innerText is exactly \"Tools\" in the composer toolbar (post-enable it gains aria-label 'Tools')."
+    },
+    {
+      "step": 4,
+      "action": "click",
+      "target": "Web Search row",
+      "note": "[role='menuitemradio'] / [role='menuitemcheckbox'] row \"Web Search / Source answers from the web\" in the Tools popover. args.enable=false toggles OFF by clicking the chip instead."
+    },
+    {
+      "step": 5,
+      "action": "read",
+      "target": "button[aria-label='Remove Web Search']",
+      "note": "ENABLED read-back: the composer shows the chip (text 'Web Search', hashed class ZBP3ZxntKAUOzAOqJQ4h k8u9YPBexjGKZxLYQKQ). Escape to close the popover."
+    }
+  ],
+  "output": {
+    "enabled": "boolean",
+    "before": "boolean",
+    "changed": "boolean",
+    "readBack": "string"
+  },
+  "rpc": "The enabled state drives metadata.toolChoice.WebSearch on the NEXT POST /duckchat/v1/chat request (bundle-verified). Enable was proven live: the following chat received 5 real citations (Wikipedia, Merriam-Webster, preply, thesaurus, indeed) via a WebSearch tool-invocation stored in IndexedDB saved-chats.",
+  "stealth": "drives only the site's own composer toggle; the search itself is executed by the backend when the chat is sent. Never a synthesized request.",
+  "sessionLock": "session.lock.json"
+}

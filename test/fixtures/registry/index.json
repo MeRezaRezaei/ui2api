@@ -1,0 +1,258 @@
+{
+  "adapta": {
+    "name": "Adapta (adapta.app)",
+    "url": "https://adapta.app",
+    "site": "adapta.app",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "araprat": {
+    "name": "Aparat (www.aparat.com) — Persian video-sharing platform",
+    "url": "https://www.aparat.com",
+    "site": "www.aparat.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-20"
+  },
+  "blackbox": {
+    "name": "Blackbox AI (www.blackbox.ai)",
+    "url": "https://www.blackbox.ai",
+    "site": "www.blackbox.ai",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "chatglm": {
+    "name": "ChatGLM / Zhipu AI (智谱清言)",
+    "url": "https://chatglm.cn",
+    "site": "chatglm.cn",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "chatgpt": {
+    "name": "ChatGPT (chatgpt.com)",
+    "url": "https://chatgpt.com",
+    "site": "chatgpt.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "claude": {
+    "name": "Claude (claude.ai)",
+    "url": "https://claude.ai",
+    "site": "claude.ai",
+    "version": "0.2.0-grounded",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "codex": {
+    "name": "ChatGPT Codex (chatgpt.com/codex)",
+    "url": "https://chatgpt.com/codex",
+    "site": "chatgpt.com/codex",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "conol": {
+    "name": "Conol (conol.ai)",
+    "url": "https://conol.ai",
+    "site": "conol.ai",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "copilot": {
+    "name": "Microsoft Copilot (copilot.microsoft.com)",
+    "url": "https://copilot.microsoft.com",
+    "site": "copilot.microsoft.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "copilot-m365": {
+    "name": "Microsoft Copilot for M365 (copilot.cloud.microsoft — Harmony app)",
+    "url": "https://copilot.cloud.microsoft",
+    "site": "copilot.cloud.microsoft",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "deepseek": {
+    "name": "DeepSeek Chat (chat.deepseek.com)",
+    "url": "https://chat.deepseek.com",
+    "site": "chat.deepseek.com",
+    "version": "0.3.0",
+    "trust": "reviewed",
+    "publishedAt": "2026-09-19"
+  },
+  "doubao": {
+    "name": "doubao",
+    "url": "https://www.doubao.com/chat/",
+    "site": "www.doubao.com",
+    "version": "1.0.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "duckduckgo": {
+    "name": "DuckDuckGo AI Chat (duck.ai)",
+    "url": "https://duck.ai/chat",
+    "site": "duck.ai",
+    "version": "0.3.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-22"
+  },
+  "gemini": {
+    "name": "Gemini (gemini.google.com)",
+    "url": "https://gemini.google.com",
+    "site": "gemini.google.com",
+    "version": "1.0.0",
+    "trust": "reviewed",
+    "publishedAt": "2026-09-21"
+  },
+  "google-ai-search": {
+    "name": "Google AI Mode (google.com/search?udm=14)",
+    "url": "https://www.google.com/search?udm=14",
+    "site": "www.google.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "grok": {
+    "name": "Grok (grok.com)",
+    "url": "https://grok.com",
+    "site": "grok.com",
+    "version": "0.1.1",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "huggingchat": {
+    "name": "HuggingChat (huggingface.co/chat)",
+    "url": "https://huggingface.co/chat",
+    "site": "huggingface.co",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "hunyuan": {
+    "name": "Tencent Hunyuan (yuanbao.tencent.com)",
+    "url": "https://yuanbao.tencent.com/",
+    "site": "yuanbao.tencent.com",
+    "version": "0.2.0-inventory",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "inner-ai": {
+    "name": "Inner AI (app.innerai.com)",
+    "url": "https://app.innerai.com",
+    "site": "app.innerai.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "kimi": {
+    "name": "Kimi AI (www.kimi.ai)",
+    "url": "https://www.kimi.ai",
+    "site": "www.kimi.ai",
+    "version": "0.2.0",
+    "trust": "reviewed",
+    "publishedAt": "2026-09-19"
+  },
+  "manus": {
+    "name": "Manus (manus.im)",
+    "url": "https://manus.im",
+    "site": "manus.im",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "notion": {
+    "name": "Notion AI (www.notion.so)",
+    "url": "https://www.notion.so",
+    "site": "www.notion.so",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "perplexity": {
+    "name": "Perplexity (perplexity.ai)",
+    "url": "https://www.perplexity.ai",
+    "site": "www.perplexity.ai",
+    "version": "0.2.0-probed",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "poe": {
+    "name": "Poe (poe.com)",
+    "url": "https://poe.com",
+    "site": "poe.com",
+    "version": "0.2.0-analyzed",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "t3chat": {
+    "name": "t3.chat (t3.chat)",
+    "url": "https://t3.chat",
+    "site": "t3.chat",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "tencent-aistudio": {
+    "name": "Tencent AI Studio (aistudio.tencent.ai)",
+    "url": "https://aistudio.tencent.ai",
+    "site": "aistudio.tencent.ai",
+    "version": "0.2.0",
+    "trust": "reviewed",
+    "publishedAt": "2026-09-19"
+  },
+  "tinycms": {
+    "name": "TinyCMS (DEAD END — no AI chat product found)",
+    "url": null,
+    "site": "tinycms",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "v0": {
+    "name": "v0 by Vercel (v0.app)",
+    "url": "https://v0.app",
+    "site": "v0.app",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "venice": {
+    "name": "Venice (venice.ai)",
+    "url": "https://venice.ai",
+    "site": "venice.ai",
+    "version": "0.2.0-ground",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "xiaomimimo": {
+    "name": "Xiaomi MiMo (MiMo Studio — aistudio.xiaomimimo.com, provider 'xiaomimimo-web')",
+    "url": "https://aistudio.xiaomimimo.com",
+    "site": "aistudio.xiaomimimo.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  },
+  "youtube": {
+    "name": "YouTube (www.youtube.com)",
+    "url": "https://www.youtube.com",
+    "site": "www.youtube.com",
+    "version": "0.3.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-20"
+  },
+  "zenmux": {
+    "name": "ZenMux (zenmux.com) — free proxy/aggregator tier",
+    "url": "https://zenmux.com",
+    "site": "zenmux.com",
+    "version": "0.1.0",
+    "trust": "unreviewed",
+    "publishedAt": "2026-09-16"
+  }
+}
