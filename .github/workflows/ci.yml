@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin the LTS runner: the wigolo daemon's pinned playwright 1.60 supports
+    # ubuntu-24.04 but NOT a rolled-forward ubuntu-latest (26.04) — its chromium
+    # installer refuses unlisted distros (GOAL 28, measured 2026-09-24).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +25,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # wigolo-engine tests (test/wigolo-engine.test.ts) spawn a local wigolo
+      # daemon from a repo checkout (WIGOLO_REPO, default ../wigolo) and drive it
+      # over loopback. Clone the canonical public upstream pinned to a verified
+      # commit, install ITS deps (playwright 1.60 is pinned there), and install
+      # ITS OWN chromium revision (1223 — distinct from the main suite's) so the
+      # daemon browser tier runs for real. Deps for the main chromium install
+      # above are system-wide; the wigolo step only downloads its browser build.
+      - name: Checkout wigolo (canonical upstream, pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: KnockOutEZ/wigolo
+          ref: d69bf773be06f29fc1d335f8ba35ec88457ac707
+          path: wigolo
+      - name: Install wigolo deps + chromium
+        run: |
+          npm ci
+          npx playwright install chromium
+        working-directory: wigolo
       - run: npm run build
       - run: npm test
       - run: npm run test:unit
         env:
           UI2API_REGISTRY_LIVE: "1"
+          WIGOLO_REPO: ${{ github.workspace }}/wigolo
