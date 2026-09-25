@@ -277,6 +277,9 @@ Full copy-paste onboarding: **docs/ONBOARDING.md**.
   `/var/www`. Apps there just `POST` in and read the answer out.
 - **Tuning a site**: profiles live in `src/profile/profile.ts`; ship a JSON override
   with `--profile /path/gemini.json` (or `UI2API_AI_SITE`) if a site's UI changed.
+  JSON overrides are validated before use (parseable selectors + chat shape +
+  send shape) — a typo'd key or wrong-typed composer/answer/send entry fails
+  loud at load, naming the file and the exact offending field.
 
 Wire it into an agent the same way as any generated server:
 `npx tsx src/cli.ts plugin serve src/plugins/ai-web.ts --base-url https://gemini.google.com` exposes `send_prompt`, `new_chat`, `read_last_response` and `ai_status` over MCP.

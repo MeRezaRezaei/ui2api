@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { resolveProfile } from "../src/profile/profile.js";
+import { resolvePackagedProfileFile } from "../src/profile/profile.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 import { KimiCapabilities } from "../src/capabilities/kimi.js";
 import { HunyuanCapabilities } from "../src/capabilities/hunyuan.js";
@@ -199,8 +199,12 @@ function extractManifestIds(manifestPath: string): string[] {
 
 for (const def of RUNNERS) {
   test(`${def.id}: run("${UNKNOWN_CAPABILITY}") → ok:false WITHOUT touching a browser`, async () => {
-    const profile = resolveProfile(def.profilePath);
-    assert.equal(profile.id, def.id, "fixture resolved correctly via resolveProfile");
+    // Packaged capability profiles resolve through the PERMISSIVE packaged
+    // seam (the same loader http.ts's /capability fallback uses) — capability-
+    // only packages may carry empty composer/answer; the strict GOAL-47
+    // override gate applies only to the user's `--profile FILE` tuning seam.
+    const profile = resolvePackagedProfileFile(def.profilePath);
+    assert.equal(profile.id, def.id, "fixture resolved correctly via resolvePackagedProfileFile");
     assert.ok(profile.url.startsWith("https://"), "profile has a valid https url");
     assert.ok(Array.isArray(profile.composer), "profile has a composer array");
 

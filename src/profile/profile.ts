@@ -407,15 +407,17 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
   if (!value) return { ...BUILTIN_PROFILES[defaultSiteId()] };
   if (BUILTIN_PROFILES[value]) return { ...BUILTIN_PROFILES[value] };
   if (value.endsWith(".json")) {
-    const raw = JSON.parse(readFileSync(value, "utf8")) as Partial<ChatSiteProfile>;
+    const raw = JSON.parse(readFileSync(value, "utf8")) as Partial<ChatSiteProfile> &
+      Record<string, unknown>;
     if (!raw.id) throw new Error(`profile file ${value} must carry an "id"`);
-    const base = BUILTIN_PROFILES[raw.id];
-    return {
-      ...(base ? { ...base } : {}),
-      ...raw,
-      composer: raw.composer ?? base?.composer ?? [],
-      answer: raw.answer ?? base?.answer ?? [],
-    } as ChatSiteProfile;
+    const merged = mergeProfileFile(value, raw);
+    // GOAL 47 override-seam gate: a --profile FILE override is a TUNING
+    // document — every field it carries must be exactly what the driver can
+    // run. Fail LOUD at load, naming the file and the offending field/entry
+    // (never a silent drop → late 15s×N "no composer found", string-answer
+    // `answer.join` TypeError, or silent Enter-press send fallback).
+    validateOverrideFile(value, raw, merged);
+    return merged;
   }
   // Installed chat-shaped package profile (capabilities/<site>/profile.json):
   // same canonical source /capability and /registry serve. Only chat-shaped
@@ -427,6 +429,193 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
   throw new Error(
     `unknown AI site "${value}" — expected one of ${PROFILE_IDS.join(", ")} or a path to a *.json profile`
   );
+}
+
+// ─── GOAL 47: the override-file seam speaks the GOAL-32 truth gate ──────────
+//
+// Packaged profiles are refused for /registry surfacing unless
+// isDriveableChatProfile (GOAL 32) — but a `--profile FILE` override bypassed
+// the gate entirely: the spread-merge SILENTLY dropped unknown keys (typo'd
+// "composr" → "no composer found" only after 15s×N timeouts), wrong-typed
+// composer/answer passed straight through (`"answer": "…"` → `answer.join`
+// TypeError in the driver), and a wrong-typed `send` silently fell back to
+// Enter-press (GOAL-45 "never a silent wrong-model prompt" fidelity class at
+// the profile input seam). The override seam now runs the SAME checks the
+// packaged path runs — parseable selectors + chat shape (+ an explicit send
+// shape check) — and every failure is loud at load, naming the FILE that is
+// the problem and the exact offending field/entry.
+
+const PROFILE_FILE_KEYS = [
+  "id",
+  "name",
+  "url",
+  "loginRequired",
+  "loginHint",
+  "composer",
+  "send",
+  "answer",
+  "newChat",
+  "jsIndex",
+  "dismiss",
+  "captureMs",
+  "stableMs",
+  "note",
+  "preComposeDelayMs",
+  "consentWall",
+  "realProfileOnly",
+  "urlTemplate",
+  "citations",
+  "capability",
+] satisfies (keyof ChatSiteProfile)[];
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = new Uint32Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/**
+ * Is `key` a close TYPO of a real ChatSiteProfile field? Only close variants
+ * are refused — packaged-profile metadata keys that are NOT profile fields
+ * (selectorNotes / captureStatus / modelPicker / consentWall-derived extras…)
+ * stay carried by the spread-merge by design (never a field, so never a typo
+ * of one). Matches: ≤2 edit-distance typos ("composr"→"composer"), prefix
+ * truncation ("compos"→"composer"), or a ≤2-char suffix slip ("composerr").
+ */
+function likelyTypoOf(key: string): keyof ChatSiteProfile | null {
+  for (const known of PROFILE_FILE_KEYS) {
+    if (key === known) continue;
+    if (levenshtein(key, known) <= 2) return known;
+    if (key.length >= 4 && known.startsWith(key)) return known;
+    if (key.length >= 4 && key.startsWith(known) && key.length - known.length <= 2) return known;
+  }
+  return null;
+}
+
+/** Merge a raw override-file body over its named builtin (shareable by both seams). */
+function mergeProfileFile(
+  file: string,
+  raw: Partial<ChatSiteProfile> & Record<string, unknown>
+): ChatSiteProfile {
+  const base = BUILTIN_PROFILES[raw.id!];
+  return {
+    ...(base ? { ...base } : {}),
+    ...raw,
+    composer: raw.composer ?? base?.composer ?? [],
+    answer: raw.answer ?? base?.answer ?? [],
+  } as ChatSiteProfile;
+}
+
+/** Loud send-shape check: a wrong-typed send must never silently fall back to Enter-press. */
+function validateSendShape(file: string, p: ChatSiteProfile): void {
+  const send = p.send as unknown;
+  if (typeof send !== "object" || send === null || Array.isArray(send)) {
+    throw new Error(
+      `profile file ${file} send must be a SendStrategy object { kind: "keyEnter" | "click"[, selector] } — got ` +
+        `${send === null ? "null" : Array.isArray(send) ? "[]" : typeof send} ${JSON.stringify(send)}`
+    );
+  }
+  const s = send as { kind?: unknown; selector?: unknown };
+  if (s.kind !== "keyEnter" && s.kind !== "click") {
+    throw new Error(`profile file ${file} send.kind must be "keyEnter" or "click" — got ${JSON.stringify(s.kind)}`);
+  }
+  if (s.kind === "click" && (typeof s.selector !== "string" || s.selector.trim() === "")) {
+    throw new Error(`profile file ${file} send.click requires a selector string — got ${JSON.stringify(s.selector)}`);
+  }
+}
+
+/**
+ * GOAL 47 gate for the USER override seam (`--profile FILE` / UI2API_AI_SITE):
+ * validate the MERGED profile (a thin slice inherits valid builtin selectors
+ * and passes) with the same truth the packaged path applies for /registry —
+ * `selectorsAreParseable` + `isChatShapedProfile` — plus an explicit `send`
+ * shape check. Every failure names the file and the exact offending
+ * field/entry; nothing is silently dropped, nothing reaches the driver only
+ * to crash there.
+ */
+function validateOverrideFile(
+  file: string,
+  raw: Partial<ChatSiteProfile> & Record<string, unknown>,
+  merged: ChatSiteProfile
+): void {
+  // 1) typo'd keys — the silent-drop class (GOAL 47 record: "composr" → only a
+  //    late 15s×N "no composer found" timeout downstream).
+  for (const key of Object.keys(raw)) {
+    if (PROFILE_FILE_KEYS.includes(key as keyof ChatSiteProfile)) continue;
+    const known = likelyTypoOf(key);
+    if (known) {
+      throw new Error(
+        `profile file ${file} unknown key "${key}" (typo of "${known}"?) — a typo'd override key is silently dropped by the merge; fix the key name`
+      );
+    }
+  }
+  // 2) selector gate — every composer/answer entry must be a runnable CSS
+  //    selector (the exact GOAL-32 isParseableSelector check /registry runs).
+  if (!selectorsAreParseable(merged)) {
+    for (const field of ["composer", "answer"] as const) {
+      const v = (merged as unknown as Record<string, unknown>)[field];
+      if (Array.isArray(v)) {
+        for (let i = 0; i < v.length; i++) {
+          if (!isParseableSelector(v[i])) {
+            throw new Error(
+              `profile file ${file} ${field}[${i}] ${JSON.stringify(v[i])} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+            );
+          }
+        }
+      } else {
+        // Scalar / object / null instead of an array — name it as the [0] entry
+        // so the message still points at the exact offending value.
+        throw new Error(
+          `profile file ${file} ${field}[0] ${JSON.stringify(v)} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+        );
+      }
+    }
+  }
+  // 3) chat-shape gate — the driver needs a composer + an answer container to
+  //    drive; a non-chat override is refused at load, never late in the driver.
+  if (!isChatShapedProfile(merged)) {
+    const missing: string[] = [];
+    if (!Array.isArray(merged.composer) || merged.composer.length === 0) missing.push("composer");
+    if (!Array.isArray(merged.answer) || merged.answer.length === 0) missing.push("answer");
+    if (typeof merged.url !== "string" || merged.url.length === 0) missing.push("url");
+    throw new Error(
+      `profile file ${file} is not a driveable chat profile — ${missing.join(" and ")} must be non-empty (a --profile FILE override tunes a chat site; capability-only packages keep their own path)`
+    );
+  }
+  // 4) send shape — the Enter-press-fallback class.
+  validateSendShape(file, merged);
+}
+
+/**
+ * Packaged-path loader: `capabilities/<site>/profile.json` and http.ts's
+ * packaged-JSON fallback resolve PERMISSIVELY (GOAL 47 criterion 3f — the
+ * packaged/capability surface keeps its existing behavior: capability-only
+ * packages like youtube/gmail/araprat deliberately carry empty composer/answer
+ * and non-chat metadata keys, and /capability/<id> routes still build their
+ * profile from them). The GOAL-32 truth gate for PACKAGED chat surfacing stays
+ * exactly where it already lives: `isDriveableChatProfile` in
+ * defaultChatSurface()/registry.ts. Unlike resolveProfile(file), this throws
+ * on missing/corrupt files (same caller contract resolveProfile had).
+ */
+export function resolvePackagedProfileFile(file: string): ChatSiteProfile {
+  const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ChatSiteProfile> &
+    Record<string, unknown>;
+  if (!raw.id) throw new Error(`profile file ${file} must carry an "id"`);
+  return mergeProfileFile(file, raw);
 }
 
 // A profile is driver-drivable (chat-shaped) when it actually drives a chat
@@ -537,9 +726,11 @@ export function isDriveableChatProfile(p: ChatSiteProfile): boolean {
 /**
  * Resolve a packaged per-site profile.json (capabilities/<site>/profile.json)
  * robustly from ANY working directory and from an installed npm package, not
- * just from the repo root. Runtime-equivalent to resolveProfile(), which is
- * CWD-relative and breaks when the daemon is started elsewhere (or from the
- * packaged tarball). Returns null when the packaged profile is absent.
+ * just from the repo root. The packaged seam resolves PERMISSIVELY — no GOAL-47
+ * override gate (packaged chat surfacing is gated by `isDriveableChatProfile`
+ * in defaultChatSurface(), and capability-only packages legitimately carry
+ * empty composer/answer + metadata keys). Returns null when the packaged
+ * profile is absent or unreadable.
  */
 export function resolvePackagedProfile(siteId: string): ChatSiteProfile | null {
   try {
@@ -559,7 +750,7 @@ export function resolvePackagedProfile(siteId: string): ChatSiteProfile | null {
         resolve(packageRoot, "src", "capabilities", siteId, "profile.json"),
       ];
       for (const p of candidates) {
-        if (existsSync(p)) return resolveProfile(p);
+        if (existsSync(p)) return resolvePackagedProfileFile(p);
       }
     }
     return null;

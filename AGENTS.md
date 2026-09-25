@@ -307,7 +307,12 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   flag never changes the ready/working verdict (site-dependent lifetimes).
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
-  out of the repo (delete after use).
+  out of the repo (delete after use). Overrides are validated with the same
+  truth gate packaged profiles pass for /registry (parseable selectors + chat
+  shape, plus an explicit `send` shape check) — a typo'd key or wrong-typed
+  composer/answer/send entry fails LOUD at load, naming the file and the exact
+  offending field/entry (never a silent drop → late "no composer found"
+  timeout, answer-join TypeError, or Enter-press send fallback).
 - **When adding a site**: analyze (static bundles + wire) → package under
   `capabilities/<id>/` (manifest/profile/recipes/session.lock/CAPABILITIES.md +
   `metadata.json`) → builtin profile entry → runner in `src/capabilities/` →

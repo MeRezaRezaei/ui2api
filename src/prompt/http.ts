@@ -40,7 +40,7 @@ import { ChatPool } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
-import { defaultSiteId, resolveProfile, resolvePackagedProfile, type ChatSiteProfile } from "../profile/profile.js";
+import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
@@ -456,7 +456,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("kimi", profilesById);
         } catch {
-          profile = resolvePackagedProfile("kimi") ?? resolveProfile("capabilities/kimi/profile.json");
+          profile = resolvePackagedProfile("kimi") ?? resolvePackagedProfileFile("capabilities/kimi/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -485,7 +485,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("hunyuan", profilesById);
         } catch {
-          profile = resolvePackagedProfile("hunyuan") ?? resolveProfile("capabilities/hunyuan/profile.json");
+          profile = resolvePackagedProfile("hunyuan") ?? resolvePackagedProfileFile("capabilities/hunyuan/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -513,7 +513,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("venice", profilesById);
         } catch {
-          profile = resolvePackagedProfile("venice") ?? resolveProfile("capabilities/venice/profile.json");
+          profile = resolvePackagedProfile("venice") ?? resolvePackagedProfileFile("capabilities/venice/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -542,7 +542,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("deepseek", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/deepseek/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/deepseek/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -572,7 +572,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("tencent-aistudio", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/tencent-aistudio/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/tencent-aistudio/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -600,7 +600,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("claude", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/claude/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/claude/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -627,7 +627,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("chatgpt", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/chatgpt/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/chatgpt/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -654,7 +654,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("copilot", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/copilot/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/copilot/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -681,7 +681,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("huggingchat", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/huggingchat/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/huggingchat/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -710,7 +710,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("youtube", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/youtube/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/youtube/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -745,7 +745,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("gmail", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/gmail/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/gmail/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -776,7 +776,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("araprat", profilesById);
         } catch {
-          profile = resolveProfile("capabilities/araprat/profile.json");
+          profile = resolvePackagedProfileFile("capabilities/araprat/profile.json");
         }
         resolveCapabilityAccount(account, profile, dataDir);
         const shared = await pool.sharedBrowser();
@@ -806,7 +806,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("adapta", profilesById);
         } catch {
-          profile = resolvePackagedProfile("adapta") ?? resolveProfile("capabilities/adapta/profile.json");
+          profile = resolvePackagedProfile("adapta") ?? resolvePackagedProfileFile("capabilities/adapta/profile.json");
         }
         const caps = new AdaptaCapabilities(profile, { account });
         try {
@@ -835,7 +835,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("blackbox", profilesById);
         } catch {
-          profile = resolvePackagedProfile("blackbox") ?? resolveProfile("capabilities/blackbox/profile.json");
+          profile = resolvePackagedProfile("blackbox") ?? resolvePackagedProfileFile("capabilities/blackbox/profile.json");
         }
         const caps = new BlackboxCapabilities(profile, { account });
         try {
@@ -864,7 +864,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("chatglm", profilesById);
         } catch {
-          profile = resolvePackagedProfile("chatglm") ?? resolveProfile("capabilities/chatglm/profile.json");
+          profile = resolvePackagedProfile("chatglm") ?? resolvePackagedProfileFile("capabilities/chatglm/profile.json");
         }
         const caps = new ChatglmCapabilities(profile, { account });
         try {
@@ -893,7 +893,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("codex", profilesById);
         } catch {
-          profile = resolvePackagedProfile("codex") ?? resolveProfile("capabilities/codex/profile.json");
+          profile = resolvePackagedProfile("codex") ?? resolvePackagedProfileFile("capabilities/codex/profile.json");
         }
         const caps = new CodexCapabilities(profile, { account });
         try {
@@ -922,7 +922,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("conol", profilesById);
         } catch {
-          profile = resolvePackagedProfile("conol") ?? resolveProfile("capabilities/conol/profile.json");
+          profile = resolvePackagedProfile("conol") ?? resolvePackagedProfileFile("capabilities/conol/profile.json");
         }
         const caps = new ConolCapabilities(profile, { account });
         try {
@@ -951,7 +951,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("copilot-m365", profilesById);
         } catch {
-          profile = resolvePackagedProfile("copilot-m365") ?? resolveProfile("capabilities/copilot-m365/profile.json");
+          profile = resolvePackagedProfile("copilot-m365") ?? resolvePackagedProfileFile("capabilities/copilot-m365/profile.json");
         }
         const caps = new CopilotM365Capabilities(profile, { account });
         try {
@@ -980,7 +980,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("doubao", profilesById);
         } catch {
-          profile = resolvePackagedProfile("doubao") ?? resolveProfile("capabilities/doubao/profile.json");
+          profile = resolvePackagedProfile("doubao") ?? resolvePackagedProfileFile("capabilities/doubao/profile.json");
         }
         const caps = new DoubaoCapabilities(profile, { account });
         try {
@@ -1012,7 +1012,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("duckduckgo", profilesById);
         } catch {
-          profile = resolvePackagedProfile("duckduckgo") ?? resolveProfile("capabilities/duckduckgo/profile.json");
+          profile = resolvePackagedProfile("duckduckgo") ?? resolvePackagedProfileFile("capabilities/duckduckgo/profile.json");
         }
         const caps = new DuckduckgoCapabilities(profile, { account });
         try {
@@ -1041,7 +1041,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("google-ai-search", profilesById);
         } catch {
-          profile = resolvePackagedProfile("google-ai-search") ?? resolveProfile("capabilities/google-ai-search/profile.json");
+          profile = resolvePackagedProfile("google-ai-search") ?? resolvePackagedProfileFile("capabilities/google-ai-search/profile.json");
         }
         const caps = new GoogleAiSearchCapabilities(profile, { account });
         try {
@@ -1070,7 +1070,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("grok", profilesById);
         } catch {
-          profile = resolvePackagedProfile("grok") ?? resolveProfile("capabilities/grok/profile.json");
+          profile = resolvePackagedProfile("grok") ?? resolvePackagedProfileFile("capabilities/grok/profile.json");
         }
         const caps = new GrokCapabilities(profile, { account });
         try {
@@ -1099,7 +1099,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("inner-ai", profilesById);
         } catch {
-          profile = resolvePackagedProfile("inner-ai") ?? resolveProfile("capabilities/inner-ai/profile.json");
+          profile = resolvePackagedProfile("inner-ai") ?? resolvePackagedProfileFile("capabilities/inner-ai/profile.json");
         }
         const caps = new InnerAiCapabilities(profile, { account });
         try {
@@ -1128,7 +1128,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("manus", profilesById);
         } catch {
-          profile = resolvePackagedProfile("manus") ?? resolveProfile("capabilities/manus/profile.json");
+          profile = resolvePackagedProfile("manus") ?? resolvePackagedProfileFile("capabilities/manus/profile.json");
         }
         const caps = new ManusCapabilities(profile, { account });
         try {
@@ -1157,7 +1157,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("notion", profilesById);
         } catch {
-          profile = resolvePackagedProfile("notion") ?? resolveProfile("capabilities/notion/profile.json");
+          profile = resolvePackagedProfile("notion") ?? resolvePackagedProfileFile("capabilities/notion/profile.json");
         }
         const caps = new NotionCapabilities(profile, { account });
         try {
@@ -1186,7 +1186,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("perplexity", profilesById);
         } catch {
-          profile = resolvePackagedProfile("perplexity") ?? resolveProfile("capabilities/perplexity/profile.json");
+          profile = resolvePackagedProfile("perplexity") ?? resolvePackagedProfileFile("capabilities/perplexity/profile.json");
         }
         const caps = new PerplexityCapabilities(profile, { account });
         try {
@@ -1215,7 +1215,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("poe", profilesById);
         } catch {
-          profile = resolvePackagedProfile("poe") ?? resolveProfile("capabilities/poe/profile.json");
+          profile = resolvePackagedProfile("poe") ?? resolvePackagedProfileFile("capabilities/poe/profile.json");
         }
         const caps = new PoeCapabilities(profile, { account });
         try {
@@ -1244,7 +1244,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("t3chat", profilesById);
         } catch {
-          profile = resolvePackagedProfile("t3chat") ?? resolveProfile("capabilities/t3chat/profile.json");
+          profile = resolvePackagedProfile("t3chat") ?? resolvePackagedProfileFile("capabilities/t3chat/profile.json");
         }
         const caps = new T3chatCapabilities(profile, { account });
         try {
@@ -1273,7 +1273,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("tinycms", profilesById);
         } catch {
-          profile = resolvePackagedProfile("tinycms") ?? resolveProfile("capabilities/tinycms/profile.json");
+          profile = resolvePackagedProfile("tinycms") ?? resolvePackagedProfileFile("capabilities/tinycms/profile.json");
         }
         const caps = new TinycmsCapabilities(profile, { account });
         try {
@@ -1302,7 +1302,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("v0", profilesById);
         } catch {
-          profile = resolvePackagedProfile("v0") ?? resolveProfile("capabilities/v0/profile.json");
+          profile = resolvePackagedProfile("v0") ?? resolvePackagedProfileFile("capabilities/v0/profile.json");
         }
         const caps = new V0Capabilities(profile, { account });
         try {
@@ -1331,7 +1331,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("xiaomimimo", profilesById);
         } catch {
-          profile = resolvePackagedProfile("xiaomimimo") ?? resolveProfile("capabilities/xiaomimimo/profile.json");
+          profile = resolvePackagedProfile("xiaomimimo") ?? resolvePackagedProfileFile("capabilities/xiaomimimo/profile.json");
         }
         const caps = new XiaomimimoCapabilities(profile, { account });
         try {
@@ -1360,7 +1360,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           profile = idFrom("zenmux", profilesById);
         } catch {
-          profile = resolvePackagedProfile("zenmux") ?? resolveProfile("capabilities/zenmux/profile.json");
+          profile = resolvePackagedProfile("zenmux") ?? resolvePackagedProfileFile("capabilities/zenmux/profile.json");
         }
         const caps = new ZenmuxCapabilities(profile, { account });
         try {
