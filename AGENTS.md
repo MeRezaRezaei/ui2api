@@ -359,7 +359,15 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   registry BUILD is crash-proofed — a malformed installed manifest capability
   entry (null / primitive / id-less) is filtered out per-entry
   (`validManifestCapability`) instead of TypeErro3ing the whole /registry for
-  every consumer (GOAL 61). Every write
+  every consumer (GOAL 61). And the packaged-profile load seam enforces id
+  AGREEMENT (GOAL 64): a `capabilities/<id>/profile.json` whose `id` mismatches
+  the package it is resolved as refuses LOUD naming the file + both ids
+  (`resolvePackagedProfileFile`'s opt-in `expectedId`, wired into
+  `resolvePackagedProfile` + the `resolveProfile` packaged branch + all 32
+  `/capability` fallbacks) — never a silent merge of the WRONG builtin base
+  (`BUILTIN_PROFILES[raw.id]`) that self-identifies as the wrong site;
+  /registry + chat surface exclude the mismatch like any other malformed
+  install (GOAL 48), /capability + CLI refuse it. Every write
   seam still runs its own truth gate (GOAL 49/50) — the read seams refuse the
   same malformed classes at serve/load time.
 - **Account-INDEX collisions are refused too** (GOAL 50): `saveAccountSnapshot`
