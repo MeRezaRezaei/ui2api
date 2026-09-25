@@ -169,6 +169,13 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     `kimi_file_upload` (`label.toolkit-item` wrapping hidden
     `input[type="file"]` — use `setInputFiles`, filechooser never fires).
   - `gemini` (gemini.google.com) — verified earlier; do not re-capture.
+    **GOAL 53 (2026-09-25)**: `gemini_file_upload` WIRED — file/image attach via the
+    composer's real hidden `input[type='file']` (kimi/duckduckgo live-verified
+    setInputFiles pattern; the site's own JS uploads, nothing synthetic). Honest
+    unverified-candidate: all stored gemini sources replay signed-out (Google auth
+    browser-bound) — `ok:true` = input accepted, NOT a live upload claim; verify the
+    chip from the user's own signed-in Chrome (UI2API_ATTACH_PORT) before treating
+    upload as verified.
 - **Suite gates (2026-09-21, fold #11)**: full suite now measured **418/418**.
   The two wigolo-engine infra gates (chromium warmup on ubuntu26.04-x64) CLOSED by
   aligning the wigolo clone's playwright 1.60→1.61: build 1228 is already present
