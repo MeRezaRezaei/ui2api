@@ -8,7 +8,7 @@ import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
 import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth } from "./runtime/session-store.js";
-import { buildPackage } from "./registry/package.js";
+import { buildPackage, packageCommandRefusal } from "./registry/package.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
 import { pushToMirror } from "./hub/mirror.js";
@@ -297,10 +297,11 @@ async function cmdServe(host: string, flags: Flags): Promise<void> {
 
 async function cmdPackage(host: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
-  if (!flags.author || !flags.use)
-    throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
-  const dir = buildPackage(host, root, root, { author: flags.author, use: flags.use });
-  console.log(`Packaged ${host} -> ${dir}`);
+  // GOAL 66: the standalone packaging command refuses LOUD — buildPackage
+  // writes the DEAD metadata+action-map pair into a dir nothing serves, and a
+  // capture-level action-map cannot produce a modern capability package.
+  // Nothing is written; the modern path is named (analyze → capabilities/<id>/).
+  throw new Error(packageCommandRefusal(host, root));
 }
 
 async function cmdInstallCatalog(flags: Flags): Promise<void> {
