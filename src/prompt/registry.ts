@@ -284,9 +284,16 @@ export type ChatSurfaceStatus = "verified" | "unverified-candidate" | "dormant" 
  *  conservative "unverified-candidate" (nothing beyond a packaged profile is
  *  ever asserted). */
 export function chatSurfaceStatus(siteId: string): ChatSurfaceStatus {
-  if (listProfiles().some((p) => p.id === siteId)) return "builtin";
-  const status = packageStatusOf(siteId);
-  return status === "unknown" ? "unverified-candidate" : status;
+  // GOAL 92: a builtin profile that ALSO has a packaged verified/dormant/dead-end
+  // record must report THAT status, not the bare "builtin" — otherwise a
+  // /registry consumer cannot tell "builtin + live-verified" from "builtin +
+  // never tried", and the shipped status column cannot be pinned to the machine
+  // truth. "builtin" is only the fallback for a profile with no package record.
+  const packaged = packageStatusOf(siteId);
+  if (listProfiles().some((p) => p.id === siteId)) {
+    return packaged === "unknown" ? "builtin" : packaged;
+  }
+  return packaged === "unknown" ? "unverified-candidate" : packaged;
 }
 
 /** The manifest/metadata status of an installed package: "dormant", "dead-end"
