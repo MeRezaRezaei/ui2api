@@ -336,7 +336,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   a named verdict and NOTHING is written (the write loop never runs, the dir
   never exists) — a broken package can no longer install "successfully" and
   be refused only later by the read/serve seams; same principle as the GOAL
-  49/50 session-write gate, applied to packages.
+  49/50 session-write gate, applied to packages. **Hub publishes are
+  write-gated too** (GOAL 69): `PUT /api/packages` (`src/hub/api.ts`) + the
+  uplink cache seam refuse with a named verdict and NOTHING written any module
+  the runtime deterministically cannot serve (`validatePublishedModule`,
+  `src/hub/module-gate.ts` — mirrors the runtime's own JSON-actions-vs-JS
+  dispatch: empty/omitted module, json-without-actions, schema-invalid
+  action-map, no-export JS text), so `{ok:true}` is never answered for an
+  artifact that dies on first serve; a malformed publish body is a named 400,
+  never a process crash (readJson's parse is no longer inside the EventEmitter
+  callback), and a broken remote module is never cached by the uplink seam
+  (honest 404 instead of cache-then-crash).
 - **Restriction walls are reported, never blind-empty** (GOAL 54 + GOAL 55): every
   builtin chat profile declares `capability.restrictionMarkers` (11/11 — gemini/kimi/
   deepseek predated the gate; chatgpt/claude/copilot/perplexity/huggingchat/
