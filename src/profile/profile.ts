@@ -420,12 +420,18 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
     return merged;
   }
   // Installed chat-shaped package profile (capabilities/<site>/profile.json):
-  // same canonical source /capability and /registry serve. Only chat-shaped
+  // same canonical source /capability and /registry serve. Loaded through the
+  // SAME gated loader the /capability fallback seam uses (GOAL 48) — a
+  // malformed installed profile fails LOUD here, naming the file + the exact
+  // offending field/entry, never a late runner TypeError. Only chat-shaped
   // packages resolve — non-chat capability surfaces (youtube, araprat, gmail,
   // …) keep the "unknown AI site" error so a prompt is never aimed at a site
   // the driver cannot drive.
-  const packaged = resolvePackagedProfile(value);
-  if (packaged && isChatShapedProfile(packaged)) return packaged;
+  const packagedFile = packagedProfilePath(value);
+  if (packagedFile) {
+    const packaged = resolvePackagedProfileFile(packagedFile);
+    if (isChatShapedProfile(packaged)) return packaged;
+  }
   throw new Error(
     `unknown AI site "${value}" — expected one of ${PROFILE_IDS.join(", ")} or a path to a *.json profile`
   );
@@ -601,21 +607,126 @@ function validateOverrideFile(
 }
 
 /**
+ * GOAL 48 packaged RUNNING-seam gate: the installed packaged profile
+ * (capabilities/<site>/profile.json) that the http.ts /capability fallbacks
+ * and the CLI packaged branch actually RUN must be exactly what the driver
+ * can run. Wrong-typed `composer`/`answer` (string/number/boolean scalars,
+ * object values that are not selector lists), wrong-typed `send`, and
+ * per-entry unparseable selectors fail LOUD at load, naming the file + the
+ * exact offending field/entry — never a late duckduckgo-style `answer.join`
+ * / `composer[0]` TypeError. The 33-profile audit's well-typed forms pass
+ * (composer/answer may be absent, null, [] or a host-keyed object of
+ * selector arrays — chatglm; send may be absent — doubao — or null —
+ * tinycms): only genuinely malformed shapes are refused.
+ */
+export function validatePackagedProfileShape(file: string, p: ChatSiteProfile): void {
+  for (const field of ["composer", "answer"] as const) {
+    const v = (p as unknown as Record<string, unknown>)[field];
+    if (v === undefined || v === null) continue; // absent / null (adapta) — pass
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        if (!isParseableSelector(v[i])) {
+          throw new Error(
+            `profile file ${file} ${field}[${i}] ${JSON.stringify(v[i])} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+          );
+        }
+      }
+      continue;
+    }
+    if (typeof v === "object") {
+      // Host-keyed selector map (chatglm): each value is a selector or
+      // selector list — every entry must be runnable.
+      for (const [host, sel] of Object.entries(v as Record<string, unknown>)) {
+        if (Array.isArray(sel)) {
+          for (let i = 0; i < sel.length; i++) {
+            if (!isParseableSelector(sel[i])) {
+              throw new Error(
+                `profile file ${file} ${field}.${host}[${i}] ${JSON.stringify(sel[i])} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+              );
+            }
+          }
+        } else if (typeof sel === "string") {
+          if (!isParseableSelector(sel)) {
+            throw new Error(
+              `profile file ${file} ${field}.${host}[0] ${JSON.stringify(sel)} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+            );
+          }
+        } else {
+          throw new Error(
+            `profile file ${file} ${field}.${host}[0] ${JSON.stringify(sel)} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+          );
+        }
+      }
+      continue;
+    }
+    // Scalar (string/number/boolean) in place of the selector list — the
+    // GOAL-47 "[0] entry" naming, same message shape.
+    throw new Error(
+      `profile file ${file} ${field}[0] ${JSON.stringify(v)} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+    );
+  }
+  // send: a SendStrategy object, or absent/null (doubao / tinycms). Anything
+  // else — string "keyEnter", [], numbers — refuses LOUD, never a silent
+  // Enter-press fallback.
+  const send = (p as unknown as Record<string, unknown>).send;
+  if (send === undefined || send === null) return;
+  validateSendShape(file, p);
+}
+
+/**
+ * Locate `<root>/capabilities/<siteId>/profile.json` (repo-root and
+ * src-layout candidates, robust from ANY working directory and from an
+ * installed npm package) without swallowing — shared by the permissive
+ * /registry loader and the gated /capability + CLI packaged-branch loaders.
+ */
+function packagedProfilePath(siteId: string): string | null {
+  try {
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    // Module sits at <root>/src/profile/ or <root>/dist/profile/ — two levels
+    // up lands on the package root in both layouts (also covers symlinked
+    // installs via realpath matching).
+    const relRoots = new Set<string>();
+    for (const up of [2, 3]) {
+      let p = here;
+      for (let i = 0; i < up; i++) p = dirname(p);
+      relRoots.add(p);
+    }
+    for (const packageRoot of relRoots) {
+      const candidates = [
+        resolve(packageRoot, "capabilities", siteId, "profile.json"),
+        resolve(packageRoot, "src", "capabilities", siteId, "profile.json"),
+      ];
+      for (const p of candidates) {
+        if (existsSync(p)) return p;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Packaged-path loader: `capabilities/<site>/profile.json` and http.ts's
- * packaged-JSON fallback resolve PERMISSIVELY (GOAL 47 criterion 3f — the
- * packaged/capability surface keeps its existing behavior: capability-only
- * packages like youtube/gmail/araprat deliberately carry empty composer/answer
- * and non-chat metadata keys, and /capability/<id> routes still build their
- * profile from them). The GOAL-32 truth gate for PACKAGED chat surfacing stays
- * exactly where it already lives: `isDriveableChatProfile` in
- * defaultChatSurface()/registry.ts. Unlike resolveProfile(file), this throws
- * on missing/corrupt files (same caller contract resolveProfile had).
+ * packaged-JSON fallback resolve through the GOAL 48 RUNNING-seam gate
+ * (`validatePackagedProfileShape`) — a malformed installed profile fails LOUD
+ * at load, naming the file + the exact offending field/entry, never a late
+ * runner `answer.join`/`composer[0]` TypeError. The 33-profile audit's
+ * well-typed forms pass (absent/null/empty/host-keyed-object composer/answer,
+ * absent/null send) — capability-only packages like youtube/gmail/araprat
+ * deliberately carry empty composer/answer and keep resolving, and /capability
+ * routes still build their profile from them. Unlike resolveProfile(file),
+ * this throws on missing/corrupt files (same caller contract resolveProfile
+ * had).
  */
 export function resolvePackagedProfileFile(file: string): ChatSiteProfile {
   const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ChatSiteProfile> &
     Record<string, unknown>;
   if (!raw.id) throw new Error(`profile file ${file} must carry an "id"`);
-  return mergeProfileFile(file, raw);
+  const merged = mergeProfileFile(file, raw);
+  // GOAL 48 packaged running-seam gate (see validatePackagedProfileShape).
+  validatePackagedProfileShape(file, merged);
+  return merged;
 }
 
 // A profile is driver-drivable (chat-shaped) when it actually drives a chat
@@ -726,35 +837,20 @@ export function isDriveableChatProfile(p: ChatSiteProfile): boolean {
 /**
  * Resolve a packaged per-site profile.json (capabilities/<site>/profile.json)
  * robustly from ANY working directory and from an installed npm package, not
- * just from the repo root. The packaged seam resolves PERMISSIVELY — no GOAL-47
- * override gate (packaged chat surfacing is gated by `isDriveableChatProfile`
- * in defaultChatSurface(), and capability-only packages legitimately carry
- * empty composer/answer + metadata keys). Returns null when the packaged
- * profile is absent or unreadable.
+ * just from the repo root. The /registry + defaultChatSurface path resolves
+ * through the GOAL 48 gate and swallows the refusal: a malformed installed
+ * profile is excluded from /registry exactly like an absent one (GOAL 48 —
+ * a malformed package must never surface as a provider; the /capability
+ * fallback seam + CLI packaged branch load the SAME file through the gated
+ * loader and fail LOUD instead). Returns null when the packaged profile is
+ * absent, unreadable, or fails the shape gate.
  */
 export function resolvePackagedProfile(siteId: string): ChatSiteProfile | null {
   try {
-    const here = fileURLToPath(new URL(".", import.meta.url));
-    // Module sits at <root>/src/profile/ or <root>/dist/profile/ — two levels
-    // up lands on the package root in both layouts (also covers symlinked
-    // installs via realpath matching).
-    const relRoots = new Set<string>();
-    for (const up of [2, 3]) {
-      let p = here;
-      for (let i = 0; i < up; i++) p = dirname(p);
-      relRoots.add(p);
-    }
-    for (const packageRoot of relRoots) {
-      const candidates = [
-        resolve(packageRoot, "capabilities", siteId, "profile.json"),
-        resolve(packageRoot, "src", "capabilities", siteId, "profile.json"),
-      ];
-      for (const p of candidates) {
-        if (existsSync(p)) return resolvePackagedProfileFile(p);
-      }
-    }
-    return null;
+    const file = packagedProfilePath(siteId);
+    return file ? resolvePackagedProfileFile(file) : null;
   } catch {
+    // Absent OR malformed — same exclusion for /registry + chat surface.
     return null;
   }
 }
