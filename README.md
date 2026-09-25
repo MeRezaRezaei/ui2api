@@ -70,7 +70,11 @@ returns the result — no brittle screen-scraping.
   different identity is likewise refused (`slug-collision`) instead of silently
   overwriting an existing account — and account reads are exact too
   (`resolveStoredAccount`): a refused alias 400s with the named available
-  slugs, never silently driving the survivor's session. See
+  slugs, never silently driving the survivor's session. The generated/plugin
+  consumer surfaces can pick the account too (GOAL 52): the generated PHP
+  client's `chat()`/`capability()` forward an optional `$account`, generated
+  ACP/MCP servers read `UI2API_ACCOUNT`, and `ui2api plugin serve --account`
+  selects which vault account drives the plugin page. See
   [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
 - **Capability reflection** — learn what a specific account can actually do on a
   chat site (plan tier, available models, restriction walls) from what the site

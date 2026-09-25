@@ -334,6 +334,18 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   [<slugs>]` from `resolveCapabilityAccount` (`src/prompt/http.ts`) and
   `GET /capabilities?site=&account=` — it never silently drives the survivor's
   session (the write gate and the read gate agree on the same key space).
+- **Consumer surfaces can pick an account too** (GOAL 52): the daemon wire was
+  never the only entry — the generated/plugin consumers now carry the same
+  identity-keyed selector: the generated PHP client's
+  `chat(..., ?string $account = null)` / `capability(..., ?string $account = null)`
+  forward `account` into the /v1 and /capability payloads (only when set);
+  generated ACP/MCP servers read `UI2API_ACCOUNT` (+ `UI2API_DATA_DIR`) into
+  `BrowserSession`, whose `resolveSessionAccountSnapshot(dataDir, host, account)`
+  resolves EXACTLY (GOAL 51 semantics — no first-account, no folding) and throws
+  a NAMED error when the requested account is missing or snapshot-less;
+  `ui2api plugin serve <module> --account SLUG|EMAIL` selects which vault account
+  drives the plugin page. One user, several accounts — pick the one that drives
+  the request everywhere.
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use). Overrides are validated with the same
