@@ -308,14 +308,18 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **863 tests / 44 suites** (862 pass + 1 env skip) — dated fold-log counts
-  (418/418 at fold #11, 430/430 at fold #17f) are history; this is the
-  current number (re-measured 2026-09-25, GOALs 83-87 flip). GOALs 88-90 add
-  three files (attach-gate 26 assertions, vault-integrity 9, lang-php 8
-  blocks) whose per-file counts are verified green; the FULL total is
-  deliberately NOT restated because the aggregate run could not complete on a
-  box concurrently running two sibling projects' phpunit suites — restating a
-  number I did not measure is exactly the fabrication this file forbids.
+  **900 tests / 48 suites** (899 pass + 1 env skip) — dated fold-log counts
+  (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87) are
+  history; this is the current number, genuinely re-measured 2026-09-25
+  (`npm run test:unit`, EXIT=0, after the box's foreign phpunit load
+  cleared). GOALs 88-90 + 91 files: attach-gate 26, vault-integrity 9,
+  error-contract 2 (converted to REAL counted subtests — its assertions
+  used to gate while reporting `tests 0`), lang-php 8 describe-bodies.
+  KNOWN COUNTED-TEST WART: lang-php reports `tests 0 / suites 8` — its 8
+  blocks DO gate (an assertion throw fails the run; verified when
+  error-contract had the same shape) but are invisible to the 900 total;
+  the error-contract fix (wrap each body in a named sub-test) is the proven
+  pattern to copy. It is flagged, not silently ignored.
   `test:unit` is now `--test-concurrency=4`: unbounded 57-way parallelism let
   each of 16 workers spawn its own esbuild/tsx subprocess, and the box hit
   `ERR_WORKER_INIT_FAILED`/`EAGAIN`, which surfaced as ~12 spurious file-level
