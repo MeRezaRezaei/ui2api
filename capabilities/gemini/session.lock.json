@@ -4,14 +4,32 @@
   "status": "locked",
   "snapshot": {
     "path": "data/sessions/gemini.google.com/merezarezaei@gmail.com/state.json",
-    "legacyPath": "data/gemini.google.com/.session/state.json",
-    "sha256Prefix": "2d2095c4b6369d9f",
-    "capturedAt": "2026-09-16T18:21:16.034Z",
-    "cookies": 23,
+    "sha256Prefix": "f4f8a5473a9ddbe5",
+    "capturedAt": "2026-09-22T12:56:16.458Z",
+    "cookies": 2,
     "localStorageKeys": ["BARD_EMBED_CHAT_STORAGE_KEY_V2", "GqGm3b", "_gcl_ls", "brd_dctG"],
-    "evidence": "3 live chat rounds completed with this snapshot (chat 1dc93d7438476596a / 95f64c582ebffca8) + one-shot prompt re-verified 2026-09-21 (answered PONG via data/sessions vault account)",
-    "audit2026_09_21": "lock.path updated from M-era flat path to the vault account the runtime actually uses (G1 in docs/AUDIT.md); legacyPath kept for history"
+    "evidence": "2243-byte vault snapshot, 2 cookies (SEARCH_SAMESITE, SOCS — consent/analytics, NO Google auth cookie) + 4 localStorage keys; read-back verified by 'profile add-all' (source=import from the user's real Chrome profile). HONEST LIMIT: this snapshot does NOT authenticate Gemini — Google auth cookies are browser-bound (app-bound encryption) and every stored gemini source replays signed-out, so live chat rides the legacy capture below or the user's own attached Chrome (UI2API_ATTACH_PORT), never this file alone.",
+    "audit2026_09_21": "lock.path updated from M-era flat path to the vault account the runtime actually uses (G1 in docs/AUDIT.md); legacyPath kept for history",
+    "audit2026_09_25": "GOAL 86: sha256Prefix + cookies RE-COMPUTED against the declared path above. The previous values (2d2095c4b6369d9f / 23) were measured on the LEGACY flat snapshot — G1 swapped the path in 2026-09-21 without recomputing, leaving the claim false on both checkable fields. The legacy measurement is preserved verbatim in legacySnapshot below (its real sha256 IS 2d2095c4b6369d9f…, its real cookie count IS 23). Nothing was deleted and no hash was invented; test/session-lock-honesty.test.ts now verifies both fields on every lock that declares a snapshot.",
+    "legacyPath": "data/gemini.google.com/.session/state.json",
+    "legacySnapshot": {
+      "sha256Prefix": "2d2095c4b6369d9f",
+      "cookies": 23,
+      "bytes": 8944,
+      "capturedAt": "2026-09-14T17:27:40.512Z",
+      "cookieNames": "APISID, HSID, SAPISID, SEARCH_SAMESITE, SID, SSID, __Secure-1PAPISID, __Secure-1PSID, __Secure-3PAPISID, __Secure-3PSID, COMPASS, _ga, _gcl_au, AEC, _ga_WC57KJ50ZZ, NID, __Secure-1PSIDTS, __Secure-3PSIDTS, SIDCC, __Secure-1PSIDCC, __Secure-3ENID, __Secure-STRP",
+      "note": "The M-era flat capture the 3 live chat rounds ran on (chat 1dc93d7438476596a / 95f64c582ebffca8, proof PASS). Carries real Google auth cookies, but they are browser-bound, so it too replays signed-out in a fresh ephemeral context — the live round-trips were run from the user's own signed-in Chrome. Kept for history + honest attribution of the old numbers; the runtime resolves the vault account first (GOAL 51 exact account ladder)."
+    },
+    "otherVaultAccounts": {
+      "note": "A second imported account exists on this box with its own measured snapshot; neither carries a Google auth cookie. 'POST /prompt {\"account\":…}' / 'POST /capability/gemini' select which one drives the request (GOAL 8/51).",
+      "osbulk": {
+        "path": "data/sessions/gemini.google.com/osbulk/state.json",
+        "sha256Prefix": "42e98b5e895c9538",
+        "cookies": 2,
+        "capturedAt": "2026-09-22T12:46:12.526Z"
+      }
+    }
   },
-  "note": "This package installs and runs from the built-in gemini profile + this locked snapshot. Both the ChatDriver path (chat) and the batchexecute path (conversation list) inject it into the fresh incognito context.",
+  "note": "This package installs and runs from the built-in gemini profile + the locked vault snapshot. Both the ChatDriver path (chat) and the batchexecute path (conversation list) inject it into the fresh incognito context. Honesty note (GOAL 86): the two CHECKABLE fields of this lock (sha256Prefix, cookies) are verified against the declared snapshot by test/session-lock-honesty.test.ts and by the 'session-lock' verdict in `ui2api requirements`; localStorageKeys is a deliberate NAMED SAMPLE (4 of the snapshot's 4 keys), never gated as a count.",
   "captureCommand": "ui2api profile capture \"https://gemini.google.com\" --login"
 }

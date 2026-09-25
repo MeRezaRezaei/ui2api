@@ -16,6 +16,11 @@
 //     window/profile/renderer starts); the only network it touches is the
 //     optional UI2API_ATTACH_PORT probe, a short HTTP GET against an
 //     already-running Chrome's CDP /json/version endpoint;
+//   - the GOAL 86 session-lock check is fs-ONLY (read the committed
+//     capabilities/<site>/session.lock.json + the snapshot it declares, hash it,
+//     count its cookies) and is joined to the vault lane below: a claim that
+//     was MEASURED and is false is not-ready; a claim that cannot be measured
+//     here is a NAMED skip, never a pass;
 //   - verdict vocabulary is the verbatim's own: ready / working / on-hold /
 //     not-ready.
 import { execFileSync } from "node:child_process";
@@ -31,6 +36,7 @@ import {
   type DisplayInfo,
 } from "./xhost-capture.js";
 import { listAccounts, loadSnapshot, snapshotPath, type StoredAccount } from "./session-store.js";
+import { sessionLockResultFor, verifyCapabilitySessionLocks, type SessionLockResult } from "./session-lock.js";
 import {
   buildRegistryPackages,
   chatSurfaceStatus,
@@ -95,6 +101,13 @@ export interface PackageRequirements extends RequirementPackage {
   /** Named reasons for the verdict (empty when ready). */
   reasons: string[];
   vault: VaultResult;
+  /** GOAL 86: the committed session.lock.json claim measured against the
+   *  snapshot it declares. `fail` = a claim that was CHECKED and disagreed
+   *  (a false readiness claim — never reported as ready/working);
+   *  `skip` = a claim that could not be checked here, with the NAMED reason
+   *  (the vault data/ is gitignored, so a missing snapshot is unverifiable,
+   *  not a pass). Never a verdict no real check can stand behind. */
+  sessionLock: SessionLockResult;
 }
 
 export interface RequirementsReport {
@@ -538,20 +551,30 @@ export function resolveVault(pkg: RequirementPackage, deps: RequirementsDeps): V
 /**
  * Pure verdict derivation — jointly falsifiable in tests:
  *   not-ready: dormant/dead-end (GOAL 32 honest exclusion), missing vault
- *              session (never captured), or a check that cannot run (no host);
+ *              session (never captured), a check that cannot run (no host), or
+ *              a session.lock claim that was MEASURED and is FALSE (GOAL 86);
  *   on-hold:   a named OS check failed;
  *   working:   all OS checks pass + vault present + a real recorded live
  *              round-trip (metadata.verified — never claimed otherwise);
  *   ready:     all OS checks pass + vault present + no recorded round-trip
  *              (driveable now, honestly unverified).
+ *
+ * `sessionLock` is OPTIONAL so the pure verdict table stays callable without a
+ * lock scan; when omitted the claim is reported as an unevaluated skip (never a
+ * pass). An UNVERIFIABLE lock (snapshot absent because data/ is gitignored) is
+ * a skip and never changes the verdict — only a measured mismatch does.
  */
 export function packageVerdict(
   pkg: RequirementPackage,
   os: { node: string; checks: RequirementsCheck[] },
   vault: VaultResult,
-  verified: RegistryVerified | false
+  verified: RegistryVerified | false,
+  sessionLock: SessionLockResult = {
+    status: "skip",
+    reason: "session-lock claim not evaluated (no lock scan supplied)",
+  }
 ): PackageRequirements {
-  const base: PackageRequirements = { ...pkg, verdict: "ready", reasons: [], vault };
+  const base: PackageRequirements = { ...pkg, verdict: "ready", reasons: [], vault, sessionLock };
   if (pkg.siteStatus === "dormant") {
     return { ...base, verdict: "not-ready", reasons: ["dormant (metadata.json) — parked origin; excluded from the chat surface until live-verified"] };
   }
@@ -567,6 +590,18 @@ export function packageVerdict(
   }
   if (vault.status === "fail") {
     return { ...base, verdict: "not-ready", reasons: [vault.reason ?? "no stored session"] };
+  }
+  // GOAL 86: a session.lock claim that was MEASURED against its snapshot and
+  // disagreed is a FALSE readiness claim — not-ready with the named mismatch
+  // (sha256 / cookie count + the measured values). Checked AFTER the vault
+  // probe so the root cause ("no stored session") is reported first, and
+  // BEFORE the `working` branch so a lying lock can never be called working.
+  if (sessionLock.status === "fail") {
+    return {
+      ...base,
+      verdict: "not-ready",
+      reasons: [...base.reasons, sessionLock.reason ?? "session-lock claim is false"],
+    };
   }
   if (verified && typeof verified === "object" && typeof verified.since === "string") {
     return {
@@ -612,15 +647,24 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
 export async function checkRequirements(opts: { deps?: Partial<RequirementsDeps> } = {}): Promise<RequirementsReport> {
   const deps = defaultRequirementsDeps(opts.deps ?? {});
   const os = await runOsChecks(deps);
+  // GOAL 86: ONE fs-only pass over the committed session locks (sha256 + cookie
+  // count vs the snapshot each lock declares). No browser, no network, no
+  // writes. Dormant/dead-end packages are never probed (same posture as the
+  // vault). An unverifiable lock (snapshot not on this box) is a NAMED skip, so
+  // the verdict depends only on a claim that was really measured.
+  const lockReport = verifyCapabilitySessionLocks();
   const packages = deps.packages().map((pkg) => {
     // Dormant/dead-end (GOAL 32 exclusions) are decided WITHOUT a vault probe
     // — they are not-ready regardless, and we never touch the session store
     // for a package the chat surface already excludes.
-    const vault =
-      pkg.siteStatus === "dormant" || pkg.siteStatus === "dead-end"
-        ? { status: "skip" as const, reason: "dormant/dead-end package — verdict decided without a vault probe" }
-        : resolveVault(pkg, deps);
-    return packageVerdict(pkg, os, vault, deps.registryVerified(pkg.id));
+    const excluded = pkg.siteStatus === "dormant" || pkg.siteStatus === "dead-end";
+    const vault = excluded
+      ? { status: "skip" as const, reason: "dormant/dead-end package — verdict decided without a vault probe" }
+      : resolveVault(pkg, deps);
+    const sessionLock: SessionLockResult = excluded
+      ? { status: "skip", reason: "dormant/dead-end package — session-lock claim not probed" }
+      : sessionLockResultFor(pkg.id, lockReport);
+    return packageVerdict(pkg, os, vault, deps.registryVerified(pkg.id), sessionLock);
   });
   const summary: Record<Verdict, number> = { ready: 0, working: 0, "on-hold": 0, "not-ready": 0 };
   for (const p of packages) summary[p.verdict]++;
