@@ -299,6 +299,29 @@ Wire it into an agent the same way as any generated server:
 `npx tsx src/cli.ts plugin serve src/plugins/ai-web.ts --base-url https://gemini.google.com` exposes `send_prompt`, `new_chat`, `read_last_response` and `ai_status` over MCP.
 Consumer-side live proofs — a fresh OpenAI-compatible client streaming `POST /v1/chat/completions` (`stream:true` → real DOM-read SSE, deepseek→"418", kimi→"419") and an external MCP client invoking `deepseek_list_conversations` to `ok:true` over `plugin serve` (GOAL 17, 2026-09-23) — with copy-paste snippets, in **docs/ONBOARDING.md §11**.
 
+## Error contract — the named failures
+
+The daemon answers failures as `{"error": {"code": "...", "message": "..."}}`
+(plus `type` and `param` on the `/v1` surface). Every code below is emitted by
+the daemon today and is what a client should branch on — the `message` is prose
+and may change; the `code` is the contract. This list is machine-pinned against
+the source (a code that ships undocumented, or a doc entry with no code behind
+it, fails the suite), so it cannot silently rot.
+
+| status | `code` | when you get it | what to do |
+| --- | --- | --- | --- |
+| 404 | `not_found` | unknown endpoint, or a model id `GET /v1/models` does not list (a refused/dormant package) | list `GET /v1/models`; do not retry — the id is not servable |
+| 404 | `unknown_model` | the `model` is not a servable chat id (capability-only, dormant, or url-less package) | list `GET /v1/models`; do not retry — the id carries no chat surface |
+| 503 | `pool_saturated` | every warm browser slot is busy | retry with backoff, or raise `UI2API_POOL_MIN` |
+| 503 | `pool_queue_timeout` | the request waited in the pool queue longer than the queue deadline | retry later; sustained means the pool is undersized |
+| 503 | `pool_closed` | the pool is closed (daemon shutting down) | not retryable on this instance; fail over or restart |
+| 504 | `request_timeout` | the browser work outlived the daemon's aggregate deadline | raise `UI2API_REQUEST_TIMEOUT_MS`, then retry |
+
+`POST /capability/<site>` and `POST /prompt` answer the same
+`{"error": {"code", "message"}}` shape. The generated PHP client raises
+`Ui2apiException` for all of them, carrying `errorCode` / `errorMessage` /
+`status`, so a PHP consumer branches on the same codes.
+
 ## How it works
 
 ```
