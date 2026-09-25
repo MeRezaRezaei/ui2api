@@ -349,6 +349,20 @@ export function defaultChatProfiles(): ChatSiteProfile[] {
 }
 
 /** Build the registry 'packages' array from the installed capability packages. */
+/**
+ * GOAL 61: crash-proofing filter for manifest capability entries. A malformed
+ * installed manifest (capabilities entry that is null / primitive / missing
+ * its string `id`) must NEVER take down the whole /registry build — the read
+ * seams refuse malformed storage gracefully (GOAL 58/59/60), and this is the
+ * registry-build twin. Malformed entries are EXCLUDED (never advertised, never
+ * crash); well-formed entries pass through untouched.
+ */
+export function validManifestCapability(c: unknown): c is ManifestCapability & { id: string } {
+  if (typeof c !== "object" || c === null || Array.isArray(c)) return false;
+  const id = (c as { id?: unknown }).id;
+  return typeof id === "string" && id.trim() !== "";
+}
+
 export function buildRegistryPackages(): RegistryPackage[] {
   const ids = listInstalledPackageIds();
   const dataDir = resolveDataDir();
@@ -388,7 +402,9 @@ export function buildRegistryPackages(): RegistryPackage[] {
     } catch {
       // metadata.json absent → scaffold/experimental package, status stays "unknown"
     }
-    const tools: RegistryTool[] = caps.map((c) => ({
+    // GOAL 61: per-entry filter — a malformed capability entry is EXCLUDED
+    // (never advertised), never a TypeError that kills the whole registry.
+    const tools: RegistryTool[] = caps.filter(validManifestCapability).map((c) => ({
       name: `${siteId}_${bareCapabilityId(siteId, c.id)}`,
       id: c.id,
       description: c.description || c.name || c.id,

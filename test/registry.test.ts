@@ -9,6 +9,7 @@ import {
   defaultChatSurface,
   listInstalledPackageIds,
   resolveDataDir,
+  validManifestCapability,
 } from "../src/prompt/registry.js";
 import { listAccounts } from "../src/runtime/session-store.js";
 import { resolvePackagedProfile } from "../src/profile/profile.js";
@@ -213,5 +214,46 @@ describe("prompt registry", () => {
     // url-less fixtures keep the field STRICTLY absent.
     assert.equal(byId.get("chatglm")?.accounts, undefined, "chatglm: no url => no accounts field");
     assert.equal(byId.get("tinycms")?.accounts, undefined, "tinycms: no url => no accounts field");
+  });
+
+  // GOAL 61 (2026-09-25): crash-proof registry build — a malformed installed
+  // manifest capability entry must never 500 the whole /registry. The filter
+  // is the read-seam twin of GOAL 58/59/60 (refuse malformed storage, never
+  // crash); malformed entries are EXCLUDED, well-formed entries untouched.
+  it("GOAL61(a): validManifestCapability refuses null/primitive/id-less entries, accepts well-formed", () => {
+    for (const bad of [null, "garbage", {}, { method: "ui-path" }, { id: "" }, { id: 42 }, { id: "  " }, []]) {
+      assert.equal(validManifestCapability(bad), false, `refused: ${JSON.stringify(bad)}`);
+    }
+    const good = { id: "chat", method: "js-function", description: "d" };
+    assert.equal(validManifestCapability(good), true, "well-formed capability entry accepted");
+  });
+
+  it("GOAL61(b): the pre-filter map CRASHES on a malformed entry; the filtered map skips it", () => {
+    const malicious = [null, { method: "ui-path" }, { id: "chat", description: "ok" }];
+    // The unguarded mapping today's registry used BEFORE GOAL 61:
+    const bare = (siteId: string, capabilityId: string): string =>
+      capabilityId.startsWith(`${siteId}_`) ? capabilityId.slice(siteId.length + 1) : capabilityId;
+    assert.throws(
+      () => malicious.map((c: any) => ({ name: bare("site", c.id), id: c.id })),
+      TypeError,
+      "pre-GOAL-61 mapping throws on a null capability entry (the /registry 500)"
+    );
+    const safe = malicious.filter(validManifestCapability).map((c) => ({ name: bare("site", c.id), id: c.id }));
+    assert.deepEqual(safe, [{ name: "chat", id: "chat" }], "filtered map skips malformed entries, keeps well-formed");
+  });
+
+  it("GOAL61(c): real registry still builds every installed package, all tool ids are string ids", () => {
+    const packages = buildRegistryPackages(); // must NOT throw
+    assert.equal(
+      packages.length,
+      listInstalledPackageIds().length,
+      "ALL-33 stay listed — per-entry filter never drops a package (GOAL 34 all-33 contract)"
+    );
+    for (const pkg of packages) {
+      for (const tool of pkg.tools ?? []) {
+        assert.equal(typeof tool.id, "string");
+        assert.ok(tool.id.length > 0, `${pkg.id}: tool id non-empty`);
+      }
+    }
   });
 });
