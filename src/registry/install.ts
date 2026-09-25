@@ -15,6 +15,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validManifestCapability } from "../prompt/registry.js";
+import { validatePackagedProfileShape, type ChatSiteProfile } from "../profile/profile.js";
 
 /** The public registry's default branch (git default, reflected in the raw URL). */
 export const DEFAULT_REGISTRY_BRANCH = "master";
@@ -161,6 +163,49 @@ export async function installPackage(
       textByFile[recipe] = await res.text();
     } else {
       throw new Error(`package "${host}" manifest references ${recipe} but it is missing (HTTP ${res.status})`);
+    }
+  }
+
+  // GOAL 65: install-seam WRITE truth gate — validate the WHOLE fetched
+  // package BEFORE anything lands on disk. The write side must refuse the
+  // same malformed classes the read/serve seams refuse (GOAL 61 capability
+  // entries, GOAL 48/56 profile shape, GOAL 64 profile id agreement), with
+  // a named verdict and NOTHING written — the GOAL 49/50 session-write
+  // principle ("refused at the write seam") applied to package installs.
+  // A package that would only be refused later by /registry (caps silently
+  // dropped) or by /capability + CLI (LOUD at serve time) must never
+  // install "successfully" in the first place.
+  for (const file of Object.keys(textByFile)) {
+    if (!/\.(json|lock)$/.test(file)) continue;
+    try {
+      JSON.parse(textByFile[file]);
+    } catch (e) {
+      throw new Error(
+        `package "${host}" ${file} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — refusing to install a corrupt package`
+      );
+    }
+  }
+  const caps = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
+  for (let i = 0; i < caps.length; i++) {
+    if (!validManifestCapability(caps[i])) {
+      throw new Error(
+        `package "${host}" manifest capabilities[${i}] is not a valid capability entry (needs an object with a string "id") — refusing to install a malformed package (it would be silently dropped from /registry)`
+      );
+    }
+  }
+  if (textByFile["profile.json"]) {
+    const profilePath = `${host}/profile.json`;
+    const profile = JSON.parse(textByFile["profile.json"]) as ChatSiteProfile;
+    // GOAL 48/56 shape gate at the write seam — a profile the runtime would
+    // refuse LOUD at serve time is refused here instead.
+    validatePackagedProfileShape(profilePath, profile);
+    // GOAL 64 id agreement — the package dir is truth: a mismatched "id"
+    // would make /capability + CLI fail LOUD and /registry exclude the
+    // package at load; never install "successfully" as the wrong identity.
+    if (typeof profile.id === "string" && profile.id !== host) {
+      throw new Error(
+        `profile file ${profilePath} declares "id" "${profile.id}" but is installed as package "${host}" — refusing to silently install the wrong site (fix the file's "id" or publish it under capabilities/${profile.id}/)`
+      );
     }
   }
 

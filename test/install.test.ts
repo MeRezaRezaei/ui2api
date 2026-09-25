@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,14 +27,14 @@ const CONTENT_TYPES: Record<string, string> = {
   ".lock": "application/json",
 };
 
-// Serve the on-disk fixture tree over HTTP, exactly as the registry raw server
-// exposes it (404 for anything not physically present — e.g. /main/ variants).
-function serveFixture(): Promise<Server> {
+// Serve an on-disk tree over HTTP, exactly as the registry raw server
+// exposes it (404 for anything not physically present).
+function serveRoot(root: string): Promise<Server> {
   return new Promise((r) => {
     const srv = createServer((req, res) => {
       const path = decodeURIComponent((req.url ?? "/").split("?")[0]);
-      const file = join(FIXTURE, path);
-      if (!file.startsWith(FIXTURE) || !existsSync(file)) {
+      const file = join(root, path);
+      if (!file.startsWith(root) || !existsSync(file)) {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("not found");
         return;
@@ -44,6 +44,27 @@ function serveFixture(): Promise<Server> {
     });
     srv.listen(0, "127.0.0.1", () => r(srv));
   });
+}
+
+// Serve the on-disk fixture tree over HTTP, exactly as the registry raw server
+// exposes it (404 for anything not physically present — e.g. /main/ variants).
+function serveFixture(): Promise<Server> {
+  return serveRoot(FIXTURE);
+}
+
+/**
+ * Build a tmp registry tree for one package with the given manifest +
+ * profile JSON. index.json carries a single catalog entry for `site`.
+ * Returns the root dir. Caller removes it (rmSync recursive).
+ */
+function makeRegistryTree(site: string, manifest: unknown, profile?: unknown): string {
+  const root = mkdtempSync(join(tmpdir(), "u2a-reg-"));
+  mkdirSync(join(root, "packages", site), { recursive: true });
+  writeFileSync(join(root, "index.json"), JSON.stringify({ [site]: { name: site, url: `https://${site}`, version: "1.0.0", trust: "unreviewed" } }));
+  writeFileSync(join(root, "packages", site, "metadata.json"), JSON.stringify({ id: site }));
+  writeFileSync(join(root, "packages", site, "manifest.json"), JSON.stringify(manifest));
+  if (profile !== undefined) writeFileSync(join(root, "packages", site, "profile.json"), JSON.stringify(profile));
+  return root;
 }
 
 describe("ui2api install (community registry, master branch + modern package shape)", () => {
@@ -129,5 +150,145 @@ describe("ui2api install (community registry, master branch + modern package sha
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  describe("GOAL 65: install-seam WRITE truth gate — a package the read/serve seams would refuse is refused at INSTALL time, nothing written", () => {
+    const srvBase = async (srv: Server) => `http://127.0.0.1:${(srv.address() as any).port}`;
+
+    it("(a) a malformed manifest capability entry (null / primitive / id-less) refuses naming the entry — the GOAL 61 class, refused at the write seam", async () => {
+      // [null] is the exact GOAL 61 proof shape: caps.map(...) crashed /registry
+      // until the read-side filter; the WRITE side must never land it on disk.
+      const root = makeRegistryTree(
+        "broken",
+        { id: "broken", capabilities: [null, { method: "ui-path" }, "garbage"] },
+        { id: "broken", url: "https://broken", composer: ["textarea"], answer: ["[id*=a]"] }
+      );
+      const tmp = mkdtempSync(join(tmpdir(), "u2a-inst-"));
+      try {
+        const srv = await serveRoot(root);
+        try {
+          await installPackage("broken", await srvBase(srv), tmp)
+            .then(() => assert.fail("expected install to refuse a malformed capabilities entry"))
+            .catch((e: Error) => {
+              assert.match(e.message, /capabilities\[0\]/, `names the entry: ${e.message}`);
+              assert.match(e.message, /refusing to install a malformed package/, `named refusal verdict: ${e.message}`);
+            });
+          assert.ok(!existsSync(join(tmp, "broken")), "NOTHING must be written on refusal");
+        } finally {
+          srv.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("(b) a wrong-shaped profile.json (GOAL 48/56 class) refuses naming file + field — never installs a package the runtime would fail LOUD on at serve time", async () => {
+      const root = makeRegistryTree(
+        "brokenshape",
+        { id: "brokenshape", capabilities: [{ id: "brokenshape_chat" }] },
+        { id: "brokenshape", url: "https://brokenshape", composer: 42 } // composer scalar — unparseable
+      );
+      const tmp = mkdtempSync(join(tmpdir(), "u2a-inst-"));
+      try {
+        const srv = await serveRoot(root);
+        try {
+          await installPackage("brokenshape", await srvBase(srv), tmp)
+            .then(() => assert.fail("expected install to refuse a wrong-shaped profile.json"))
+            .catch((e: Error) => {
+              assert.match(e.message, /brokenshape\/profile\.json/, `names the file: ${e.message}`);
+              assert.match(e.message, /composer/, `names the field: ${e.message}`);
+            });
+          assert.ok(!existsSync(join(tmp, "brokenshape")), "NOTHING must be written on refusal");
+        } finally {
+          srv.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("(c) a profile.json whose id mismatches the package dir (GOAL 64 class) refuses naming file + BOTH ids — never installs under the wrong identity", async () => {
+      const root = makeRegistryTree(
+        "duckduckgo",
+        { id: "duckduckgo", capabilities: [{ id: "duckduckgo_chat" }] },
+        { id: "gemini", url: "https://gemini.google.com", composer: ["textarea"], answer: ["[id*=a]"] } // declares the WRONG site
+      );
+      const tmp = mkdtempSync(join(tmpdir(), "u2a-inst-"));
+      try {
+        const srv = await serveRoot(root);
+        try {
+          await installPackage("duckduckgo", await srvBase(srv), tmp)
+            .then(() => assert.fail("expected install to refuse an id-mismatched profile.json"))
+            .catch((e: Error) => {
+              assert.match(e.message, /duckduckgo\/profile\.json/, `names the file: ${e.message}`);
+              assert.match(e.message, /"gemini"/, `names the declared id: ${e.message}`);
+              assert.match(e.message, /"duckduckgo"/, `names the package id: ${e.message}`);
+              assert.match(e.message, /refusing to silently install the wrong site/, `GOAL-62/64 message shape: ${e.message}`);
+            });
+          assert.ok(!existsSync(join(tmp, "duckduckgo")), "NOTHING must be written on refusal");
+        } finally {
+          srv.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("(d) corrupt JSON anywhere in the package (metadata/session.lock/recipe) refuses naming the file — nothing written", async () => {
+      const root = makeRegistryTree(
+        "corrupt",
+        { id: "corrupt", capabilities: [{ id: "corrupt_chat", recipe: "recipes/corrupt_chat.json" }] },
+        { id: "corrupt", url: "https://corrupt", composer: ["textarea"], answer: ["[id*=a]"] }
+      );
+      mkdirSync(join(root, "packages", "corrupt", "recipes"), { recursive: true });
+      writeFileSync(join(root, "packages", "corrupt", "recipes", "corrupt_chat.json"), "{ not json");
+      const tmp = mkdtempSync(join(tmpdir(), "u2a-inst-"));
+      try {
+        const srv = await serveRoot(root);
+        try {
+          await installPackage("corrupt", await srvBase(srv), tmp)
+            .then(() => assert.fail("expected install to refuse corrupt recipe JSON"))
+            .catch((e: Error) => {
+              assert.match(e.message, /recipes\/corrupt_chat\.json/, `names the corrupt file: ${e.message}`);
+              assert.match(e.message, /not valid JSON/, `named parse verdict: ${e.message}`);
+            });
+          assert.ok(!existsSync(join(tmp, "corrupt")), "NOTHING must be written on refusal");
+        } finally {
+          srv.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("(e) positive regression: a WELL-FORMED package (capabilities well-typed, profile id == package dir, valid shape) installs byte-identical", async () => {
+      const root = makeRegistryTree(
+        "good",
+        { id: "good", capabilities: [{ id: "good_chat", recipe: "recipes/good_chat.json" }] },
+        { id: "good", url: "https://good", composer: ["textarea"], answer: ["[id*=a]"] }
+      );
+      mkdirSync(join(root, "packages", "good", "recipes"), { recursive: true });
+      writeFileSync(join(root, "packages", "good", "recipes", "good_chat.json"), JSON.stringify({ name: "good_chat" }));
+      const tmp = mkdtempSync(join(tmpdir(), "u2a-inst-"));
+      try {
+        const srv = await serveRoot(root);
+        try {
+          const result = await installPackage("good", await srvBase(srv), tmp);
+          assert.equal(result.siteId, "good");
+          for (const f of ["metadata.json", "manifest.json", "profile.json", "recipes/good_chat.json"]) {
+            assert.ok(existsSync(join(tmp, "good", f)), `missing ${f} — the gate must not block a valid package`);
+          }
+        } finally {
+          srv.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    });
   });
 });
