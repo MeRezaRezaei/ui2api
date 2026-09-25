@@ -90,6 +90,181 @@ function bodyForParams(schema: RegistryToolInputSchema): string {
   return `[\n${entries.join("\n")}\n        ]`;
 }
 
+// The daemon's errors arrive in TWO different wire shapes, and a generated
+// client that does not understand both destroys every NAMED refusal the daemon
+// went to the trouble of naming:
+//
+//   OpenAI-shaped   {error: {message, type, code, param}}
+//                   src/prompt/openai.ts (unknown_model, not_found,
+//                   ui2api_driver_error, the body/messages 400s)
+//   string-shaped   {error: "<string>"}
+//                   src/prompt/http.ts — the /capability catch and the
+//                   `no stored account "<acct>" for "<host>"; available: [...]`
+//                   refusal from validateAccount (openai.ts calls it, and the
+//                   throw surfaces as a 400 {error: "<string>"}), plus
+//                   {error:{code,message}} for the pool/timeout refusals.
+//
+// The pre-GOAL-90 client did `($res['body']['error'] ?? json_encode(...))` in a
+// string concat: the array shape became the literal string "Array" and BOTH the
+// code and the real message were lost. This class is the generated normalizer —
+// one structure for every shape, never a stringified structure.
+function phpExceptionFile(siteId: string): string {
+  return `<?php
+
+declare(strict_types=1);
+
+namespace Ui2api\\Map\\${phpClassName(siteId)};
+
+/**
+ * A NAMED refusal from the ui2api promptd daemon.
+ *
+ * Extends \\RuntimeException, so every existing \`catch (\\RuntimeException $e)\`
+ * in a consumer keeps working — this only ADDS the structured fields the daemon
+ * already sent and the pre-GOAL-90 client silently threw away.
+ *
+ * Two wire shapes in, one honest structure out:
+ *
+ *   {error: "<string>"}                        -> code derived from the text
+ *   {error: {message, type, code, param}}      -> the daemon's own code kept
+ *   (no error key)                             -> http_<status> fallback
+ *
+ * The message is never the string "Array" (a string-cast of a structure): it is
+ * always the daemon's real message, prefixed with the stable code and the HTTP
+ * status, so a log line or an exception trace still names the refusal.
+ */
+final class Ui2apiException extends \\RuntimeException
+{
+    /**
+     * Named errorCode / errorMessage rather than $code: \\Exception already owns
+     * an untyped \`protected $code\` (an int), and PHP forbids a child from
+     * re-declaring it typed/readonly. getMessage() below is the decorated
+     * one-liner (code + real message); toArray() is the full structure.
+     */
+    public function __construct(
+        string $message,
+        public readonly string $errorCode,
+        public readonly string $errorMessage,
+        public readonly int $status,
+        public readonly ?string $type = null,
+        public readonly ?string $param = null,
+        public readonly array $raw = [],
+    ) {
+        parent::__construct($message);
+    }
+
+    /**
+     * Stable code for the daemon's named refusals. Mirrors the daemon's own
+     * naming (http.ts poolRefusal: pool_saturated / pool_queue_timeout /
+     * pool_closed) plus the request/account/site refusals it names. Text we do
+     * not recognize is NOT guessed at: it falls back to http_<status>, which is
+     * the honest answer when no name was sent.
+     */
+    public static function codeFor(string $message, int $status): string
+    {
+        $named = [
+            '/^pool saturated /' => 'pool_saturated',
+            '/^pool queue timeout /' => 'pool_queue_timeout',
+            '/^pool closed /' => 'pool_closed',
+            '/^request timeout after /' => 'request_timeout',
+            '/^no stored account /' => 'no_stored_account',
+            '/^unknown site /' => 'unknown_site',
+        ];
+        foreach ($named as $pattern => $code) {
+            if (preg_match($pattern, $message) === 1) {
+                return $code;
+            }
+        }
+        if (trim($message) === 'not found') {
+            return 'not_found';
+        }
+        return 'http_' . $status;
+    }
+
+    /**
+     * The normalizer. Accepts the decoded body, the HTTP status and the raw
+     * body text, and always yields a structure carrying code + message + status
+     * (+ type/param when the daemon sent them).
+     */
+    public static function fromResponse(mixed $body, int $status, string $rawBody = '', string $path = ''): self
+    {
+        $error = is_array($body) ? ($body['error'] ?? null) : null;
+
+        $code = null;
+        $message = null;
+        $type = null;
+        $param = null;
+
+        if (is_string($error)) {
+            // Shape 1 — the one non-OpenAI shape: {error: "<string>"}.
+            $message = $error;
+        } elseif (is_array($error)) {
+            // Shape 2 — {error: {message, type, code, param}}. The daemon's own
+            // code wins; the patterns in codeFor() only fill a gap.
+            if (isset($error['code']) && is_string($error['code']) && $error['code'] !== '') {
+                $code = $error['code'];
+            }
+            if (isset($error['message']) && is_string($error['message'])) {
+                $message = $error['message'];
+            }
+            if (isset($error['type']) && is_string($error['type'])) {
+                $type = $error['type'];
+            }
+            if (isset($error['param']) && is_string($error['param'])) {
+                $param = $error['param'];
+            }
+        }
+
+        if ($message === null || trim($message) === '') {
+            // Nothing usable was sent: name what actually arrived. Never cast a
+            // structure to a string — that is the "Array" bug this replaces.
+            $message = $rawBody !== '' ? $rawBody : (is_string($error) ? $error : json_encode($body, JSON_UNESCAPED_SLASHES));
+            if (!is_string($message) || trim($message) === '') {
+                $message = 'ui2api daemon returned no error message';
+            }
+        }
+        if ($code === null) {
+            $code = self::codeFor($message, $status);
+        }
+
+        $prefix = $path !== '' ? 'ui2api ' . $path . ' failed' : 'ui2api request failed';
+
+        return new self(
+            $prefix . ' (HTTP ' . $status . ') [' . $code . ']: ' . $message,
+            $code,
+            $message,
+            $status,
+            $type,
+            $param,
+            is_array($body) ? $body : ['raw' => $rawBody],
+        );
+    }
+
+    /**
+     * The normalized refusal: always carries a stable 'code', the daemon's real
+     * 'message' (never the string "Array"), the HTTP 'status', and 'type'/
+     * 'param' when the daemon sent them.
+     *
+     * @return array<string,mixed>
+     */
+    public function toArray(): array
+    {
+        $out = [
+            'code' => $this->errorCode,
+            'message' => $this->errorMessage,
+            'status' => $this->status,
+        ];
+        if ($this->type !== null) {
+            $out['type'] = $this->type;
+        }
+        if ($this->param !== null) {
+            $out['param'] = $this->param;
+        }
+        return $out;
+    }
+}
+`;
+}
+
 function clientFile(siteId: string): string {
   return `<?php
 
@@ -113,6 +288,11 @@ namespace Ui2api\\Map\\${phpClassName(siteId)};
  * Both chat() and capability() accept an optional $account (a vault slug or
  * identity from GET /accounts?site=, GOAL 52) — one user, several accounts,
  * pick which one drives the request.
+ *
+ * Refusals are never flattened: every non-2xx response becomes a
+ * Ui2apiException carrying the daemon's own stable code and status, and chat()
+ * returns the daemon's sibling 'ui2api' block so a 'restricted' stop can never
+ * pass for a normal answer.
  */
 final class Ui2apiClient
 {
@@ -123,7 +303,29 @@ final class Ui2apiClient
     ) {
     }
 
-    /** Chat through the daemon's OpenAI-compatible surface. */
+    /**
+     * Normalize a daemon error response into a NAMED, structured refusal.
+     *
+     * Handles both wire shapes the daemon sends —
+     * \`{error: "<string>"}\` (the account/site/capability refusals) and
+     * \`{error: {message, type, code, param}}\` (the OpenAI-shaped refusals) —
+     * and never stringifies a structure into "Array".
+     */
+    public static function normalizeError(mixed $body, int $status, string $rawBody = '', string $path = ''): Ui2apiException
+    {
+        return Ui2apiException::fromResponse($body, $status, $rawBody, $path);
+    }
+
+    /**
+     * Chat through the daemon's OpenAI-compatible surface.
+     *
+     * Returns the assistant message PLUS the daemon's sibling \`ui2api\` block,
+     * which carries the honest stop reason (\`doneReason\`) — 'restricted' when a
+     * tier/limit wall stopped the round trip (GOAL 54), plus the driver's other
+     * done reasons. Without it a consumer cannot tell a real answer from a
+     * restriction wall. \`refusal\` keeps the daemon's own value (it is never
+     * hardcoded to null); the field stays present either way (back-compat).
+     */
     public function chat(string $model, array $messages, bool $stream = false, bool $newChat = false, ?string $account = null): array
     {
         $payload = [
@@ -136,10 +338,22 @@ final class Ui2apiClient
             $payload['account'] = $account;
         }
         $data = $this->request('/v1/chat/completions', $payload);
-        if (($data['choices'][0]['message']['content'] ?? null) !== null) {
-            return $data['choices'][0]['message'];
+        $message = $data['choices'][0]['message'] ?? null;
+        if (!\\is_array($message)) {
+            return $data;
         }
-        return $data;
+        $refusal = $message['refusal'] ?? null;
+        if (($message['content'] ?? null) === null && $refusal === null) {
+            return $data;
+        }
+        // The daemon's real refusal, never a hardcoded null.
+        $message['refusal'] = \\is_string($refusal) ? $refusal : null;
+        // The honest stop reason, kept in both shapes: the whole sibling block
+        // and a flat snake_case alias for PHP/Laravel callers.
+        $ui2api = $data['ui2api'] ?? null;
+        $message['ui2api'] = \\is_array($ui2api) ? $ui2api : null;
+        $message['done_reason'] = \\is_array($ui2api) ? ($ui2api['doneReason'] ?? null) : null;
+        return $message;
     }
 
     /** Run one non-chat capability (web_search, list_conversations, ...). */
@@ -152,9 +366,15 @@ final class Ui2apiClient
         if ($account !== null) {
             $payload['account'] = $account;
         }
-        $data = $this->request('/capability/' . $site, $payload);
+        $path = '/capability/' . $site;
+        $res = $this->raw('POST', $path, $payload);
+        $this->guard($path, $res);
+        $data = $res['body'];
         if (($data['ok'] ?? false) === false) {
-            throw new \\RuntimeException($data['error'] ?? 'ui2api capability failed');
+            // A 2xx body that still says ok:false — the runner's own honest
+            // refusal. Normalized with the REAL status, never a string-cast of
+            // $data['error'] (which may be a structure, not a message).
+            throw self::normalizeError($data, $res['status'], $res['raw'], $path);
         }
         return $data['result'] ?? $data;
     }
@@ -165,7 +385,7 @@ final class Ui2apiClient
         return $this->request('/registry', null);
     }
 
-    /** @return array{status:int, body:array} raw response for advanced use */
+    /** @return array{status:int, body:array, raw:string} raw response for advanced use */
     public function raw(string $method, string $path, ?array $payload = null): array
     {
         $ch = \\curl_init($this->baseUrl . $path);
@@ -193,19 +413,30 @@ final class Ui2apiClient
         if ($body === false) {
             throw new \\RuntimeException('ui2api daemon unreachable: ' . $err);
         }
-        $decoded = \\json_decode((string) $body, true);
-        return ['status' => $status, 'body' => \\is_array($decoded) ? $decoded : ['raw' => (string) $body]];
+        $raw = (string) $body;
+        $decoded = \\json_decode($raw, true);
+        return [
+            'status' => $status,
+            'body' => \\is_array($decoded) ? $decoded : ['raw' => $raw],
+            // Kept for the normalizer: a non-JSON error body (an HTML 502 from a
+            // proxy in front of the daemon) must still name itself honestly
+            // instead of becoming "Array".
+            'raw' => $raw,
+        ];
+    }
+
+    /** Throw a NAMED, structured refusal for any non-2xx response. */
+    private function guard(string $path, array $res): void
+    {
+        if ($res['status'] < 200 || $res['status'] >= 300) {
+            throw self::normalizeError($res['body'], $res['status'], $res['raw'], $path);
+        }
     }
 
     private function request(string $path, ?array $payload): array
     {
         $res = $this->raw('POST', $path, $payload);
-        if ($res['status'] < 200 || $res['status'] >= 300) {
-            throw new \\RuntimeException(
-                'ui2api ' . $path . ' failed (HTTP ' . $res['status'] . '): '
-                . ($res['body']['error'] ?? \\json_encode($res['body']))
-            );
-        }
+        $this->guard($path, $res);
         return $res['body'];
     }
 }
@@ -339,11 +570,31 @@ the daemon API is a plain function call everywhere:
     $ map = new Ui2api\\Map\\${phpClassName(siteId)}\\${phpClassName(siteId)}Map($client);
 
     # chat (daemon drives the site's own composer in your real session)
-    $map->chat('hello', true);            # -> {content: '...', role: 'user'}
+    # -> {content: '...', role: 'assistant', refusal: null,
+    #     ui2api: {site, doneReason: 'stop'|'restricted'|..., chunkCount}, done_reason: '...'}
+    $answer = $map->chat('hello', true);
 
     # other capabilities
     $map->listConversations(20);          # reads the live sidebar
     $map->webSearch(true);                # flips the composer's Search toggle
+
+Named refusals (the daemon's own code and message, never a stringified array):
+
+    use Ui2api\\Map\\${phpClassName(siteId)}\\Ui2apiException;
+
+    try {
+        $answer = $map->chat('hello', true);
+        if ($answer['done_reason'] === 'restricted') {
+            // a tier/limit wall stopped the round trip — NOT an answer
+        }
+    } catch (Ui2apiException $e) {        // extends \\RuntimeException
+        $e->code;    // request_timeout | pool_saturated | pool_queue_timeout
+                     // | pool_closed | not_found | unknown_model
+                     // | no_stored_account | ... | http_<status> (honest fallback)
+        $e->status;  // 400 | 404 | 502 | 503 | 504
+        $e->message; // the daemon's REAL message (never "Array")
+        $e->toArray();
+    }
 
 Capabilities:
 ${pkg.tools
@@ -364,6 +615,7 @@ export function generatePhpMap(pkg: RegistryPackage, outDir: string): string {
   mkdirSync(resolve(dir, "config"), { recursive: true });
   writeFileSync(resolve(dir, "composer.json"), composerFile(pkg.id, pkg));
   writeFileSync(resolve(dir, "src", "Ui2apiClient.php"), clientFile(pkg.id));
+  writeFileSync(resolve(dir, "src", "Ui2apiException.php"), phpExceptionFile(pkg.id));
   writeFileSync(resolve(dir, "src", `${phpClassName(pkg.id)}Map.php`), mapFile(pkg.id, pkg));
   writeFileSync(resolve(dir, "config", "ui2api.php"), configFile(pkg.id, pkg));
   writeFileSync(resolve(dir, "README.md"), readmeFile(pkg.id, pkg));
