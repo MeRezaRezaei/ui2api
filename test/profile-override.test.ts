@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   resolveProfile,
+  resolveProfileWithOverride,
   resolvePackagedProfile,
   resolvePackagedProfileFile,
 } from "../src/profile/profile.js";
@@ -212,6 +213,59 @@ describe("profile override seam (GOAL 47 truth gate)", () => {
         },
       });
       assert.equal(resolveProfile(f).id, "gemini", "well-typed GOAL 55 capability override passes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // GOAL 62 (2026-09-25): --site X --profile FILE never silently drops the
+  // tuning document. The old `flags.site ?? flags.profile` discarded the file
+  // entirely when both were given (PROVEN: --site gemini + tune.json with
+  // deepseek selectors resolved plain gemini). resolveProfileWithOverride
+  // enforces id AGREEMENT: a file whose id mismatches the requested site fails
+  // LOUD naming both sides; absent file.id tunes the requested site.
+  it("GOAL62(a): --site + --profile with a MISMATCHED file id refuses LOUD naming both sides", () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-goal62-"));
+    try {
+      const tune = join(dir, "mismatch.json");
+      writeFileSync(tune, JSON.stringify({ id: "deepseek", composer: ["textarea[data-sentinel]"] }));
+      assert.throws(
+        () => resolveProfileWithOverride("gemini", tune),
+        /profile file .* id "deepseek" does not match --site gemini/,
+        "mismatched file id must fail LOUD (never a silent wrong-site tune)"
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("GOAL62(b): --site + --profile with a MATCHED file id applies the file's fields over the site base", () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-goal62-"));
+    try {
+      const tune = join(dir, "match.json");
+      writeFileSync(tune, JSON.stringify({ id: "gemini", composer: ["textarea[data-sentinel]"] }));
+      const p = resolveProfileWithOverride("gemini", tune);
+      assert.equal(p.id, "gemini");
+      assert.equal(p.composer?.[0], "textarea[data-sentinel]", "file composer applies (the document is a tuning, not a site picker)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("GOAL62(c): absent file.id tunes the requested site; --profile alone keeps file-id-picks-base semantics", () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-goal62-"));
+    try {
+      const tuning = join(dir, "tuning.json");
+      writeFileSync(tuning, JSON.stringify({ composer: ["input[data-x]"] }));
+      const p = resolveProfileWithOverride("gemini", tuning);
+      assert.equal(p.id, "gemini", "absent id = tuning the requested site");
+      assert.equal(p.composer?.[0], "input[data-x]");
+
+      const standalone = join(dir, "standalone.json");
+      writeFileSync(standalone, JSON.stringify({ id: "kimi", composer: ["textarea[data-k]"] }));
+      const p2 = resolveProfile(standalone);
+      assert.equal(p2.id, "kimi", "--profile alone: file id picks the base (unchanged)");
+      assert.equal(p2.composer?.[0], "textarea[data-k]");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -490,6 +490,34 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
   );
 }
 
+/**
+ * GOAL 62: resolve a site id WITH an explicit tuning file, enforcing id
+ * AGREEMENT. `--site X --profile FILE` must never silently drop the tuning
+ * document (the old `flags.site ?? flags.profile` discarded the file entirely)
+ * and a file that declares a DIFFERENT id than the requested site must fail
+ * LOUD naming both sides — never a silent wrong-site tune that aims a prompt
+ * at the wrong site or "no composer found" after N timeouts. An absent file.id
+ * tunes the requested site (the file is a tuning document, not a site picker).
+ */
+export function resolveProfileWithOverride(site: string, profileFile: string): ChatSiteProfile {
+  const raw = JSON.parse(readFileSync(profileFile, "utf8")) as Partial<ChatSiteProfile> &
+    Record<string, unknown>;
+  const fileId = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : undefined;
+  if (fileId && fileId !== site) {
+    throw new Error(
+      `profile file ${profileFile} id "${fileId}" does not match --site ${site} — ` +
+        `refusing to silently tune the wrong site (fix the file's "id" or drop --site)`
+    );
+  }
+  // The merge base is the REQUESTED site: absent/matching file id = tuning it.
+  // The GOAL 47 override gate still runs on the file's fields (a typo'd
+  // composer/answer/send fails LOUD naming file+field, exactly as with
+  // --profile alone) — this seam only additionally enforces id agreement.
+  const merged = mergeProfileFile(profileFile, { ...raw, id: site });
+  validateOverrideFile(profileFile, { ...raw, id: site }, merged);
+  return merged;
+}
+
 // ─── GOAL 47: the override-file seam speaks the GOAL-32 truth gate ──────────
 //
 // Packaged profiles are refused for /registry surfacing unless

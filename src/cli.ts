@@ -17,7 +17,7 @@ import { HubRuntime } from "./hub/runtime.js";
 import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
-import { resolveProfile, defaultSiteId } from "./profile/profile.js";
+import { resolveProfile, resolveProfileWithOverride, defaultSiteId } from "./profile/profile.js";
 import { defaultChatProfiles, chatSurfaceStatus } from "./prompt/registry.js";
 import { ChatDriver } from "./prompt/driver.js";
 import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
@@ -437,7 +437,14 @@ async function cmdPrompt(text: string, flags: Flags): Promise<void> {
       "usage: ui2api prompt '<text>' [--site gemini|chatgpt|claude|copilot|perplexity|huggingchat] [--profile FILE] [--new] [--model NAME] [--timeout-ms N] [--data-dir DIR] [--json]"
     );
   }
-  const profile = resolveProfile(flags.site ?? flags.profile);
+  // GOAL 62: the override seam must never silently drop the tuning file —
+  // --site + --profile enforces id AGREEMENT (mismatched file.id -> LOUD
+  // named error), absent file.id tunes the requested site. --profile alone
+  // keeps the file-id-picks-base semantics unchanged.
+  const profile =
+    flags.site && flags.profile
+      ? resolveProfileWithOverride(flags.site, flags.profile)
+      : resolveProfile(flags.site ?? flags.profile);
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
   // Same vault-validated account guard as the daemon surfaces: an unknown
   // account fails loudly (non-zero) BEFORE any browser work, never a silent
@@ -496,7 +503,9 @@ async function cmdLiveProof(flags: Flags): Promise<void> {
 async function cmdPromptd(flags: Flags): Promise<void> {
   const port = Number(flags.port ?? process.env.UI2API_PROMPTD_PORT ?? 9797);
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
-  const profiles = flags.site ? [resolveProfile(flags.site)] : undefined;
+  const profiles = flags.site && flags.profile
+    ? [resolveProfileWithOverride(flags.site, flags.profile)]
+    : flags.site ? [resolveProfile(flags.site)] : flags.profile ? [resolveProfile(flags.profile)] : undefined;
   const svc = await startPromptd({
     port,
     dataDir,
