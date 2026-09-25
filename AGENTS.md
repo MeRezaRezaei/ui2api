@@ -305,8 +305,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   and is its block's own words, rows are chronological, and every T-stamped
   `- verbatim:` citation in `.brain/verbatim-goals.md` resolves. Package +
   runner sync is enforced by
-  `test/capability-dispatch.test.ts` (18/18) and package shape by
-  `test/validate-packages.test.ts` (211/211).
+  `test/capability-dispatch.test.ts` (28/28) and package shape by
+  `test/validate-packages.test.ts` (298/298). Standing suite measurement:
+  **810 tests / 44 suites** (809 pass + 1 env skip) — dated fold-log counts
+  (418/418 at fold #11, 430/430 at fold #17f) are history; this is the
+  current number.
 - **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
   `src/runtime/requirements.ts`) only reports verdicts a real check can stand
   behind — every check runs for real (execute-only probes; a check that cannot
