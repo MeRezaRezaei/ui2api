@@ -44,6 +44,10 @@ jobs:
           npx playwright install chromium
         working-directory: wigolo
       - run: npm run build
+      # GOAL 78: the verbatim-completeness gate (P1..P5) is part of the
+      # human-free chain — a PR that leaves the corpus inconsistent fails here.
+      - run: npm run check:verbatim
+      - run: npm run check:verbatim:goals
       - run: npm test
       - run: npm run test:unit
         env:
