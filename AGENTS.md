@@ -273,8 +273,9 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
     and its HunyuanDefault chat already serves modelId=hy4-preview-g).
     `google-ai-search` stays BLOCKED on portal v20 (external sign-in required).
   - **Audit fixes shipped**: `test/capability-dispatch.test.ts` RUNNERS now
-    include `youtube` + `araprat` (12 runners, IN-SYNC manifest↔dispatch —
-    was 10, these two live-verified runners were outside the suite);
+    include `youtube` + `araprat` (14 runners, IN-SYNC manifest↔dispatch —
+    hard-enforced since GOAL 79 — was 10, these two live-verified runners were
+    outside the suite);
     `src/capabilities/araprat.ts` + manifest now dispatch the 6 posting caps
     HONESTLY as login-gated (ok:false loginGated:true, no browser) so they no
     longer fall into the dead "unknown" branch; suite 430/430.
@@ -307,9 +308,9 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **810 tests / 44 suites** (809 pass + 1 env skip) — dated fold-log counts
+  **817 tests / 44 suites** (816 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f) are history; this is the
-  current number.
+  current number (re-measured 2026-09-25, GOALs 78-80 flip).
 - **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
   `src/runtime/requirements.ts`) only reports verdicts a real check can stand
   behind — every check runs for real (execute-only probes; a check that cannot

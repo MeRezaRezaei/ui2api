@@ -1,6 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolvePackagedProfileFile } from "../src/profile/profile.js";
@@ -28,25 +30,28 @@ import { DuckduckgoCapabilities } from "../src/capabilities/duckduckgo.js";
 //   UNKNOWN CAPABILITY → every runner's `run()` has a switch/capability default
 //   that returns {ok:false, error:"unknown <id> capability: …"} BEFORE any
 //   `ensureBrowser()` or `openPage()` call. No browser is launched for an
-//   unknown capability name in any of these six runners. The race guard below
-//   is a belt-and-suspenders confirmation.
+//   unknown capability name in any runner. The race guard below is a
+//   belt-and-suspenders confirmation.
 //
 //   MANIFEST <-> DISPATCH DRIFT: the sets of `case` labels in each runner's
-//   dispatch table and the `capabilities[].id` entries in its manifest.json
-//   are NOT identical for 5 of 6 runners (only gemini is in sync). This drift
-//   is real and documented in each test's diagnostic output. Strict equality
-//   assertion is gated below — flip HARD_FAIL_ON_DRIFT to surface it as a
-//   hard failure; when false it emits loud DRIFT diagnostics while keeping the
-//   suite green (exit 0).
+//   dispatch table and the `capabilities[].id` entries in its manifest.json are
+//   compared below and drift is a HARD failure (HARD_FAIL_ON_DRIFT = true —
+//   GOAL 79, 2026-09-25; the deep-equal assertion is reachable and green).
+//   Measured baseline: all 14 RUNNERS are IN-SYNC — dispatch exactly matches
+//   manifest ("IN-SYNC" diagnostics, zero DRIFT lines; the former "5 of 6
+//   runners have drift" justification for the soft gate was measured false).
+//   The moment a manifest gains a capability its runner does not dispatch (or
+//   vice versa), the suite fails LOUD with the DRIFT diagnostics + the
+//   assertion message — the gate has been SEEN to fail on a scratch fixture.
 // ────────────────────────────────────────────────────────────────────────────
 
 const UNKNOWN_CAPABILITY = "definitely-not-a-capability";
 const GUARD_SETTLE_TIMEOUT_MS = 7000;
 
-// Flip to true to turn manifest<->dispatch drift into a hard assertion failure.
-// Currently false: every runner (except gemini) HAS drift; a hard failure would
-// break the MUST-PASS (exit 0) acceptance criterion for this file.
-const HARD_FAIL_ON_DRIFT = false;
+// GOAL 79: drift is a HARD failure. Measured baseline (2026-09-25): 14 ×
+// IN-SYNC, zero drift — the gate's deep-equal assertion is reachable and green,
+// and a real manifest<->runner pair divergence now fails the suite.
+const HARD_FAIL_ON_DRIFT = true;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -272,3 +277,31 @@ for (const def of RUNNERS) {
     }
   });
 }
+
+// ─── 3. GOAL 79 negative pin: the HARD gate is proven to FAIL on drift ──────
+//
+// The gate's comparison — extractDispatchLabels vs extractManifestIds, the
+// exact functions asserted in section 2 — is driven against a SCRATCH fixture
+// with a deliberately drifted pair (a capability in the manifest the runner
+// does not dispatch). Real packages are never mutated. A gate nobody has seen
+// fail is the exact claim class this repo forbids; this pin shows it red.
+test("drift gate: a deliberately drifted scratch manifest/runner pair FAILS the deep-equal the gate asserts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "caps-drift-gate-"));
+  try {
+    const manifestPath = join(dir, "manifest.json");
+    const sourcePath = join(dir, "runner.ts");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({ capabilities: [{ id: "scratch_site_cap_test" }, { id: "scratch_site_undispatched" }] }),
+    );
+    writeFileSync(sourcePath, 'case "scratch_site_cap_test": break;\n');
+    const dispatch = extractDispatchLabels(sourcePath).sort();
+    const manifestIds = extractManifestIds(manifestPath);
+    assert.throws(
+      () => assert.deepEqual(dispatch, manifestIds),
+      "the gate's own deep-equal must report a manifest-proposes-but-runner-does-not-dispatch drift",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
