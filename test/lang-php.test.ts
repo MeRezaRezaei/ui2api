@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { describe as d } from "node:test";
+import { test as t } from "node:test";
 import { strict as assert } from "node:assert";
 import type { RegistryPackage } from "../src/prompt/registry.js";
 
@@ -63,19 +63,19 @@ function mkTmp(): string {
   return dir;
 }
 
-d("phpMethodName camelCases bare capability ids", () => {
+t("phpMethodName camelCases bare capability ids", () => {
   assert.equal(phpMethodName("deepseek", "deepseek_chat"), "chat");
   assert.equal(phpMethodName("deepseek", "deepseek_list_conversations"), "listConversations");
   assert.equal(phpMethodName("deepseek", "deepseek_web_search"), "webSearch");
   assert.equal(phpMethodName("tencent-aistudio", "tencent-aistudio_chat"), "chat");
 });
 
-d("phpClassName pascalCases site ids", () => {
+t("phpClassName pascalCases site ids", () => {
   assert.equal(phpClassName("deepseek"), "Deepseek");
   assert.equal(phpClassName("tencent-aistudio"), "TencentAistudio");
 });
 
-d("generatePhpMap emits a valid composer package with one method per capability", () => {
+t("generatePhpMap emits a valid composer package with one method per capability", () => {
   const out = mkTmp();
   try {
     const dir = generatePhpMap(pkg, resolve(out, "deepseek"));
@@ -105,7 +105,7 @@ d("generatePhpMap emits a valid composer package with one method per capability"
   }
 });
 
-d("generatePhpMaps emits per-site dirs and honors a site filter", () => {
+t("generatePhpMaps emits per-site dirs and honors a site filter", () => {
   const out = mkTmp();
   try {
     const dirs = generatePhpMaps([pkg], out);
@@ -120,7 +120,7 @@ d("generatePhpMaps emits per-site dirs and honors a site filter", () => {
   }
 });
 
-d("generated php lints when php is available", () => {
+t("generated php lints when php is available", () => {
   let phpAvailable = true;
   try {
     execFileSync("php", ["-v"], { stdio: "ignore" });
@@ -138,7 +138,7 @@ d("generated php lints when php is available", () => {
     rmSync(out, { recursive: true, force: true });
   }
 });
-d("GOAL 52: the generated Ui2apiClient forwards an optional $account to both surfaces", () => {
+t("GOAL 52: the generated Ui2apiClient forwards an optional $account to both surfaces", () => {
   const out = mkTmp();
   try {
     const dir = generatePhpMap(pkg, resolve(out, "deepseek"));
@@ -281,7 +281,7 @@ function phpGate(): { ok: boolean; version: string; reason: string } {
   }
 }
 
-d("GOAL 90: the generated client EXECUTES and names every daemon refusal (both wire shapes)", async () => {
+t("GOAL 90: the generated client EXECUTES and names every daemon refusal (both wire shapes)", async () => {
   const gate = phpGate();
   const out = mkTmp();
   const { createServer } = await import("node:http");
@@ -388,7 +388,7 @@ echo json_encode($out);
   }
 });
 
-d("GOAL 90: structural pins over the generated source (never a vacuous pass)", () => {
+t("GOAL 90: structural pins over the generated source (never a vacuous pass)", () => {
   const gate = phpGate();
   const out = mkTmp();
   try {
