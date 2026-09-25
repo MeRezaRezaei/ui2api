@@ -322,10 +322,40 @@ export function listAccounts(sitesDir: string, host: string): StoredAccount[] {
     if (!existsSync(idx)) return [];
     const raw = JSON.parse(readFileSync(idx, "utf8")) as { accounts?: StoredAccount[] };
     if (!Array.isArray(raw.accounts)) return [];
-    return raw.accounts;
+    // GOAL 60: read-side gate on the vault INDEX — every entry served must be
+    // a shape a consumer can safely resolve. A hostile/corrupt entry (path-
+    // traversal slug, numeric slug, missing identity) is EXCLUDED here, so it
+    // is never listed in /accounts + /registry accounts[], and never drives
+    // path resolution (accountSnapshotPath's resolve() would escape the vault
+    // with a `../../..` slug). Writes are safe (slugifyIdentity at save);
+    // this closes the read seam for hand-edited / partial / stale indexes.
+    return raw.accounts.filter(validStoredAccount);
   } catch {
     return [];
   }
+}
+
+/**
+ * GOAL 60: per-entry read gate for the vault index. True only for an entry a
+ * consumer can safely resolve: slug must be a non-empty string matching the
+ * slugify alphabet `[a-z0-9._@-]+` (structurally no `/`, no `..` — path
+ * traversal is impossible), identity/host non-empty strings, source one of
+ * the AccountSource kinds, capturedAt a non-empty string. profileDir is
+ * optional metadata (may be absent, non-string entries dropped as unsafe).
+ */
+export function validStoredAccount(entry: unknown): entry is StoredAccount {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const a = entry as Record<string, unknown>;
+  // Slug must be a single safe path segment: slugify alphabet only (no `/`,
+  // no `..`), and never the traversal sentinels `.` / `..` themselves —
+  // resolve() would climb the vault with a `..` segment.
+  if (typeof a.slug !== "string" || !/^[a-z0-9._@-]+$/.test(a.slug) || a.slug === "." || a.slug === "..") return false;
+  if (typeof a.identity !== "string" || a.identity.trim() === "") return false;
+  if (typeof a.host !== "string" || a.host.trim() === "") return false;
+  const source = ["capture", "ingest", "import", "legacy"] as const;
+  if (!source.includes(a.source as (typeof source)[number])) return false;
+  if (typeof a.capturedAt !== "string" || a.capturedAt.trim() === "") return false;
+  return true;
 }
 
 export function saveAccountSnapshot(

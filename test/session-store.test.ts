@@ -20,6 +20,11 @@ import {
   snapshotPath,
   storageReplayScript,
   validateSnapshotShape,
+  validStoredAccount,
+  listAccounts,
+  loadAccountSnapshot,
+  accountSnapshotPath,
+  accountsIndexPath,
   type ProfileSnapshot,
 } from "../src/runtime/session-store.js";
 
@@ -282,6 +287,59 @@ test("GOAL59(b): loadSnapshot refuses a malformed stored file (null) and keeps r
     writeFileSync(p, legacy);
     const loaded = loadSnapshot(p);
     assert.ok(loaded && loaded.host === "goal59.example.com", "legacy-shaped stored snapshot still loads");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// GOAL 60 (2026-09-25): read-side gate on the vault INDEX (accounts.json).
+// GOAL 59 gated the snapshot FILE read; the index that points at those files
+// was unvalidated per-entry — a hostile slug ("../../../pwned") served by
+// listAccounts would escape the vault via accountSnapshotPath's resolve(),
+// and a numeric slug passed straight into path building. Writes are safe
+// (slugifyIdentity at save); this closes the read seam for hand-edited /
+// partial / stale indexes. Hostile entries are EXCLUDED, never served.
+
+test("GOAL60(a): validStoredAccount accepts well-formed entries, refuses hostile slug / numeric slug / bad source / empty identity", () => {
+  const base = { slug: "me@gmail.com", identity: "Me", host: "h.example.com", source: "import", capturedAt: "2026-09-25" };
+  assert.equal(validStoredAccount(base), true, "well-formed entry valid");
+  assert.equal(validStoredAccount({ ...base, slug: "@-._" }), true, "slugify alphabet preserved (no path separators)");
+  for (const slug of ["../../../pwned", "a/b", "..", ".\\evil", 42, "", "has space"]) {
+    assert.equal(validStoredAccount({ ...base, slug }), false, `hostile/non-string slug refused: ${JSON.stringify(slug)}`);
+  }
+  for (const source of ["teleport", "upload", 7, null]) {
+    assert.equal(validStoredAccount({ ...base, source }), false, `bad source refused: ${JSON.stringify(source)}`);
+  }
+  assert.equal(validStoredAccount({ ...base, identity: "" }), false, "empty identity refused");
+  assert.equal(validStoredAccount({ ...base, host: "" }), false, "empty host refused");
+  assert.equal(validStoredAccount({ ...base, capturedAt: "" }), false, "empty capturedAt refused");
+  assert.equal(validStoredAccount("nope"), false, "scalar refused");
+  assert.equal(validStoredAccount(null), false, "null refused");
+});
+
+test("GOAL60(b): listAccounts filters hostile index entries — no path escape, hostile identity resolves null, well-formed entries unchanged", () => {
+  const dir = mkdtempSync(join(tmpdir(), "u2a-goal60-"));
+  try {
+    const host = "evil.example.com";
+    const idx = accountsIndexPath(dir, host);
+    mkdirSync(dirname(idx), { recursive: true });
+    const entries = [
+      { slug: "../../../pwned", identity: "attacker", host, source: "import", capturedAt: "t" },
+      { slug: 42, identity: "num", host, source: "import", capturedAt: "t" },
+      { slug: "good", identity: "ok", host, source: "import", capturedAt: "t" },
+    ];
+    writeFileSync(idx, JSON.stringify({ accounts: entries }));
+    const listed = listAccounts(dir, host);
+    assert.deepEqual(listed.map((a) => a.slug), ["good"], "hostile/numeric entries excluded, well-formed kept");
+    for (const a of listed) {
+      const p = accountSnapshotPath(dir, host, a.slug);
+      assert.ok(p.startsWith(resolve(dir, "sessions", host)), `path stays in the vault: ${p}`);
+    }
+    assert.equal(loadAccountSnapshot(dir, host, "attacker"), null, "hostile identity does not resolve");
+    // Well-formed multi-account index serves all entries unchanged.
+    const idx2 = accountsIndexPath(dir, host);
+    writeFileSync(idx2, JSON.stringify({ accounts: entries.slice(2).concat([{ slug: "second", identity: "two", host, source: "capture", capturedAt: "t" }]) }));
+    assert.deepEqual(listAccounts(dir, host).map((a) => a.slug), ["good", "second"], "well-formed index unchanged");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
