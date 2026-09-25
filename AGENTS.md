@@ -378,7 +378,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   shape, plus an explicit `send` shape check) — a typo'd key or wrong-typed
   composer/answer/send entry fails LOUD at load, naming the file and the exact
   offending field/entry (never a silent drop → late "no composer found"
-  timeout, answer-join TypeError, or Enter-press send fallback). Installed
+  timeout, answer-join TypeError, or Enter-press send fallback). The override
+  seam validates the `capability` block the same way the packaged seam does
+  (GOAL 57, the GOAL 56 helper) — a wrong-typed `restrictionMarkers`/picker/
+  toggle in a `--profile FILE` refuses LOUD at load, never a late
+  matchRestrictionMarkers for…of-undefined crash at answer time. Installed
   `capabilities/<id>/profile.json` runs the same gate on the packaged running
   seam (CLI packaged id + `/capability` fallbacks, GOAL 48) — a wrong-typed or
   unparseable entry fails LOUD at serve time, naming the file + exact
