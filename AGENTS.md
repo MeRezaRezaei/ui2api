@@ -297,7 +297,14 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `UI2API_PROMPTD_TOKEN` (no token set = localhost-only posture, README's
   "optionally bearer-token gated").
 - **Verification before claiming done**: `npx tsc --noEmit`, `npm run build`,
-  `npm test`, `npm run test:unit`. Package + runner sync is enforced by
+  `npm test`, `npm run test:unit`, plus the verbatim-corpus completeness gate
+  `npm run check:verbatim` (+ `npm run check:verbatim:goals` for the goals-index
+  citations) — the standing P1..P5 verifier (`scripts/verify-verbatim-index.mjs`,
+  GOAL 74/75) must pass on every flip: every user block has exactly its Index
+  row (global + per-date equality), every row resolves to a real archive marker
+  and is its block's own words, rows are chronological, and every T-stamped
+  `- verbatim:` citation in `.brain/verbatim-goals.md` resolves. Package +
+  runner sync is enforced by
   `test/capability-dispatch.test.ts` (18/18) and package shape by
   `test/validate-packages.test.ts` (211/211).
 - **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
