@@ -341,6 +341,23 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   when there is no answer — a real wall); coverage is pinned by
   `test/restriction-markers.test.ts` (builtin + packaged) so a future profile
   added without markers fails LOUD (suite, like the manifest↔dispatch drift gate).
+- **The profile-shape and storage READ gates are complete** (GOAL 56/57/58/59/60):
+  `--profile FILE` overrides AND packaged `profile.json` validate the GOAL 54/55
+  `capability` block at load (GOAL 56 packaged + GOAL 57 override — a wrong-typed
+  `restrictionMarkers`/picker/toggle refuses LOUD naming file+field instead of a
+  late `matchRestrictionMarkers` for…of-undefined at answer time); stored
+  capability fingerprints are never served malformed — `GET /capabilities?site=`
+  answers `probed:false` + the NAMED reason + re-probe hint (GOAL 58,
+  `validateCapabilityReportShape`); stored snapshots are shape-gated at the load
+  seam — a wrong-shaped `state.json` (cookies string etc.) returns null like
+  corrupt JSON instead of crashing `injectSnapshot`'s `.filter` mid-runner
+  (GOAL 59, `validateSnapshotShape`, legacy absent-field snapshots still load);
+  and the vault `accounts.json` index is per-entry gated — hostile slugs
+  (`../../..`, numeric) are excluded so they are never listed on /accounts +
+  /registry accounts[] and never escape the vault through
+  `accountSnapshotPath`'s resolve() (GOAL 60, `validStoredAccount`). Every write
+  seam still runs its own truth gate (GOAL 49/50) — the read seams refuse the
+  same malformed classes at serve/load time.
 - **Account-INDEX collisions are refused too** (GOAL 50): `saveAccountSnapshot`
   is gated by `slugCollision` (`src/runtime/session-store.ts`) — a same-slug
   DIFFERENT identity on one host is never silently overwritten (the old
