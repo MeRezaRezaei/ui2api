@@ -108,6 +108,26 @@ export interface RequirementsReport {
   summary: Record<Verdict, number>;
 }
 
+/** GOAL 42: verdict-count summary (ready/working/on-hold/not-ready) for a
+ *  package row set — the scoped-summary math the doctor prints. Exported so
+ *  the CLI's `doctor <site>` human table and the --json payload share it. */
+export function summarizeVerds(rows: { verdict: string }[]): Record<Verdict, number> {
+  const s: Record<Verdict, number> = { ready: 0, working: 0, "on-hold": 0, "not-ready": 0 };
+  for (const r of rows) s[r.verdict as Verdict] = (s[r.verdict as Verdict] ?? 0) + 1;
+  return s;
+}
+
+/** GOAL 42: the scoped report — the `doctor <site>` view. Packages filtered to
+ *  the site, summary recomputed for the scope (the SAME filtering the human
+ *  path prints: full summary only when the scope is the whole set). The machine
+ *  payload (`requirements --json`) serializes exactly this, so the scoped JSON
+ *  can never drift from the printed verdicts. */
+export function scopeRequirementsReport(report: RequirementsReport, siteId: string): RequirementsReport {
+  const rows = report.packages.filter((p) => p.id === siteId);
+  const summary = rows.length === report.packages.length ? report.summary : summarizeVerds(rows);
+  return { ...report, packages: rows, summary };
+}
+
 /** Injectable seams — every default is a thin real implementation; tests
  *  override each one so no real binary/network/filesystem is touched. */
 export interface RequirementsDeps {

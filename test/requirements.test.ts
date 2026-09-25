@@ -17,6 +17,8 @@ import {
   requirementPackagesFor,
   resolveVault,
   runOsChecks,
+  scopeRequirementsReport,
+  summarizeVerds,
   type PackageRequirements,
   type RequirementPackage,
   type RequirementsCheck,
@@ -638,4 +640,77 @@ test("default deps keep real implementations (no-op on construction; never launc
   assert.equal(deps.dataDir, "/tmp/req-default-test");
   assert.equal(typeof deps.chromeVersion, "function");
   assert.equal(deps.nodeVersion, process.versions.node);
+});
+
+// --- GOAL 42: the scoped report the --json payload serializes (doctor <site>) ---
+
+test("summarizeVerds: counts the four-verdict vocabulary, ignores nothing else", () => {
+  assert.deepEqual(summarizeVerds([]), { ready: 0, working: 0, "on-hold": 0, "not-ready": 0 });
+  assert.deepEqual(
+    summarizeVerds([
+      { verdict: "ready" },
+      { verdict: "working" },
+      { verdict: "on-hold" },
+      { verdict: "not-ready" },
+      { verdict: "ready" },
+    ]),
+    { ready: 2, working: 1, "on-hold": 1, "not-ready": 1 }
+  );
+});
+
+test("GOAL 42: scoped report (doctor <site>) filters packages + recomputes the summary — the SAME set the human path prints, serialized for --json", async () => {
+  await withCleanEnv(async () => {
+    const deps = makeDeps({
+      listAccounts: (d, h) => (h === "gemini.google.com" || h === "chat.deepseek.com" ? ACC : []),
+      legacySessionPresent: () => false,
+      registryVerified: (id) =>
+        id === "deepseek"
+          ? { since: "2026-09-19", evidence: "proof PASS 11462", via: "session-locked vault replay" }
+          : false,
+      packages: () => [
+        pkg({}),
+        pkg({ id: "deepseek", url: "https://chat.deepseek.com", host: "chat.deepseek.com", siteStatus: "verified" }),
+        pkg({ id: "claude", url: "https://claude.ai/new", host: "claude.ai" }),
+      ],
+    });
+    const report = await checkRequirements({ deps });
+    assert.deepEqual(report.summary, { ready: 1, working: 1, "on-hold": 0, "not-ready": 1 });
+    // The scoped view: exactly the deepseek row, with the scope's own summary —
+    // the identical filtering the human `doctor <site>` path prints.
+    const scoped = scopeRequirementsReport(report, "deepseek");
+    assert.equal(scoped.packages.length, 1);
+    assert.equal(scoped.packages[0].id, "deepseek");
+    assert.equal(scoped.packages[0].verdict, "working");
+    assert.deepEqual(scoped.summary, { ready: 0, working: 1, "on-hold": 0, "not-ready": 0 });
+    // The --json payload: the serialized scoped report carries the filtered set
+    // + the GOAL-39 vault fields (capturedAt/ageDays/stale) intact.
+    const payload = JSON.parse(JSON.stringify(scoped));
+    assert.equal(payload.packages.length, 1);
+    assert.equal(payload.packages[0].verdict, "working");
+    assert.match(payload.packages[0].vault.detail, /captured 2026-09-01 \(24 days ago\)/);
+    assert.equal(payload.packages[0].vault.stale, true);
+    assert.equal(payload.summary.working, 1);
+  });
+});
+
+test("GOAL 42: scoping to a non-ready site keeps the not-ready verdict + reason in the payload (exit-code truth)", async () => {
+  await withCleanEnv(async () => {
+    const deps = makeDeps({
+      listAccounts: () => [],
+      legacySessionPresent: () => false,
+      packages: () => [
+        pkg({}),
+        pkg({ id: "claude", url: "https://claude.ai/new", host: "claude.ai" }),
+      ],
+    });
+    const report = await checkRequirements({ deps });
+    const scoped = scopeRequirementsReport(report, "claude");
+    assert.equal(scoped.packages.length, 1);
+    assert.equal(scoped.packages[0].verdict, "not-ready");
+    assert.deepEqual(scoped.summary, { ready: 0, working: 0, "on-hold": 0, "not-ready": 1 });
+    const payload = JSON.parse(JSON.stringify(scoped));
+    assert.match(payload.packages[0].reasons[0], /no stored session for claude\.ai/);
+    // cmdRequirements maps this to exit 1: not-ready present in the scoped set.
+    assert.equal(payload.packages.some((p: { verdict: string }) => p.verdict === "not-ready"), true);
+  });
 });

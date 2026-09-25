@@ -127,6 +127,15 @@ test("OS-fail -> exit 1 + named reason (never a guessed verdict)", async () => {
     assert.match(outcome.message, /display: headless: no usable Chrome executable/);
     assert.match(outcome.message, /browser-home: ui2api data dir not usable/);
     assert.equal(smokeExitCode(outcome), 1);
+    // GOAL 42: the fail path carries the report — the NAMED fails are
+    // machine-readable in report.checks[], not just buried in the message.
+    assert.ok(outcome.report, "fail path still carries the requirements report");
+    const display = outcome.report.checks.find((c) => c.id === "display");
+    const browserHome = outcome.report.checks.find((c) => c.id === "browser-home");
+    assert.equal(display?.status, "fail");
+    assert.match(display?.reason ?? "", /no usable Chrome executable/);
+    assert.equal(browserHome?.status, "fail");
+    assert.match(browserHome?.reason ?? "", /ui2api data dir not usable/);
   });
 });
 
@@ -145,6 +154,7 @@ test("no-anonymous-package + install seam fails -> named not-ready + install hin
     assert.match(outcome.message, /installing "duckduckgo" failed \(GET registry index\.json -> HTTP 404\)/);
     assert.match(outcome.message, /Hint: 'ui2api install duckduckgo'/);
     assert.equal(smokeExitCode(outcome), 1);
+    assert.ok(outcome.report, "install-seam fail path still carries the report");
   });
 });
 
@@ -217,6 +227,7 @@ test("round-trip fails (driver throws) -> exit 1 + named reason", async () => {
     assert.equal(outcome.site, "duckduckgo");
     assert.match(outcome.message, /^smoke FAIL: round-trip failed on duckduckgo — no answer appeared on duckduckgo within 45000ms/);
     assert.equal(smokeExitCode(outcome), 1);
+    assert.ok(outcome.report, "round-trip fail path still carries the report");
   });
 });
 
@@ -236,6 +247,7 @@ test("round-trip returns an empty answer -> exit 1 with the driver's doneReason 
     assert.equal(outcome.ok, false);
     assert.match(outcome.message, /returned no answer \(doneReason=empty\)/);
     assert.equal(smokeExitCode(outcome), 1);
+    assert.ok(outcome.report, "empty-answer fail path still carries the report");
   });
 });
 
@@ -252,6 +264,81 @@ test("the round-trip uses the caller's prompt (default = the SMOKE OK ask)", asy
     });
     assert.equal(asked, SMOKE_PROMPT);
     assert.match(SMOKE_PROMPT, /SMOKE OK/);
+  });
+});
+
+// --- GOAL 42: the machine payload — the report rides every outcome ---
+
+test("GOAL 42: ok path carries the report — the --json payload shape (report.checks[] present, undefined fields omitted)", async () => {
+  await withCleanEnv(async () => {
+    const outcome = await runSmoke({
+      deps: makeDeps({
+        checkOs: async () =>
+          osReport([
+            { id: "node", status: "pass", detail: "node v24.20.0 (>= 22.13.0)" },
+            { id: "chrome", status: "pass", detail: "/usr/bin/google-chrome-stable 152.0.7977.82" },
+            { id: "display", status: "pass", detail: "headless — ladder-resolved chrome /usr/bin/google-chrome-stable 152.0.7977.82" },
+          ]),
+      }),
+    });
+    assert.equal(outcome.ok, true);
+    // The report the gate computed is carried, NOT thrown away (smoke.ts:153).
+    assert.ok(outcome.report, "outcome.report present on the ok path");
+    assert.ok(Array.isArray(outcome.report.checks));
+    const node = outcome.report.checks.find((c) => c.id === "node");
+    assert.equal(node?.status, "pass");
+    assert.match(node?.detail ?? "", /node v24\.20\.0/);
+    // The --json payload: the exact object cmdSmoke serializes. JSON.stringify
+    // drops undefined-valued keys (installedAnon absent here), keeps the report.
+    const payload = JSON.parse(
+      JSON.stringify({
+        ok: outcome.ok,
+        site: outcome.site,
+        answer: outcome.answer,
+        ms: outcome.ms,
+        message: outcome.message,
+        installedAnon: outcome.installedAnon,
+        report: outcome.report,
+      })
+    );
+    assert.equal(payload.ok, true);
+    assert.equal(payload.site, "duckduckgo");
+    assert.equal(payload.answer, "SMOKE OK");
+    assert.equal(typeof payload.ms, "number");
+    assert.equal(payload.installedAnon, undefined);
+    assert.match(payload.message, /^smoke OK: duckduckgo answered "SMOKE OK" in \d+ms$/);
+    assert.equal(payload.report.checks.length, 3);
+    assert.equal(payload.report.checks[1].detail, "/usr/bin/google-chrome-stable 152.0.7977.82");
+  });
+});
+
+test("GOAL 42: --json verdict shape on an ok-with-install path carries installedAnon (undefined-omission guest)", async () => {
+  await withCleanEnv(async () => {
+    let anonAvailable = false;
+    const outcome = await runSmoke({
+      deps: makeDeps({
+        anonymousProfile: () => (anonAvailable ? ANON() : null),
+        installAnon: async () => {
+          anonAvailable = true;
+          return INSTALLED;
+        },
+      }),
+    });
+    assert.equal(outcome.ok, true);
+    assert.ok(outcome.report);
+    const payload = JSON.parse(
+      JSON.stringify({
+        ok: outcome.ok,
+        site: outcome.site,
+        answer: outcome.answer,
+        ms: outcome.ms,
+        message: outcome.message,
+        installedAnon: outcome.installedAnon,
+        report: outcome.report,
+      })
+    );
+    assert.equal(payload.installedAnon.version, "0.3.0");
+    assert.equal(payload.report.checks.length, 1);
   });
 });
 
@@ -276,9 +363,23 @@ test("firstContentLine: tolerates leading blank lines; caps length", () => {
 
 // --- help text anchor (the CLI case + help line are wired up top-level) ---
 
-test("smoke anchors in the CLI command table + help line", () => {
+test("smoke anchors in the CLI command table + help line + --json wiring (GOAL 42)", () => {
   const cli = readFileSync("src/cli.ts", "utf8");
   assert.match(cli, /case "smoke":\n\s+return cmdSmoke\(flags\);/);
   assert.match(cli, /async function cmdSmoke\(flags: Flags\)/);
   assert.match(cli, /ui2api smoke\s+\(ONE command:/);
+  // GOAL 42: cmdSmoke consumes flags.json — the machine verdict serializes
+  // the outcome (undefined fields omitted via JSON.stringify) with the report
+  // riding along, and the exit code stays the gate.
+  assert.match(cli, /if \(flags\.json\)/);
+  assert.match(cli, /installedAnon: outcome\.installedAnon,/);
+  assert.match(cli, /report: outcome\.report,/);
+  assert.match(cli, /process\.exitCode = smokeExitCode\(outcome\);/);
+  assert.match(cli, /ui2api smoke\s+\(ONE command:[\s\S]*?\[--json = \{ok, site, answer\?, ms\?, message, installedAnon\?, report\}\]/);
+  // GOAL 42: cmdRequirements consumes the same flag for the SAME report shape
+  // the daemon serves, honoring the doctor <site> scope.
+  assert.match(cli, /async function cmdRequirements\(siteOrEmpty: string, flags: Flags\)/);
+  assert.match(cli, /scopeRequirementsReport\(report, siteOrEmpty\)/);
+  assert.match(cli, /JSON\.stringify\(scoped, null, 2\)/);
+  assert.match(cli, /ui2api requirements \[site\][\s\S]*?\[--json = the same report/);
 });

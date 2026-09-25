@@ -651,30 +651,35 @@ async function cmdProfileList(host: string, flags: Flags): Promise<void> {
 // (src/runtime/requirements.ts): no browser is ever launched (the attach probe
 // is an HTTP GET against an already-running Chrome; chrome version is an
 // execute-only --version probe). Exit is non-zero when any requested-scope
-// package is not-ready (scriptable gates).
-function summarizeVerds(rows: { verdict: string }[]): Record<string, number> {
-  const s: Record<string, number> = { ready: 0, working: 0, "on-hold": 0, "not-ready": 0 };
-  for (const r of rows) s[r.verdict] = (s[r.verdict] ?? 0) + 1;
-  return s;
-}
+// package is not-ready (scriptable gates). --json (GOAL 42): the report shape
+// the daemon's GET /requirements serves, honoring the `doctor <site>` scope
+// (filtered packages + scoped summary — the SAME filtering the human path
+// prints, just serialized).
 
 async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void> {
-  const { checkRequirements } = await import("./runtime/requirements.js");
+  const { checkRequirements, scopeRequirementsReport } = await import("./runtime/requirements.js");
   const report = await checkRequirements({
     deps: { dataDir: resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data") },
   });
+  // GOAL 42: ONE scope helper for both the human table and the --json payload
+  // so the machine view can never drift from the printed verdicts.
+  const scoped = siteOrEmpty ? scopeRequirementsReport(report, siteOrEmpty) : report;
+  if (siteOrEmpty && scoped.packages.length === 0) {
+    throw new Error(`unknown site "${siteOrEmpty}" for requirements`);
+  }
+  if (flags.json) {
+    console.log(JSON.stringify(scoped, null, 2));
+    const notReady = scoped.packages.filter((p) => p.verdict === "not-ready");
+    if (notReady.length > 0) process.exitCode = 1;
+    return;
+  }
   console.log(`[ui2api] OS-level requirements (doctor) — node ${report.node}`);
   for (const c of report.checks) {
     const mark = c.status === "pass" ? "[ok]  " : c.status === "fail" ? "[FAIL]" : "[skip]";
     console.log(`  ${mark} ${c.id.padEnd(13)} ${c.detail ?? c.reason ?? ""}`);
   }
   console.log("");
-  const rows = siteOrEmpty
-    ? report.packages.filter((p) => p.id === siteOrEmpty)
-    : report.packages;
-  if (siteOrEmpty && rows.length === 0) {
-    throw new Error(`unknown site "${siteOrEmpty}" for requirements`);
-  }
+  const rows = scoped.packages;
   console.log(`${"site".padEnd(24)} kind            verdict     reasons`);
   for (const p of rows) {
     const reasons = p.reasons.length > 0 ? p.reasons.join("; ") : "driveable now (honestly unverified)";
@@ -686,9 +691,8 @@ async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void>
     if (p.vault.stale && p.vault.reason) console.log(`  ⚠ ${p.vault.reason}`);
   }
   console.log("");
-  const scoped = rows.length === report.packages.length ? report.summary : summarizeVerds(rows);
   console.log(
-    `summary: ${scoped.ready} ready · ${scoped.working} working · ${scoped["on-hold"]} on-hold · ${scoped["not-ready"]} not-ready`
+    `summary: ${scoped.summary.ready} ready · ${scoped.summary.working} working · ${scoped.summary["on-hold"]} on-hold · ${scoped.summary["not-ready"]} not-ready`
   );
   const notReady = rows.filter((p) => p.verdict === "not-ready");
   if (notReady.length > 0) {
@@ -703,7 +707,11 @@ async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void>
 // (src/prompt/smoke.ts) runs the real gates and decides the verdict line; this
 // command only prints the outcome + maps it to the exit code — the same data
 // dir resolution cmdRequirements uses, the real install seam for the missing
-// anonymous package, and a REAL headless ChatDriver round-trip.
+// anonymous package, and a REAL headless ChatDriver round-trip. --json
+// (GOAL 42): the machine verdict {ok, site, answer, ms, message,
+// installedAnon?, report} — the report the gate computed rides along (the WHY:
+// passed-check detail + every package's GOAL-39 vault fields); undefined
+// fields are omitted; the exit code stays the gate (smokeExitCode).
 async function cmdSmoke(flags: Flags): Promise<void> {
   const { runSmoke, smokeExitCode } = await import("./prompt/smoke.js");
   const outcome = await runSmoke({
@@ -713,6 +721,27 @@ async function cmdSmoke(flags: Flags): Promise<void> {
       ...(flags.out ? { packagesRoot: flags.out } : {}),
     },
   });
+  if (flags.json) {
+    // JSON.stringify omits undefined-valued keys — answer/ms/installedAnon
+    // disappear on paths that don't carry them.
+    console.log(
+      JSON.stringify(
+        {
+          ok: outcome.ok,
+          site: outcome.site,
+          answer: outcome.answer,
+          ms: outcome.ms,
+          message: outcome.message,
+          installedAnon: outcome.installedAnon,
+          report: outcome.report,
+        },
+        null,
+        2
+      )
+    );
+    process.exitCode = smokeExitCode(outcome);
+    return;
+  }
   if (outcome.installedAnon) {
     const res = outcome.installedAnon;
     console.log(
@@ -1016,7 +1045,9 @@ async function main(): Promise<void> {
       return cmdPromptd(flags);
     case "requirements":
     case "doctor":
-      return cmdRequirements(arg ?? "", flags);
+      // <site> is optional — a leading-dash positional is a flag (e.g.
+      // `requirements --json`), never a site id.
+      return cmdRequirements(arg && !arg.startsWith("--") ? arg : "", flags);
     case "smoke":
       return cmdSmoke(flags);
     case "proof":
@@ -1040,8 +1071,8 @@ async function main(): Promise<void> {
       console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
       console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
-      console.log("  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready)");
-      console.log("  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1))");
+      console.log("  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready) [--json = the same report as a machine-readable object, honoring the <site> scope]");
+      console.log("  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1)) [--json = {ok, site, answer?, ms?, message, installedAnon?, report}]");
       process.exit(cmd ? 1 : 0);
   }
 }

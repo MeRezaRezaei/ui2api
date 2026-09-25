@@ -20,6 +20,10 @@
 //   (d) prints `smoke OK: duckduckgo answered "<first line>" in Nms` or the
 //       NAMED failure; the exit code is the gate (smokeExitCode: ok -> 0,
 //       any named failure -> 1).
+//   (e) GOAL 42: the requirements report the gate computed in (a) is carried
+//       on EVERY outcome path — the machine payload (`smoke --json`) embeds it
+//       so a buyer's CI sees the WHY (passed-check detail + every package's
+//       GOAL-39 vault fields), mirroring the daemon's GET /requirements.
 //
 // Injectable seams (same pattern as test/requirements.test.ts): unit tests
 // override checkOs / anonymousProfile / installAnon / ask so NO browser is
@@ -75,6 +79,12 @@ export interface SmokeOutcome {
   installedAnon?: InstallResult;
   /** The printed verdict line (OK or the NAMED failure). */
   message: string;
+  /** GOAL 42: the requirements report the gate computed — carried on EVERY
+   *  path (ok AND every named failure) so the machine payload carries the WHY:
+   *  passed-check detail (ladder chrome + version, display mode, node,
+   *  browser-home) and every package's GOAL-39 vault fields
+   *  (report.packages[].vault.{capturedAt,ageDays,stale}). */
+  report: RequirementsReport;
 }
 
 /** Exit-code mapping — the shell gate: ok -> 0, every named failure -> 1. */
@@ -158,6 +168,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
       ok: false,
       site: "",
       message: `smoke FAIL: OS-level requirements not met (${reasons}) — fix the named reasons, then re-run`,
+      report,
     };
   }
 
@@ -174,6 +185,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
         message:
           `smoke FAIL: no anonymous chat package installable — installing "${SMOKE_ANON_SITE}" failed (${(e as Error).message}). ` +
           `Hint: 'ui2api install ${SMOKE_ANON_SITE}' (network/registry permitting), then re-run smoke`,
+        report,
       };
     }
     profile = deps.anonymousProfile();
@@ -184,6 +196,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
         message:
           `smoke FAIL: anonymous chat package "${SMOKE_ANON_SITE}" installed (v${installed.version}) but still not driveable — ` +
           `its packaged profile must be anonymous (loginRequired=false) and chat-shaped; inspect capabilities/${SMOKE_ANON_SITE}/profile.json, then re-run smoke`,
+        report,
       };
     }
   }
@@ -199,6 +212,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
       ok: false,
       site: profile.id,
       message: `smoke FAIL: round-trip failed on ${profile.id} — ${(e as Error).message.split("\n")[0]}`,
+      report,
     };
   }
   const ms = Date.now() - t0;
@@ -208,6 +222,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
       ok: false,
       site: profile.id,
       message: `smoke FAIL: round-trip on ${profile.id} returned no answer (doneReason=${result.doneReason}) — the page did not answer`,
+      report,
     };
   }
   const outcome: SmokeOutcome = {
@@ -216,6 +231,7 @@ export async function runSmoke(opts: { deps?: Partial<SmokeDeps>; prompt?: strin
     answer: first,
     ms,
     message: `smoke OK: ${profile.id} answered "${first}" in ${ms}ms`,
+    report,
   };
   if (installed !== undefined) outcome.installedAnon = installed;
   return outcome;
