@@ -78,7 +78,7 @@ npx tsx src/cli.ts analyse <url> [--login] [--llm]   # recorder + action map
 npx tsx src/cli.ts profile scan|import|capture|ingest|list  # session management
 npx tsx src/cli.ts profile add-all [--known|--interactive]  # one-command bulk import: ALL Chrome-profile site sessions → vault (read-back verified, no per-host loop)
 npx tsx src/cli.ts requirements [site] (alias: doctor)     # OS-level readiness gates BEFORE any browser work: per-package verdict ready/working/on-hold/not-ready with the NAMED reason; exit nonzero on any not-ready
-npx tsx src/cli.ts package | install | plugin serve  # package + hub workflows
+npx tsx src/cli.ts install <site> | plugin serve  # install + plugin workflows (`package` REFUSES LOUD — write-truth gate, GOAL 66)
 npx tsx src/cli.ts hub | serve | remap | generate    # server generation pipeline
 npm test                  # integration (test/integration.ts)
 npm run test:unit         # full unit suite incl. validate-packages + capability-dispatch
