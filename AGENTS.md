@@ -305,6 +305,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   ago)`, and a session older than the `SESSION_STALE_DAYS` risk threshold (14)
   gets a `⚠ stale` warn with the re-capture instruction — age ≠ expiry, so the
   flag never changes the ready/working verdict (site-dependent lifetimes).
+- **Session writes are never fabricated either** (GOAL 49): every capture,
+  ingest, and import path runs the WRITE truth gate (`snapshotHasAuth`,
+  `src/runtime/session-store.ts`) — a snapshot with ZERO cookies AND ZERO
+  localStorage for the target host is REFUSED at the write seam with a named
+  `skipped-no-auth (nothing to save)` verdict (nothing written to the vault,
+  never listed in `/accounts`, `cmdProfileIngest` exits nonzero). The
+  "logged-in session — chat history persists" claim only prints for a usable
+  snapshot, so the vault, the account guard, and the requirements age gate can
+  never surface an anonymous session as fresh + valid. Decrypt-limited partials
+  (cookies matched but undecryptable) keep their honest warning — they are a
+  real logged-in session, not the anonymous class this gate kills.
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use). Overrides are validated with the same

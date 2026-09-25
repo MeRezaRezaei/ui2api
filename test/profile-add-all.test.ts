@@ -141,11 +141,12 @@ function assertNoNewU2aEnts(before: Set<string>, ctx: string): void {
 // lines ~686-702 of src/cli.ts) — same seams, no browser ---
 
 function addAllVerdict(
-  imp: { stats: { cookiesMatched: number } },
+  imp: { stats: { cookiesMatched: number }; ok?: boolean; snapshotPath?: string },
   dataDir: string,
   host: string,
   slug: string
 ): string {
+  if (!imp.ok || !imp.snapshotPath) return "skipped-no-auth (nothing to save)";
   const listed = listAccounts(dataDir, host).some((a) => a.slug === slug);
   const snap = loadAccountSnapshot(dataDir, host, slug);
   if (!listed || !snap) return "failed(read-back-missing)";
@@ -330,14 +331,18 @@ test("add-all read-back: matched-zero host -> 'skipped-no-auth'", async () => {
 
     const imp = await importSiteSnapshot({ root, host, dataDir });
     assert.equal(imp.ok, false, "no cookie matched -> NOT logged in");
-    assert.ok(imp.warnings.some((w) => /no cookies matched/i.test(w)), JSON.stringify(imp.warnings));
+    assert.equal(imp.snapshotPath, "", "GOAL 49: fully anonymous import is REFUSED at the write seam — nothing written");
+    assert.ok(imp.warnings.some((w) => /skipped-no-auth \(nothing to save\)/i.test(w)), JSON.stringify(imp.warnings));
 
     const slug = slugifyIdentity(imp.identity);
-    const snap = loadAccountSnapshot(dataDir, host, slug);
-    assert.ok(snap, "snapshot still written (honest record)");
-    assert.equal((snap!.cookies ?? []).length, 0);
+    // GOAL 49: the vault MUST NOT contain the refused account — no index row,
+    // no snapshot on disk (the old behavior of writing the anonymous snapshot
+    // "as an honest record" is what made /accounts + the age gate surface a
+    // fake account as fresh + valid).
+    assert.equal(listAccounts(dataDir, host).some((a) => a.slug === slug), false, "refused import must NOT be listed");
+    assert.equal(loadAccountSnapshot(dataDir, host, slug), null, "no snapshot for a refused import");
 
-    assert.equal(addAllVerdict(imp, dataDir, host, slug), "skipped-no-auth");
+    assert.equal(addAllVerdict(imp, dataDir, host, slug), "skipped-no-auth (nothing to save)");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

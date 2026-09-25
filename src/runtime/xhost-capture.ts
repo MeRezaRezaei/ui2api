@@ -207,11 +207,31 @@ export async function captureProfileFromLiveChrome(opts: {
   const ingest = await ingestProfile({ profileDir: opts.profileDir, targetHost: opts.host });
   const detected = detectProfileIdentity(opts.profileDir).best;
   const identity = detected || opts.identity || `${currentUsername()}-default`;
+  const warnings = [...ingest.warnings];
+  // GOAL 49 write truth gate: a FULLY anonymous capture (zero cookies matched
+  // AND zero localStorage entries for the target host) is REFUSED at the write
+  // seam — nothing written to the vault, empty snapshotPath, named verdict.
+  // The decrypt-limited partial (cookies matched but undecryptable, or
+  // cookies-only storage) keeps its honest warning below and IS still written:
+  // it represents a real logged-in session whose auth simply could not be
+  // exported, so it is not the silent-wrong-session class this gate kills.
+  if (ingest.stats.cookiesMatched === 0 && ingest.stats.localStorageEntries === 0) {
+    warnings.push(`skipped-no-auth (nothing to save) — no cookies and no localStorage matched ${opts.host} (logged out?)`);
+    return {
+      identity,
+      snapshotPath: "",
+      warnings,
+      stats: {
+        cookiesMatched: ingest.stats.cookiesMatched,
+        cookiesTotal: ingest.stats.cookiesTotal,
+        localStorageEntries: ingest.stats.localStorageEntries,
+      },
+    };
+  }
   saveAccountSnapshot(opts.dataDir, opts.host, identity, ingest.snapshot, {
     source: "capture",
     profileDir: opts.profileDir,
   });
-  const warnings = [...ingest.warnings];
   if (ingest.stats.cookiesMatched === 0) {
     warnings.push(`zero cookies matched ${opts.host} — snapshot saved anyway (localStorage may carry the auth)`);
   }

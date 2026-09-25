@@ -7,7 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
-import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity } from "./runtime/session-store.js";
+import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, snapshotHasAuth } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -558,6 +558,15 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     console.log(`  Log in to ${host} in the browser window, then return here and press Enter.`);
     await waitForEnter();
     const captured = await captureProfileFromLiveChrome({ profileDir, host, dataDir, identity: flags.identity });
+    // GOAL 49 write truth gate: an anonymous capture returns an empty
+    // snapshotPath — nothing was written, so no "captured" claim and no
+    // capability fingerprint against an account that does not exist.
+    if (!captured.snapshotPath) {
+      console.warn(`[ui2api] nothing saved — no cookies and no localStorage matched ${host} (logged out?) — no vault account written`);
+      for (const w of captured.warnings) console.warn(`  ! ${w}`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`[ui2api] identity-keyed session captured for ${host}:`);
     console.log(`  identity: ${captured.identity}`);
     console.log(`  snapshot: ${captured.snapshotPath}`);
@@ -612,7 +621,14 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     console.log(`  cookies  -> ${sessionPath(dataDir, host)}`);
     console.log(`  snapshot (cookies + localStorage + sessionStorage + IndexedDB) -> ${snapshotPath(dataDir, host)}`);
   }
-  console.log(`Sites driven through ui2api now see your logged-in session — chat history persists.`);
+  // GOAL 49 claim gate: the "logged-in session" claim only prints for a usable
+  // snapshot (cookies or localStorage present). A fully anonymous capture is
+  // saved for the record but never claimed as a signed-in session.
+  if (snapshotHasAuth(session.snapshot)) {
+    console.log(`Sites driven through ui2api now see your logged-in session — chat history persists.`);
+  } else {
+    console.warn(`[ui2api] warning: no cookies and no localStorage captured for ${host} (logged out?) — this capture carries no session to reuse.`);
+  }
 }
 
 async function cmdProfileIngest(host: string, flags: Flags): Promise<void> {
@@ -622,6 +638,16 @@ async function cmdProfileIngest(host: string, flags: Flags): Promise<void> {
     targetHost: host,
     profileDir: flags.profile,
   });
+  // GOAL 49 write truth gate: an anonymous snapshot (zero cookies AND zero
+  // localStorage in the CONTENT) is refused at the write seam — never saved to
+  // disk, never claimed "logged in". Named message + nonzero exit (scriptable
+  // gates), so a logged-out ingest fails LOUD instead of writing a fake account.
+  if (!snapshotHasAuth(snapshot)) {
+    console.error(`[ui2api] nothing saved — no cookies and no localStorage matched ${host} (logged out?) — no vault account written`);
+    for (const w of warnings) console.warn(`  ! ${w}`);
+    process.exitCode = 1;
+    return;
+  }
   const target = snapshotPath(dataDir, host);
   saveSnapshot(target, snapshot);
   console.log(`[ui2api] ingested ${profileDir} -> ${target}`);
@@ -684,6 +710,16 @@ async function cmdProfileImport(host: string, flags: Flags): Promise<void> {
     try {
       const r = await importSiteSnapshot({ root: p.root, host: wanted, dataDir, identity: flags.identity });
       found = true;
+      if (!r.snapshotPath) {
+        // GOAL 49 write truth gate: a fully anonymous import was refused at the
+        // write seam — nothing written, no "imported" claim, named verdict.
+        console.warn(`[ui2api] nothing saved for ${r.host} from ${p.root}:`);
+        console.warn(`  identity: ${r.identity}`);
+        console.warn(`  cookies: ${r.stats.cookiesMatched}/${r.stats.cookiesTotal} matched`);
+        for (const w of r.warnings) console.warn(`  ! ${w}`);
+        process.exitCode = 1;
+        continue;
+      }
       console.log(`[ui2api] imported ${r.host} from ${p.root}:`);
       console.log(`  identity: ${r.identity}`);
       console.log(`  snapshot: ${r.snapshotPath}`);
@@ -910,24 +946,32 @@ async function cmdProfileAddAll(flags: Flags): Promise<void> {
         imp = await importSiteSnapshot({ root, host: hit.host, dataDir, identity });
         importedIdentity = imp.identity;
         slug = slugifyIdentity(importedIdentity);
-        // Verification pass: read the account back from the VAULT — same seams
-        // `profile list` uses. Never claim ok for something not on disk.
-        const listed = listAccounts(dataDir, hit.host).some((a) => a.slug === slug);
-        const snap = loadAccountSnapshot(dataDir, hit.host, slug);
-        if (!listed || !snap) {
-          verdict = "failed(read-back-missing)";
+        // GOAL 49: a fully anonymous import was REFUSED at the write seam —
+        // nothing written, nothing to read back. Its row is the named
+        // "skipped-no-auth (nothing to save)" verdict, never persisting as an
+        // account and never read back (read-back would claim a NaN artifact).
+        if (!imp.ok || !imp.snapshotPath) {
+          verdict = `skipped-no-auth (nothing to save)`;
         } else {
-          const cookies = (snap.cookies ?? []).length;
-          const ls = (snap.localStorage ?? []).length;
-          if (cookies === 0 && imp.stats.cookiesMatched > 0) {
-            // The profile HAD cookies for this host but every one was
-            // undecryptable (app-bound, portal v20 class) — captured but not
-            // usable; say so honestly instead of "imported".
-            verdict = "decrypt-limited (portal v20)";
-          } else if (cookies > 0 || ls > 0) {
-            verdict = "imported";
+          // Verification pass: read the account back from the VAULT — same seams
+          // `profile list` uses. Never claim ok for something not on disk.
+          const listed = listAccounts(dataDir, hit.host).some((a) => a.slug === slug);
+          const snap = loadAccountSnapshot(dataDir, hit.host, slug);
+          if (!listed || !snap) {
+            verdict = "failed(read-back-missing)";
           } else {
-            verdict = "skipped-no-auth";
+            const cookies = (snap.cookies ?? []).length;
+            const ls = (snap.localStorage ?? []).length;
+            if (cookies === 0 && imp.stats.cookiesMatched > 0) {
+              // The profile HAD cookies for this host but every one was
+              // undecryptable (app-bound, portal v20 class) — captured but not
+              // usable; say so honestly instead of "imported".
+              verdict = "decrypt-limited (portal v20)";
+            } else if (cookies > 0 || ls > 0) {
+              verdict = "imported";
+            } else {
+              verdict = "skipped-no-auth";
+            }
           }
         }
       } catch (e) {

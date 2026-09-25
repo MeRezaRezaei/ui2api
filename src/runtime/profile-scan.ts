@@ -402,8 +402,11 @@ export function scanProfilesForSites(
  * 2. `detectProfileIdentity(root).best` (email or display name from prefs)
  * 3. `{owningUser}-default` fallback — never saves under an empty slug.
  *
- * The snapshot is always saved; callers must check `ok` (false when no cookies
- * matched the target host, meaning the user is probably logged out).
+ * GOAL 49 write truth gate: a fully anonymous import (zero cookies matched AND
+ * zero localStorage entries) is REFUSED — nothing is written to the vault, the
+ * returned `snapshotPath` is empty, and `ok` is false. Callers must check `ok`
+ * (false also when no cookies matched a localStorage-carrying site, meaning
+ * the snapshot may still be usable — `localStorage` can carry the auth).
  *
  * @throws When `ingestProfile` itself throws (e.g. no Cookies DB at all).
  */
@@ -434,14 +437,38 @@ export async function importSiteSnapshot(
   if (!identity || !identity.trim()) identity = `${user}-default`;
 
   const slug = slugifyIdentity(identity);
+  // GOAL 49 write truth gate: compute `ok` BEFORE any write. A fully anonymous
+  // import (zero cookies matched AND zero localStorage entries) is REFUSED at
+  // the write seam — the vault/index would otherwise surface it as a valid
+  // account ("skipped-no-auth" rows persisting as listed accounts). Refusal
+  // means NOTHING is written: no snapshot, no accounts.json entry — and the
+  // returned snapshotPath is empty ("refused — nothing to save").
+  const ok = stats.cookiesMatched > 0 || stats.localStorageEntries > 0;
+  const warnings = [...ingestWarnings];
+  if (!ok) {
+    warnings.push("skipped-no-auth (nothing to save) — no cookies and no localStorage matched");
+    return {
+      host: opts.host,
+      identity,
+      snapshotPath: "",
+      ok: false,
+      stats: {
+        cookiesMatched: stats.cookiesMatched,
+        cookiesTotal: stats.cookiesTotal,
+        localStorageEntries: stats.localStorageEntries,
+      },
+      warnings,
+      profileUser: user,
+    };
+  }
   saveAccountSnapshot(opts.dataDir, opts.host, identity, snapshot, {
     source: "import",
     profileDir: opts.root,
   });
 
-  const ok = stats.cookiesMatched > 0;
-  const warnings = [...ingestWarnings];
-  if (!ok) warnings.push("no cookies matched — probably logged out");
+  if (stats.cookiesMatched === 0) {
+    warnings.push("no cookies matched — localStorage may carry the auth");
+  }
 
   return {
     host: opts.host,

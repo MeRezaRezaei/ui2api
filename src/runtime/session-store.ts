@@ -62,6 +62,18 @@ export function loadSnapshot(path: string): ProfileSnapshot | null {
   }
 }
 
+// WRITE-path truth gate (GOAL 49): a snapshot with ZERO cookies AND ZERO
+// localStorage carries no auth signal — it is an anonymous session and must
+// never be written + indexed as a valid vault account, listed in /accounts,
+// accepted by the account guard, or surfaced by the requirements age gate as
+// fresh + valid. Pure: judges snapshot CONTENT (what survives into the file),
+// unlike the ingest stats (which also count undecryptable matched cookies).
+export function snapshotHasAuth(
+  snap: Pick<ProfileSnapshot, "cookies" | "localStorage">
+): boolean {
+  return (snap.cookies?.length ?? 0) > 0 || (snap.localStorage?.length ?? 0) > 0;
+}
+
 // --- Capture ---
 
 // Dump a page's origin storage + the context's cookies into a ProfileSnapshot.
