@@ -5,7 +5,7 @@
 // prompt behaves exactly like a human typing it: paste + Enter runs the site's
 // own JS, and the streamed answer is read off the page's event bus.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
-import { makeDomPrimitives, type DomPrimitives } from "../runtime/dom-primitives.js";
+import { makeDomPrimitives, type DomPrimitives, type AnswerRegionRead } from "../runtime/dom-primitives.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { matchRestrictionMarkers, type RestrictionHit } from "../runtime/capability-probe.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -74,6 +74,24 @@ export function pickModelRowIndex(rows: PickerRow[], target: string): number | n
     if (rows[i].text.toLowerCase().includes(tl)) return i;
   }
   return null;
+}
+
+/**
+ * Pure, browser-free newChat reset verification (GOAL 46 stale-echo guard) —
+ * injected signal seam so tests can exercise the verdict without a browser. A
+ * reset is verified when EITHER signal is observable: the answer region emptied
+ * (every mounted answer bubble gone) or the composer cleared. `null` = signal
+ * not readable; false = honest no-reset — the caller must refuse to compose
+ * into the still-mounted page (the per-ask readback baseline would also catch
+ * the echo, but refusing up front is the loud, never-silent path).
+ */
+export interface NewChatResetSignals {
+  answerRegionEmpty: boolean | null;
+  composerEmpty: boolean | null;
+}
+
+export function newChatResetVerified(signals: NewChatResetSignals): boolean {
+  return signals.answerRegionEmpty === true || signals.composerEmpty === true;
 }
 
 export interface ChatDriverOptions {
@@ -241,6 +259,53 @@ export class ChatDriver {
     }
   }
 
+  // GOAL 46 — verify a newChat click actually reset the conversation: the
+  // answer region emptied or the composer cleared (the profile's own selectors
+  // are the signals). Bounded re-poll for slow resets; an unverified reset is a
+  // LOUD failure — never compose into the previous conversation and then
+  // read the old answer back as the new one (the readback baseline would also
+  // catch it, but the failure here is caught before any typing happens).
+  private async verifyNewChatReset(): Promise<void> {
+    const signals: NewChatResetSignals = { answerRegionEmpty: null, composerEmpty: null };
+    const checks: string[] = [];
+    const answerSel = this.profile.answer.join(", ") || "body";
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      // Signal 1: the answer region emptied (every mounted answer bubble gone).
+      try {
+        const region = await this.dom.readAnswerRegion(answerSel);
+        signals.answerRegionEmpty = region.elementTexts.every((t) => !t.trim());
+        const mounted = region.elementTexts.filter((t) => t.trim()).length;
+        if (!signals.answerRegionEmpty && mounted > 0) checks.push(`answer region still shows ${mounted} mounted answer(s)`);
+      } catch {
+        signals.answerRegionEmpty = null;
+      }
+      // Signal 2: the composer cleared (input value or contenteditable text).
+      if (this.profile.composer.length) {
+        try {
+          const p = await this.page!;
+          const sel = this.profile.composer[0];
+          const loc = p.locator(sel).first();
+          const value = await loc.inputValue().catch(() => "");
+          const inner = (value || ((await loc.evaluate("(el) => (el && el.innerText || '').trim()").catch(() => "")) as string)).trim();
+          signals.composerEmpty = !inner;
+          if (!signals.composerEmpty) checks.push(`composer still contains ${inner.length} char(s)`);
+        } catch {
+          signals.composerEmpty = null;
+        }
+      }
+      if (newChatResetVerified(signals)) return;
+      if (Date.now() >= deadline) break;
+      await this.page!.waitForTimeout(250);
+    }
+    const detail =
+      checks.length > 0 ? checks.join("; ") : "no reset signal readable (answer region and composer both unreadable after the click)";
+    throw new Error(
+      `newChat reset not verified on ${this.profile.id}: after clicking "${this.profile.newChat}" — ${detail}; ` +
+        `refusing to compose into a non-reset page (stale-echo guard, GOAL 46)`
+    );
+  }
+
   // JS-function-indexed probe (verbatim 2026-09-20T10:01): when the profile
   // ships a live-captured index, call window.<root>.<method> in the page and
   // report ok/error honestly. reloadAfterSuccess implements the verbatim rule —
@@ -315,8 +380,17 @@ export class ChatDriver {
         // Random 600–1300ms pause to match a human's post-click dwell time
         // (audit item #4 — page-visible deterministic waits are trivially fingerprinted).
         await this.page!.waitForTimeout(600 + Math.floor(Math.random() * 700));
-      } catch {
-        // no new-chat affordance on this profile/revision — continue in-page
+        // GOAL 46 — verify the conversation actually reset (answer region
+        // emptied / composer cleared). A click that did not reset must FAIL
+        // loudly, never silently compose into the previous conversation and
+        // then read the old answer back as the new one.
+        await this.verifyNewChatReset();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("newChat reset not verified")) throw e;
+        // no new-chat affordance clickable on this profile/revision — continue
+        // in-page; the per-ask readback baseline (below) guarantees no stale
+        // echo either way.
       }
     }
     await this.dismissOverlays();
@@ -346,6 +420,19 @@ export class ChatDriver {
           `Tune ${this.profile.id} in src/profile/profile.ts or ship a JSON override (--profile FILE). ` +
           `Page title: ${title}, url: ${url}`
       );
+    }
+    // GOAL 46 — per-ask FRESHNESS BASELINE: snapshot the answer region BEFORE
+    // the prompt is sent so awaitAnswer requires growth from a NEW element.
+    // Without this, a warm pooled page (newChat defaults false; pool.ts:139
+    // reuses idle workers) carries the previous prompt's static answer and
+    // awaitAnswer's longest-element read would go "stable" on it, returning
+    // prompt A's text as prompt B's answer — plausible success, wrong thing.
+    const answerSel = this.profile.answer.join(", ") || "body";
+    let baseline: AnswerRegionRead | undefined;
+    try {
+      baseline = await this.dom.readAnswerRegion(answerSel);
+    } catch {
+      baseline = undefined; // unreadable region — awaitAnswer snapshots at entry
     }
     // Send the prompt the way the site's own JS expects it. AI chat composers
     // (Copilot/ChatGPT/Claude) are controlled React inputs: `type` sets the
@@ -401,13 +488,33 @@ export class ChatDriver {
         }
       }
     }
-    // Read the streamed answer off the page: stop when text stops growing.
-    const answerSel = this.profile.answer.join(", ") || "body";
-    const observed = await this.dom.awaitAnswer(answerSel, {
-      timeoutMs: opts.timeoutMs ?? this.profile.captureMs,
-      stableMs: opts.stableMs ?? this.profile.stableMs,
-    });
+    // Read the streamed answer off the page: stop when the FRESH text stops
+    // growing — the read is judged against the pre-ask baseline (GOAL 46), so
+    // the previous conversation's static answer can never be judged stable or
+    // echoed back.
+    const observed = await this.dom.awaitAnswer(
+      answerSel,
+      {
+        timeoutMs: opts.timeoutMs ?? this.profile.captureMs,
+        stableMs: opts.stableMs ?? this.profile.stableMs,
+      },
+      baseline
+    );
     const answer = (observed.text ?? "").trim();
+    const doneReason = observed.doneReason;
+    if (doneReason === "stale") {
+      // Honest verdict, never the old echo: the region NEVER changed from the
+      // pre-ask baseline — the previous answer stayed mounted the whole time
+      // and no new element grew. Refuse loudly instead of returning prompt
+      // A's text as prompt B's answer (the GOAL-45 fidelity class).
+      throw new Error(
+        `no fresh answer appeared on ${this.profile.id} within ${opts.timeoutMs ?? this.profile.captureMs}ms — ` +
+          `the region never changed from the per-ask baseline (previous answer still mounted; stale-echo guard, GOAL 46). ` +
+          (this.profile.newChat
+            ? `A newChat reset was requested but did not verifiably clear the conversation — send newChat:true (resets are verified) or check the ${this.profile.newChat} selector.`
+            : `This profile has no newChat affordance — send newChat:true or reset the conversation before asking again.`)
+      );
+    }
     // Capability reflection, L2 (in-band): scan the page for restriction
     // markers (upgrade walls, plan limits, login gates). When a marker hits we
     // say so explicitly — a caller can fall back to another site/model instead
@@ -462,7 +569,7 @@ export class ChatDriver {
     return {
       answer: cap(answer, 60000),
       chunkCount: observed.chunkCount,
-      doneReason: observed.doneReason,
+      doneReason,
       url: observed.url,
       title: observed.title,
       ...(citations.length ? { citations } : {}),

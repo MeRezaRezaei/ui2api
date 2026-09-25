@@ -49,7 +49,12 @@ test/                    # node:test suites (unit, integration, validation)
    `UI2API_AI_SITE`). Paste prompt + Enter via the site's own JS, read the
    streamed answer until it stops growing. One driver, all sites. Model
    selection verifies it took (exact-row click, selected-state check) — never a
-   silent wrong-model prompt.
+   silent wrong-model prompt. Answer readback is FRESH per prompt: `awaitAnswer`
+   snapshots the pre-ask answer region as a baseline and judges only new text,
+   so the warm daemon pool's reused pages never echo a previous prompt's
+   still-mounted answer (stale-echo guard, `test/readback-freshness.test.ts`);
+   `newChat` resets are verified after the click (answer region emptied or
+   composer cleared) before composing.
 2. **Capability runners** (`src/capabilities/*.ts`) — per-site capability
    surface (chat, list_conversations, web_search, image_gen, …) exposed as
    `/capability/<site>` endpoints, wired in `src/prompt/http.ts`, and kept

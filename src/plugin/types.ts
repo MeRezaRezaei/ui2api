@@ -35,11 +35,14 @@ export interface Ui2ApiContext {
     capture(selector: string, untilMs?: number): Promise<unknown>;
     // Stable-wait read for streamed answers: poll until the text stops growing
     // for `stableMs` (or the budget `timeoutMs` expires). Returns the longest
-    // text seen plus why it stopped ("stable" | "timeout" | "empty").
+    // text seen plus why it stopped ("stable" | "timeout" | "empty" | "stale").
+    // "stale" = the region never changed from the per-ask baseline (a previous
+    // answer is still mounted — the caller must not treat it as a fresh reply).
     awaitAnswer(
       selector: string,
-      opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number }
-    ): Promise<{ text: string; chunkCount: number; url: string; title: string; doneReason: "stable" | "timeout" | "empty" }>;
+      opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number },
+      baseline?: { elementTexts: string[] }
+    ): Promise<{ text: string; chunkCount: number; url: string; title: string; doneReason: "stable" | "timeout" | "empty" | "stale" }>;
     status(selector?: string): Promise<unknown>;
   };
   /** Release any browser/context this context lazily launched. Idempotent. */

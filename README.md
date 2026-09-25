@@ -145,7 +145,7 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 37 hermetic unit-test files (595+ tests) — no browser needed
+npm run test:unit   # 38 hermetic unit-test files (595+ tests) — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
@@ -192,6 +192,12 @@ curl -X POST http://127.0.0.1:9797/prompt -H 'authorization: Bearer op-secret' \
   -H 'content-type: application/json' \
   -d '{"site":"copilot","prompt":"what is 2+2?"}'
 ```
+
+`POST /prompt` body: `{"site","prompt"}` (plus optional `"newChat":true` to
+force a fresh conversation, and `"account":"<slug|email>"` for a specific
+vault account). By default the daemon reuses its warm pooled page for the site;
+answer readback is baseline-fresh per ask, so a reused page never echoes a
+previous prompt's still-mounted answer.
 
 ### promptd is a stand-by daemon (warm page pool)
 

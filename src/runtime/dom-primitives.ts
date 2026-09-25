@@ -23,20 +23,179 @@ export interface DomPrimitives {
   paste(selector: string, text: string): Promise<unknown>;
   press(selector: string | null, keys: string[]): Promise<unknown>;
   capture(selector: string, untilMs?: number): Promise<unknown>;
-  // Stable-wait read for streamed answers: poll until the text stops growing for
-  // `stableMs` (or the budget expires). Returns the longest text seen + why it
-  // stopped, so a caller can distinguish "finished streaming" from "timed out".
+  // Stable-wait read for streamed answers: poll until the FRESH text (elements
+  // that did not exist in the pre-ask baseline) stops growing for `stableMs`
+  // (or the budget expires). GOAL 46: an optional per-ask FRESHNESS BASELINE
+  // (the pre-ask answer region — captured before the prompt was sent) makes the
+  // read require growth from a NEW element; a warm pooled page's previous
+  // answer is never judged "stable" and never echoed. The returned doneReason
+  // distinguishes "stable" (the fresh text stopped growing), "timeout" (grew
+  // but never settled), "empty" (nothing fresh ever appeared) and "stale"
+  // (only the pre-existing answer was present — the region never changed from
+  // the baseline; the text field is "" in that case, never the old echo).
   awaitAnswer(
     selector: string,
-    opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number }
+    opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number },
+    baseline?: AnswerRegionRead
   ): Promise<{
     text: string;
     chunkCount: number;
     url: string;
     title: string;
-    doneReason: "stable" | "timeout" | "empty";
+    doneReason: AnswerDoneReason;
   }>;
+  // Read the current answer region: every selector-matching element's trimmed
+  // innerText (DOM order) + the longest — the per-ask freshness baseline and
+  // the newChat reset signal both come from this.
+  readAnswerRegion(selector: string): Promise<AnswerRegionRead>;
   status(selector?: string): Promise<unknown>;
+}
+
+// --- Answer-readback freshness core (GOAL 46 stale-echo guard) --------------
+// The daemon pool reuses warm pages across prompts (pool.ts:139/acquire,
+// http.ts:396 newChat defaults false) and chat pages keep every answer bubble
+// mounted, so a naive longest-element read goes "stable" on the PREVIOUS
+// prompt's static answer and returns it as the current one — plausible success
+// on the wrong thing, no error, no hint. The core below is PURE and
+// browser-free: the browser loop feeds it reads, unit tests inject fixture
+// reads without a browser. A "fresh" element is one that did not exist in the
+// pre-ask baseline (beyond the baseline's element count, or whose text was not
+// present in the baseline region) — judgement runs on the fresh text, never on
+// the pre-ask longest.
+
+export interface AnswerRegionRead {
+  /** Longest matching element's trimmed innerText (never used for the verdict —
+   *  kept so callers see the region as a browser would). */
+  text: string;
+  /** Every matching element's trimmed innerText in DOM order (the region set). */
+  elementTexts: string[];
+}
+
+export interface AnswerBaseline {
+  elementTexts: string[];
+  maxText: string;
+}
+
+export type AnswerDoneReason = "stable" | "timeout" | "empty" | "stale";
+
+export interface AnswerPollState {
+  last: string;
+  lastChange: number;
+  maxFresh: string;
+  chunkCount: number;
+  madeProgress: boolean;
+  doneReason: AnswerDoneReason;
+}
+
+/** Snapshot the pre-ask region into a freshness baseline. */
+export function snapshotBaseline(region: AnswerRegionRead): AnswerBaseline {
+  return { elementTexts: region.elementTexts, maxText: region.text };
+}
+
+/**
+ * Pure freshness reducer: given a poll read + the pre-ask baseline, split the
+ * region into the FRESH text (elements that did not exist before the ask) and
+ * whether the region changed at all. The fresh text is the longest element
+ * text among new elements — when the site mounted a new (empty) bubble that
+ * streams, the fresh text grows; when only the old answer is present, fresh is
+ * "" and changed is false, so the caller never goes "stable" on the old echo.
+ */
+export function freshRegion(
+  region: AnswerRegionRead,
+  baseline: AnswerBaseline
+): { fresh: string; changed: boolean } {
+  const baseTexts = new Set(baseline.elementTexts);
+  let fresh = "";
+  for (let i = 0; i < region.elementTexts.length; i++) {
+    const t = region.elementTexts[i];
+    // New by position (beyond the pre-ask count — chat pages append bubbles)
+    // or new by content (text the pre-ask region never had — covers in-place
+    // container reuse and mid-stream restarts).
+    const isNew = i >= baseline.elementTexts.length || !baseTexts.has(t);
+    if (isNew && t.length > fresh.length) fresh = t;
+  }
+  const changed =
+    region.elementTexts.length !== baseline.elementTexts.length ||
+    region.text !== baseline.maxText;
+  return { fresh: fresh.trim(), changed };
+}
+
+export function initAnswerPollState(nowMs: number): AnswerPollState {
+  return { last: "", lastChange: nowMs, maxFresh: "", chunkCount: 0, madeProgress: false, doneReason: "timeout" };
+}
+
+/**
+ * One poll step of the freshness-aware awaitAnswer state machine (pure). The
+ * loop below calls this with each browser read; tests call it with injected
+ * fixture reads. Returns the next state; `doneReason` flips to "stable" the
+ * moment the fresh text has been unchanged for `stableMs`.
+ */
+export function stepAnswerPoll(
+  state: AnswerPollState,
+  region: AnswerRegionRead,
+  baseline: AnswerBaseline,
+  nowMs: number,
+  stableMs: number
+): AnswerPollState {
+  const { fresh, changed } = freshRegion(region, baseline);
+  const next: AnswerPollState = {
+    ...state,
+    chunkCount: state.chunkCount + 1,
+  };
+  if (changed && !state.madeProgress) {
+    // First evidence the ask produced something: start judging on the fresh
+    // text. Until this fires, the read is EXACTLY the pre-ask region (the old
+    // answer) — it must never initialize stability.
+    next.madeProgress = true;
+    next.last = fresh;
+    next.lastChange = nowMs;
+    next.maxFresh = fresh;
+    return next;
+  }
+  if (!state.madeProgress) return next;
+  if (fresh.length > state.maxFresh.length) next.maxFresh = fresh;
+  if (fresh !== state.last) {
+    next.last = fresh;
+    next.lastChange = nowMs;
+  } else if (fresh && nowMs - state.lastChange >= stableMs) {
+    next.doneReason = "stable";
+  }
+  return next;
+}
+
+/**
+ * The full freshness-aware awaitAnswer loop over an injected read function —
+ * the same loop the browser path runs, so fixture tests (no browser) exercise
+ * the production verdict logic verbatim. Returns the fresh text seen (never
+ * the baseline's text), the number of polls, and an honest doneReason:
+ * "stable" / "timeout" / "empty" / "stale" (see the interface comment).
+ */
+export async function awaitAnswerFromReads(
+  read: () => Promise<AnswerRegionRead>,
+  opts: { timeoutMs?: number; stableMs?: number; pollMs?: number } = {},
+  baseline?: AnswerRegionRead
+): Promise<{ text: string; chunkCount: number; doneReason: AnswerDoneReason }> {
+  const { timeoutMs = 30000, stableMs = 1800, pollMs = 400 } = opts;
+  const t0 = Date.now();
+  const base = snapshotBaseline(baseline ?? (await read()));
+  let state = initAnswerPollState(t0);
+  let stable = false;
+  while (!stable && Date.now() - t0 < timeoutMs) {
+    const region = await read();
+    state = stepAnswerPoll(state, region, base, Date.now(), stableMs);
+    stable = state.doneReason === "stable";
+    if (!stable) await new Promise((r) => setTimeout(r, pollMs));
+  }
+  const text = state.maxFresh.trim();
+  let doneReason = state.doneReason;
+  if (doneReason === "timeout" && !text) {
+    // Nothing fresh ever appeared: "stale" means pre-existing content (the old
+    // answer) was present the whole time and the read never changed — the true
+    // stale-echo signal, reported honestly instead of echoing that content;
+    // a baseline that was already empty is a plain "empty" (no answer at all).
+    doneReason = state.madeProgress ? "empty" : base.maxText ? "stale" : "empty";
+  }
+  return { text, chunkCount: state.chunkCount, doneReason };
 }
 
 export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
@@ -154,42 +313,24 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
         { sel, budgetMs: untilMs }
       );
     },
-    async awaitAnswer(selector, opts = {}) {
+    // Read the answer region (every matching element's trimmed innerText + the
+    // longest) — the per-ask freshness baseline and the newChat reset signal.
+    async readAnswerRegion(selector) {
       const p = await pageFn();
-      const { timeoutMs = 30000, stableMs = 1800, pollMs = 400 } = opts;
-      const t0 = Date.now();
-      let last = "";
-      let lastChange = 0;
-      let maxText = "";
-      let chunkCount = 0;
-      let doneReason: "stable" | "timeout" | "empty" = "timeout";
-      // Poll from the Node side: each read is a tiny anonymous leaf evaluation
-      // (no named functions — esbuild's __name helper is invalid inside a page).
-      while (Date.now() - t0 < timeoutMs) {
-        const cur = (await p.evaluate((sel: string) => {
-          const els = document.querySelectorAll(sel);
-          let best = "";
-          for (const el of els) {
-            const t = (el as HTMLElement).innerText ?? "";
-            if (t.length > best.length) best = t;
-          }
-          return (best || "").trim();
-        }, selector)) as string;
-        chunkCount++;
-        if (cur.length > maxText.length) maxText = cur;
-        if (cur !== last) {
-          last = cur;
-          lastChange = Date.now();
-        } else if (cur && Date.now() - lastChange >= stableMs) {
-          doneReason = "stable";
-          break;
-        }
-        await new Promise((r) => setTimeout(r, pollMs));
-      }
-      const text = maxText.trim();
-      if (doneReason === "timeout" && !text) doneReason = "empty";
+      return readAnswerRegionFromPage(p, selector);
+    },
+    async awaitAnswer(selector, opts = {}, baseline) {
+      const p = await pageFn();
+      const read = (): Promise<AnswerRegionRead> => readAnswerRegionFromPage(p, selector);
+      // Per-ask FRESHNESS BASELINE (GOAL 46): when the caller (ChatDriver)
+      // captured the pre-ask region before composing, require growth from a NEW
+      // element; without one, snapshot at entry — either way the pre-existing
+      // answer can never be judged "stable" or echoed. Poll from the Node side:
+      // each read is a tiny anonymous leaf evaluation (no named functions —
+      // esbuild's __name helper is invalid inside a page).
+      const res = await awaitAnswerFromReads(read, opts, baseline);
       const meta = (await p.evaluate(() => ({ url: location.href, title: document.title }))) as { url: string; title: string };
-      return { text, chunkCount, url: meta.url, title: meta.title, doneReason };
+      return { ...res, url: meta.url, title: meta.title };
     },
     async status(sel) {
       const p = await pageFn();
@@ -208,4 +349,20 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
       );
     },
   };
+}
+
+/** In-page answer-region read shared by readAnswerRegion/awaitAnswer
+ *  (anonymous leaf function — no named helpers inside the page). */
+async function readAnswerRegionFromPage(p: any, selector: string): Promise<AnswerRegionRead> {
+  return (await p.evaluate((sel: string) => {
+    const els = document.querySelectorAll(sel);
+    const list: string[] = [];
+    let best = "";
+    for (const el of els) {
+      const t = ((el as HTMLElement).innerText ?? "").trim();
+      list.push(t);
+      if (t.length > best.length) best = t;
+    }
+    return { text: best, elementTexts: list };
+  }, selector)) as AnswerRegionRead;
 }
