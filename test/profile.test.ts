@@ -61,6 +61,26 @@ describe("chat-site profiles (MVP: use AI sites for doing prompts)", () => {
     assert.equal(resolveProfile().id, "claude");
   });
 
+  // GOAL 63 (2026-09-25): the header comment once documented UI2API_AI_PROFILE
+  // — a knob never read (a user setting it got the DEFAULT profile, tuning
+  // silently lost). The WORKING env override is UI2API_AI_SITE, and it carries
+  // a builtin id OR an override *.json path. Pin the path form so the
+  // documented env override is proven behavior, not a comment.
+  it("GOAL63(a): UI2API_AI_SITE carries an override *.json path (env-carries-profile-path is real)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "u2a-profile-"));
+    try {
+      const file = join(dir, "env-override.json");
+      writeFileSync(file, JSON.stringify({ id: "gemini", composer: ["textarea[data-env]"] }));
+      process.env.UI2API_AI_SITE = file;
+      const p = resolveProfile();
+      assert.equal(p.id, "gemini");
+      assert.equal(p.composer?.[0], "textarea[data-env]", "the env-named JSON tuning applies over the builtin base");
+    } finally {
+      delete process.env.UI2API_AI_SITE;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads a JSON profile override file, inheriting the named built-in", () => {
     const dir = mkdtempSync(join(tmpdir(), "u2a-profile-"));
     try {

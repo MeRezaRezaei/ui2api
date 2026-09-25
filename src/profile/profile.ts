@@ -11,7 +11,10 @@ import { usingUserChrome } from "../runtime/browser.js";
 //
 // Selectors are best-effort snapshots of each site's current web UI; they rot,
 // and when they do you re-tune them in a JSON override file (--profile FILE or
-// UI2API_AI_PROFILE) instead of editing code. The flow itself stays identical:
+// UI2API_AI_SITE — the env knob carries a builtin id OR an override *.json
+// path; GOAL 63: the header once named UI2API_AI_PROFILE, a knob that was
+// never read — the working env override is UI2API_AI_SITE) instead of editing
+// code. The flow itself stays identical:
 // paste the prompt + Enter (the site's OWN JS runs), then read the streamed
 // answer off the page.
 
