@@ -311,7 +311,13 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   **914 tests / 44 suites** (913 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
   900/48 → 908/40 → 911/42 mid-fold) are history; this is the current
-  number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0). GOALs 88-90 + 91
+  number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
+  RE-CONFIRMED under real load (box load 11.3 with 4-9 sibling-project phpunit
+  processes running — same 914/44, 0 fail, EXIT=0), which is the actual proof
+  that the concurrency bound works rather than a lucky idle run. 10 sleep+
+  recheck cycles watching the box: load 26 -> 10 but never fully quiet, because
+  those sibling suites cycle on their own; measuring under load is the honest
+  answer, and it is green. GOALs 88-90 + 91
   files: attach-gate 26, vault-integrity 9, error-contract 2, lang-php 8.
   The two counted-test warts are CLOSED, not flagged: error-contract and
   lang-php both ran their assertions inside `describe` bodies and reported
