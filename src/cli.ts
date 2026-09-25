@@ -756,7 +756,7 @@ async function cmdProfileScan(flags: Flags): Promise<void> {
     return;
   }
   console.log("Sites found (checkbox index) — import any with:");
-  console.log("  ui2api profile import <host> [--account email]");
+  console.log("  ui2api profile import <host> [--identity|--account email]");
   console.log("[ui2api] tip: add ALL known hosts in one step →  ui2api profile add-all [--known|--interactive]");
   console.log("");
   console.log(renderCheckboxList(index.hits));
@@ -766,6 +766,17 @@ async function cmdProfileScan(flags: Flags): Promise<void> {
   }
   console.log("");
   console.log(`Tip: ${index.hits.filter((h) => h.known).length} of ${index.hits.length} hosts match known AI chat sites.`);
+}
+
+// GOAL 80: `profile import` keys the vault entry by the identity the user
+// asked for. ONBOARDING §4b's copy-paste command named `--account email` while
+// cmdProfileImport only read `--identity` — the flag was parsed and silently
+// DEAD, so the import landed under the auto-detected identity instead. The
+// canonical name stays `--identity` and `--account` now maps onto it; the
+// import success output echoes the resolved identity so a requested-vs-detected
+// divergence is never silent. Pure flag read — no I/O, directly unit-testable.
+export function importIdentityArg(flags: Flags): string | undefined {
+  return flags.identity ?? flags.account;
 }
 
 // Import one host from a scanned Chrome profile into the identity-keyed vault.
@@ -784,10 +795,11 @@ async function cmdProfileImport(host: string, flags: Flags): Promise<void> {
     throw new Error("no chrome profile found for import");
   }
   const wanted = host.toLowerCase();
+  const requestedIdentity = importIdentityArg(flags);
   let found = false;
   for (const p of chosen) {
     try {
-      const r = await importSiteSnapshot({ root: p.root, host: wanted, dataDir, identity: flags.identity });
+      const r = await importSiteSnapshot({ root: p.root, host: wanted, dataDir, identity: requestedIdentity });
       found = true;
       if (!r.snapshotPath) {
         // GOAL 49/50 write truth gates: a refused import (anonymous content,
@@ -802,6 +814,9 @@ async function cmdProfileImport(host: string, flags: Flags): Promise<void> {
       }
       console.log(`[ui2api] imported ${r.host} from ${p.root}:`);
       console.log(`  identity: ${r.identity}`);
+      if (requestedIdentity && requestedIdentity.trim() !== r.identity) {
+        console.warn(`  ! requested identity "${requestedIdentity}" but the import resolved to "${r.identity}"`);
+      }
       console.log(`  snapshot: ${r.snapshotPath}`);
       console.log(`  cookies: ${r.stats.cookiesMatched}/${r.stats.cookiesTotal} matched${r.ok ? "" : " (NOT logged in — no cookies matched)"}`);
       console.log(`  localStorage: ${r.stats.localStorageEntries} entries`);
@@ -1218,7 +1233,7 @@ async function main(): Promise<void> {
         return cmdProfileScan(flags);
       }
       if (arg === "import") {
-        if (!rest[0]) throw new Error("usage: ui2api profile import <host> [--profile DIR] [--identity email] [--data-dir DIR]");
+        if (!rest[0]) throw new Error("usage: ui2api profile import <host> [--profile DIR] [--identity|--account email] [--data-dir DIR]");
         return cmdProfileImport(rest[0], flags);
       }
       if (arg === "add-all") {

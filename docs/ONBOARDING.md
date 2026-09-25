@@ -115,7 +115,7 @@ Real output on this box (fold #11):
   - /home/me/.config/google-chrome (user: me)
 
 Sites found (checkbox index) — import any with:
-  ui2api profile import <host> [--account email]
+  ui2api profile import <host> [--identity|--account email]
 [ui2api] tip: add ALL known hosts in one step →  ui2api profile add-all [--known|--interactive]
 
 [...83 hosts...]
