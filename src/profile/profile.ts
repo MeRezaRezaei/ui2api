@@ -722,8 +722,121 @@ export function validatePackagedProfileShape(file: string, p: ChatSiteProfile): 
   // else — string "keyEnter", [], numbers — refuses LOUD, never a silent
   // Enter-press fallback.
   const send = (p as unknown as Record<string, unknown>).send;
-  if (send === undefined || send === null) return;
-  validateSendShape(file, p);
+  if (send !== undefined && send !== null) validateSendShape(file, p);
+  // capability: the GOAL 54/55 first-class block (restrictionMarkers /
+  // tierSelectors / pickerOpen / pickerOption / abilityToggles). Absent
+  // capability (capability-only packages, doubao/tinycms) passes; a
+  // wrong-typed entry refuses LOUD naming the file + field + entry — never a
+  // late matchRestrictionMarkers TypeError at answer time (GOAL 56).
+  const capability = (p as unknown as Record<string, unknown>).capability;
+  if (capability !== undefined && capability !== null) {
+    if (typeof capability !== "object" || Array.isArray(capability)) {
+      throw new Error(
+        `profile file ${file} capability must be an object — got ${JSON.stringify(capability)}`
+      );
+    }
+    validateCapabilityBlockShape(file, capability as Record<string, unknown>);
+  }
+}
+
+/**
+ * GOAL 56: capability-block gate for the packaged profile shape — the
+ * `capability` object (restrictionMarkers / tierSelectors / pickerOpen /
+ * pickerOption / abilityToggles) gets the SAME LOUD-at-load truth gate as
+ * composer/answer/send. GOAL 54/55 made restrictionMarkers first-class data
+ * on the chat surface; a wrong-typed entry (e.g. `restrictionMarkers: "foo"`)
+ * is NOT safely ignored — it passes the callers' `!markers?.length` guard
+ * (strings have length) and then crashes `matchRestrictionMarkers`'s
+ * `for (const p of m.patterns)` with a late TypeError at answer time, the
+ * exact GOAL-48 "late runner TypeError" class. Absent `capability` (and
+ * absent/null/empty selector fields, host-keyed selector objects) keep
+ * passing — only genuinely malformed shapes are refused, naming the file +
+ * field + entry, in the GOAL-47/48 message shape.
+ */
+function validateCapabilityBlockShape(file: string, cap: Record<string, unknown>): void {
+  // restrictionMarkers: array of { kind: "upgrade"|"limit"|"login", patterns: string[] }
+  const markers = cap.restrictionMarkers;
+  if (markers !== undefined && markers !== null) {
+    if (!Array.isArray(markers)) {
+      throw new Error(
+        `profile file ${file} capability.restrictionMarkers must be an array of { kind, patterns } — got ${JSON.stringify(markers)}`
+      );
+    }
+    for (let i = 0; i < markers.length; i++) {
+      const m = markers[i] as Record<string, unknown> | null | undefined;
+      if (typeof m !== "object" || m === null || Array.isArray(m)) {
+        throw new Error(
+          `profile file ${file} capability.restrictionMarkers[${i}] must be an object { kind, patterns } — got ${JSON.stringify(m)}`
+        );
+      }
+      if (m.kind !== "upgrade" && m.kind !== "limit" && m.kind !== "login") {
+        throw new Error(
+          `profile file ${file} capability.restrictionMarkers[${i}].kind must be "upgrade" | "limit" | "login" — got ${JSON.stringify(m.kind)}`
+        );
+      }
+      const patterns = m.patterns as unknown;
+      if (!Array.isArray(patterns) || patterns.length === 0) {
+        throw new Error(
+          `profile file ${file} capability.restrictionMarkers[${i}].patterns must be a non-empty string[] — got ${JSON.stringify(patterns)}`
+        );
+      }
+      for (let j = 0; j < patterns.length; j++) {
+        if (typeof patterns[j] !== "string" || (patterns[j] as string).trim() === "") {
+          throw new Error(
+            `profile file ${file} capability.restrictionMarkers[${i}].patterns[${j}] must be a non-empty string — got ${JSON.stringify(patterns[j])}`
+          );
+        }
+      }
+    }
+  }
+  // tierSelectors / pickerOpen / pickerOption: string[] of parseable selectors.
+  for (const field of ["tierSelectors", "pickerOpen", "pickerOption"] as const) {
+    const v = cap[field];
+    if (v === undefined || v === null) continue;
+    if (!Array.isArray(v)) {
+      throw new Error(
+        `profile file ${file} capability.${field} must be a string[] of CSS selectors — got ${JSON.stringify(v)}`
+      );
+    }
+    for (let i = 0; i < v.length; i++) {
+      if (typeof v[i] !== "string" || !isParseableSelector(v[i])) {
+        throw new Error(
+          `profile file ${file} capability.${field}[${i}] ${JSON.stringify(v[i])} is not a runnable selector — typo or wrong type? expected a string[] of CSS selectors`
+        );
+      }
+    }
+  }
+  // abilityToggles: array of { id, selector, label, selectedClass? }.
+  const toggles = cap.abilityToggles;
+  if (toggles !== undefined && toggles !== null) {
+    if (!Array.isArray(toggles)) {
+      throw new Error(
+        `profile file ${file} capability.abilityToggles must be an array of { id, selector, label } — got ${JSON.stringify(toggles)}`
+      );
+    }
+    for (let i = 0; i < toggles.length; i++) {
+      const t = toggles[i] as Record<string, unknown> | null | undefined;
+      if (typeof t !== "object" || t === null || Array.isArray(t)) {
+        throw new Error(
+          `profile file ${file} capability.abilityToggles[${i}] must be an object { id, selector, label } — got ${JSON.stringify(t)}`
+        );
+      }
+      if (typeof t.id !== "string" || t.id.trim() === "") {
+        throw new Error(`profile file ${file} capability.abilityToggles[${i}].id must be a non-empty string — got ${JSON.stringify(t.id)}`);
+      }
+      if (typeof t.selector !== "string" || !isParseableSelector(t.selector)) {
+        throw new Error(
+          `profile file ${file} capability.abilityToggles[${i}].selector ${JSON.stringify(t.selector)} is not a runnable selector — typo or wrong type?`
+        );
+      }
+      if (typeof t.label !== "string" || t.label.trim() === "") {
+        throw new Error(`profile file ${file} capability.abilityToggles[${i}].label must be a non-empty string — got ${JSON.stringify(t.label)}`);
+      }
+      if (t.selectedClass !== undefined && (typeof t.selectedClass !== "string" || t.selectedClass.trim() === "")) {
+        throw new Error(`profile file ${file} capability.abilityToggles[${i}].selectedClass must be a non-empty string — got ${JSON.stringify(t.selectedClass)}`);
+      }
+    }
+  }
 }
 
 /**

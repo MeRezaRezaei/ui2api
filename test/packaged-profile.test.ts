@@ -236,4 +236,54 @@ describe("packaged-profile running seam (GOAL 48 gate)", () => {
     });
     assert.throws(() => resolvePackagedProfileFile(junk), /composer\[0\]/);
   });
+
+  it("(f) GOAL 56: capability-block gate — wrong-typed restrictionMarkers / picker fields / abilityToggles refuse LOUD naming file + field, absent capability passes", () => {
+    // GOAL 55 made capability first-class data on the packaged chat surface;
+    // before this gate a typo'd `restrictionMarkers` (string instead of
+    // array) slipped past composer/answer/send validation, satisfied the
+    // callers' `!markers?.length` guard (strings have length), and then
+    // crashed matchRestrictionMarkers's `for (const p of m.patterns)` at
+    // ANSWER time — the GOAL-48 "late runner TypeError" class. Every entry
+    // names the exact offending field + index, in the GOAL-47/48 shape.
+    const base = { id: "x", composer: ["textarea"], answer: ["[id*=a]"], url: "https://x" };
+
+    // (f1) restrictionMarkers string typo
+    let f = writeJson(tmpDir(), "f1/profile.json", { ...base, capability: { restrictionMarkers: "rate limit" } });
+    assert.throws(() => resolvePackagedProfileFile(f), /capability\.restrictionMarkers must be an array/, "string restrictionMarkers must refuse");
+
+    // (f2) unknown kind
+    f = writeJson(tmpDir(), "f2/profile.json", { ...base, capability: { restrictionMarkers: [{ kind: "premium", patterns: ["x"] }] } });
+    assert.throws(() => resolvePackagedProfileFile(f), /restrictionMarkers\[0\]\.kind must be "upgrade" \| "limit" \| "login"/, "bogus kind must refuse");
+
+    // (f3) empty patterns + (f4) non-string pattern
+    f = writeJson(tmpDir(), "f3/profile.json", { ...base, capability: { restrictionMarkers: [{ kind: "limit", patterns: [] }] } });
+    assert.throws(() => resolvePackagedProfileFile(f), /restrictionMarkers\[0\]\.patterns must be a non-empty string\[\]/, "empty patterns must refuse");
+    f = writeJson(tmpDir(), "f4/profile.json", { ...base, capability: { restrictionMarkers: [{ kind: "limit", patterns: [42] }] } });
+    assert.throws(() => resolvePackagedProfileFile(f), /restrictionMarkers\[0\]\.patterns\[0\] must be a non-empty string/, "non-string pattern must refuse");
+
+    // (f5) pickerOption string + (f6) unparseable tierSelectors entry
+    f = writeJson(tmpDir(), "f5/profile.json", { ...base, capability: { pickerOption: "button" } });
+    assert.throws(() => resolvePackagedProfileFile(f), /capability\.pickerOption must be a string\[\]/, "scalar pickerOption must refuse");
+    f = writeJson(tmpDir(), "f6/profile.json", { ...base, capability: { tierSelectors: ["not a selector (prose)"] } });
+    assert.throws(() => resolvePackagedProfileFile(f), /capability\.tierSelectors\[0\].*not a runnable selector/, "prose tierSelectors must refuse");
+
+    // (f7) abilityToggle missing id + (f8) capability scalar
+    f = writeJson(tmpDir(), "f7/profile.json", { ...base, capability: { abilityToggles: [{ selector: "button", label: "Search" }] } });
+    assert.throws(() => resolvePackagedProfileFile(f), /abilityToggles\[0\]\.id must be a non-empty string/, "toggle without id must refuse");
+    f = writeJson(tmpDir(), "f8/profile.json", { ...base, capability: "nope" });
+    assert.throws(() => resolvePackagedProfileFile(f), /capability must be an object/, "scalar capability must refuse");
+
+    // (f9) absent capability + well-typed GOAL 55 shape still resolve
+    f = writeJson(tmpDir(), "f9a/profile.json", { ...base });
+    assert.equal(resolvePackagedProfileFile(f).id, "x", "absent capability passes (capability-only packages)");
+    f = writeJson(tmpDir(), "f9b/profile.json", {
+      ...base,
+      capability: {
+        restrictionMarkers: [{ kind: "limit", patterns: ["rate limit"] }],
+        pickerOption: ["button.model"],
+        abilityToggles: [{ id: "web", selector: "button[data-toggle]", label: "Web" }],
+      },
+    });
+    assert.equal(resolvePackagedProfileFile(f).id, "x", "well-typed GOAL 55 capability block passes");
+  });
 });
