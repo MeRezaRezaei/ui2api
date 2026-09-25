@@ -19,3 +19,22 @@ Self-contained digest of `capabilities/hunyuan/`. Full bundle-analysis inventory
 ## Status
 - All wire endpoints grounded by static bundle analysis (2026-09-15), **none executed**; selectors and exact response shapes are `UNVERIFIED` until first live capture (`session.lock.json`, `status: awaiting-capture`). Analysis source: `capabilities/hunyuan-yuanbao/CAPABILITIES.md`.
 - **MEASURED (fold #17f, 2026-09-22): HONEST FAIL LIVE — the user has NEVER signed into yuanbao.tencent.com.** No `hy_user`/`hy_token` session exists ANYWHERE on this box: absent from the real me-Chrome profile (only `.tencent.ai` hunyuan cookies exist there) and from the ui2api copy-Chrome profile; a live prompt round-trip answered SIGNED-OUT within ~60s. **This is a dead-end until the USER logs into yuanbao.tencent.com first** (Tencent cookies are ordinary domain cookies, NOT app-bound like Google's): then `ui2api profile add-all --known` (or `profile capture "https://yuanbao.tencent.com" --login`) makes it capturable and live-verifiable. The Tencent AI surface the user actually wants is **`tencent-aistudio`** (aistudio.tencent.ai — VERIFIED headless/real-Chrome, whose HunyuanDefault chat already serves modelId `hy4-preview-g`). Never claim hunyuan verified without that login + a live round-trip.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `hunyuan_chat` | Chat | declared (not verified) | Send a prompt on the Yuanbao composer (Quill contenteditable, .ql-editor candidate); site's own JS posts to POST /api/chat/ and streams tool-call content (text, |
+| `hunyuan_deep_search` | Deep search (AI-search report) | declared (not verified) | Deep-search session: chat scene ai_search_pro (finance ai_search_pro_fin, DeepSeek ai_search_deepseek); session provisioning via GET /api/inputguide/search/crea |
+| `hunyuan_list_conversations` | Conversation history list | declared (not verified) | List/detail: GET /api/convs, /api/conv (+ /api/user/agent/conversation/list, /api/user/agent/conversation/v1/detail, /api/user/agent/session/list); rename/pin/c |
+| `hunyuan_document_qa` | Knowledge-base / document Q&A | declared (not verified) | Attach one document per turn (types per uploaderTypeList: pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv); wire = /api/resource/genUploadInfo -> COS write -> /api/resou |
+| `hunyuan_voice_mode` | Voice mode | declared (not verified) | Voice input via mic on the composer; ASR/TTS temp key GET /api/generate/voice_tmpkey; voice_recorder content chunks with SPEAKING/STOPPING/SPLIT statuses. Thin  |
+
+<!-- ui2api:capability-index:end -->

@@ -192,3 +192,26 @@ frame-token/leaf/download preview plumbing; `__vercel_session` (from provider-ca
 
 (Not exposed: billing/credit purchases, teams admin, ai-gateway-key minting, VM admin shell —
 sensitive admin/paid surfaces; endpoints are listed above if a future capability needs them.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `v0_chat` | Chat stream | declared (not verified) | Composer send via POST /chat/api/chat (Accept text/event-stream, body parsed as newline-delimited JSON reduced into assistant message state; resume via GET /cha |
+| `v0_chat_history` | Chat history / favorites / latest | declared (not verified) | GET /chat/api/history, GET /chat/api/favorites, GET /api/chat/chat/latest?chatId=&lastSyncedAt=, GET /api/v2/chats/:chatId (JSON) |
+| `v0_agent_workspace` | Agent workspace / build VM | declared (not verified) | Build sandbox lifecycle: /chat/api/vm/status\|git\|actions/recreate\|actions/run-pipeline, /api/v2/internal/chats/:chatId/agent-workspace/* (acquire, browser, c |
+| `v0_artifact_preview` | Artifact preview (generated UI frames) | declared (not verified) | Preview plumbing verified: GET /chat/api/chat/frame-token?cid=&vid=&bid=&tcid= (frame session token), /chat/api/chat/leaf, /chat/api/chat/download?url=. Whether |
+| `v0_deployments` | Deployments & publishing | declared (not verified) | POST /api/v2/internal/deployments/ and POST /api/v2/internal/chats/:chatId/publish — SSE text/event-stream with verified object schemas (publish.progress/publis |
+| `v0_image_generation` | Image generation | declared (not verified) | imageGenerations boolean + imageGeneration:{modelId} on the chat payload; reasoning-effort enum none\|minimal\|low\|medium\|high\|max\|xhigh; catalog GET /api/v |
+| `v0_voice_input` | Voice transcription | declared (not verified) | POST /api/chat/transcribe (audio -> text input) |
+| `v0_integrations_mcp` | Integrations / MCP | declared (not verified) | /api/chat/integrations/oauth/{discover,initiate}, slack-mcp/authorize, figma/*, snowflake/oauth, mcp/permissions; /api/v2/mcp-servers |
+| `v0_git_sync` | GitHub connection / git sync | declared (not verified) | /chat/api/git/connect\|reconnect\|create-branch\|reset-deleted-branch, /api/v2/internal/github/:namespace/:repo(/branches), /api/v2/internal/chats/:chatId/git-c |
+
+<!-- ui2api:capability-index:end -->

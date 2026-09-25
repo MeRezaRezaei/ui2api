@@ -106,3 +106,26 @@ headless-fresh contexts were not separately probed (honest caveat).
    is confirmed.
 3. `npx tsx src/cli.ts profile capture https://www.aparat.com --login` if
    account-scoped capabilities are ever added; lock the session.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `araprat_search` | Video search | declared (not verified) | Search Aparat videos by loading https://www.aparat.com/search/<url-encoded-query> in the real browser and reading the result grid the site's own JS renders. VER |
+| `araprat_trending` | Trending / homepage videos | declared (not verified) | Read the homepage's trending/recommended video grid from the live rendered DOM. VERIFIED 2026-09-20: www.aparat.com → /home renders 52 a[href*='/v/'] anchors an |
+| `araprat_video_detail` | Video detail | declared (not verified) | Read one video page's metadata from https://www.aparat.com/v/<id>. VERIFIED 2026-09-20 on /v/mindkye: h1 carries the title, div.description the Persian descript |
+| `araprat_comment` | Comment on a video | login-gated-recipe-only | Aparat comment composer — LOGIN-GATED + public + irreversible. Dispatched honestly: ok:false login-required until an authorized captured logged-in session exist |
+| `araprat_like` | Like a video | login-gated-recipe-only | LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists. |
+| `araprat_follow` | Follow a channel | login-gated-recipe-only | LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists. |
+| `araprat_subscribe` | Subscribe to a channel | login-gated-recipe-only | LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists. |
+| `araprat_upload` | Upload a video (Studio) | login-gated-recipe-only | Aparat upload (admin.aparat.com / file picker) — LOGIN-GATED + public + IRREVERSIBLE. Dispatched honestly: ok:false login-required until an authorized logged-in |
+| `araprat_playlist` | Add to playlist/favorites | login-gated-recipe-only | LOGIN-GATED. Dispatched honestly: ok:false login-required until an authorized captured session exists. |
+
+<!-- ui2api:capability-index:end -->

@@ -36,3 +36,18 @@ Analysis method: static HTTP probing of `https://www.perplexity.ai` from a plain
 ## 7. Suggested ui2api capability list (id, one-line description)
 1. `perplexity_chat` — UI-path Ask stream with session cookie `__Secure-next-auth.session-token`; verified auth surface, page-driven chat, wire shape pending first capture.
 - (Deferred, no bundle evidence): `perplexity_search_focus` (focus modes), `perplexity_threads`, `perplexity_models`. Add only after a live capture grounds them.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `perplexity_chat` | Chat / Ask stream | declared (not verified) | Send a prompt on the Ask composer; streamed answer + citations read off the page. Playwright/CDP UI path: type into composer, keyEnter, read answer until stable |
+
+<!-- ui2api:capability-index:end -->

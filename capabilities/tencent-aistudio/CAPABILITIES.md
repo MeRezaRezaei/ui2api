@@ -265,3 +265,27 @@ Posture: Xvfb `:99` + `UI2API_HEADED=1 UI2API_CHROME=1`, injected 2026-09-18 sna
 Composer state on this revision: mode chip "High" (`paint-button-group` → `paint-button`, pro badge, TDesign `t-select`), `control-extra-left-wrapper`, `hy-chat-input__content-bottom--left-content`, `hy-chat-input__content-top-content-wrapper--no-files`. Side menu: Chat / 3D Studio / Get API Key / Docs / History / New. Dead sub-routes verified: `/image`, `/code`, `/tts`, `/podcast`, `/translate` all render "Current Page Does Not Exist".
 
 Runner updated (2026-09-23): `tencent_aistudio_conversation_crud` now implements list + open (ui-path on `/chat-history`); the 8 remaining caps keep honest ok:false with the measured reasons above baked into the error text. Manifest/metadata scope updated. **Never claim the 8 verified without a live round-trip (AGENTS.md red line) — none has one.**
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `tencent_aistudio_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; streamed answer via POST /api/new-portal/chat/{chatId} (JSON chunk parsing). VERIFIED LIVE 2026-09-19: proof round-trips PASS (13 |
+| `tencent_aistudio_web_search` | Web search (deep search mode) | declared (not verified) | Toggle deep-search mode for grounded answers; sets searchDeepMode=true on the chat request |
+| `tencent_aistudio_deep_think` | Deep thought / reasoning | declared (not verified) | Chain-of-Thought reasoning mode (DEEP_THOUGHT / DEEP_THINK / REASONER stream speech types) |
+| `tencent_aistudio_conversation_crud` | Conversation CRUD + history | declared (not verified) | List/open conversations via the live History surface. LIST + OPEN LIVE-VERIFIED 2026-09-23 (headed real Chrome + snapshot): History → /chat-history renders the  |
+| `tencent_aistudio_image_gen` | Image generation (DIT / vision) | declared (not verified) | Generate images via /api/vision_platform/generation (DIT model at dit.hunyuan.tencent.com); poll via query_task |
+| `tencent_aistudio_code_run` | Code interpreter / sandbox | declared (not verified) | Execute code in a sandbox (coder/runCode features; env to verify) |
+| `tencent_aistudio_file_upload` | File upload + document QA | declared (not verified) | Upload docs via COS tempCred → genUploadInfo; parse via /api/resource/fileParse; document analysis rides chat as DOC_CARD/DOC_DEEP_MODE speech types |
+| `tencent_aistudio_tts` | Speech synthesis (TTS) + ASR | declared (not verified) | Text-to-speech via /api/new-portal/audio/synthesis; speech recognition via /api/new-portal/asr/ + asr.cloud.tencent.com |
+| `tencent_aistudio_podcast` | Podcast generation | declared (not verified) | Generate podcast content: audioDeltaBase64 chunks + script timing; interact via /api/new-portal/podcast/* |
+| `tencent_aistudio_translations` | In-chat translation | declared (not verified) | Translate via translateModelList + sourceLang/targetLang fields on chat request |
+
+<!-- ui2api:capability-index:end -->

@@ -146,3 +146,20 @@ chat product.
   blog and MiMo Code (CLI) product pages. No chat app JS, no chat route, no chat-relevant
   state or selectors. The only MiMo-chat-adjacent text found: the word "Studio" appears as
   a product label linking to aistudio (platform console i18n only, not in docs bundles).
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **dead-end**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `xiaomimimo_chat` | Chat (MiMo Studio composer) | declared (not verified) | Send a prompt in MiMo Studio's composer and read the streamed answer. Chat surface EXISTS per platform console evidence ('Xiaomi MiMo Studio' product label + op |
+| `xiaomimimo_api_gateway` | OpenAI/Anthropic-compatible API gateway | declared (not verified) | POST api.xiaomimimo.com/v1 (OpenAI chat-completions shape) and /anthropic (Anthropic shape); auth via 'api-key' HTTP header. Anonymous probe → 401 'invalid_key' |
+| `xiaomimimo_console` | MiMo Open Platform console (token-plan / billing / API keys) | declared (not verified) | platform.xiaomimimo.com Rspack SPA. Routes: /authorize (/authorize/code, /authorize/success), /api/v1/logout, /auth/{sendCode, verifyCode, verificationStatus, c |
+
+<!-- ui2api:capability-index:end -->

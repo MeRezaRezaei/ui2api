@@ -118,3 +118,22 @@ Implementation: `src/capabilities/gmail.ts`, dispatch `POST /capability/gmail`.
 - Anti-bot: not probed (no session). Google's bot posture on gmail is
   documented-industry-known (login walls, device-bound cookies); the attached
   real Chrome path avoids it entirely.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **scaffold**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `gmail_read_inbox` | Read inbox | dom-unverified-auth-walled | Open mail.google.com/mail/u/0/ in the user's session and read the site's own rendered conversation list: rows carry sender, subject, snippet, date and read/unre |
+| `gmail_list_threads` | List threads (folder / label / query route) | dom-unverified-auth-walled | Navigate the site's own hash route (#label/<Label>, #search/<q>, or the default #inbox) and read the same rendered conversation rows as gmail_read_inbox. DOM-UN |
+| `gmail_open_thread` | Open a thread and read it | dom-unverified-auth-walled | Open the first matching thread (or drive a search to find one) by clicking the site's own conversation row, then read the opened thread's subject, from, date an |
+| `gmail_search` | Search mail | dom-unverified-auth-walled | Type the query into the site's own search box (known-stable surfaces: input[aria-label='Search mail'] / input[name='q']) and press Enter so gmail's own JS runs  |
+| `gmail_send` | Compose and send an email | login-gated-recipe-only | Click the site's own Compose button, fill to/subject/body in the site's own composer fields, click the site's own Send button, and read back the sent confirmati |
+
+<!-- ui2api:capability-index:end -->

@@ -82,3 +82,22 @@ Landing/shell: **not bot-walled** (200 + full HTML for Chrome UA). Chat app: **h
 5. `copilot_m365_webchat` — `/webchat/*` API segment (302 evidence) — open/to-verify post-auth.
 
 (Not exposing: admin.microsoft.com console, config.centro tenant-config/service admin — sensitive; noted as CSP targets only.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `copilot_m365_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; streamed answer (expected turbo/webchat transport — to-verify post-auth). Requires a real Entra M365 session. |
+| `copilot_m365_auth_entra` | Entra ID OIDC sign-in flow | declared (not verified) | Server-side OpenID Connect on ASP.NET Core (Microsoft.Identity.Web): /login -> /loginv2 -> login.microsoftonline.com/common/oauth2/v2.0/authorize (client_id 476 |
+| `copilot_m365_grounding` | Tenant-data grounding | declared (not verified) | Answers grounded on M365 tenant data via Graph/SharePoint — M365Copilot.Read.All scope + graph.microsoft.com dns-prefetch verified; actual grounding wire to-ver |
+| `copilot_m365_deep_link` | Work prompt deep links | declared (not verified) | /chat/entity1-d870f6cd-4aa5-4d42-9626-ab690c041429/<base64> deep links; payload decodes to {properties:{promptSource:microsoft}, scenario:tryinappgrowth, chatTy |
+| `copilot_m365_webchat` | /webchat/* API segment | declared (not verified) | M365 mounts a /webchat/* REST segment (302 authorize evidence on /webchat/api). Surface contents unobservable pre-auth. |
+
+<!-- ui2api:capability-index:end -->

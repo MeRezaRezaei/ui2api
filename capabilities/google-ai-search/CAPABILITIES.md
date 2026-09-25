@@ -109,3 +109,18 @@ Verified per-request fingerprints:
 - **Auth notes:** everything anonymous is reachable but either JS-walled (search) or 400-inner-RPC (Gemini batch). Real renders need the user's NID/SID/`__Secure-3PSID` cookies and JS execution; no consent wall in this region.
 - **Recommended first capability:** `google_ai_mode_search` — a single logged-in `udm=14` page load parsed into `{answer, citations}`; no custom endpoint, maximal legitimacy.
 - **Open questions needing a live-browser test later:** exact `AF_initDataCallback` key shape for the udm=14 answer block; whether unlogged-in/rolled-out users get degraded AI Mode; whether StreamGenerate tool id is literally `google_search` in the current proto; the `af.httprm`/session-token flow for authenticated `batchexecute`; and whether AI Mode persists conversation across `sei` values.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `google_ai_mode_search` | AI Mode search | declared (not verified) | One logged-in /search?q=…&udm=14 page load -> {answer, citations[]} |
+
+<!-- ui2api:capability-index:end -->

@@ -158,3 +158,24 @@ real attached session proves the flip.
   expand) clicked → searchable-transcript panel EXPANDED → site's own
   get_transcript **400 Precondition check failed** → 0 segments (4 videos,
   3+ attempts, anonymous profile).
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `youtube_search` | Video search | verified-2026-09-20 | Load YouTube's own results page for a query (https://www.youtube.com/results?search_query=<q>) and read the rendered result list (ytd-video-renderer rows, title |
+| `youtube_transcript` | Transcript read-back | verified-2026-09-20-ui-path-anonymous-gated (segments pending logged-in capture) | Open a watch page (youtube.com/watch?v=<id>), expand the description (tp-yt-paper-button#expand), click the site's own 'Show transcript' button (button[aria-lab |
+| `youtube_comment` | Post a comment | implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session) | VERBATIM studio surface (comment) — LOGIN-GATED + public + irreversible. Registry contract: workType ui\|js + reloadAfterSuccess. IMPLEMENTED (dispatch lives on |
+| `youtube_like` | Like a video | implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session) | IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): clicks the site's own ytd-segmented-like-dislike-button-renderer like button on the watch page and rea |
+| `youtube_subscribe` | Subscribe to a channel | implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session) | IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): clicks the site's own ytd-subscribe-button-renderer button on a channel page and reads back the button |
+| `youtube_upload` | Upload a video (Studio) | implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session + real file) | Upload video to YouTube (youtube.com/upload) — LOGIN-GATED + public + IRREVERSIBLE. IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): hands a local file |
+| `youtube_playlist_add` | Add to a playlist | implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session) | IMPLEMENTED (dispatch on /capability/youtube 2026-09-21): opens the watch page's Save menu (button[aria-label^='Save']) and reads back whether the account's pla |
+
+<!-- ui2api:capability-index:end -->

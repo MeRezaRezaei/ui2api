@@ -57,3 +57,18 @@ consulting firm, not the chat product.
    keys): none can be extracted — there are no app JS bundles; the parking page ships only
    `/js/searchlinks.js` (parking widgets) and `/css/*`. All previous analysis assumptions
    from a hypothetical app are invalidated until the real product is found.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `adapta_chat` | Chat | see notes | Placeholder for the chat capability of the real adapta product — NOT RENDERABLE: no live chat surface exists at adapta.app (parked). Re-point the package to the |
+
+<!-- ui2api:capability-index:end -->

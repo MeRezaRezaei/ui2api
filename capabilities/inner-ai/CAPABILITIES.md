@@ -153,3 +153,23 @@ menu items).
 | `inner_ai_files` | Upload lifecycle + blob read (`uploads`, `artifacts`, workspace/folder_archive) + jurisprudence. |
 | `inner_ai_realtime_history` | Centrifuge history subscription from `/v1/realtime/tokens/history` (event `history.conversation.deleted`). |
 | `inner_ai_voice` | Voice catalog (`/v1/get_voices`) + prompt enhancer (`lambda.innerai.com/promptEnhancer`). |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `inner_ai_chat` | Chat stream | declared (not verified) | Send a prompt on the composer (multi-model: 27 pickable models); answer streamed via Centrifuge WS turn-events subscription (v3 agentic chat), seq-paginated RES |
+| `inner_ai_conversations` | Conversation history + CRUD | declared (not verified) | List/get conversations and messages, cancel turns, list feedback reasons, post feedback (AgentChatAPI) |
+| `inner_ai_models` | Model catalog / picker | declared (not verified) | Read the 27-model catalog and drive the picker (model id, llm_model slug, categories, pro/ultra gating) |
+| `inner_ai_files` | Uploads + artifacts (workspace) | declared (not verified) | Attach files (multipart upload lifecycle) and read generated artifacts / workspace archive |
+| `inner_ai_realtime_history` | Realtime history events (Centrifuge) | declared (not verified) | Live history invalidation via Centrifuge subscription (token: POST /api/v1/realtime/tokens/history); event literal 'history.conversation.deleted' seen |
+| `inner_ai_voice` | Voice (TTS preview) + prompt enhancer | declared (not verified) | Read voice catalog for pickers and call the prompt-enhancer lambda |
+
+<!-- ui2api:capability-index:end -->

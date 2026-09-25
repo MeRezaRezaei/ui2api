@@ -40,3 +40,22 @@ Flag map (connector → QnA ingestion/connector literal in bundle): google-drive
 5. `notion_ai_connectors` — Manage QnA source ingestions (connector→ingestion map above) from `aicustomagents`/`aiconnectors*`. Flag map grounded; UI/settings shapes TO-VERIFY.
 
 (Not exposed: identity, payments/billing, admin — present only as auth-adjacent cookies and `/internal/*` routes; no dedicated RPC literals recovered.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `notion_chat` | Notion AI chat | declared (not verified) | Open /ai (or a workspace page's Notion AI) and send a prompt; answer renders in the AI chat thread. Same-origin eventName-RPC transport (POST /api/v3/<eventName |
+| `notion_qna` | Workspace Q&A | declared (not verified) | Ask across connected workspace sources on /ai (Q&A model orange-mousse, promptCategory filter); exact request body NOT statically recoverable — live shape to ve |
+| `notion_ai_commands` | In-page AI commands | declared (not verified) | Inline AI commands (Improve writing, Summarize, etc.) on workspace pages; ai_writer / create_form / db_agent settings tabs — flag literals in bundle, exact comm |
+| `notion_ai_search` | AI search tool | declared (not verified) | injectSearchTool flag / targetConfig types=[search, researcher] / promptCategory=deep_research — grounded flags, live search flow TO-VERIFY. |
+| `notion_ai_connectors` | QnA source connectors | declared (not verified) | Manage external source ingestions (google_drive_qna_ingestion, jira_qna_ingestion_v2, github_qna, gmail_ai_connector, etc.) under aicustomagents/aiconnectors* — |
+
+<!-- ui2api:capability-index:end -->

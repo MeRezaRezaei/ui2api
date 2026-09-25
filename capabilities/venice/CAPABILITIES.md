@@ -45,3 +45,23 @@ TO-VERIFY (needs a live captured session + lazy chunks): exact `session` token �
 2. `venice_image` — `POST /api/v1/image/generate` (flux-2-pro, w/h); studio UI at `/studio/image`.
 3. `venice_video` — `POST /api/v1/video/queue` (veo3-full-text-to-video) — async queue, poll/download.
 4. `venice_audio` — `POST /api/v1/audio/queue` (stable-audio-25) — async queue.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `venice_chat` | Chat | declared (not verified) | OpenAI-compatible chat completion: POST https://api.venice.ai/api/v1/chat/completions with {model, messages, venice_parameters:{enable_web_search:'auto', enable |
+| `venice_image` | Image generation | declared (not verified) | POST https://api.venice.ai/api/v1/image/generate with {model:'flux-2-pro', prompt, width, height}. Studio UI at /studio/image (edit/upscale/background-remove ad |
+| `venice_video` | Video generation | declared (not verified) | POST https://api.venice.ai/api/v1/video/queue with {model:'veo3-full-text-to-video', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at  |
+| `venice_audio` | Music / audio generation | declared (not verified) | POST https://api.venice.ai/api/v1/audio/queue with {model:'stable-audio-25', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/ |
+| `venice_list_conversations` | Conversation history list | declared (not verified) | List past chats from the live page's sidebar DOM (always mirrors the current logged-in session). The production wire API (api.venice.ai/api/v1, OpenAI-compatibl |
+| `venice_model_list` | Model list | declared (not verified) | Enumerate available models. capabilities/venice/profile.json carries no model-picker DOM candidate (only composer/answer selectors), and the logged-in /chat/v2  |
+
+<!-- ui2api:capability-index:end -->

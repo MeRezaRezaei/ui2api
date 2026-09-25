@@ -47,3 +47,21 @@ PASS (7023). Headless-safe.
 
 Model_type note: literal `deepseek-reasoner`/`deepseek-chat` ids still never
 appear in the wire DTOs — model is addressable via the UI toggle, not by id.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `deepseek_chat` | Chat | declared (not verified) | Send a prompt on the DeepSeek composer; streamed answer off the page. Wire: POST /api/v0/chat/completion {chat_session_id, parent_message_id, model_type, prompt |
+| `deepseek_list_conversations` | List conversations | declared (not verified) | Read the logged-in session's conversation list from the live DOM sidebar (a[href*='/chat/'] anchors; matches both /chat/<id> and /a/chat/s/<id> href shapes, sta |
+| `deepseek_reasoner` | Reasoning / CoT mode (thinking toggle) | declared (not verified) | Toggle reasoning (CoT) on per request/session. VERIFIED LIVE 2026-09-19: the composer carries a real toggle div.ds-toggle-button:has-text('DeepThink') whose sta |
+| `deepseek_web_search` | Web search toggle | declared (not verified) | Flip the composer 'Search' toggle (div.ds-toggle-button:has-text('Search'), state = ds-toggle-button--selected class) so the next completion carries search_enab |
+
+<!-- ui2api:capability-index:end -->

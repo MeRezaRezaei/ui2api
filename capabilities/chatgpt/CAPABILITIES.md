@@ -123,3 +123,24 @@ flag surface.
 | `chatgpt_artifacts` | Canmore artifacts/Canvas (`window.CanmoreNative`, `/conversation/{id}/textdocs`). |
 | `chatgpt_gpts` | Custom-GPT chat via `conversation_mode {GizmoInteraction, gizmo_id}`. |
 | `chatgpt_voice` | `/backend-api/transcribe` audio→text input. |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `chatgpt_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; SSE-streamed answer off the page (POST /backend-api/f/conversation, text/event-stream) |
+| `chatgpt_conversation_crud` | Conversation CRUD + history | declared (not verified) | List/get/rename/delete conversations via /backend-api/conversation/* (endpoint literals in bundle; live shapes to verify) |
+| `chatgpt_web_search` | Web search / tools toggle | declared (not verified) | web_search + cloud_browser tool flags feed client_tools of the conversation request (flag literals in bundle) |
+| `chatgpt_upload_attach` | File upload / Estuary | declared (not verified) | Attachment + artifact content via /backend-api/estuary/content and /backend-api/estuary/upload_content_bytes (upload_url_expiry, direct_azure/direct_aws strateg |
+| `chatgpt_artifacts` | Artifacts / Canvas (Canmore) | declared (not verified) | window.CanmoreNative hook + artifact_* message fields; /conversation/{id}/textdocs endpoint |
+| `chatgpt_gpts` | GPTs (custom assistants) | declared (not verified) | conversation_mode { kind: GizmoInteraction, gizmo_id } + model_slug on custom GPTs |
+| `chatgpt_voice` | Voice transcription / input | declared (not verified) | /backend-api/transcribe endpoint literal; voice dictation UI |
+
+<!-- ui2api:capability-index:end -->

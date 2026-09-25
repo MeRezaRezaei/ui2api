@@ -126,3 +126,25 @@ Codex CLI OAuth endpoints; shared app shell with chatgpt; logged-out `/codex` se
 - Post-login, expect the usual ChatGPT server-side anti-automation (sentinel/chat-requirements gates on
   `/sentinel/chat-requirements/prepare`, account-tier limits on `/accounts/check/{version}`) plus higher-tier
   Codex gates (`wham_access`, `codex_only`, credit/rate-limit walls) once automation signals appear.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `codex_chat` | Codex task create + stream | declared (not verified) | Create a Codex task from the /codex composer and read the task/turn stream (POST /backend-api/wham/tasks {new_task, input_items} + SSE GET /backend-api/tasks/{t |
+| `codex_task_crud` | Task list / detail / lifecycle | declared (not verified) | List, search, get, archive, cancel, fork, mark-read, recover Codex tasks via /wham/tasks* |
+| `codex_task_turns` | Task turns & PRs | declared (not verified) | Turn list/detail, logs, cancel, copy-git-apply, viewed, and pull-request create/update |
+| `codex_environment` | Environments & machines | declared (not verified) | Sandbox environment CRUD + machine inventory for Codex tasks |
+| `codex_repo_connect` | GitHub / GitLab connectors | declared (not verified) | Repo discovery, branch search, installations, code review + GitLab service-account config |
+| `codex_usage_credits` | Usage & credits | declared (not verified) | Token/credit usage breakdowns, credit events, rate-limit reset credits |
+| `codex_cloud` | Codex Cloud | declared (not verified) | Codex Cloud SPA surface (universe/tasks/access/security/settings) + cloud task PR page |
+| `codex_oauth_cli` | Codex CLI / desktop auth | declared (not verified) | OAuth client config for the Codex CLI + desktop/install entrypoints |
+
+<!-- ui2api:capability-index:end -->

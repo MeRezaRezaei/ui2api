@@ -182,3 +182,23 @@ bundle only (not in the manifest / runner) — never claimed verified.
 | `duckduckgo_reasoning` | Set reasoning effort fast/reasoning via the composer reasoning-mode toggle (button text flip). **VERIFIED live 2026-09-23.** Extended not offered on free models (honest ok:false). |
 | `duckduckgo_chat_history` | Read anonymous chats from IndexedDB `savedAIChatData` + sidebar corroboration. **VERIFIED live 2026-09-23.** |
 | `duckduckgo_image_generate` | Toggle `metadata.toolChoice.GenerateImage` → AI image generation via backend. Wire-mapped from bundle only — NOT in manifest/runner, never claimed verified. |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `duckduckgo_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; SSE-streamed answer via POST /duckchat/v1/chat (accept: text/event-stream). Model configurable per message. |
+| `duckduckgo_web_search` | Web search toggle | declared (not verified) | Toggle in-chat web search (metadata.toolChoice.WebSearch → backend performs search, injects results + citations) |
+| `duckduckgo_model_picker` | Model picker read | declared (not verified) | Read available AI models from the embedded bundle config (gpt-4o/5.x, claude-sonnet-4-x/opus-4-x, llama-4, mistral-small, kimi-k2-5) |
+| `duckduckgo_file_upload` | File / image upload | declared (not verified) | Attach files and images to a chat message (base64-encoded in request body) |
+| `duckduckgo_reasoning` | Reasoning mode | declared (not verified) | Set reasoning effort (fast / reasoning / extended) for supported models |
+| `duckduckgo_chat_history` | Chat history (local or synced) | declared (not verified) | Read recent chats from IndexedDB (anonymous, device-local) or DDG-account sync |
+
+<!-- ui2api:capability-index:end -->

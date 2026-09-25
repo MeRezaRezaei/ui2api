@@ -86,3 +86,22 @@ Streaming = a `startMessage`/`newMessage` then a sequence of `appendText`/`repla
 | `copilot_autosuggest` | `POST /conversations/{id}/autosuggest` for follow-up suggestions; inbound `startSuggestion/appendSuggestion`. |
 
 (Not exposing: browser-computer-use automation (`invokeAction`/`browserAutomate`), subscription/paywall, shopping — agentic/sensitive; they exist as wire events above if a future package needs them.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `copilot_chat` | Chat stream | declared (not verified) | Send a prompt on the composer (#userInput, Enter); streamed answer appends in-page. Underlying wire = WebSocket /c/api/chat (event:send → appendText/replaceText |
+| `copilot_search_mode` | Web search / grounding mode | declared (not verified) | Composer chat mode 'search' (Bing) — grounded answers with citation events on the wire |
+| `copilot_thinking_mode` | Think deeper (reasoning) mode | declared (not verified) | Composer chat mode 'Think deeper' — reasoning tokens via chainOfThought events |
+| `copilot_history` | Conversation history / persistence | declared (not verified) | REST /c/api/conversations CRUD + /conversations/{id}/history?api-version=2; autotitle via titleUpdate events |
+| `copilot_image_gen` | Image generation (Imagine) | declared (not verified) | Image gen over the chat socket (generatingImage/imageGenerated events) with /imagine gallery; Bing Image Creator pipeline |
+
+<!-- ui2api:capability-index:end -->

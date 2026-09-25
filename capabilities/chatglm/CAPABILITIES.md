@@ -215,3 +215,25 @@ Analyzed statically (curl only, Chrome UA, no browser launched) across two hosts
 | `chatglm_glms_assistant` | GLMS task engine assistant chat via `/chatglm/mainchat-api/engine/submit` (zh only, server-selected tools/prompts). |
 
 (Not exposing: auth/user registration/subscription/telemetry — sensitive or tied to interactive UI flows.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `chatglm_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; streamed answer off the page |
+| `chatglm_conversation_crud` | Conversation CRUD + history | declared (not verified) | List/get/rename/delete conversations — zh: /chatglm/backend-api/v1/conversation/*; intl: /api/v1/chats/* (endpoint literals verified, live shapes to-verify) |
+| `chatglm_web_search` | Web search / tools toggle | declared (not verified) | Z.ai: client-side web_search toggle feeds chat completions; zh: server-controlled per assistant config |
+| `chatglm_image_gen` | Image generation (CogView) | declared (not verified) | CogView image gen — zh: drawing-api config + chat tool; intl: /api/v1/images base |
+| `chatglm_model_list` | Model picker read | declared (not verified) | Read available models — intl: GET /api/models; zh: GET /chatglm/agent-api/operation/detail?tag=available_models |
+| `chatglm_file_upload` | File upload | declared (not verified) | Attach files to chat — zh: POST /chatglm/productivity-api/file/chat_upload; intl: GET/DELETE /api/v1/files/ |
+| `chatglm_ppt` | PPT generation | declared (not verified) | PPT creation/editing — intl: /api/chat/ppt/*; zh: CogView slides tools in GLMS engine |
+| `chatglm_glms_assistant` | GLMS task-engine assistant | declared (not verified) | Server-configured assistant chat via POST /chatglm/mainchat-api/engine/submit (zh only); tools/prompts selected by assistant_id server-side |
+
+<!-- ui2api:capability-index:end -->

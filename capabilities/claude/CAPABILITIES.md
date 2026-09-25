@@ -114,3 +114,22 @@ scriptable for endpoint mining. No over-the-wire chat request was captured yet.
 
 (Not exposing: account/CLI (`/api/account`, `/v1/code/sessions`), skills marketplace,
 marketplaces/plugins admin, telemetry — sensitive or peripheral; endpoints above if needed.)
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `claude_chat` | Chat stream | declared (not verified) | Send a prompt on the claude.ai composer (ProseMirror, confirmed in bundles); streamed answer read off [data-testid="assistant-message"] nodes (confirmed in bund |
+| `claude_list_conversations` | List conversations | declared (not verified) | Read the conversation list from the live page's own sidebar DOM (anchors under /chat/<uuid> and /conversation/<uuid>, deduped, capped at 20). Honest rpcNote: th |
+| `claude_extended_thinking` | Extended thinking | declared (not verified) | Enable claude.ai extended_thinking mode. Honest best-effort only: the extended_thinking flag is confirmed in bundles (b-shared-0/b-shared-13) but the profile ha |
+| `claude_artifacts` | Artifacts / CCR sandbox | declared (not verified) | Enable claude.ai artifacts. Honest ok:false: the artifacts/CCR sandbox surface exists in bundles (anthropic.claude.usercontent.sandbox.ClaudeCompletionRequest/R |
+| `claude_web_search` | Web search | declared (not verified) | Toggle the in-chat web_search tool. Honest ok:false: web_search tool references are in the bundles (b-shared-0 et al., six refs) but no toggle selector or reque |
+
+<!-- ui2api:capability-index:end -->

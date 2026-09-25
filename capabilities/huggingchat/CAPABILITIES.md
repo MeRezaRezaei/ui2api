@@ -177,3 +177,22 @@ Verified markup (static templates in bundles; not yet confirmed live):
 4. `huggingchat_settings` — Read `/chat/api/v2/user/settings`, upsert `POST /chat/settings` (streamingMode, customPrompts, tools/artifacts/reasoning/provider overrides).
 5. `huggingchat_mcp` — Read `/chat/api/mcp/servers`, attach `selectedMcpServers` (Exa / HF) to the send body.
 6. `huggingchat_share` — `POST /chat/conversation/{id}/share` → `/r/{shareId}` link.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `huggingchat_chat` | Chat stream | declared (not verified) | Create conversation (POST /chat/conversation) + send prompt on the composer; NDJSON answer stream off POST /chat/conversation/{id} (Chunked ReadableStream, newl |
+| `huggingchat_conversations` | Conversation CRUD / history | declared (not verified) | GET/POST/PATCH/DELETE /chat/api/v2/conversations(?p=), /conversations/{id}, /conversations/{id}/message/{messageId}, delete-all, import-share |
+| `huggingchat_models` | Model catalog & picker | declared (not verified) | GET /chat/api/v2/models (140 + omni router, live payload) and /models/{id}; activeModel + system prompt + tools/reasoning/artifacts overrides via /chat/settings |
+| `huggingchat_settings` | Settings read/upsert | declared (not verified) | GET /chat/api/v2/user/settings and debounced POST /chat/settings (streamingMode smooth\|raw, customPrompts, toolsOverrides, artifactsOverrides, providerOverride |
+| `huggingchat_mcp` | MCP servers | declared (not verified) | GET /chat/api/mcp/servers (base Web Search (Exa) + Hugging Face); enabled servers attached to each send (selectedMcpServerNames/selectedMcpServers) |
+
+<!-- ui2api:capability-index:end -->

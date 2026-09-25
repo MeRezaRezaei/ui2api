@@ -103,3 +103,23 @@ session (or the account owner's real browser) can apply XL via the same path.
 Cold-boot: on fresh contexts the toolkit/composer render before the app can
 dispatch; every interaction path polls for its target node (up to 15s) instead
 of trusting readyState.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `kimi_chat` | Chat | declared (not verified) | Send a prompt on the composer; streamed answer off the page (ChatService.Chat server-stream on notilo.kimi.com/apiv2) |
+| `kimi_web_search` | Web search toggle (in-chat internet mode) | declared (not verified) | Flip the composer web-search switch so the answer is grounded by live search (feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat) |
+| `kimi_list_conversations` | Conversation history list | declared (not verified) | List past chats (ChatService.ListChats / ListMessages). VERIFIED LIVE 2026-09-19: sidebar DOM read returns 15 real conversations via a.next-sidebar-history-item |
+| `kimi_file_upload` | File / image upload support | see notes | Attach documents or images to a chat — REST multipart POST /apiv2-files/file/upload (FileService.Upload) with parse tracking (GetFileParseProgress, ListChatFile |
+| `kimi_long_context` | Long-context / long-context-only mode | see notes | Set context_length / context-length-only mode on ChatRequestOptions (kimi.common.v1.ContextLength) for long-input answers |
+| `kimi_model_list` | Model picker read | declared (not verified) | Read the available models from the model picker DOM (selectModelEntry state key + GetAvailableModels RPC proven in bundles). VERIFIED LIVE 2026-09-19: click [da |
+
+<!-- ui2api:capability-index:end -->

@@ -351,3 +351,29 @@ Doubao is ByteDance's consumer AI chat platform, built on the Modern.js framewor
 | `session.lock.json` | session lock (kimi shape) |
 | `recipes/doubao_chat.json` | chat recipe (gemini schema) |
 | `CAPABILITIES.md` | this file |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `doubao_chat` | Chat | awaiting capture |  |
+| `doubao_image-generation` | Image Generation | verified-endpoint / live-to-verify |  |
+| `doubao_video-generation` | Video Generation | verified-endpoint / live-to-verify |  |
+| `doubao_web-search` | Web Search | verified-endpoint / live-to-verify |  |
+| `doubao_deep-research` | Deep Research | verified-endpoint / live-to-verify |  |
+| `doubao_code-interpreter` | Code Interpreter | verified-endpoint / live-to-verify |  |
+| `doubao_canvas` | Canvas | verified-endpoint / live-to-verify |  |
+| `doubao_document-analysis` | Document Analysis | verified-endpoint / live-to-verify |  |
+| `doubao_audio-voice` | Audio Voice | verified-endpoint / live-to-verify |  |
+| `doubao_writing` | Writing | verified-endpoint / live-to-verify |  |
+| `doubao_ppt-generation` | Ppt Generation | verified-endpoint / live-to-verify |  |
+| `doubao_search-images` | Search Images | verified-endpoint / live-to-verify |  |
+
+<!-- ui2api:capability-index:end -->

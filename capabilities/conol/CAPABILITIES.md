@@ -78,3 +78,18 @@ This is NOT a dead-end. The domain is alive, auth surface is confirmed (better-a
 - Better-auth API routes respond with proper HTTP status codes (401/404/200) without challenge pages.
 - `/login` returned 429 after multiple rapid requests -- **rate limiting is present** but not a bot wall (it is the auth endpoint rate limiter).
 - No anti-bot fingerprint SDK detected (no VolcanoEngine, no TrustDecision, no Cloudflare Turnstile in static surface).
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `conol_chat` | Chat (UNVERIFIED) | declared (not verified) | Send a prompt on the composer; streamed answer -- wire protocol, selectors, and streaming transport all unknown from static analysis (requires headed capture) |
+
+<!-- ui2api:capability-index:end -->

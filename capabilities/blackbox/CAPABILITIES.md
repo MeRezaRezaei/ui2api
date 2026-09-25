@@ -73,3 +73,19 @@ inference API endpoints + model + proxy-mode literals in §2.
 |----|-------------|
 | `blackbox_chat` | Composer send + streamed answer (UI-path driver) — transport UNVERIFIED; ship recipe, confirm DOM + wire on first logged-in capture. |
 | `blackbox_inference_api` | Direct inference via `POST enterprise.blackbox.ai/chat/completions` (OpenAI-compatible) / `enc/<model>/message_stream` — endpoints verified statically, live shapes to verify. |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `blackbox_chat` | Chat stream (composer) | declared (not verified) | Send a prompt on the composer and read the streamed answer off the page. UNVERIFIED transport: the chat SPA's module graph is not present in the static HTML/JS  |
+| `blackbox_inference_api` | Inference API (OpenAI-compatible + enc stream) | declared (not verified) | Verified (static) API surface: POST https://enterprise.blackbox.ai/chat/completions and SSE path /enc/<model>/message_stream. Live request/response shapes to ve |
+
+<!-- ui2api:capability-index:end -->

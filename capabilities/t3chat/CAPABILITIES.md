@@ -69,3 +69,22 @@ t3.chat (https://t3.chat) is behind a Vercel Security Checkpoint bot wall. Every
 | Streaming via Convex subscription | UNVERIFIED | Plausible (Convex is the backend); not proven |
 | github.com/t3-oss/t3-chat repo exists | DISPROVEN | Returns 404 on 2026-09-16 |
 | Any JS bundle content | DISPROVEN | Vercel Security Checkpoint (429) blocks all static curl |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `t3chat_chat` | Chat stream | declared (not verified) | Send a prompt via the chat composer; streamed answer from the selected LLM backend (Convex mutation or /api/chat route — wire path UNKNOWN) |
+| `t3chat_model_switch` | Model / provider switching | declared (not verified) | Select which LLM backend to use (Claude, GPT, Gemini, Llama, etc.) via the model picker dropdown |
+| `t3chat_conversation_crud` | Conversation CRUD + history | declared (not verified) | List/get/rename/delete conversations — Convex-backed (chats table in clone repos) |
+| `t3chat_file_upload` | File / image upload | declared (not verified) | Attach files or images to a chat (UNVERIFIED — clone repos suggest Convex Blob storage or Vercel Blob) |
+| `t3chat_model_list` | Model picker read | declared (not verified) | Read available models from the model picker DOM — UNVERIFIED selectors |
+
+<!-- ui2api:capability-index:end -->

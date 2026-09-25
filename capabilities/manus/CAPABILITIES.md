@@ -28,3 +28,22 @@ Sessions/tasks (not flat conversations): session start/list, sandbox start/statu
 
 ## Capability list
 `manus_chat` (UI path) · `manus_session_start` · `manus_session_list` · `manus_sandbox` · `manus_upload` (REST shapes, live-to-verify).
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `manus_chat` | Chat (UI path) | awaiting capture |  |
+| `manus_session_start` | Session start | verified-endpoint / live-to-verify |  |
+| `manus_session_list` | Session list | verified-endpoint / live-to-verify |  |
+| `manus_sandbox` | Sandbox control | verified-endpoint / live-to-verify |  |
+| `manus_upload` | File upload | verified-endpoint / live-to-verify |  |
+
+<!-- ui2api:capability-index:end -->

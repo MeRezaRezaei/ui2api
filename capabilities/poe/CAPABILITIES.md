@@ -42,3 +42,18 @@ analysis. Everything below the "Verified" headings is prior documented/community
   own send handler). Implementation hint: proceed with the generic contenteditable composer
   candidates in profile.json; tune selectors against real DOM on first live capture; then, if desired,
   peel the real wire off the first captured request to add an `rpc` short-path capability later.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `poe_chat` | Chat | declared (not verified) | Send a prompt on the Poe composer; streamed answer read off the page. |
+
+<!-- ui2api:capability-index:end -->

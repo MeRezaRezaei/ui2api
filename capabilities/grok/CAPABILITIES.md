@@ -81,3 +81,18 @@ Sentry bundler plugin appKey `website`):
 `session.lock.json` = **awaiting-capture**, snapshot hash `null`. Nothing about grok.com could
 be confirmed without a headed browser session; the Cloudflare JSD gate is the concrete thing a
 first live capture must negotiate.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `grok_chat` | Chat stream | declared (not verified) | Send a prompt on the grok.com composer; streamed answer read off the page. UI-path only — grok.com's wire transport is unobservable from this host (Cloudflare W |
+
+<!-- ui2api:capability-index:end -->

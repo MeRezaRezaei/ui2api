@@ -80,3 +80,18 @@ OmniRoute catalog entry should be flagged for potential removal or archival.
 
 All files are scaffolded for structural completeness but carry the dead-end verdict.
 No selectors, no recipes, no live session data — all marked accordingly.
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **unverified (no verified record)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `tinycms_chat` | Chat (dead-end scaffold) | dead-end |  |
+
+<!-- ui2api:capability-index:end -->

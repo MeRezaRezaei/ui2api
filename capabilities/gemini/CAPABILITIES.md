@@ -234,3 +234,22 @@ BranchConversation / UpdateConversation / ListConversationTurns / GetConversatio
 | `gemini_artifacts` | `CreateArtifactVersion`/`UpdateCurrentArtifact` + canvas/immersive panels (code, data viz, web page). |
 | `gemini_mcp_skills` | `ListCustomMcpServers`/`CreateManagedSkill` / enable Drive-Gmail-People MCP extensions for the turn. |
 | `gemini_daily_brief` | `GenerateDailyBrief`/`GetDailyBrief` scheduled-proactive chat (Your Day). |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **verified (record in metadata.json)**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `gemini_chat` | Chat stream | declared (not verified) | Send a prompt on the composer; streamed answer off the page (StreamGenerate RxAFq on the wire) |
+| `gemini_list_conversations` | Conversation list / search | declared (not verified) | ListConversations / SearchConversations via batchexecute RPC, DOM-sidebar fallback |
+| `gemini_model_list` | Model picker read | declared (not verified) | Enumerate visible models + WIZ_global_data model flags (no ListModels RPC exists) |
+| `gemini_search_toggle` | Search / Web-access toggle | see notes | Flip the composer search switch (feeds the tools field of StreamGenerate) |
+| `gemini_file_upload` | File / image attachment | see notes | Attach a document or image to the real Gemini composer (hidden input[type='file'] under the composer attach/tools entry) — the site's own JS performs the upload |
+
+<!-- ui2api:capability-index:end -->

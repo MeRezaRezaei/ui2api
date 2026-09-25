@@ -308,10 +308,10 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **911 tests / 42 suites** (910 pass + 1 env skip) — dated fold-log counts
+  **914 tests / 44 suites** (913 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
-  900/48 then 908/40 mid-fold) are history; this is the current number,
-  genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0). GOALs 88-90 + 91
+  900/48 → 908/40 → 911/42 mid-fold) are history; this is the current
+  number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0). GOALs 88-90 + 91
   files: attach-gate 26, vault-integrity 9, error-contract 2, lang-php 8.
   The two counted-test warts are CLOSED, not flagged: error-contract and
   lang-php both ran their assertions inside `describe` bodies and reported

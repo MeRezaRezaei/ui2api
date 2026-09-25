@@ -62,3 +62,18 @@ A parked shell has no defenses; it simply has no service.
 | id | description | status |
 |----|-------------|--------|
 | `zenmux_chat` | Composer send + streamed answer (exact wire UNKNOWN — catalog implies an OpenAI-compatible proxy tier). | scaffold only; dormant pending domain revival |
+
+<!-- ui2api:capability-index:start -->
+<!-- GENERATED from manifest.json by scripts/gen-capability-index.mjs — do not hand-edit. -->
+
+## Capability index (machine-generated, complete by construction)
+
+Package status: **dormant**.
+The status column below is each capability's OWN declared status — it is a
+declared surface, not a claim of a verified live round-trip.
+
+| capability id | name | declared status | description |
+| --- | --- | --- | --- |
+| `zenmux_chat` | Chat | dormant | Composer send + streamed answer — exact wire UNKNOWN; dormant scaffold awaiting domain revival |
+
+<!-- ui2api:capability-index:end -->
