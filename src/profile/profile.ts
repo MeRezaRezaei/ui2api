@@ -170,7 +170,13 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     ],
     captureMs: 30000,
     stableMs: 2000,
-    note: "AI Mode answer block; selectors tune per-account after a live capture (data/www.google.com/.session)",
+    note: "AI Mode answer block; selectors tune per-account after a live capture (data/www.google.com/.session)",    capability: {
+      restrictionMarkers: [
+        { kind: "limit", patterns: ["rate limit", "too many requests", "you've reached your limit"] },
+        { kind: "login", patterns: ["sign in to continue", "to continue, sign in"] },
+      ],
+    },
+
   },
   chatgpt: {
     id: "chatgpt",
@@ -183,7 +189,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     answer: ["[data-message-author-role='assistant']", ".markdown"],
     newChat: '[aria-label="New chat"], [aria-label*="New conversation"]',
     captureMs: 60000,
-    stableMs: 2500,
+    stableMs: 2500,    capability: {
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade to plus", "chatgpt plus", "upgrade to chatgpt"] },
+        { kind: "limit", patterns: ["you've reached your limit", "you've reached the limit", "message limit", "rate limit", "too many requests"] },
+        { kind: "login", patterns: ["log in to continue", "sign in to continue", "log in or sign up"] },
+      ],
+    },
+
   },
   claude: {
     id: "claude",
@@ -196,7 +209,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     answer: ['[data-testid="assistant-message"]', ".font-claude-message", ".whitespace-pre-wrap"],
     newChat: '[aria-label="New chat"], [data-testid="new-chat"]',
     captureMs: 90000,
-    stableMs: 2500,
+    stableMs: 2500,    capability: {
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade to pro", "upgrade to max", "claude pro", "pro plan"] },
+        { kind: "limit", patterns: ["you've reached your limit", "message limit", "rate limit", "too many requests", "daily message limit"] },
+        { kind: "login", patterns: ["log in to continue", "sign in to continue"] },
+      ],
+    },
+
   },
   copilot: {
     id: "copilot",
@@ -210,7 +230,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     dismiss: ['button[aria-label*="Accept"]', 'button[id*="accept"]', 'button[aria-label*="Continue"]', '#c-accept'],
     captureMs: 60000,
     stableMs: 2000,
-    note: "anonymous Microsoft Copilot — best 'zero-setup' default for a fresh server",
+    note: "anonymous Microsoft Copilot — best 'zero-setup' default for a fresh server",    capability: {
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade to copilot", "copilot pro", "copilot pro plan"] },
+        { kind: "limit", patterns: ["daily limit", "conversation limit", "rate limit", "too many requests", "you've reached"] },
+        { kind: "login", patterns: ["sign in to continue", "log in to continue"] },
+      ],
+    },
+
   },
   perplexity: {
     id: "perplexity",
@@ -223,7 +250,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     answer: ["[data-testid='answer']", "div[class*='prose']", ".answer-content"],
     dismiss: ['button[aria-label*="Close"]', 'button[aria-label*="Dismiss"]', "button:has-text('Maybe later')"],
     captureMs: 90000,
-    stableMs: 2500,
+    stableMs: 2500,    capability: {
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["upgrade to pro", "perplexity pro", "pro plan"] },
+        { kind: "limit", patterns: ["you've reached your limit", "free limit", "rate limit", "too many requests"] },
+        { kind: "login", patterns: ["log in to continue", "sign in to continue"] },
+      ],
+    },
+
   },
   huggingchat: {
     id: "huggingchat",
@@ -236,7 +270,14 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     answer: [".message.overflow-y-auto", '[data-testid="message"]', ".chat-container .message"],
     dismiss: ["button:has-text('Start chatting')"],
     captureMs: 90000,
-    stableMs: 2500,
+    stableMs: 2500,    capability: {
+      restrictionMarkers: [
+        { kind: "upgrade", patterns: ["hf pro", "hugging face pro"] },
+        { kind: "limit", patterns: ["rate limit", "too many requests", "you've reached"] },
+        { kind: "login", patterns: ["log in to continue", "sign in to continue"] },
+      ],
+    },
+
   },
   kimi: {
     id: "kimi",
@@ -356,7 +397,13 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     stableMs: 2500,
     preComposeDelayMs: 8000,
     realProfileOnly: true,
-    note: "LIVE-VERIFIED chat round-trip (2026-09-19, headed real Chrome + injected snapshot): composer textarea.t-textarea__inner (placeholder 'Ask me anything'), AI answer in .agent-chat__bubble--ai .hyc-content-md (markdown .hyc-common-markdown), human bubble .agent-chat__bubble--human .hyc-content-text, completion marker 'Completed'. EdgeOne blocks headless (HTTP 567) AND ephemeral snapshot contexts ('Access Restricted' — its challenge cookies are session-scoped, never captured) — real-profile/attach ONLY (realProfileOnly).",
+    note: "LIVE-VERIFIED chat round-trip (2026-09-19, headed real Chrome + injected snapshot): composer textarea.t-textarea__inner (placeholder 'Ask me anything'), AI answer in .agent-chat__bubble--ai .hyc-content-md (markdown .hyc-common-markdown), human bubble .agent-chat__bubble--human .hyc-content-text, completion marker 'Completed'. EdgeOne blocks headless (HTTP 567) AND ephemeral snapshot contexts ('Access Restricted' — its challenge cookies are session-scoped, never captured) — real-profile/attach ONLY (realProfileOnly).",    capability: {
+      restrictionMarkers: [
+        { kind: "limit", patterns: ["请求过于频繁", "频率限制", "rate limit", "too many requests", "次数用完", "今日次数"] },
+        { kind: "login", patterns: ["请先登录", "请登录后", "login to continue", "sign in to continue"] },
+      ],
+    },
+
   },
   hunyuan: {
     id: "hunyuan",
@@ -377,7 +424,13 @@ export const BUILTIN_PROFILES: BuiltinProfiles = {
     dismiss: ['button[aria-label*="关闭"]', 'button[aria-label*="Close"]', "button:has-text('知道了')"],
     captureMs: 60000,
     stableMs: 2000,
-    note: "UNVERIFIED selectors copied verbatim from capabilities/hunyuan/profile.json. HEADED-ONLY + anti-bot: the SPA sets X-webdriver: 1 for automated Chrome (Turing.js + QIMEI fingerprinting); session = hy_user/hy_token cookies outside bundle JS. Tune every selector after the first live capture (data/yuanbao.tencent.com/.session).",
+    note: "UNVERIFIED selectors copied verbatim from capabilities/hunyuan/profile.json. HEADED-ONLY + anti-bot: the SPA sets X-webdriver: 1 for automated Chrome (Turing.js + QIMEI fingerprinting); session = hy_user/hy_token cookies outside bundle JS. Tune every selector after the first live capture (data/yuanbao.tencent.com/.session).",    capability: {
+      restrictionMarkers: [
+        { kind: "limit", patterns: ["请求过于频繁", "频率限制", "rate limit", "too many requests", "次数用完"] },
+        { kind: "login", patterns: ["请先登录", "请登录后", "login to continue"] },
+      ],
+    },
+
   },
   // NOTE: `youtube` + `araprat` (Aparat) are intentionally NOT builtin chat
   // profiles — they are capability-only surfaces (video platforms, no
