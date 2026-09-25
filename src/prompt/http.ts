@@ -23,20 +23,27 @@
 //                 -> OpenAI chat.completion JSON (or SSE chunks if stream:true)
 //   GET  /sites   -> the available chat-site profiles
 //   GET  /accounts?site=gemini  -> identity-keyed accounts stored for the site
-//   GET  /status  -> pool health (warm/idle/busy pages)
+//   GET  /status  -> pool state (warm/idle/busy pages) + `liveness` — the honest
+//                 browser probe (up|down|unknown), when it last ran, the reaper's
+//                 state and its last measured sweep, plus per-worker detail
+//                 (site, busyMs, in-flight account)
 //   GET  /requirements -> OS-level readiness report (GOAL 33 — the same data
 //                 `ui2api requirements` prints: per-package verdict
 //                 ready/working/on-hold/not-ready with named reasons, BEFORE
 //                 any browser work), scoped to this daemon's profilesById gate
 //                 + every installed capability package
-//   GET  /health  -> {ok, defaultSite}
+//   GET  /health  -> {ok, defaultSite, sites, pool, liveness}
+//   GET  /requests -> the bounded request ring (GOAL 87): the last N requests
+//                 with {method, path, status, durationMs, site, account,
+//                 outcome} so a wedged or refused request is visible. Prompts,
+//                 answers, cookies and tokens are NEVER recorded.
 //
 // Bound to 127.0.0.1 by default; optionally guarded by a bearer token
 // (UI2API_PROMPTD_TOKEN). The server owns a stand-by page pool (one headless
 // browser, `min` warmed pages, `max` cap from UI2API_POOL_MAX / free memory) so
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { ChatPool } from "./pool.js";
+import { ChatPool, type PoolStatus } from "./pool.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
@@ -94,12 +101,158 @@ export interface PromptdOptions {
      whatever is still open, so a wedged request can never make the daemon
      un-stoppable. Env: UI2API_SHUTDOWN_GRACE_MS. */
   shutdownGraceMs?: number;
+  /* GOAL 87 — the pool's liveness reaper interval (0 disables it). Env:
+     UI2API_REAPER_INTERVAL_MS. The daemon starts it explicitly and pool.close()
+     stops it — never a bare module-level timer. */
+  reaperIntervalMs?: number;
+  /* GOAL 87 — test seam: hand the daemon a pre-built pool (already saturated,
+     fake drivers) so pool-saturated refusals can be exercised over the wire
+     without launching a browser. Omitted in production: the daemon builds its
+     own pool and warms it. */
+  pool?: ChatPool;
 }
 
 export interface PromptdServer {
   server: Server;
   port: number;
+  /* GOAL 87 — the same pool /status reports, and the same request ring
+     GET /requests serves, so a caller (and a test) can assert on the exact
+     object rather than on a JSON round-trip. */
+  pool: ChatPool;
+  requestLog: RequestLog;
   close(): Promise<void>;
+}
+
+/* ── GOAL 87 — the bounded request ring ─────────────────────────────────────
+ *
+ * Before this the daemon logged nothing at all outside UI2API_DEBUG: a wedged
+ * request was invisible ("busy: 1" with no start time, no site, no account, no
+ * elapsed time), so the only diagnosis was attaching a debugger.
+ *
+ * What is recorded is deliberately minimal and non-secret: method, path (the
+ * PATHNAME — the query string is dropped, because it can carry anything),
+ * status, durationMs, site, account, outcome. The prompt, the messages, the
+ * answer, cookies, headers and tokens are NEVER read out of the request: only
+ * `site`/`model`/`account` are, and the no-secret pin enforces that.
+ *
+ * It is a RING: bounded to `limit` entries (default 20, UI2API_REQUEST_LOG), the
+ * oldest evicted on overflow, in memory only, no disk writes. */
+export interface RequestLogEntry {
+  seq: number;
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+  site: string | null;
+  account: string | null;
+  /* "done"     — the route answered 2xx/3xx.
+     "timeout"  — the daemon's aggregate deadline cut it off (504).
+     "refused"  — the request was NOT served: a 4xx shape/identity error, a 5xx
+                   fault, or a 503 pool refusal (saturated / queue timeout /
+                   closed). The status code beside it carries the real code. */
+  outcome: "done" | "timeout" | "refused";
+  startedAt: string;
+}
+
+const DEFAULT_REQUEST_LOG_SIZE = 20;
+/* A hard ceiling on the knob so UI2API_REQUEST_LOG can never turn a bounded ring
+   into unbounded growth. */
+const MAX_REQUEST_LOG_SIZE = 500;
+
+function requestLogSize(explicit?: number): number {
+  if (Number.isFinite(explicit) && explicit !== undefined) {
+    return Math.max(0, Math.min(MAX_REQUEST_LOG_SIZE, Math.floor(explicit as number)));
+  }
+  const raw = Number(process.env.UI2API_REQUEST_LOG);
+  if (Number.isFinite(raw) && raw >= 0) return Math.min(MAX_REQUEST_LOG_SIZE, Math.floor(raw));
+  return DEFAULT_REQUEST_LOG_SIZE;
+}
+
+function outcomeFor(status: number): RequestLogEntry["outcome"] {
+  if (status === 504) return "timeout";
+  return status >= 400 ? "refused" : "done";
+}
+
+export class RequestLog {
+  private ring: RequestLogEntry[] = [];
+  private nextSeq = 1;
+  private open = 0;
+  readonly limit: number;
+
+  constructor(limit?: number) {
+    this.limit = requestLogSize(limit);
+  }
+
+  /* How many requests are in flight RIGHT NOW. A wedge is visible here before
+     the deadline cuts it: inFlight>0 with no finished entry beside it. */
+  get inFlight(): number {
+    return this.open;
+  }
+
+  list(): RequestLogEntry[] {
+    return this.ring.map((e) => ({ ...e }));
+  }
+
+  /* Start a record for one request and get the finisher. The finisher is
+     idempotent (end + close can both fire for one request) and decrements the
+     in-flight count exactly once, so `inFlight` can never leak upwards. */
+  begin(method: string, path: string): (fields: { status: number; site?: string | null; account?: string | null }) => void {
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    this.open++;
+    let closed = false;
+    return (fields) => {
+      if (closed) return;
+      closed = true;
+      this.open = Math.max(0, this.open - 1);
+      if (this.limit <= 0) return;
+      const status = Math.trunc(fields.status);
+      this.ring.push({
+        seq: this.nextSeq++,
+        method,
+        path,
+        status,
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+        site: fields.site ?? null,
+        account: fields.account ?? null,
+        outcome: outcomeFor(status),
+        startedAt,
+      });
+      while (this.ring.length > this.limit) this.ring.shift();
+    };
+  }
+}
+
+/* Site + account for the log, read from what the route already parsed. The
+   parsed body is cached on the request (readJson), so no route has to be edited
+   to become visible — and nothing else is ever read out of the body: the
+   prompt, the messages and the args stay out of the log. */
+function requestIdentity(req: IncomingMessage, url: string): { site: string | null; account: string | null } {
+  const body = (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache;
+  const text = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t ? t.slice(0, 120) : null;
+  };
+  const q = url.includes("?") ? new URL(url, "http://localhost") : null;
+  const cap = /^\/(?:capabilities|capability|v1\/chat)\/([^/?#]+)/.exec(url);
+  const site = text(body?.site) ?? text(body?.model) ?? (cap ? text(decodeURIComponent(cap[1])) : null) ?? (q ? text(q.searchParams.get("site")) : null);
+  const account = text(body?.account) ?? (q ? text(q.searchParams.get("account")) : null);
+  return { site, account };
+}
+
+// The log's honest liveness block: the daemon answered (that is what makes
+// `daemon:"up"` a measurement, not a claim) and the browser state is the REAL
+// probe from pool.status, never the old null-check.
+function livenessBlock(st: PoolStatus): Record<string, unknown> {
+  return {
+    daemon: "up",
+    browser: st.browser,
+    browserProbe: st.browserProbe,
+    browserCheckedAt: st.browserCheckedAt,
+    reaper: st.reaper,
+    lastSweep: st.lastSweep,
+  };
 }
 
 /* GOAL 83 defaults.
@@ -264,18 +417,57 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
 
   // The stand-by page pool. `min` pages are warmed at boot for the default site
   // so the very first prompt is served by an already-loaded composer.
-  const pool = new ChatPool({
-    profiles: profileList,
-    min: opts.min,
-    max: opts.max,
-    defaultProfile: defaultSiteId(),
-    dataDir,
-  });
+  // (opts.pool is a test seam — a pre-built pool, no warm, so pool saturation
+  // can be exercised over the wire without a browser.)
+  const pool =
+    opts.pool ??
+    new ChatPool({
+      profiles: profileList,
+      min: opts.min,
+      max: opts.max,
+      defaultProfile: defaultSiteId(),
+      dataDir,
+      reaperIntervalMs: opts.reaperIntervalMs,
+    });
   // Warm lazily on first use per site; if boot warm failed (site changed / site
   // down), keep going — requests will open pages on demand.
-  await pool.warm().catch(() => undefined);
+  if (!opts.pool) await pool.warm().catch(() => undefined);
+  // GOAL 87: the liveness reaper, started EXPLICITLY. Without it a page that
+  // died while idle kept reporting warm/idle forever (the only liveness check
+  // lived inside release()), and the respawn only happened when a REQUEST
+  // arrived — which a health-checker polling /status never does. Owned by the
+  // pool: pool.close() stops it, so a stopped daemon is a stopped daemon.
+  pool.startReaper(opts.reaperIntervalMs);
+  // GOAL 87: the bounded request ring. Per-server (never module state), so one
+  // daemon's log can never leak into another's — and never into a test's.
+  const requestLog = new RequestLog();
 
   const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // GOAL 87: open a ring record and capture the answer. Every response path
+    // ends the response (send(), the /v1 SSE stream, the deadline's 504), so
+    // wrapping `end` catches them all without editing a single route. The ring
+    // never records ITSELF (reading the log must not append to it) — but
+    // /status and /health ARE recorded, because a refused or wedged health check
+    // is exactly what you want to see.
+    const url = req.url ?? "/";
+    const finish = url.startsWith("/requests")
+      ? null
+      : requestLog.begin(req.method ?? "GET", url.split("?")[0].slice(0, 200));
+    if (finish) {
+      const end = res.end.bind(res);
+      (res as unknown as { end: (...args: unknown[]) => unknown }).end = (...args: unknown[]) => {
+        // 499: the socket went away before any answer — the daemon never
+        // finished serving this request, which is exactly what a client hang-up
+        // looks like from here. Never logged as a 2xx.
+        const status = res.headersSent ? res.statusCode : 499;
+        finish({ status: status || 499, ...requestIdentity(req, url) });
+        return end(...(args as []));
+      };
+      // A client that hangs up mid-request never reaches `end`; finalize on close
+      // so the in-flight count cannot leak upwards and a vanished request is
+      // still visible in the ring.
+      res.on("close", () => finish({ status: res.headersSent ? res.statusCode || 499 : 499, ...requestIdentity(req, url) }));
+    }
     try {
       if (token && req.headers.authorization !== `Bearer ${token}`) {
         return send(res, 401, { error: "unauthorized" });
@@ -458,7 +650,22 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         return send(res, 200, stored);
       }
       if (req.method === "GET" && req.url === "/status") {
-        return send(res, 200, { ok: true, pool: pool.status });
+        const st = pool.status;
+        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st) });
+      }
+      // GOAL 87 — the bounded request ring, read-only. Same localhost-only +
+      // optional-bearer posture as every other route here (it lives behind the
+      // same auth check at the top of the handler). It exposes method, path,
+      // status, duration, site, account and outcome — nothing else: no prompt,
+      // no answer, no cookie, no token, no headers, and the query string is
+      // dropped from `path`.
+      if (req.method === "GET" && (req.url === "/requests" || req.url === "/requests/")) {
+        return send(res, 200, {
+          ok: true,
+          limit: requestLog.limit,
+          inFlight: requestLog.inFlight,
+          requests: requestLog.list(),
+        });
       }
       // OS-level requirements readiness (GOAL 33): the same report the
       // `requirements`/`doctor` command prints, scoped to THIS daemon's surface —
@@ -480,7 +687,8 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         return send(res, 200, report);
       }
       if (req.method === "GET" && (req.url === "/health" || req.url === "/")) {
-        return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: pool.status });
+        const st = pool.status;
+        return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: st, liveness: livenessBlock(st) });
       }
       if (req.method === "POST" && req.url === "/prompt") {
         const body = await readJson(req);
@@ -1542,7 +1750,14 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
   return {
     server,
     port,
+    pool,
+    requestLog,
     close: async () => {
+      // GOAL 87: stop the liveness reaper at the very START of the shutdown, so
+      // no sweep can race a closing pool (and so a stopped daemon leaves nothing
+      // behind that could keep the process alive). Idempotent — pool.close()
+      // stops it again.
+      pool.stopReaper();
       // Stop accepting new work. In-flight requests keep their sockets while
       // they finish, but only for a bounded grace — after that whatever is
       // still open is destroyed. Without this bound a wedged request (or one

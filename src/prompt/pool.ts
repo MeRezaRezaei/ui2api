@@ -21,6 +21,12 @@ export interface PoolOptions {
      the daemon never spawns/kills a browser — so the pool survives exactly like
      its attached host. Enabled automatically when UI2API_ATTACH_PORT is set. */
   attach?: boolean;
+  /* GOAL 87 — how often the liveness reaper re-checks IDLE pages and evicts the
+     dead ones (0 disables it). The sweep never spawns a browser (that would be
+     fabricated traffic from a timer) — it only drops a page it measured dead
+     and re-warms when the browser it can prove is up. Env:
+     UI2API_REAPER_INTERVAL_MS. */
+  reaperIntervalMs?: number;
   /* GOAL 83 — BOUNDED over-capacity queue. Past `max` pages a request waits
      for the next free one, but the wait is bounded on BOTH axes: at most
      `maxWaiters` requests may be parked at once, and each may wait at most
@@ -57,6 +63,35 @@ type PoolWaiter = {
 const DEFAULT_MAX_WAITERS = 16;
 const DEFAULT_WAITER_TIMEOUT_MS = 240_000;
 
+/* GOAL 87 — the reaper's default interval. 30s is frequent enough that a dead
+   idle page is evicted long before the next request would have hit it, and rare
+   enough that the probe (one `evaluate` round-trip per idle page) is noise. */
+const DEFAULT_REAPER_INTERVAL_MS = 30_000;
+
+/* GOAL 87 — what we may say about the browser. The old status was
+   `this.browser ? "up" : "down"`, a NULL-CHECK wearing a liveness label: a
+   disconnected-but-still-set handle answered "up" forever, because the respawn
+   only happened inside the next ensureBrowser() — i.e. only when a REQUEST
+   arrived, which a health-checker polling /status never does.
+   - "up"       — a real probe talked to the handle and it is connected.
+   - "down"     — no handle at all, or a handle whose liveness probe answered
+                  "not connected" (or threw). Never reported for a live browser.
+   - "unknown"  — a handle exists but exposes no liveness surface, so the truth
+                  cannot be measured. The honest answer, never a false "up". */
+export type BrowserLiveness = "up" | "down" | "unknown";
+
+export interface BrowserProbe {
+  state: BrowserLiveness;
+  /* The named reason, always present: why this state and not another one. */
+  reason: string;
+  checkedAt: string;
+}
+
+/* GOAL 87 — per-worker health as last MEASURED. "unprobed" is the honest
+   default: a page is only "live" after a real probe, and "dead" only after a
+   probe failed (or the reaper evicted it). */
+export type WorkerHealth = "live" | "dead" | "unprobed";
+
 export interface PoolWorker {
   profileId: string;
   driver: ChatDriver;
@@ -65,11 +100,56 @@ export interface PoolWorker {
      demand, handed out once, and closed on release — they never join the idle
      pool, because a warm page carries the legacy default account. */
   dedicated?: { account: string };
+  /* GOAL 87 — when this page was handed out (epoch ms). "busy: 1" with no start
+     time is not diagnosable; busyMs is measured from THIS stamp, and is null
+     (never a fabricated 0) whenever the page is not busy. */
+  busySince?: number;
+  /* GOAL 87 — the last MEASURED health of this page (the reaper's /status's
+     per-worker view), with the time it was measured. */
+  health?: WorkerHealth;
+  checkedAt?: string;
+}
+
+export interface PoolWorkerStatus {
+  /* Which site this page serves (the honest "which request is this page on"). */
+  site: string;
+  busy: boolean;
+  /* How long this page has been busy, measured from busySince. null whenever
+     the page is idle — a null is a fact, a 0 would be a guess. */
+  busyMs: number | null;
+  /* The identity-keyed account in flight, or null for the pool's shared default
+     session (a warm page carries the legacy account — null says exactly that). */
+  account: string | null;
+  health: WorkerHealth;
+  checkedAt: string | null;
+  dedicated: boolean;
+}
+
+/* GOAL 87 — what one liveness sweep measured. Recorded even when it did
+   nothing, so "the reaper ran and found nothing wrong" is a claim the daemon
+   can back with numbers instead of silence. */
+export interface SweepReport {
+  checkedAt: string;
+  checked: number;
+  evicted: number;
+  respawned: number;
+  respawnFailed: number;
+  sites: string[];
+  note: string;
 }
 
 export type PoolStatus = {
-  browser: "up" | "down";
+  browser: BrowserLiveness;
+  /* GOAL 87: WHEN the honest browser probe last ran (ISO), and WHY it answered
+     what it answered. `null` only when the pool has never been probed at all. */
+  browserCheckedAt: string | null;
+  browserProbe: string;
   warm: number;
+  /* GOAL 87: how many of the IDLE pages were PROVED live by their last measured
+     probe. `warm` is kept byte-compatible (it counts idle pages, as it always
+     did), but a page that has never been probed is NOT counted here — this is
+     the number you can lean on, and it never counts an unmeasured page. */
+  warmLive: number;
   idle: number;
   busy: number;
   total: number;
@@ -80,6 +160,14 @@ export type PoolStatus = {
   queued: number;
   maxWaiters: number;
   perSite: Record<string, { idle: number; busy: number; total: number }>;
+  /* GOAL 87: the busy/idle pages with their MEASURED detail, so "busy: 1" says
+     which site, for how long, and under which account — no debugger attached. */
+  workers: PoolWorkerStatus[];
+  /* GOAL 87: the reaper's last measured sweep (null until one has run). */
+  lastSweep: SweepReport | null;
+  /* GOAL 87: is the liveness sweep running? A started-but-leaked reaper would
+     keep the process alive; this makes the claim checkable, not assumed. */
+  reaper: "running" | "stopped";
 };
 
 function resolveDataDir(): string {
@@ -113,6 +201,13 @@ export class ChatPool {
   private readonly defaultProfile: string;
   private readonly dataDir: string;
   private readonly attach: boolean;
+  /* GOAL 87 — the liveness reaper's timer. Owned by the pool, started
+     EXPLICITLY (startReaper), stopped in close(): never a bare module-level
+     setInterval that outlives the daemon or keeps the process alive. */
+  private reaperTimer?: ReturnType<typeof setInterval>;
+  private reaperMs = 0;
+  private sweeping = false;
+  private lastSweep: SweepReport | null = null;
 
   constructor(private readonly opts: PoolOptions) {
     const envMin = Number(process.env.UI2API_POOL_MIN);
@@ -121,6 +216,7 @@ export class ChatPool {
     this.max = Math.max(this.min, opts.max ?? resourceMax());
     this.maxWaiters = Math.max(0, opts.maxWaiters ?? envCount("UI2API_POOL_MAX_WAITERS", DEFAULT_MAX_WAITERS));
     this.waiterTimeoutMs = Math.max(0, opts.waiterTimeoutMs ?? envCount("UI2API_POOL_WAITER_TIMEOUT_MS", DEFAULT_WAITER_TIMEOUT_MS));
+    this.reaperMs = Math.max(0, opts.reaperIntervalMs ?? envCount("UI2API_REAPER_INTERVAL_MS", DEFAULT_REAPER_INTERVAL_MS));
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.defaultProfile = opts.defaultProfile ?? opts.profiles[0]?.id ?? "";
     this.attach = Boolean(opts.attach || process.env.UI2API_ATTACH_PORT);
@@ -128,6 +224,39 @@ export class ChatPool {
 
   get attached(): boolean {
     return this.attach;
+  }
+
+  /* GOAL 87 — the honest liveness probe. It TALKS to the handle; the old status
+     never did. A Playwright Browser answers isConnected() locally, so this is
+     free to call on every /status read:
+       - no handle            → "down"    (measured: there is no browser)
+       - isConnected() true   → "up"      (measured: the handle is live)
+       - isConnected() false  → "down"    (the lie this whole goal is about)
+       - probe threw          → "down"    (a set handle that cannot be probed
+                                          alive is not serving anyone)
+       - no liveness surface  → "unknown" (the truth cannot be measured — and
+                                          an honest "unknown", never a lie) */
+  probeBrowser(): BrowserProbe {
+    const checkedAt = new Date().toISOString();
+    const b = this.browser as unknown as { isConnected?: () => boolean; contexts?: () => unknown[] } | undefined;
+    if (!b) {
+      return { state: "down", reason: "no browser handle: the pool has not spawned one (it spawns on the first request)", checkedAt };
+    }
+    if (typeof b.isConnected === "function") {
+      try {
+        if (b.isConnected()) return { state: "up", reason: "browser.isConnected() === true", checkedAt };
+        return { state: "down", reason: "browser.isConnected() === false — the handle is set but the browser is disconnected (respawned on the next request)", checkedAt };
+      } catch (e) {
+        return { state: "down", reason: `liveness probe threw (${e instanceof Error ? e.message : String(e)}) — a handle that cannot answer is not a live browser`, checkedAt };
+      }
+    }
+    if (typeof b.contexts === "function") {
+      // A context count is NOT liveness: Playwright returns the cached list after
+      // a disconnect, so "0 contexts" would still read as a live browser. Say
+      // so honestly instead of guessing.
+      return { state: "unknown", reason: "this browser handle exposes no isConnected() liveness surface — its liveness cannot be measured, so it is never reported as up", checkedAt };
+    }
+    return { state: "unknown", reason: "this browser handle exposes no liveness surface at all — reported as unknown, never as up", checkedAt };
   }
 
   async ensureBrowser(): Promise<Browser> {
@@ -181,19 +310,19 @@ export class ChatPool {
   acquire(siteId: string, account?: string): Promise<PoolWorker> {
     if (account && account !== "default") {
       return this.spawn(siteId, account).then((w) => {
-        w.busy = true;
+        this.markBusy(w);
         return w;
       });
     }
     const existing = this.workers.find((w) => w.profileId === siteId && !w.busy);
     if (existing) {
-      existing.busy = true;
+      this.markBusy(existing);
       return Promise.resolve(existing);
     }
     if (this.workers.length < this.max) {
       return this.spawn(siteId).then((w) => {
         this.workers.push(w);
-        w.busy = true;
+        this.markBusy(w);
         return w;
       });
     }
@@ -217,7 +346,7 @@ export class ChatPool {
           return;
         }
         this.settleDelivered(waiter);
-        w.busy = true;
+        this.markBusy(w);
         resolve(w);
       };
       if (this.waiterTimeoutMs > 0) {
@@ -340,17 +469,28 @@ export class ChatPool {
     }
   }
 
+  // GOAL 87: hand a page out and STAMP when. `busy: 1` without a start time is
+  // not diagnosable — /status now reports how long each busy page has been busy,
+  // measured from this stamp.
+  private markBusy(worker: PoolWorker): void {
+    worker.busy = true;
+    worker.busySince = Date.now();
+  }
+
   // Return a page to the pool after a prompt. Unusable pages (browser died) are
   // discarded and replaced lazily. Dedicated account workers are closed right
   // away — they never idle back into the pool.
   async release(worker: PoolWorker): Promise<void> {
     worker.busy = false;
+    worker.busySince = undefined;
     if (worker.dedicated) {
       this.workers = this.workers.filter((w) => w !== worker);
       await worker.driver.close();
       return;
     }
     const usable = await isWorkerUsable(worker);
+    worker.health = usable ? "live" : "dead";
+    worker.checkedAt = new Date().toISOString();
     if (!usable) {
       this.workers = this.workers.filter((w) => w !== worker);
       await worker.driver.close();
@@ -364,7 +504,7 @@ export class ChatPool {
     const next = this.waiters.shift();
     if (next) {
       if (next.siteId === worker.profileId) {
-        worker.busy = true;
+        this.markBusy(worker);
         next.resolve(worker);
         return;
       }
@@ -389,6 +529,124 @@ export class ChatPool {
     );
   }
 
+  /* GOAL 87 — start the liveness reaper. EXPLICIT (the daemon calls this) and
+     pool-owned: a bare module-level setInterval would outlive the daemon and
+     keep the process alive. The timer is unref'd AND cleared by close(), so a
+     stopped daemon is a stopped daemon.
+     `intervalMs` 0 (or UI2API_REAPER_INTERVAL_MS=0) disables it — honest opt-out,
+     and /status then reports reaper:"stopped" rather than pretending one runs. */
+  startReaper(intervalMs?: number): boolean {
+    if (intervalMs !== undefined) this.reaperMs = Math.max(0, intervalMs);
+    if (this.reaperMs <= 0) return false;
+    if (this.reaperTimer) return true; // idempotent — never a second timer
+    this.reaperTimer = setInterval(() => {
+      void this.sweep().catch(() => undefined);
+    }, this.reaperMs);
+    this.reaperTimer.unref?.();
+    return true;
+  }
+
+  stopReaper(): void {
+    if (!this.reaperTimer) return;
+    clearInterval(this.reaperTimer);
+    this.reaperTimer = undefined;
+  }
+
+  get reaperRunning(): boolean {
+    return Boolean(this.reaperTimer);
+  }
+
+  get reaperIntervalMs(): number {
+    return this.reaperMs;
+  }
+
+  /* GOAL 87 — ONE liveness sweep, and the numbers it measured.
+
+     Before this existed there was no reaper anywhere in src/prompt/: the only
+     liveness check for a page was isWorkerUsable() inside release(), so a page
+     that died while IDLE kept reporting warm/idle (an ARRAY ENTRY, not a live
+     page) until the next request happened to touch it. A health-checker
+     polling /status therefore never learned anything.
+
+     Rules that keep it honest:
+       - a BUSY page is never evicted (it is mid-request; killing it would fail
+         work that is actually running),
+       - the sweep NEVER spawns a browser: a timer launching Chrome would be
+         fabricated traffic. It re-warms only when the honest probe says the
+         browser is up (the dead-page case), and records the refusal otherwise,
+       - every count in the report is measured here, so "the reaper ran and
+         found nothing wrong" is a checkable claim rather than silence. */
+  async sweep(): Promise<SweepReport> {
+    const checkedAt = new Date().toISOString();
+    if (this.sweeping) {
+      const busy: SweepReport = { checkedAt, checked: 0, evicted: 0, respawned: 0, respawnFailed: 0, sites: [], note: "a sweep is already running" };
+      return busy;
+    }
+    this.sweeping = true;
+    try {
+      const sites: string[] = [];
+      let checked = 0;
+      let evicted = 0;
+      for (const w of [...this.workers]) {
+        if (w.busy) continue; // in use: never evicted mid-request
+        checked++;
+        const usable = await isWorkerUsable(w);
+        w.health = usable ? "live" : "dead";
+        w.checkedAt = new Date().toISOString();
+        if (usable) continue;
+        evicted++;
+        this.workers = this.workers.filter((x) => x !== w);
+        try {
+          await w.driver.close();
+        } catch {
+          // tab already gone
+        }
+        if (!sites.includes(w.profileId)) sites.push(w.profileId);
+        // A parked request is waiting for exactly this kind of replacement.
+        this.drain(w.profileId);
+      }
+      let respawned = 0;
+      let respawnFailed = 0;
+      const probe = this.probeBrowser();
+      for (const siteId of sites) {
+        if (this.workers.length >= this.max) {
+          respawnFailed++;
+          continue;
+        }
+        if (probe.state !== "up") {
+          // No browser to re-warm on (measured, not assumed): the next REQUEST
+          // spawns one, exactly as it always did. The sweep stays silent about
+          // it rather than pretending it did something.
+          respawnFailed++;
+          continue;
+        }
+        try {
+          const w = await this.acquire(siteId);
+          await this.release(w);
+          respawned++;
+        } catch {
+          respawnFailed++;
+        }
+      }
+      const report: SweepReport = {
+        checkedAt,
+        checked,
+        evicted,
+        respawned,
+        respawnFailed,
+        sites,
+        note:
+          evicted === 0
+            ? `swept ${checked} idle page(s), none dead`
+            : `evicted ${evicted} dead idle page(s) for [${sites.join(", ")}]; respawned ${respawned}, failed ${respawnFailed}${probe.state === "up" ? "" : ` (browser is ${probe.state}: left to the next request to spawn)`}`,
+      };
+      this.lastSweep = report;
+      return report;
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
   get status(): PoolStatus {
     const perSite: PoolStatus["perSite"] = {};
     for (const w of this.workers) {
@@ -403,9 +661,15 @@ export class ChatPool {
     }
     const idle = this.workers.filter((w) => !w.busy).length;
     const busy = this.workers.length - idle;
+    // GOAL 87: a REAL probe, not `this.browser ? "up" : "down"`.
+    const probe = this.probeBrowser();
+    const now = Date.now();
     return {
-      browser: this.browser ? "up" : "down",
+      browser: probe.state,
+      browserCheckedAt: probe.checkedAt,
+      browserProbe: probe.reason,
       warm: idle,
+      warmLive: this.workers.filter((w) => !w.busy && w.health === "live").length,
       idle,
       busy,
       total: this.workers.length,
@@ -413,6 +677,18 @@ export class ChatPool {
       queued: this.waiters.length,
       maxWaiters: this.maxWaiters,
       perSite,
+      workers: this.workers.map((w) => ({
+        site: w.profileId,
+        busy: w.busy,
+        // null when idle — a measured "not busy" is a fact, a 0 would be a guess.
+        busyMs: w.busy && typeof w.busySince === "number" ? Math.max(0, now - w.busySince) : null,
+        account: w.dedicated?.account ?? null,
+        health: w.health ?? "unprobed",
+        checkedAt: w.checkedAt ?? null,
+        dedicated: Boolean(w.dedicated),
+      })),
+      lastSweep: this.lastSweep,
+      reaper: this.reaperTimer ? "running" : "stopped",
     };
   }
 
@@ -427,6 +703,11 @@ export class ChatPool {
   }
 
   async close(): Promise<void> {
+    // GOAL 87: stop the reaper FIRST, before anything it might touch goes away.
+    // A leaked interval would keep sweeping (and keep the process alive) after
+    // the daemon was supposed to be gone — the leak pin asserts this flag, not a
+    // stopwatch.
+    this.stopReaper();
     // Shutdown settles EVERY queued waiter with a named cause before the
     // browser goes away. Never `this.waiters = []` (a silent drop: the parked
     // acquire() promises had no reject, so the awaiting HTTP handlers never
