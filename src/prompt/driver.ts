@@ -38,6 +38,44 @@ function cap(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + `\n… (truncated at ${n} chars)` : s;
 }
 
+/** A model picker row as the pure matcher sees it. */
+export interface PickerRow {
+  /** First line of the row's innerText (the display name). */
+  text: string;
+  /** data-model-id / data-value / element id — present only when it differs from the text. */
+  id?: string;
+}
+
+/**
+ * Pure, browser-free model-row matching used by ChatDriver.selectModel — pick
+ * WHICH row a "select model X" click must target. Order (per the selectModel
+ * contract: exact match first, substring demoted to LAST resort):
+ *   1. exact: first-line text === target — a prefix-sharing row ("Gemini Pro")
+ *      NEVER wins over the exact row ("Gemini");
+ *   2. attr-id: the row's data-model-id/data-value/id === target — decisive
+ *      when a row's id differs from its displayed name and the target is the id;
+ *   3. substring LAST resort: case-insensitive text contains target — this is
+ *      exactly the OLD locator.filter({ hasText }).first() behavior, which can
+ *      click a prefix-sharing WRONG row (both rows contain "Gemini"), which is
+ *      why it is the fallback, never the default.
+ * Returns the index of the row to click, or null when no row matches at all.
+ */
+export function pickModelRowIndex(rows: PickerRow[], target: string): number | null {
+  if (rows.length === 0) return null;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].text === target) return i;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const id = rows[i].id;
+    if (id !== undefined && id !== rows[i].text && id === target) return i;
+  }
+  const tl = target.toLowerCase();
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].text.toLowerCase().includes(tl)) return i;
+  }
+  return null;
+}
+
 export interface ChatDriverOptions {
   /* Reuse an externally-owned browser (the daemon pool's). When set, close()
      only tears down this driver's context+page, never the browser. */
@@ -508,15 +546,26 @@ export class ChatDriver {
     }
     try {
       const target = found.id !== found.name ? found.id : found.name;
-      // Click the matching option row.
+      // Click the matching option row. WHICH row is decided by the pure
+      // pickModelRowIndex matcher (exact first-line → attr-id → substring
+      // LAST resort) — never a blind substring hasText .first() click: with
+      // observed ["Gemini Pro", "Gemini"] and a "Gemini" request, substring +
+      // DOM order would click "Gemini Pro" and the prompt would silently run
+      // on the wrong model.
       let clicked = false;
       for (const sel of cap?.pickerOption ?? []) {
         try {
-          const row = this.page!.locator(sel).filter({
-            hasText: found.name.slice(0, 40),
-          });
-          if ((await row.count()) > 0) {
-            await row.first().click({ timeout: 4000 });
+          const rows = (await this.page!.locator(sel).evaluateAll((els: Element[]) =>
+            els.map((el) => {
+              const elt = el as HTMLElement;
+              const text = (elt.innerText || "").trim().split("\n")[0].trim();
+              const id = elt.getAttribute?.("data-model-id") || elt.getAttribute?.("data-value") || elt.id || text;
+              return { text, id: id !== text ? id : undefined } as PickerRow;
+            })
+          )) as PickerRow[];
+          const idx = pickModelRowIndex(rows, target);
+          if (idx !== null) {
+            await this.page!.locator(sel).nth(idx).click({ timeout: 4000 });
             clicked = true;
             break;
           }
@@ -525,26 +574,53 @@ export class ChatDriver {
         }
       }
       if (!clicked) {
-        // Fall back: exact first-line text match on any visible option.
-        await this.page!.evaluate(
-          ([selList, name]) => {
+        // Fallback: the same three-step match over every selector's DOM rows
+        // (pickModelRowIndex's semantics, mirrored in-page). The returned
+        // boolean is HONORED: false = no row matched at all → loud failure,
+        // never a silent proceed (the old code discarded this return value).
+        const ok = await this.page!.evaluate(
+          ([selList, tgt]) => {
+            const rows: Array<{ text: string; id?: string }> = [];
+            const els: Element[] = [];
             for (const sel of selList) {
               for (const el of document.querySelectorAll(sel)) {
-                const rowText = ((el as HTMLElement).innerText || "").trim();
-                const firstLine = rowText.split("\n")[0].trim();
-                const attrId = (el as HTMLElement).getAttribute?.("data-model-id") ?? "";
-                if (firstLine === name || attrId === name) {
-                  (el as HTMLElement).click();
-                  return true;
-                }
+                const elt = el as HTMLElement;
+                const text = (elt.innerText || "").trim().split("\n")[0].trim();
+                const id = elt.getAttribute?.("data-model-id") || elt.getAttribute?.("data-value") || elt.id || text;
+                rows.push({ text, id: id !== text ? id : undefined });
+                els.push(el);
               }
             }
+            for (let i = 0; i < rows.length; i++) if (rows[i].text === tgt) { (els[i] as HTMLElement).click(); return true; }
+            for (let i = 0; i < rows.length; i++) if (rows[i].id !== undefined && rows[i].id !== rows[i].text && rows[i].id === tgt) { (els[i] as HTMLElement).click(); return true; }
+            const tl = tgt.toLowerCase();
+            for (let i = 0; i < rows.length; i++) if (rows[i].text.toLowerCase().includes(tl)) { (els[i] as HTMLElement).click(); return true; }
             return false;
           },
           [cap?.pickerOption ?? [], target] as [string[], string]
         );
+        if (!ok) throw new Error(`model "${model}" did not take — no picker row matched`);
+        clicked = true;
       }
       await this.page!.waitForTimeout(500);
+      // Verify it took (the documented contract — "then verify it took" — now
+      // implemented HERE): re-scan the picker rows for a selected-state marker
+      // (aria-selected="true" / checked / active class, via readModel()). A
+      // DIFFERENT selected row means the click did not take — throw loudly,
+      // never prompt on the wrong model. When the site exposes NO observable
+      // selected-state (readModel() stays null), the exact-row click + no
+      // exception stands: there is no signal to verify against, and the click
+      // already targeted the exact row.
+      const deadline = Date.now() + 1500;
+      let current: string | null = null;
+      for (;;) {
+        current = await this.readModel();
+        if (current === found.name || current !== null || Date.now() >= deadline) break;
+        await this.page!.waitForTimeout(150);
+      }
+      if (current !== null && current !== found.name) {
+        throw new Error(`model "${model}" did not take (still on "${current}")`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`${this.profile.id}: failed to select model "${model}" — ${msg}`);

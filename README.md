@@ -71,7 +71,8 @@ returns the result — no brittle screen-scraping.
   live session and stores a fingerprint per account; the daemon serves it at
   `GET /capabilities?site=X&account=Y`; prompts report in-band restrictions
   (`doneReason:"restricted"` + `restrictions[]`) and `--model NAME` selects a
-  model or fails explicitly when the account lacks it.
+  model or fails explicitly when the account lacks it (errors loudly if not on
+  your account; the selection is verified after clicking).
 - **LLM-assisted naming with offline fallback** — `--llm` uses a model to produce
   semantic tool names and task mappings; a deterministic heuristic fallback keeps
   the pipeline fully offline when no model is configured.

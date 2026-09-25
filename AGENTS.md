@@ -47,7 +47,9 @@ test/                    # node:test suites (unit, integration, validation)
 1. **ChatDriver** (`src/prompt/`) — declarative profiles
    (`src/profile/profile.ts`, overridable via JSON with `--profile` or
    `UI2API_AI_SITE`). Paste prompt + Enter via the site's own JS, read the
-   streamed answer until it stops growing. One driver, all sites.
+   streamed answer until it stops growing. One driver, all sites. Model
+   selection verifies it took (exact-row click, selected-state check) — never a
+   silent wrong-model prompt.
 2. **Capability runners** (`src/capabilities/*.ts`) — per-site capability
    surface (chat, list_conversations, web_search, image_gen, …) exposed as
    `/capability/<site>` endpoints, wired in `src/prompt/http.ts`, and kept
