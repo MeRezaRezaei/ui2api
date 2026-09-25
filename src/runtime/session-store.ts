@@ -285,6 +285,18 @@ export function saveAccountSnapshot(
   return account;
 }
 
+// GOAL 50: a same-slug account whose identity differs from `identity` — the
+// vault write seam must refuse loudly instead of silently destroying it. Same
+// identity string (latest-wins re-capture) is NOT a collision.
+export function slugCollision(
+  sitesDir: string,
+  host: string,
+  identity: string
+): StoredAccount | null {
+  const slug = slugifyIdentity(identity);
+  return listAccounts(sitesDir, host).find((a) => a.slug === slug && a.identity !== identity) ?? null;
+}
+
 // Load a snapshot for (host, identity|slug|undefined). Never throws.
 //   - identity/slug given -> the vault account, else null
 //   - undefined            -> the legacy default path (old captures), else null

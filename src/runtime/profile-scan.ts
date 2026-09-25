@@ -10,7 +10,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ingestProfile, detectProfileIdentity } from "./profile-ingest.js";
-import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity } from "./session-store.js";
+import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity, slugCollision } from "./session-store.js";
 import type { IngestResult } from "./profile-ingest.js";
 
 // --- Constants ---
@@ -447,6 +447,27 @@ export async function importSiteSnapshot(
   const warnings = [...ingestWarnings];
   if (!ok) {
     warnings.push("skipped-no-auth (nothing to save) — no cookies and no localStorage matched");
+    return {
+      host: opts.host,
+      identity,
+      snapshotPath: "",
+      ok: false,
+      stats: {
+        cookiesMatched: stats.cookiesMatched,
+        cookiesTotal: stats.cookiesTotal,
+        localStorageEntries: stats.localStorageEntries,
+      },
+      warnings,
+      profileUser: user,
+    };
+  }
+  // GOAL 50 account-INDEX collision gate: a same-slug DIFFERENT identity
+  // already in the vault is REFUSED (nothing overwritten) with the named
+  // verdict — never silently destroy the existing account. Same identity
+  // string = latest-wins re-capture, NOT a collision.
+  const collision = slugCollision(opts.dataDir, opts.host, identity);
+  if (collision) {
+    warnings.push(`slug-collision (NOT overwritten — account "${collision.slug}" already exists as "${collision.identity}")`);
     return {
       host: opts.host,
       identity,

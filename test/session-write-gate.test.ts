@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   snapshotHasAuth,
   slugifyIdentity,
+  slugCollision,
   listAccounts,
   loadAccountSnapshot,
 } from "../src/runtime/session-store.js";
@@ -189,5 +190,117 @@ test("captureProfileFromLiveChrome: decryptable capture still writes (gate does 
     assert.ok(existsSync(res.snapshotPath), "file exists");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+// --- GOAL 50: account-INDEX collision — same-slug DIFFERENT identity refused ---
+
+test("slugCollision: same-slug different identity detected; same identity string is NOT a collision", () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-collide-"));
+  try {
+    const dataDir = join(base, "data");
+    const host = "gemini.google.com";
+    const id1 = "John Smith";
+    const id2 = "john  smith";
+    // slugify folds aggressive variants to one slug.
+    assert.equal(slugifyIdentity(id1), slugifyIdentity(id2));
+    assert.equal(slugifyIdentity(id1), "john-smith");
+
+    // No accounts yet -> no collision.
+    assert.equal(slugCollision(dataDir, host, id1), null, "empty vault: no collision");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("importSiteSnapshot: same-slug different identity on the SAME host is REFUSED — existing account intact, named verdict", async () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-collide-import-"));
+  try {
+    const dataDir = join(base, "data");
+    const host = "gemini.google.com";
+
+    // First account: "John Smith" with a real cookie.
+    const root1 = makeProfile(join(base, "p1"), {
+      email: "John Smith",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-1") }],
+    });
+    const first = await importSiteSnapshot({ root: root1, host, dataDir });
+    assert.equal(first.ok, true, "first import ok");
+    const slug1 = slugifyIdentity(first.identity);
+    assert.ok(listAccounts(dataDir, host).some((a) => a.slug === slug1), "first account listed");
+
+    // Second account: "john  smith" (same slug, different identity string).
+    const root2 = makeProfile(join(base, "p2"), {
+      email: "john  smith",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-2") }],
+    });
+    const second = await importSiteSnapshot({ root: root2, host, dataDir });
+    assert.equal(second.ok, false, "collision import refused");
+    assert.equal(second.snapshotPath, "", "nothing written on collision");
+    assert.ok(
+      second.warnings.some((w) => /slug-collision \(NOT overwritten/.test(w)),
+      `named verdict: ${JSON.stringify(second.warnings)}`
+    );
+    // The FIRST account survives untouched.
+    const survivors = listAccounts(dataDir, host);
+    assert.equal(survivors.length, 1, "index keeps exactly the original account");
+    assert.equal(survivors[0].identity, "John Smith", "original identity preserved");
+    const snap = loadAccountSnapshot(dataDir, host, slug1);
+    assert.ok(snap, "original snapshot still readable");
+    assert.ok((snap!.cookies ?? []).some((c) => c.name === "SID" && c.value === "sid-1"), "original cookie value intact");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("importSiteSnapshot: SAME identity string re-import is latest-wins (NOT a collision)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-collide-rewrite-"));
+  try {
+    const dataDir = join(base, "data");
+    const host = "gemini.google.com";
+
+    const root1 = makeProfile(join(base, "p1"), {
+      email: "alice@example.com",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-old") }],
+    });
+    const first = await importSiteSnapshot({ root: root1, host, dataDir });
+    assert.equal(first.ok, true);
+
+    const root2 = makeProfile(join(base, "p2"), {
+      email: "alice@example.com", // EXACT same identity string
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-new") }],
+    });
+    const second = await importSiteSnapshot({ root: root2, host, dataDir });
+    assert.equal(second.ok, true, "same identity re-import is NOT a collision");
+    assert.ok(second.snapshotPath.length > 0, "rewritten to the same vault path");
+    const snap = loadAccountSnapshot(dataDir, host, slugifyIdentity("alice@example.com"));
+    assert.ok(snap);
+    assert.ok((snap!.cookies ?? []).some((c) => c.value === "sid-new"), "latest-wins: new cookie value present");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("importSiteSnapshot: same slug on DIFFERENT hosts is allowed (host-scoped collision, not global)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-collide-host-"));
+  try {
+    const dataDir = join(base, "data");
+
+    const rootA = makeProfile(join(base, "pa"), {
+      email: "John Smith",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-a") }],
+    });
+    const rootB = makeProfile(join(base, "pb"), {
+      email: "john smith", // same slug, different identity, DIFFERENT host
+      rows: [{ host_key: ".deepseek.com", name: "SID", encrypted_value: encryptClassic("sid-b") }],
+    });
+
+    const a = await importSiteSnapshot({ root: rootA, host: "gemini.google.com", dataDir });
+    assert.equal(a.ok, true, "host A first import");
+    const b = await importSiteSnapshot({ root: rootB, host: "deepseek.com", dataDir });
+    assert.equal(b.ok, true, "host B import with colliding slug is allowed (different host)");
+    assert.equal(listAccounts(dataDir, "gemini.google.com").length, 1);
+    assert.equal(listAccounts(dataDir, "deepseek.com").length, 1);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });

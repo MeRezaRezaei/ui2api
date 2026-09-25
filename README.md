@@ -66,7 +66,9 @@ returns the result — no brittle screen-scraping.
   every Chrome-profile site session, and an identity-keyed multi-account
   session vault. Anonymous sessions (zero cookies AND zero localStorage) are
   refused at the write seam with a named `skipped-no-auth` verdict — the vault
-  and `/accounts` never list a session that carries no sign-in. See
+  and `/accounts` never list a session that carries no sign-in. A same-slug
+  different identity is likewise refused (`slug-collision`) instead of silently
+  overwriting an existing account. See
   [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
 - **Capability reflection** — learn what a specific account can actually do on a
   chat site (plan tier, available models, restriction walls) from what the site

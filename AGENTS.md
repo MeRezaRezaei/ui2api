@@ -316,6 +316,15 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   never surface an anonymous session as fresh + valid. Decrypt-limited partials
   (cookies matched but undecryptable) keep their honest warning — they are a
   real logged-in session, not the anonymous class this gate kills.
+- **Account-INDEX collisions are refused too** (GOAL 50): `saveAccountSnapshot`
+  is gated by `slugCollision` (`src/runtime/session-store.ts`) — a same-slug
+  DIFFERENT identity on one host is never silently overwritten (the old
+  filter-replace destroyed the first account's index entry + snapshot with zero
+  warning); all three write seams (capture/import/xhost) refuse with a named
+  `slug-collision (NOT overwritten — account "<slug>" already exists as
+  "<identity>")` verdict, nothing written, the original account intact. Same
+  identity string = latest-wins re-capture, never a false positive; slugs are
+  host-scoped, so an identical slug on two hosts is valid.
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use). Overrides are validated with the same

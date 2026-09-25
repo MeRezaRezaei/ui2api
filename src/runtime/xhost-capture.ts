@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { userInfo } from "node:os";
 import { chromium } from "playwright";
 import { detectProfileIdentity, ingestProfile } from "./profile-ingest.js";
-import { accountSnapshotPath, saveAccountSnapshot, slugifyIdentity } from "./session-store.js";
+import { accountSnapshotPath, saveAccountSnapshot, slugifyIdentity, slugCollision } from "./session-store.js";
 
 /** What a shared X session needs: the display name plus an optional XAUTHORITY. */
 export interface DisplayInfo {
@@ -217,6 +217,23 @@ export async function captureProfileFromLiveChrome(opts: {
   // exported, so it is not the silent-wrong-session class this gate kills.
   if (ingest.stats.cookiesMatched === 0 && ingest.stats.localStorageEntries === 0) {
     warnings.push(`skipped-no-auth (nothing to save) — no cookies and no localStorage matched ${opts.host} (logged out?)`);
+    return {
+      identity,
+      snapshotPath: "",
+      warnings,
+      stats: {
+        cookiesMatched: ingest.stats.cookiesMatched,
+        cookiesTotal: ingest.stats.cookiesTotal,
+        localStorageEntries: ingest.stats.localStorageEntries,
+      },
+    };
+  }
+  // GOAL 50 account-INDEX collision gate: a same-slug DIFFERENT identity
+  // already in the vault is REFUSED — never silently destroy the existing
+  // account. Same identity string = latest-wins re-capture, NOT a collision.
+  const collision = slugCollision(opts.dataDir, opts.host, identity);
+  if (collision) {
+    warnings.push(`slug-collision (NOT overwritten — account "${collision.slug}" already exists as "${collision.identity}")`);
     return {
       identity,
       snapshotPath: "",

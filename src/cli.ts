@@ -7,7 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
-import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, snapshotHasAuth } from "./runtime/session-store.js";
+import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth } from "./runtime/session-store.js";
 import { buildPackage } from "./registry/package.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -562,7 +562,7 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     // snapshotPath — nothing was written, so no "captured" claim and no
     // capability fingerprint against an account that does not exist.
     if (!captured.snapshotPath) {
-      console.warn(`[ui2api] nothing saved — no cookies and no localStorage matched ${host} (logged out?) — no vault account written`);
+      console.warn(`[ui2api] nothing saved — no account written for ${host} (see named verdict below)`);
       for (const w of captured.warnings) console.warn(`  ! ${w}`);
       process.exitCode = 1;
       return;
@@ -600,6 +600,16 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
   const session = await doInteractiveLogin(url, host);
   const identity = flags.identity;
   if (identity) {
+    // GOAL 50 account-INDEX collision gate: a same-slug DIFFERENT identity
+    // already in the vault is refused (nothing overwritten, never a silent
+    // destruction of the existing account); same identity = latest-wins.
+    const collision = slugCollision(dataDir, host, identity);
+    if (collision) {
+      console.error(`[ui2api] nothing saved — account "${collision.slug}" already exists as "${collision.identity}" (slug-collision, NOT overwritten)`);
+      console.error(`  captured identity "${identity}" collides on ${host} — use the SAME identity to re-capture, or list/remove the existing account first.`);
+      process.exitCode = 1;
+      return;
+    }
     saveAccountSnapshot(dataDir, host, identity, session.snapshot, { source: "capture" });
     console.log(`[ui2api] profile captured for ${host} (identity: ${identity}):`);
     console.log(`  snapshot -> ${snapshotPath(dataDir, host)}`);
@@ -711,8 +721,9 @@ async function cmdProfileImport(host: string, flags: Flags): Promise<void> {
       const r = await importSiteSnapshot({ root: p.root, host: wanted, dataDir, identity: flags.identity });
       found = true;
       if (!r.snapshotPath) {
-        // GOAL 49 write truth gate: a fully anonymous import was refused at the
-        // write seam — nothing written, no "imported" claim, named verdict.
+        // GOAL 49/50 write truth gates: a refused import (anonymous content,
+        // or a same-slug identity collision) was NOT written — nothing saved,
+        // no "imported" claim, named verdict in the warnings.
         console.warn(`[ui2api] nothing saved for ${r.host} from ${p.root}:`);
         console.warn(`  identity: ${r.identity}`);
         console.warn(`  cookies: ${r.stats.cookiesMatched}/${r.stats.cookiesTotal} matched`);
@@ -946,12 +957,13 @@ async function cmdProfileAddAll(flags: Flags): Promise<void> {
         imp = await importSiteSnapshot({ root, host: hit.host, dataDir, identity });
         importedIdentity = imp.identity;
         slug = slugifyIdentity(importedIdentity);
-        // GOAL 49: a fully anonymous import was REFUSED at the write seam —
-        // nothing written, nothing to read back. Its row is the named
-        // "skipped-no-auth (nothing to save)" verdict, never persisting as an
-        // account and never read back (read-back would claim a NaN artifact).
+        // GOAL 49/50: a refused import (anonymous content, or a same-slug
+        // identity collision) was REFUSED at the write seam — nothing written,
+        // nothing to read back. Its row is the named verdict (from the import
+        // warnings when available), never persisting as an account.
         if (!imp.ok || !imp.snapshotPath) {
-          verdict = `skipped-no-auth (nothing to save)`;
+          const collision = imp.warnings.find((w) => w.startsWith("slug-collision"));
+          verdict = collision ? "slug-collision (not overwritten)" : "skipped-no-auth (nothing to save)";
         } else {
           // Verification pass: read the account back from the VAULT — same seams
           // `profile list` uses. Never claim ok for something not on disk.
