@@ -323,18 +323,24 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   never surface an anonymous session as fresh + valid. Decrypt-limited partials
   (cookies matched but undecryptable) keep their honest warning — they are a
   real logged-in session, not the anonymous class this gate kills.
-- **Restriction walls are reported, never blind-empty** (GOAL 54): every builtin
-  chat profile declares `capability.restrictionMarkers` (11/11 — gemini/kimi/
+- **Restriction walls are reported, never blind-empty** (GOAL 54 + GOAL 55): every
+  builtin chat profile declares `capability.restrictionMarkers` (11/11 — gemini/kimi/
   deepseek predated the gate; chatgpt/claude/copilot/perplexity/huggingchat/
   google-ai-search/hunyuan added, incl. the verbatim-named hy3 = tencent-aistudio
-  with limit+login). `src/prompt/driver.ts` `readRestrictions()` scans the page
-  in-band and answers `doneReason:"restricted"` + the named hits instead of a
-  blind empty answer; `src/runtime/capability-probe.ts` feeds the same markers
-  into the per-account fingerprint's `restrictions[]`. Patterns are conservative
-  and honest: a never-matching pattern is a silent miss, a false-positive wall
-  report is what's forbidden; coverage is pinned by
-  `test/restriction-markers.test.ts` so a future profile added without markers
-  fails LOUD (suite, like the manifest↔dispatch drift gate).
+  with limit+login) AND every chat-shaped packaged `capabilities/<id>/profile.json`
+  declares them too (14/14 — the served packaged surface: blackbox, codex,
+  copilot-m365, duckduckgo, grok, inner-ai, manus, notion, poe, t3chat, v0, venice,
+  plus dormant zenmux/xiaomimimo still served on /registry + /capability). The
+  same driver + fingerprint seam consumes both: `src/prompt/driver.ts`
+  `readRestrictions()` scans the page in-band and answers
+  `doneReason:"restricted"` + the named hits instead of a blind empty answer;
+  `src/runtime/capability-probe.ts` feeds the same markers into the per-account
+  fingerprint's `restrictions[]`. Patterns are conservative and honest: a
+  never-matching pattern is a silent miss, a false-positive wall report is what's
+  forbidden (and the driver's `if (!answer)` gate means a marker can only surface
+  when there is no answer — a real wall); coverage is pinned by
+  `test/restriction-markers.test.ts` (builtin + packaged) so a future profile
+  added without markers fails LOUD (suite, like the manifest↔dispatch drift gate).
 - **Account-INDEX collisions are refused too** (GOAL 50): `saveAccountSnapshot`
   is gated by `slugCollision` (`src/runtime/session-store.ts`) — a same-slug
   DIFFERENT identity on one host is never silently overwritten (the old
