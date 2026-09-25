@@ -42,6 +42,7 @@ import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type Reg
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount } from "../runtime/session-store.js";
+import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -370,6 +371,20 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
             account,
             probed: false,
             hint: "run `ui2api profile capabilities <host> --account <email>` once to probe this account",
+          });
+        }
+        // GOAL 58: read-side truth gate — never serve a malformed/stale
+        // fingerprint as truth (a hand-edited or schema-drifted file with
+        // valid JSON but the wrong shape would 200 as a real fingerprint).
+        // Refuse with the named reason; the account must re-probe.
+        const invalid = validateCapabilityReportShape(stored);
+        if (invalid) {
+          return send(res, 200, {
+            site: profile.id,
+            host,
+            account,
+            probed: false,
+            error: `stored fingerprint for "${account}" on "${host}" is not a valid CapabilityReport — ${invalid}; re-run \`ui2api profile capabilities ${host} --account ${account}\` to re-probe`,
           });
         }
         return send(res, 200, stored);

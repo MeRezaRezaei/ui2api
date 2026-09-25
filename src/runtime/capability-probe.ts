@@ -120,6 +120,103 @@ export function modelUnavailableError(model: string, observed: string[]): string
   return `model "${model}" not available on this account (observed: [${observed.join(", ")}])`;
 }
 
+/**
+ * GOAL 58: read-side truth gate for STORED capability fingerprints. The
+ * write side is gated (GOAL 49/50 refuse anonymous snapshots at the write
+ * seam) and the profile shapes are pinned (GOAL 54-57), but `GET
+ * /capabilities?site=&account=` served whatever `loadCapabilities` parsed
+ * (raw `unknown`, never throws) — a hand-edited / stale / partially-written
+ * file with valid JSON but the WRONG shape 200'd as a real fingerprint
+ * (garbage-as-truth: wrong tier, wrong restrictions[], a TypeError for a
+ * consumer reading `restrictions.length` off a string). This validator names
+ * the FIRST shape violation or returns null; the HTTP surface refuses to
+ * serve a malformed stored report and answers with the named reason instead.
+ * Honest: only REFUSES malformed storage — a well-formed stored fingerprint
+ * is served byte-for-byte as before.
+ */
+export function validateCapabilityReportShape(report: unknown): string | null {
+  if (typeof report !== "object" || report === null || Array.isArray(report)) {
+    return "report must be an object";
+  }
+  const r = report as Record<string, unknown>;
+  for (const field of ["site", "host", "account", "observedAt"] as const) {
+    if (typeof r[field] !== "string" || (r[field] as string).trim() === "") {
+      return `${field} must be a non-empty string`;
+    }
+  }
+  const tier = r.tier as Record<string, unknown> | null | undefined;
+  if (typeof tier !== "object" || tier === null || Array.isArray(tier)) {
+    return "tier must be an object { value, method }";
+  }
+  if (!(tier.value === null || typeof tier.value === "string")) {
+    return "tier.value must be a string or null";
+  }
+  const TIER_METHODS = ["dom", "declared", "unknown"];
+  if (typeof tier.method !== "string" || !TIER_METHODS.includes(tier.method)) {
+    return `tier.method must be one of ${TIER_METHODS.join("|")}`;
+  }
+  if (!Array.isArray(r.models)) {
+    return "models must be an array";
+  }
+  for (let i = 0; i < (r.models as unknown[]).length; i++) {
+    const m = (r.models as unknown[])[i] as Record<string, unknown> | null | undefined;
+    if (typeof m !== "object" || m === null || Array.isArray(m) || typeof m.id !== "string") {
+      return `models[${i}].id must be a string`;
+    }
+  }
+  const MODEL_METHODS = ["wire", "dom", "declared", "none"];
+  if (typeof r.modelsMethod !== "string" || !MODEL_METHODS.includes(r.modelsMethod)) {
+    return `modelsMethod must be one of ${MODEL_METHODS.join("|")}`;
+  }
+  if (!Array.isArray(r.restrictions)) {
+    return "restrictions must be an array";
+  }
+  for (let i = 0; i < (r.restrictions as unknown[]).length; i++) {
+    const hit = (r.restrictions as unknown[])[i] as Record<string, unknown> | null | undefined;
+    if (
+      typeof hit !== "object" ||
+      hit === null ||
+      typeof hit.kind !== "string" ||
+      typeof hit.matched !== "string"
+    ) {
+      return `restrictions[${i}] must be { kind: string, matched: string }`;
+    }
+  }
+  if (typeof r.ok !== "boolean") {
+    return "ok must be a boolean";
+  }
+  if (r.abilities !== undefined && r.abilities !== null) {
+    if (!Array.isArray(r.abilities)) {
+      return "abilities must be an array";
+    }
+    for (let i = 0; i < (r.abilities as unknown[]).length; i++) {
+      const a = (r.abilities as unknown[])[i] as Record<string, unknown> | null | undefined;
+      if (
+        typeof a !== "object" ||
+        a === null ||
+        typeof a.id !== "string" ||
+        typeof a.label !== "string" ||
+        typeof a.on !== "boolean" ||
+        typeof a.present !== "boolean"
+      ) {
+        return `abilities[${i}] must be { id, label, on, present }`;
+      }
+    }
+  }
+  if (
+    r.abilitiesMethod !== undefined &&
+    r.abilitiesMethod !== null &&
+    r.abilitiesMethod !== "dom" &&
+    r.abilitiesMethod !== "unknown"
+  ) {
+    return "abilitiesMethod must be \"dom\" | \"unknown\"";
+  }
+  if (r.reason !== undefined && r.reason !== null && typeof r.reason !== "string") {
+    return "reason must be a string";
+  }
+  return null;
+}
+
 // --- Profile capabilities (declarative, JSON-safe) ---
 
 export interface ProfileCapability {
