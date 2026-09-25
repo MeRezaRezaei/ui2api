@@ -403,7 +403,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   seam validates the `capability` block the same way the packaged seam does
   (GOAL 57, the GOAL 56 helper) — a wrong-typed `restrictionMarkers`/picker/
   toggle in a `--profile FILE` refuses LOUD at load, never a late
-  matchRestrictionMarkers for…of-undefined crash at answer time. Installed
+  matchRestrictionMarkers for…of-undefined crash at answer time. The seam also
+  enforces id AGREEMENT (GOAL 62): `--site X --profile FILE` never silently
+  drops the tuning document — a file whose id mismatches the requested site
+  fails LOUD naming both sides (`resolveProfileWithOverride`); absent file.id
+  tunes the requested site. Installed
   `capabilities/<id>/profile.json` runs the same gate on the packaged running
   seam (CLI packaged id + `/capability` fallbacks, GOAL 48) — a wrong-typed or
   unparseable entry fails LOUD at serve time, naming the file + exact
