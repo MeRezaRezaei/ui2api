@@ -25,5 +25,33 @@
   "captureMs": 60000,
   "stableMs": 2000,
   "captureStatus": "unverified — ALL selectors UNVERIFIED (chat DOM is behind the Entra auth wall and was never observed; copied from consumer copilot profile as candidates only)",
-  "note": "This M365 surface is hard-gated by Entra ID; the post-auth chat SPA and its DOM were NOT observable via static analysis, so every selector here is a flagged candidate (inherited from the consumer copilot profile, likely WRONG for this app). Must be re-verified on the first authenticated live capture. auth: kind token/cookie in provider-catalog = 'access_token + chathubPath' — consistent with an Entra-issued token driving a chat backend, to be confirmed live."
+  "note": "This M365 surface is hard-gated by Entra ID; the post-auth chat SPA and its DOM were NOT observable via static analysis, so every selector here is a flagged candidate (inherited from the consumer copilot profile, likely WRONG for this app). Must be re-verified on the first authenticated live capture. auth: kind token/cookie in provider-catalog = 'access_token + chathubPath' — consistent with an Entra-issued token driving a chat backend, to be confirmed live.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "upgrade",
+        "patterns": [
+          "microsoft 365 copilot",
+          "upgrade to copilot"
+        ]
+      },
+      {
+        "kind": "limit",
+        "patterns": [
+          "conversation limit",
+          "daily limit",
+          "rate limit",
+          "too many requests",
+          "you've reached"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }

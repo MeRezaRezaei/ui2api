@@ -93,3 +93,63 @@ test("GOAL54(d): in-band detection wiring is intact (driver + probe consume the 
   assert.match(probe, /restrictionMarkers/, "capability-probe must feed markers into the account fingerprint");
   assert.match(probe, /matchRestrictionMarkers\(/, "probe must run the shared matcher");
 });
+
+// --- GOAL 55 (2026-09-25): the PACKAGED chat surface. GOAL 54 pinned the
+// builtin catalog; the served chat surface (registry.defaultChatSurface) also
+// includes every installed driveable chat-shaped capabilities/<id>/profile.json
+// (blackbox, codex, copilot-m365, duckduckgo, grok, inner-ai, manus, notion,
+// poe, t3chat, v0, venice — plus dormant zenmux/xiaomimimo served on
+// /registry + /capability). They ride the SAME ChatDriver, so they must watch
+// the same walls. Verified node-only 2026-09-25: 23-entry surface, ALL 12
+// packaged entries carried zero markers before this gate.
+const PACKAGED_CHAT_PROFILES = [
+  "blackbox",
+  "codex",
+  "copilot-m365",
+  "duckduckgo",
+  "grok",
+  "inner-ai",
+  "manus",
+  "notion",
+  "poe",
+  "t3chat",
+  "v0",
+  "venice",
+  "zenmux",
+  "xiaomimimo",
+];
+
+function readPackagedProfile(id: string): string {
+  return readFileSync(join(ROOT, "capabilities", id, "profile.json"), "utf8");
+}
+
+test("GOAL55(a): every chat-shaped packaged profile declares restrictionMarkers (14/14)", () => {
+  for (const id of PACKAGED_CHAT_PROFILES) {
+    const src = readPackagedProfile(id);
+    const ok = JSON.parse(src); // shape is valid JSON (the packaged seam is JSON, not TS)
+    assert.ok(ok.composer?.length > 0, `${id}: chat-shaped package must declare a composer`);
+    assert.ok(ok.answer?.length > 0, `${id}: chat-shaped package must declare an answer`);
+    assert.ok(
+      ok.capability?.restrictionMarkers?.length > 0,
+      `${id}: packaged chat profile must declare restrictionMarkers (walls reported, never blind-empty)`
+    );
+  }
+});
+
+test("GOAL55(b): packaged marker kinds ⊆ {upgrade,limit,login} with non-empty patterns", () => {
+  for (const id of PACKAGED_CHAT_PROFILES) {
+    const p = JSON.parse(readPackagedProfile(id));
+    for (const marker of p.capability.restrictionMarkers) {
+      assert.ok(VALID_KINDS.has(marker.kind), `${id}: invalid marker kind "${marker.kind}"`);
+      assert.ok(Array.isArray(marker.patterns) && marker.patterns.length > 0, `${id}: marker ${marker.kind} has EMPTY patterns`);
+    }
+  }
+});
+
+test("GOAL55(c): the VERIFIED packaged chat (duckduckgo) and the dormant seam carry markers", () => {
+  const ddg = JSON.parse(readPackagedProfile("duckduckgo"));
+  assert.ok(ddg.capability.restrictionMarkers.some((m: { kind: string }) => m.kind === "limit"), "duckduckgo (verified chat): limit wall watch");
+  assert.ok(ddg.capability.restrictionMarkers.some((m: { kind: string }) => m.kind === "login"), "duckduckgo (verified chat): login wall watch");
+  const xm = JSON.parse(readPackagedProfile("xiaomimimo"));
+  assert.ok(xm.capability.restrictionMarkers.length > 0, "dormant xiaomimimo still served on /registry — markers present");
+});

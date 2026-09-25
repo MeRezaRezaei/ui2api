@@ -17,5 +17,25 @@
   "newChat": "[aria-label=\"New task\"], [aria-label*=\"New textarea\"], a[href=\"/codex/cloud/tasks/new\"], button[aria-label*=\"new task\"]",
   "captureMs": 120000,
   "stableMs": 2500,
-  "note": "UNVERIFIED — confirm on first live capture: the logged-out /codex fetch returned only the Contentful marketing page, so NO Codex app DOM was observed this run (browser not allowed). Composer/answer/newChat selectors above are CANDIDATE placeholders inferred from the Codex task UX (task dashboard + composer) and shared chatgpt DOM conventions; the wham codex app is a separate auth-gated SPA surface from plain chat (#prompt-textarea ship a fallback). loginRequired true; login reuses chatgpt.com. Wire facts (POST /backend-api/wham/tasks, SSE /backend-api/tasks/{id}/stream, Bearer + Sentinel tokens, feature gates wham_access/codex_only) come from JS-bundle analysis and did NOT launch a browser."
+  "note": "UNVERIFIED — confirm on first live capture: the logged-out /codex fetch returned only the Contentful marketing page, so NO Codex app DOM was observed this run (browser not allowed). Composer/answer/newChat selectors above are CANDIDATE placeholders inferred from the Codex task UX (task dashboard + composer) and shared chatgpt DOM conventions; the wham codex app is a separate auth-gated SPA surface from plain chat (#prompt-textarea ship a fallback). loginRequired true; login reuses chatgpt.com. Wire facts (POST /backend-api/wham/tasks, SSE /backend-api/tasks/{id}/stream, Bearer + Sentinel tokens, feature gates wham_access/codex_only) come from JS-bundle analysis and did NOT launch a browser.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue",
+          "sign in with github"
+        ]
+      }
+    ]
+  }
 }

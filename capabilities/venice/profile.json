@@ -9,7 +9,9 @@
     "div[contenteditable=\"true\"][role=\"textbox\"]",
     "textarea"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[class*=\"message\"]",
     "[class*=\"prose\"]",
@@ -23,5 +25,24 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic textarea/contenteditable composer, common answer containers). Tune each against a real browser after the first live capture (data/venice.ai/.session). Auth per provider-catalog.md: cookie 'session'. Venice's private-mode / model-picker / image-gen surfaces may exist but are NOT catalogued — do not assume; re-verify on first live capture."
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic textarea/contenteditable composer, common answer containers). Tune each against a real browser after the first live capture (data/venice.ai/.session). Auth per provider-catalog.md: cookie 'session'. Venice's private-mode / model-picker / image-gen surfaces may exist but are NOT catalogued — do not assume; re-verify on first live capture.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }

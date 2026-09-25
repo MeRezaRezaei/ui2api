@@ -9,7 +9,9 @@
     "div[contenteditable=\"true\"][data-testid*=\"chat\"]",
     "textarea"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[data-testid*=\"response\"]",
     "[class*=\"Message\"]",
@@ -22,5 +24,33 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic contenteditable[role=textbox] composer, common answer containers). Tune each against a real browser after the first live capture (data/poe.com/.session). Auth per provider-catalog.md: cookie p-b."
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic contenteditable[role=textbox] composer, common answer containers). Tune each against a real browser after the first live capture (data/poe.com/.session). Auth per provider-catalog.md: cookie p-b.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "upgrade",
+        "patterns": [
+          "poe subscription",
+          "subscribe to poe",
+          "poe points"
+        ]
+      },
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit",
+          "daily limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }

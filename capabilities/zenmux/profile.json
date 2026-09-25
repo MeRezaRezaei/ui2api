@@ -8,7 +8,9 @@
     "textarea[placeholder*=\"Send a message\"], textarea[placeholder*=\"问\"], textarea[placeholder*=\"询问\"]",
     "[contenteditable=\"true\"][role=\"textbox\"]"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[class*=\"assistant\"], [class*=\"message\"]",
     "[data-message-author-role='assistant']"
@@ -30,5 +32,24 @@
       "UNVERIFIED placeholder — generic naming; no app DOM exists to match."
     ]
   },
-  "note": "DORMANT SCAFFOLD (dead-end package). provider-catalog.md line 14 classifies zenmux-free as kind=cookie ('Cookie header (full)') — free tier of a proxy/aggregator. Static probe 2026-09-16: domain parked (CSC DNS, MX custmx.cscdns.net), HTTPS :443 timeout, HTTP 200 empty `<body></body>` shell — identical to the 2026-06-14 Wayback capture. Therefore EVERY selector above is an UNVERIFIED, fictional-origin placeholder FLAGGED for re-derivation; this profile will not match any live DOM today and should not be driven until a live capture exists."
+  "note": "DORMANT SCAFFOLD (dead-end package). provider-catalog.md line 14 classifies zenmux-free as kind=cookie ('Cookie header (full)') — free tier of a proxy/aggregator. Static probe 2026-09-16: domain parked (CSC DNS, MX custmx.cscdns.net), HTTPS :443 timeout, HTTP 200 empty `<body></body>` shell — identical to the 2026-06-14 Wayback capture. Therefore EVERY selector above is an UNVERIFIED, fictional-origin placeholder FLAGGED for re-derivation; this profile will not match any live DOM today and should not be driven until a live capture exists.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }

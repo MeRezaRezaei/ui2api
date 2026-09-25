@@ -11,7 +11,9 @@
     "[class*=\"chat-input\"] textarea",
     "textarea"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[class*=\"message\"]",
     "[data-testid*=\"message\"]",
@@ -27,5 +29,32 @@
   ],
   "captureMs": 90000,
   "stableMs": 2500,
-  "note": "UNVERIFIED CANDIDATE selectors for grok.com — generic contenteditable/textarea composer and common answer containers; tune each after the first live capture (data/grok.com/.session). Composer and answer markup frequently change; keep entries generic-but-plausible until a real session confirms them."
+  "note": "UNVERIFIED CANDIDATE selectors for grok.com — generic contenteditable/textarea composer and common answer containers; tune each after the first live capture (data/grok.com/.session). Composer and answer markup frequently change; keep entries generic-but-plausible until a real session confirms them.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "upgrade",
+        "patterns": [
+          "supergrok",
+          "xai premium"
+        ]
+      },
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit",
+          "message limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }

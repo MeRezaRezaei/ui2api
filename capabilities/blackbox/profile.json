@@ -8,7 +8,9 @@
     "textarea[placeholder*=\"Ask\"]",
     "div[contenteditable=\"true\"][role=\"textbox\"]"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[class*=\"answer\"]",
     "[class*=\"response\"]",
@@ -39,5 +41,25 @@
       "unverified — generic close/dismiss candidate; confirm on first live capture"
     ]
   },
-  "note": "HONEST SCAFFOLD — verified vs unverified is inverted vs a normal profile: the ONLY things proven statically are (a) root / is the B2B marketing site, (b) /login = 224KB JS auth form, (c) the consumer chat app does not exist in the anonymous module graph (/chat 404, app.blackbox.ai redirects home), and (d) the inference API surface enterprise.blackbox.ai/chat/completions + /enc/<model>/message_stream. EVERY composer/send/answer/newChat/dismiss selector above is an UNVERIFIED candidate for the first logged-in capture (data/www.blackbox.ai/.session). Do not trust any selector until confirmed."
+  "note": "HONEST SCAFFOLD — verified vs unverified is inverted vs a normal profile: the ONLY things proven statically are (a) root / is the B2B marketing site, (b) /login = 224KB JS auth form, (c) the consumer chat app does not exist in the anonymous module graph (/chat 404, app.blackbox.ai redirects home), and (d) the inference API surface enterprise.blackbox.ai/chat/completions + /enc/<model>/message_stream. EVERY composer/send/answer/newChat/dismiss selector above is an UNVERIFIED candidate for the first logged-in capture (data/www.blackbox.ai/.session). Do not trust any selector until confirmed.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue",
+          "sign in with"
+        ]
+      }
+    ]
+  }
 }

@@ -10,7 +10,9 @@
     "[data-testid*=\"chat-input\"]",
     "form textarea, form [contenteditable]"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[data-testid*=\"message\"]",
     "[class*=\"markdown\"]",
@@ -43,5 +45,25 @@
       "UNVERIFIED — clone repos (e.g. NotT3Chat) show a model dropdown at the top of the chat; live DOM completely unknown. Confirm on first live capture."
     ]
   },
-  "note": "SCAFFOLD-ONLY — t3.chat is behind Vercel Security Checkpoint (HTTP 429 on all curl requests including /_next/*, /api/*, /trpc/*). The canonical repo github.com/t3-oss/t3-chat returns 404. provider-catalog.md lines 53 + 83 document auth as cookie (convex-session-id + Cookie header) and token respectively. Every DOM selector above is an unverified guess — the live site has not been accessed and no bundles were recoverable. Anti-bot: Vercel Security Checkpoint uses a JavaScript challenge via obfuscated worker script + mouse-event telemetry; requires a real browser session to bypass. GOAL 32 (2026-09-24): the former prose rows that lived at composer[0]/answer[0]/newChat[0]/modelPicker[0] (\"UNVERIFIED-SCAFFOLD — …\") were REMOVED — prose in a chat-surface selector array passed the old arrays gate and threw a CSS SyntaxError at send time. The remaining entries are PARSEABLE-CSS unverified candidates (surfaced as status \"unverified-candidate\"), never claimed verified."
+  "note": "SCAFFOLD-ONLY — t3.chat is behind Vercel Security Checkpoint (HTTP 429 on all curl requests including /_next/*, /api/*, /trpc/*). The canonical repo github.com/t3-oss/t3-chat returns 404. provider-catalog.md lines 53 + 83 document auth as cookie (convex-session-id + Cookie header) and token respectively. Every DOM selector above is an unverified guess — the live site has not been accessed and no bundles were recoverable. Anti-bot: Vercel Security Checkpoint uses a JavaScript challenge via obfuscated worker script + mouse-event telemetry; requires a real browser session to bypass. GOAL 32 (2026-09-24): the former prose rows that lived at composer[0]/answer[0]/newChat[0]/modelPicker[0] (\"UNVERIFIED-SCAFFOLD — …\") were REMOVED — prose in a chat-surface selector array passed the old arrays gate and threw a CSS SyntaxError at send time. The remaining entries are PARSEABLE-CSS unverified candidates (surfaced as status \"unverified-candidate\"), never claimed verified.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue",
+          "sign in with github"
+        ]
+      }
+    ]
+  }
 }

@@ -8,7 +8,9 @@
     "[contenteditable='true'], textarea, div[role='textbox']",
     "[data-cy~='composer'], textarea[placeholder]"
   ],
-  "send": { "kind": "keyEnter" },
+  "send": {
+    "kind": "keyEnter"
+  },
   "answer": [
     "[data-message-role='assistant']",
     "[class*='message'][class*='assistant'], main p"
@@ -16,5 +18,24 @@
   "newChat": "[aria-label~='new'][aria-label~='chat'], button[aria-label*='Nova']",
   "captureMs": 60000,
   "stableMs": 2500,
-  "note": "UNVERIFIED selectors — the app is a hashed CSS-modules React SPA (single 16MB Vite bundle, mount #root) so no stable class names can be extracted statically. Candidates above are generic role/generic-attribute patterns to confirm on first live capture; wires (platformapi endpoints, USER-TOKEN headers, Centrifuge WS) are bundle-verified. Login inputs #email/#password on platform.innerai.com/login.html ARE verified from the login HTML."
+  "note": "UNVERIFIED selectors — the app is a hashed CSS-modules React SPA (single 16MB Vite bundle, mount #root) so no stable class names can be extracted statically. Candidates above are generic role/generic-attribute patterns to confirm on first live capture; wires (platformapi endpoints, USER-TOKEN headers, Centrifuge WS) are bundle-verified. Login inputs #email/#password on platform.innerai.com/login.html ARE verified from the login HTML.",
+  "capability": {
+    "restrictionMarkers": [
+      {
+        "kind": "limit",
+        "patterns": [
+          "rate limit",
+          "too many requests",
+          "you've reached your limit"
+        ]
+      },
+      {
+        "kind": "login",
+        "patterns": [
+          "log in to continue",
+          "sign in to continue"
+        ]
+      }
+    ]
+  }
 }
