@@ -189,6 +189,22 @@ export async function handleOpenAIRoutes(
       return sendJson(res, 502, { error: { message: msg, type: "server_error", code: "ui2api_driver_error", param: null } });
     }
   }
+
+  // Terminal fallback — NO /v1/* request may leave this handler without a
+  // response. An unmatched path (any /v1/embeddings, /v1/completions, a wrong
+  // method on /v1/chat/completions, …) used to fall through the whole function
+  // and hang the connection forever: nothing ever wrote to res. Answer a named
+  // 404 instead (the marketplace-class hang the user hit once — "the last
+  // ocmmand you did stucked"). The native non-/v1 404 at http.ts stays the
+  // fallback for paths outside the /v1 prefix.
+  return sendJson(res, 404, {
+    error: {
+      message: `unknown endpoint ${req.method ?? "?"} ${url}; ui2api serves GET /v1/models and POST /v1/chat/completions`,
+      type: "invalid_request_error",
+      code: "not_found",
+      param: null,
+    },
+  });
 }
 
 // --- helpers ----------------------------------------------------------------

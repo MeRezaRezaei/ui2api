@@ -2,6 +2,7 @@
 // (no browser is launched; the driver path is stubbed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { siteIdFromModel, messagesToPrompt, handleOpenAIRoutes } from "../src/prompt/openai.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
@@ -165,4 +166,62 @@ test("POST /v1/chat/completions with empty messages -> 400", async () => {
   } finally {
     server.close();
   }
+});
+
+// ─── GOAL 81: the /v1/* surface must NEVER hang — every unmatched path 404s ──
+
+// Probe with a client-side timeout so a pre-fix handler (which left the socket
+// open forever) FAILS the test with a timeout instead of hanging the runner —
+// a hanging pin is a second dead path.
+async function probeV1(port: number, path: string, init: RequestInit, timeoutMs = 1500): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`http://127.0.0.1:${port}${path}`, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+test("GET /v1/embeddings (unmatched /v1 path) -> 404 not_found, never a hang", async () => {
+  const { server, port } = await startTestServer(stubPool("x"));
+  try {
+    const res = await probeV1(port, "/v1/embeddings", { method: "GET" });
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { error: { message: string; code: string } };
+    assert.equal(body.error.code, "not_found");
+    assert.match(body.error.message, /unknown endpoint GET \/v1\/embeddings/);
+    assert.match(body.error.message, /serves GET \/v1\/models and POST \/v1\/chat\/completions/);
+  } finally {
+    server.close();
+  }
+});
+
+test("GET /v1/chat/completions (wrong method on a real /v1 path) -> 404 not_found, never a hang", async () => {
+  const { server, port } = await startTestServer(stubPool("x"));
+  try {
+    const res = await probeV1(port, "/v1/chat/completions", { method: "GET" });
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "not_found");
+  } finally {
+    server.close();
+  }
+});
+
+// Source-level invariant (GOAL 81): the daemon keeps BOTH 404 layers — the
+// terminal openai.ts fallback for /v1/* paths AND the native http.ts fallback
+// for everything else. If either is removed the coverage silently collapses
+// (a path class stops answering). Pin both against the on-disk source.
+test("http.ts still serves the native non-/v1 404 next to the /v1 delegation", () => {
+  const httpSrc = readFileSync(new URL("../src/prompt/http.ts", import.meta.url), "utf8");
+  const v1Branch = httpSrc.indexOf('req.url?.startsWith("/v1/")');
+  const native404 = httpSrc.indexOf('send(res, 404, { error: "not found" })');
+  assert.ok(v1Branch >= 0, "http.ts must still contain the /v1/* delegation branch");
+  assert.ok(native404 > v1Branch, "the native non-/v1 404 must follow the /v1 branch");
+  const between = httpSrc.slice(v1Branch, native404);
+  // the branch delegates to openai.ts AND returns — so a /v1 path never falls
+  // through to the native 404, and a non-/v1 path always reaches it.
+  assert.match(between, /handleOpenAIRoutes\(req, res, \{/, "the /v1 branch must delegate to handleOpenAIRoutes");
+  assert.match(between, /return;/, "the /v1 branch must return after delegating (no fall-through to the native 404)");
 });
