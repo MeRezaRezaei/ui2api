@@ -32,6 +32,14 @@
       "method": "ui-toggle",
       "recipe": "recipes/gemini_search_toggle.json",
       "notes": "MEASURED 2026-09-23 (GOAL 15): Google-Search grounding is a SIGNED-IN-only sources/extensions entry (otAQ7b Search=1, menuitemcheckbox riding the StreamGenerate tools field). All stored gemini sources replay SIGNED-OUT (Google auth browser-bound/app-bound — same phenomenon as youtube posting), so the runner returns the measured honest blocker (ok:false, reason string); toggle from the user's own signed-in Chrome (UI2API_ATTACH_PORT). Runner guard excludes the 'Deep research' menuitemcheckbox (label contains 'search') from matching."
+    },
+    {
+      "id": "gemini_file_upload",
+      "name": "File / image attachment",
+      "description": "Attach a document or image to the real Gemini composer (hidden input[type='file'] under the composer attach/tools entry) — the site's own JS performs the upload (setInputFiles fires the change event; nothing synthetic)",
+      "method": "ui-path (composer file input)",
+      "recipe": "recipes/gemini_file_upload.json",
+      "notes": "WIRED 2026-09-25 (GOAL 53), kimi/duckduckgo LIVE-VERIFIED pattern mirrored; status HONEST unverified-candidate: all stored gemini sources replay SIGNED-OUT (Google auth browser-bound), so no upload round-trip claimed — run against the user's own signed-in Chrome (UI2API_ATTACH_PORT) and confirm the chip before treating upload as verified; ok:true from the runner means input accepted, not a live upload."
     }
   ],
   "auth": {

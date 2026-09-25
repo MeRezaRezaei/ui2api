@@ -1,0 +1,15 @@
+{
+  "capability": "gemini_file_upload",
+  "site": "gemini",
+  "flow": "ui-path (composer file input) — attach a document or image through the REAL composer input so the site's own JS performs the upload",
+  "steps": [
+    { "step": 1, "action": "open", "url": "https://gemini.google.com", "note": "session snapshot injected (signed-in Chrome via UI2API_ATTACH_PORT for the live round-trip)" },
+    { "step": 2, "action": "open-attach", "note": "if present, open the composer attach/tools entry (button[aria-label*='Upload'], [aria-label*='Attach'], [aria-label*='Tools']) so the hidden file input is reachable; tolerated if not needed" },
+    { "step": 3, "action": "set-files", "note": "page.locator(\"input[type='file']\").setInputFiles(path) — sets the value AND fires the change event, so the site's OWN JS posts the upload (kimi pattern, LIVE-VERIFIED 2026-09-19 kimi_file_upload; duckduckgo_file_upload 2026-09-23). NEVER a synthetic request; filechooser event does not fire on this class of UI" },
+    { "step": 4, "action": "read-back", "note": "wait ~2s, then read the attachment chip (class*='attachment' | 'file-chip' | 'file-preview' | 'upload' | thumbnail) — honest on-page read; absent chip is reported as attached:null, never fabricated" }
+  ],
+  "output": { "ok": "boolean (input accepted)", "method": "dom.input.setFiles", "data": { "file": "basename", "attached": "chip text|null", "verified": false, "honesty": "ok:true = input accepted, NOT a live round-trip claim — verify against a signed-in Chrome (UI2API_ATTACH_PORT) before treating upload as verified" } },
+  "rpcEquivalent": "the composer's own upload path (site's JS, driven by the change event) — no direct RPC used",
+  "note": "WIRED 2026-09-25 (GOAL 53): kimi/duckduckgo LIVE-VERIFIED pattern mirrored. HONEST status — unverified-candidate until a live signed-in round-trip proves the chip: all stored gemini sources replay SIGNED-OUT (Google auth cookies browser-bound/app-bound, same measured phenomenon as youtube posting; measurement 2026-09-23). Do not flip to verified without the live round-trip.",
+  "sessionLock": "session.lock.json"
+}

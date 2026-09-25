@@ -220,6 +220,8 @@ export class GeminiCapabilities {
         return this.modelList();
       case "gemini_search_toggle":
         return this.searchToggle(args);
+      case "gemini_file_upload":
+        return this.fileUpload(args);
       default:
         return { capability, ok: false, data: undefined, error: `unknown gemini capability: ${capability}` };
     }
@@ -456,6 +458,60 @@ export class GeminiCapabilities {
 
   private fail(capability: string, e: unknown): GeminiCapabilityResult {
     return { capability, ok: false, data: undefined, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  // --- gemini_file_upload: attach a file/image through the REAL composer input ---
+  // Mirrors the LIVE-VERIFIED kimi pattern (kimi.ts fileUpload): Gemini's
+  // composer "Upload & tools" panel wraps a hidden input[type='file']; the site's
+  // own JS performs the upload on setInputFiles — nothing synthetic. WIRED
+  // 2026-09-25 (GOAL 53) with honest unverified-candidate status: the signed-out
+  // replay surface (measurement 2026-09-23) shows the attach entry but the upload
+  // round-trip needs a signed-in session (browser-bound Google auth) — never
+  // claim ok:true without the live round-trip.
+  private async fileUpload(args: Record<string, unknown>): Promise<GeminiCapabilityResult> {
+    const path = String(args.path ?? args.filePath ?? "");
+    if (!path) return this.fail("gemini_file_upload", "path (local file) is required");
+    const page = await this.openPage();
+    await waitForDomain(page, 4000);
+    try {
+      // Composer attach entry ("Upload & tools" / paperclip) — open the panel if
+      // the button exists, then target the hidden file input directly.
+      const uploadBtn = page.locator("button[aria-label*='Upload'], button[aria-label*='upload'], button[aria-label*='Attach'], button[aria-label*='Tools']").first();
+      if ((await uploadBtn.count().catch(() => 0)) > 0) {
+        await uploadBtn.click({ timeout: 8000 }).catch(() => {});
+        await page.waitForTimeout(900);
+      }
+      // setInputFiles sets the value AND fires the change event, so the site's
+      // own JS performs the POST — no synthetic request (kimi pattern, VERIFIED).
+      let fileInput = page.locator("input[type='file']").first();
+      const n = await fileInput.count().catch(() => 0);
+      if (n === 0) {
+        return this.fail("gemini_file_upload", "no composer file input found (page signed-out or attach hidden)");
+      }
+      await fileInput.setInputFiles(path);
+      await page.waitForTimeout(2000);
+      const attached = await page.evaluate(() => {
+        const chip = document.querySelector(
+          "[class*='attachment'], [class*='file-chip'], [class*='file-preview'], [class*='upload'], [data-test-id*='file'], [class*='thumbnail']"
+        ) as HTMLElement | null;
+        return chip ? (chip.innerText || (chip.getAttribute("aria-label") ?? "") || chip.className.split(" ").slice(0, 2).join(" ")).trim().slice(0, 60) : null;
+      });
+      return {
+        capability: "gemini_file_upload",
+        ok: true,
+        method: "dom.input.setFiles",
+        data: {
+          file: path.split("/").pop(),
+          attached,
+          verified: false,
+          honesty: "ok:true = input accepted, NOT a live round-trip claim — verify against a signed-in Chrome (UI2API_ATTACH_PORT) before treating upload as verified",
+        },
+      };
+    } catch (e) {
+      return this.fail("gemini_file_upload", e);
+    } finally {
+      await this.teardownPage(page);
+    }
   }
 
   private async teardownPage(page: Page): Promise<void> {
