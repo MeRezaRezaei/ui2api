@@ -56,10 +56,77 @@ export function loadSnapshot(path: string): ProfileSnapshot | null {
     if (!existsSync(path)) return null;
     const raw = JSON.parse(readFileSync(path, "utf8")) as ProfileSnapshot;
     if (!raw || raw.version !== 1 || !raw.host) return null;
+    // GOAL 59: read-side truth gate — refuse a wrong-shaped stored snapshot
+    // (hand-edited / stale build) at the load seam instead of letting it
+    // crash injectSnapshot's `(snap.cookies ?? []).filter(...)` mid-runner or
+    // silently replaying garbage cookies into addCookies. Same null-return
+    // contract as corrupt JSON; validateSnapshotShape names the field for
+    // tests/callers that want the reason.
+    if (validateSnapshotShape(raw) !== null) return null;
     return raw;
   } catch {
     return null;
   }
+}
+
+/**
+ * GOAL 59: read-side shape gate for STORED ProfileSnapshots. GOAL 49/50 gate
+ * the WRITE side (anonymous snapshots refused at the write seam) and GOAL 58
+ * gates the fingerprint read-back; this closes the snapshot READ seam:
+ * `loadSnapshot` previously accepted any JSON with `version===1 && host`
+ * (TS-cast, never validated), so a wrong-shaped `cookies` (string) passed
+ * straight through and then UNCAUGHT-crashed injectSnapshot's
+ * `(snap.cookies ?? []).filter(...)` mid-runner, or "worked" in
+ * `cookies.length > 0` (string length) and replayed garbage into addCookies.
+ * Absent/null fields pass (legacy snapshots may lack sessionStorage /
+ * indexedDB); a PRESENT wrong-typed field refuses, naming the FIRST
+ * violation. Returns null when the shape is valid.
+ */
+export function validateSnapshotShape(snap: unknown): string | null {
+  if (typeof snap !== "object" || snap === null || Array.isArray(snap)) {
+    return "snapshot must be an object";
+  }
+  const s = snap as Record<string, unknown>;
+  if (s.version !== 1) return "version must be 1";
+  for (const field of ["host", "origin", "capturedAt"] as const) {
+    if (s[field] !== undefined && s[field] !== null && (typeof s[field] !== "string" || (s[field] as string).trim() === "")) {
+      return `${field} must be a non-empty string`;
+    }
+  }
+  // cookies: array of { name: string, domain: string } (the injectSnapshot
+  // filter's own contract); extra fields (cx/value/…) allowed, never refused.
+  if (s.cookies !== undefined && s.cookies !== null) {
+    if (!Array.isArray(s.cookies)) return "cookies must be an array";
+    for (let i = 0; i < (s.cookies as unknown[]).length; i++) {
+      const c = (s.cookies as unknown[])[i] as Record<string, unknown> | null | undefined;
+      if (typeof c !== "object" || c === null || Array.isArray(c) || typeof c.name !== "string" || typeof c.domain !== "string") {
+        return `cookies[${i}] must be { name: string, domain: string }`;
+      }
+    }
+  }
+  // localStorage / sessionStorage: arrays of [string, string] tuples.
+  for (const field of ["localStorage", "sessionStorage"] as const) {
+    const v = s[field];
+    if (v === undefined || v === null) continue;
+    if (!Array.isArray(v)) return `${field} must be an array of [key, value] tuples`;
+    for (let i = 0; i < (v as unknown[]).length; i++) {
+      const t = (v as unknown[])[i];
+      if (!Array.isArray(t) || t.length !== 2 || typeof t[0] !== "string" || typeof t[1] !== "string") {
+        return `${field}[${i}] must be a [string, string] tuple`;
+      }
+    }
+  }
+  // indexedDB: array of objects with a string name.
+  if (s.indexedDB !== undefined && s.indexedDB !== null) {
+    if (!Array.isArray(s.indexedDB)) return "indexedDB must be an array";
+    for (let i = 0; i < (s.indexedDB as unknown[]).length; i++) {
+      const db = (s.indexedDB as unknown[])[i] as Record<string, unknown> | null | undefined;
+      if (typeof db !== "object" || db === null || Array.isArray(db) || typeof db.name !== "string") {
+        return `indexedDB[${i}] must be an object with a string name`;
+      }
+    }
+  }
+  return null;
 }
 
 // WRITE-path truth gate (GOAL 49): a snapshot with ZERO cookies AND ZERO

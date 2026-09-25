@@ -19,6 +19,7 @@ import {
   saveSnapshot,
   snapshotPath,
   storageReplayScript,
+  validateSnapshotShape,
   type ProfileSnapshot,
 } from "../src/runtime/session-store.js";
 
@@ -226,5 +227,62 @@ test("capture then inject: a fresh context sees cookies, localStorage, sessionSt
     await browser?.close().catch(() => {});
     rmSync(dir, { recursive: true, force: true });
     site.close();
+  }
+});
+
+// GOAL 59 (2026-09-25): read-side truth gate for STORED snapshots. GOAL 49/50
+// gate the WRITE side (anonymous snapshots refused at the write seam), GOAL 58
+// gates the fingerprint read-back — but loadSnapshot accepted any JSON with
+// `version===1 && host`, so a wrong-shaped `cookies` (string, from a hand edit
+// or stale build) crashed injectSnapshot's `(snap.cookies ?? []).filter(...)`
+// UNCAUGHT mid-runner (session-store.ts:192) or "worked" in `cookies.length`
+// and replayed garbage into addCookies. The load seam now refuses malformed
+// shapes (null, same contract as corrupt JSON); the validator names the field.
+
+test("GOAL59(a): validateSnapshotShape names the FIRST violation of each malformed shape, well-formed + legacy pass", () => {
+  const good = {
+    version: 1,
+    host: "h",
+    origin: "https://h",
+    capturedAt: "t",
+    cookies: [{ name: "n", domain: ".h", value: "v" }],
+    localStorage: [["k", "v"]],
+    sessionStorage: [],
+    indexedDB: [],
+  };
+  assert.equal(validateSnapshotShape(good), null, "well-formed snapshot validates");
+  assert.equal(validateSnapshotShape({ version: 1, host: "h" }), null, "legacy snapshot (absent optional fields) validates");
+
+  const cases: Array<[unknown, RegExp]> = [
+    ["nope", /snapshot must be an object/],
+    [null, /snapshot must be an object/],
+    [{ version: 2, host: "h" }, /version must be 1/],
+    [{ version: 1, host: "" }, /host must be a non-empty string/],
+    [{ version: 1, host: "h", cookies: "nope" }, /cookies must be an array/],
+    [{ version: 1, host: "h", cookies: [{ name: "n" }] }, /cookies\[0\] must be \{ name: string, domain: string \}/],
+    [{ version: 1, host: "h", localStorage: [["k"]] }, /localStorage\[0\] must be a \[string, string\] tuple/],
+    [{ version: 1, host: "h", sessionStorage: 7 }, /sessionStorage must be an array of \[key, value\] tuples/],
+    [{ version: 1, host: "h", indexedDB: "x" }, /indexedDB must be an array/],
+  ];
+  for (const [snap, re] of cases) {
+    const err = validateSnapshotShape(snap);
+    assert.ok(err !== null && re.test(err), `expected ${re} got ${err}`);
+  }
+});
+
+test("GOAL59(b): loadSnapshot refuses a malformed stored file (null) and keeps returning well-formed storage", () => {
+  const dir = mkdtempSync(join(tmpdir(), "u2a-goal59-"));
+  try {
+    const p = snapshotPath(dir, "goal59.example.com");
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, JSON.stringify({ version: 1, host: "goal59.example.com", cookies: "not-an-array" }));
+    assert.equal(loadSnapshot(p), null, "wrong-shaped stored snapshot refuses (null, same as corrupt JSON)");
+
+    const legacy = JSON.stringify({ version: 1, host: "goal59.example.com" });
+    writeFileSync(p, legacy);
+    const loaded = loadSnapshot(p);
+    assert.ok(loaded && loaded.host === "goal59.example.com", "legacy-shaped stored snapshot still loads");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
