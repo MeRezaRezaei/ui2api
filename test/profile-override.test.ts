@@ -169,4 +169,51 @@ describe("profile override seam (GOAL 47 truth gate)", () => {
       /is not a driveable chat profile/
     );
   });
+
+  it("(g) GOAL 57: capability-block gate on the override seam — wrong-typed restrictionMarkers/picker/toggle entries refuse LOUD naming file + field, absent capability + well-typed GOAL 55 shape pass", () => {
+    // GOAL 56 put the capability shape gate on the packaged seam; the override
+    // seam (--profile FILE / UI2API_AI_SITE) accepts `capability` as a key but
+    // never validated it — a string restrictionMarkers merged into a builtin
+    // profile and then crashed matchRestrictionMarkers's for…of at answer time.
+    const dir = mkdtempSync(join(tmpdir(), "u2a-goal57-"));
+    try {
+      const base = { id: "gemini" };
+
+      let f = writeOverride(dir, "g1.json", { ...base, capability: { restrictionMarkers: "rate limit" } });
+      assert.throws(() => resolveProfile(f), /capability\.restrictionMarkers must be an array/, "string restrictionMarkers must refuse");
+
+      f = writeOverride(dir, "g2.json", { ...base, capability: { restrictionMarkers: [{ kind: "premium", patterns: ["x"] }] } });
+      assert.throws(() => resolveProfile(f), /restrictionMarkers\[0\]\.kind must be "upgrade" \| "limit" \| "login"/, "bogus kind must refuse");
+
+      f = writeOverride(dir, "g3.json", { ...base, capability: { restrictionMarkers: [{ kind: "limit", patterns: [] }] } });
+      assert.throws(() => resolveProfile(f), /restrictionMarkers\[0\]\.patterns must be a non-empty string\[\]/, "empty patterns must refuse");
+
+      f = writeOverride(dir, "g4.json", { ...base, capability: { pickerOption: "button" } });
+      assert.throws(() => resolveProfile(f), /capability\.pickerOption must be a string\[\]/, "scalar pickerOption must refuse");
+
+      f = writeOverride(dir, "g5.json", { ...base, capability: { tierSelectors: ["not a selector (prose)"] } });
+      assert.throws(() => resolveProfile(f), /capability\.tierSelectors\[0\].*not a runnable selector/, "prose tierSelectors must refuse");
+
+      f = writeOverride(dir, "g6.json", { ...base, capability: { abilityToggles: [{ selector: "button", label: "Web" }] } });
+      assert.throws(() => resolveProfile(f), /abilityToggles\[0\]\.id must be a non-empty string/, "toggle without id must refuse");
+
+      f = writeOverride(dir, "g7.json", { ...base, capability: "nope" });
+      assert.throws(() => resolveProfile(f), /capability must be an object/, "scalar capability must refuse");
+
+      // Absent capability + well-typed GOAL 55 shape still resolve.
+      f = writeOverride(dir, "g8.json", { ...base, dismiss: ["button.close"] });
+      assert.equal(resolveProfile(f).id, "gemini", "absent capability passes");
+      f = writeOverride(dir, "g9.json", {
+        ...base,
+        capability: {
+          restrictionMarkers: [{ kind: "limit", patterns: ["rate limit"] }],
+          pickerOption: ["button.model"],
+          abilityToggles: [{ id: "web", selector: "button[data-toggle]", label: "Web" }],
+        },
+      });
+      assert.equal(resolveProfile(f).id, "gemini", "well-typed GOAL 55 capability override passes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

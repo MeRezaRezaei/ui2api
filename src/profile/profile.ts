@@ -657,6 +657,20 @@ function validateOverrideFile(
   }
   // 4) send shape — the Enter-press-fallback class.
   validateSendShape(file, merged);
+  // 5) capability block — the GOAL 56 shape gate, now on the override seam
+  //    too (GOAL 57): `capability` is a valid override key (PROFILE_FILE_KEYS)
+  //    but the merged profile's markers/picker fields feed the driver untyped;
+  //    a wrong-typed entry refuses LOUD at load, never a late
+  //    matchRestrictionMarkers for…of-undefined TypeError at answer time.
+  const capability = (merged as unknown as Record<string, unknown>).capability;
+  if (capability !== undefined && capability !== null) {
+    if (typeof capability !== "object" || Array.isArray(capability)) {
+      throw new Error(
+        `profile file ${file} capability must be an object — got ${JSON.stringify(capability)}`
+      );
+    }
+    validateCapabilityBlockShape(file, capability as Record<string, unknown>);
+  }
 }
 
 /**
