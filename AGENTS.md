@@ -308,9 +308,9 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **844 tests / 44 suites** (843 pass + 1 env skip) — dated fold-log counts
+  **863 tests / 44 suites** (862 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f) are history; this is the
-  current number (re-measured 2026-09-25, GOALs 83-85 flip).
+  current number (re-measured 2026-09-25, GOALs 83-87 flip).
 - **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
   `src/runtime/requirements.ts`) only reports verdicts a real check can stand
   behind — every check runs for real (execute-only probes; a check that cannot
