@@ -32,6 +32,7 @@
 // every request; we only navigate, click the site's own controls, and read
 // back what renders.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { sameOrigin, assertChannelUrl } from "../runtime/ssrf.js";
 import {
   injectSnapshot,
@@ -69,6 +70,13 @@ export interface YouTubeCapabilityResult {
 const SCAFFOLD_NOTE =
   "scaffold-dom-unverified: selectors are unverified candidates (no live round-trip performed); " +
   "re-tune against a real browser on first capture";
+
+// GOAL 88: what youtube_upload may hand the upload input. YouTube's own input
+// takes video/*, so the gate holds to the signature-verified video containers
+// (mp4/mov/webm/mkv/avi). An image or document here would be refused by name.
+const YOUTUBE_ATTACH_ACCEPT = [
+  "video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-msvideo",
+].join(",");
 
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
@@ -551,9 +559,25 @@ export class YouTubeCapabilities {
   // --- youtube_upload: hand a local file to the site's own hidden
   // input[type=file] on youtube.com/upload. Requires login; anonymous gets a
   // sign-in redirect. We only `setInputFiles` — the site's own JS uploads.
+  //
+  // GOAL 88: the payload goes through the SHARED attach gate
+  // (src/runtime/file-attach.ts) BEFORE the browser opens. It used to be
+  // `String(args.filePath)` straight into setInputFiles — an unrestricted
+  // local-file-read primitive. The accept list is the signature-verified video
+  // set (YouTube's own input is video/*).
   private async upload(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
-    const filePath = String(args.filePath ?? "").trim();
-    if (!filePath) return this.fail("youtube_upload", "filePath is required");
+    const attach = validateAttachRequest(args, { siteId: "youtube", accept: YOUTUBE_ATTACH_ACCEPT });
+    if (!attach.ok) {
+      const refusal = attachRefusal(attach, "youtube_upload");
+      return {
+        capability: refusal.capability,
+        ok: false,
+        data: { code: refusal.code, rule: attach.code, message: refusal.message },
+        scaffold: SCAFFOLD_NOTE,
+        error: `[${refusal.code}] ${refusal.message} (GOAL 88 attach gate, src/runtime/file-attach.ts — refused before any browser launched)`,
+      };
+    }
+    const payload = attachPayload(attach);
     const page = await this.openPage("https://www.youtube.com/upload");
     try {
       const fileInput = page.locator("input[type=file]").first();
@@ -563,7 +587,9 @@ export class YouTubeCapabilities {
         // The file input may sit inside a shadow/slotted wrapper — attempt the
         // piped setInputFiles anyway (playwright reaches it when on the page).
       }
-      await fileInput.setInputFiles(filePath);
+      // GATED bytes in memory (vetted name + SNIFFED mimeType): the site's own
+      // upload handler receives exactly what the gate approved.
+      await fileInput.setInputFiles(payload);
       // After a successful handoff the site starts processing the file.
       await page.waitForTimeout(2000);
       const processing = await page.evaluate(() => {
@@ -574,7 +600,7 @@ export class YouTubeCapabilities {
         capability: "youtube_upload",
         ok: processing,
         method: "dom.file-input-handoff",
-        data: { fileName: filePath.split("/").pop(), processing },
+        data: { fileName: payload.name, processing },
         scaffold: "scaffold-dom-unverified: hidden file input + processing text are candidates (no live round-trip yet); upload demands login",
         error: processing ? undefined : "site did not show processing state after the file handoff (anonymous or unsupported format)",
         note: processing ? "the file was handed to the site's own upload input and the page entered its processing state" : undefined,

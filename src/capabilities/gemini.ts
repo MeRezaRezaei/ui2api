@@ -73,6 +73,7 @@
 //   BranchConversation, UpdateConversation, ListConversationTurns,
 //   GetConversationTurn.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -95,6 +96,17 @@ export interface GeminiCapabilityResult {
   latencyMs?: number;
   error?: string;
 }
+
+// GOAL 88: what gemini_file_upload is allowed to hand the composer. The site's
+// own accept attribute was never measured for this UI revision, so the gate
+// stays on the conservative signature-verified set (images + pdf + office
+// packages). Text/json/code payloads have no magic signature and are refused.
+const GEMINI_ATTACH_ACCEPT = [
+  "image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+].join(",");
 
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
@@ -468,9 +480,26 @@ export class GeminiCapabilities {
   // replay surface (measurement 2026-09-23) shows the attach entry but the upload
   // round-trip needs a signed-in session (browser-bound Google auth) — never
   // claim ok:true without the live round-trip.
+  //
+  // GOAL 88: the payload goes through the SHARED attach gate
+  // (src/runtime/file-attach.ts) BEFORE the browser opens. It used to be
+  // `String(args.path ?? args.filePath)` straight into setInputFiles, i.e. the
+  // capability was an unrestricted local-file-read primitive. Accept list is the
+  // conservative image/pdf/ooxml set (the site's own accept attribute is not
+  // measured for this UI revision, so the gate stays narrow).
   private async fileUpload(args: Record<string, unknown>): Promise<GeminiCapabilityResult> {
-    const path = String(args.path ?? args.filePath ?? "");
-    if (!path) return this.fail("gemini_file_upload", "path (local file) is required");
+    const attach = validateAttachRequest(args, { siteId: "gemini", accept: GEMINI_ATTACH_ACCEPT });
+    if (!attach.ok) {
+      const refusal = attachRefusal(attach, "gemini_file_upload");
+      return {
+        capability: refusal.capability,
+        ok: false,
+        data: { code: refusal.code, rule: attach.code, message: refusal.message },
+        method: "dom.input.setFiles",
+        error: `[${refusal.code}] ${refusal.message} (GOAL 88 attach gate, src/runtime/file-attach.ts — refused before any browser launched)`,
+      };
+    }
+    const payload = attachPayload(attach);
     const page = await this.openPage();
     await waitForDomain(page, 4000);
     try {
@@ -483,12 +512,14 @@ export class GeminiCapabilities {
       }
       // setInputFiles sets the value AND fires the change event, so the site's
       // own JS performs the POST — no synthetic request (kimi pattern, VERIFIED).
+      // The GATED bytes are handed over in memory: the vetted name + the SNIFFED
+      // mimeType, so the site's own accept logic sees the truth about the bytes.
       let fileInput = page.locator("input[type='file']").first();
       const n = await fileInput.count().catch(() => 0);
       if (n === 0) {
         return this.fail("gemini_file_upload", "no composer file input found (page signed-out or attach hidden)");
       }
-      await fileInput.setInputFiles(path);
+      await fileInput.setInputFiles(payload);
       await page.waitForTimeout(2000);
       const attached = await page.evaluate(() => {
         const chip = document.querySelector(
@@ -501,7 +532,7 @@ export class GeminiCapabilities {
         ok: true,
         method: "dom.input.setFiles",
         data: {
-          file: path.split("/").pop(),
+          file: payload.name,
           attached,
           verified: false,
           honesty: "ok:true = input accepted, NOT a live round-trip claim — verify against a signed-in Chrome (UI2API_ATTACH_PORT) before treating upload as verified",

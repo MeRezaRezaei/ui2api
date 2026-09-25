@@ -74,10 +74,9 @@
 // VQD canvas fingerprint challenge inside the page, so driving the UI is the
 // only posture that keeps anonymous chat working (same principle as the
 // signed-in sites: never send a request the page didn't make itself).
-import { readFileSync } from "node:fs";
-import { basename, extname } from "node:path";
 import { launchBrowser } from "../runtime/browser.js";
 import { makeDomPrimitives } from "../runtime/dom-primitives.js";
+import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -180,14 +179,10 @@ const READ_SIDEBAR_JS =
   "  return out;" +
   "})()";
 
-const MIME_BY_EXT: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".pdf": "application/pdf",
-};
+// GOAL 88: the old MIME_BY_EXT table (extension → caller-facing mimeType) is
+// GONE. A declared extension/name/mimeType never decides what a payload is —
+// the shared validator sniffs the real bytes (src/runtime/file-attach.ts) and
+// refuses any name that disagrees with the sniff.
 
 export class DuckduckgoCapabilities {
   private browser?: Browser;
@@ -583,39 +578,37 @@ export class DuckduckgoCapabilities {
   // input[type='file'] with accept="image/png,image/jpeg,image/webp,image/gif,
   // application/pdf,.pdf". setInputFiles on the input (filechooser never fires
   // — same as kimi_file_upload) attaches the file; the composer then renders a
-  // chip button[aria-label^='Remove image '] (read-back). Rejects payloads
-  // whose mime is NOT in the accept list (honest — the site won't attach them).
+  // chip button[aria-label^='Remove image '] (read-back).
+  //
+  // GOAL 88: the payload is gated by the SHARED validator
+  // (src/runtime/file-attach.ts) BEFORE any browser is launched. The old gate
+  // compared the CALLER-DECLARED mimeType against ATTACH_ACCEPT, so
+  // file:{path:"…/.ssh/id_rsa", name:"a.png", mimeType:"image/png"} was read
+  // and uploaded. Now the real bytes are sniffed, the path form is refused
+  // unless UI2API_ATTACH_ROOTS names a containing root, and the handoff is
+  // always the in-memory payload.
   private async fileUpload(args: Record<string, unknown>): Promise<DuckduckgoCapabilityResult> {
-    const page = await this.openPage();
     const t0 = Date.now();
+    const file = validateAttachRequest(args, { siteId: "duckduckgo", accept: ATTACH_ACCEPT });
+    if (!file.ok) {
+      const refusal = attachRefusal(file, "duckduckgo_file_upload");
+      return {
+        capability: refusal.capability,
+        ok: false,
+        method: "ui.file-upload",
+        latencyMs: Date.now() - t0,
+        data: { code: refusal.code, rule: file.code, message: refusal.message },
+        error: `[${refusal.code}] ${refusal.message}`,
+        note: "GOAL 88 attach gate refused the payload before any browser launched — see src/runtime/file-attach.ts for the rule order",
+      };
+    }
+    const payload = attachPayload(file);
+    const { name, mimeType, buffer } = payload;
+    const page = await this.openPage();
     try {
       await page.waitForSelector("textarea", { timeout: 15000 });
       await page.waitForTimeout(1200);
       await this.dismissOverlays(page);
-      const file = this.resolveUpload(args);
-      if (!file.ok) {
-        return {
-          capability: "duckduckgo_file_upload",
-          ok: false,
-          method: "ui.file-upload",
-          latencyMs: Date.now() - t0,
-          data: undefined,
-          error: file.error ?? "upload payload missing",
-        };
-      }
-      const { name, mimeType, buffer } = file;
-      if (!ATTACH_ACCEPT.split(",").includes(mimeType)) {
-        return {
-          capability: "duckduckgo_file_upload",
-          ok: false,
-          method: "ui.file-upload",
-          latencyMs: Date.now() - t0,
-          data: undefined,
-          error:
-            `site accept list is ${ATTACH_ACCEPT} — mime "${mimeType}" would be rejected by the site's own uploader; ` +
-            "pass an image/png, image/jpeg, image/webp, image/gif or application/pdf payload (honest rejection, never synthesized)",
-        };
-      }
       const input = page.locator("input[type='file']").first();
       if ((await input.count()) === 0) {
         return {
@@ -627,7 +620,7 @@ export class DuckduckgoCapabilities {
           error: "composer input[type='file'] not found — attach UI unverifiable on this load",
         };
       }
-      await input.setInputFiles({ name, mimeType, buffer });
+      await input.setInputFiles(payload);
       await page.waitForTimeout(1400);
       const chip = page.locator("button[aria-label^='Remove image '], button[aria-label^='Remove file ']");
       const seen = await chip.isVisible({ timeout: 3000 }).catch(() => false);
@@ -666,36 +659,9 @@ export class DuckduckgoCapabilities {
     }
   }
 
-  private resolveUpload(args: Record<string, unknown>):
-    | { ok: true; name: string; mimeType: string; buffer: Buffer }
-    | { ok: false; error?: string } {
-    const file = args.file as { name?: unknown; mimeType?: unknown; path?: unknown; data?: unknown } | undefined;
-    const filePath = typeof args.path === "string" ? args.path : typeof file?.path === "string" ? file.path : null;
-    if (filePath) {
-      let buffer: Buffer;
-      try {
-        buffer = readFileSync(filePath);
-      } catch (e) {
-        return { ok: false, error: `cannot read upload path "${filePath}": ${e instanceof Error ? e.message : String(e)}` };
-      }
-      const name = file?.name ? String(file.name) : basename(filePath);
-      const mimeType = file?.mimeType ? String(file.mimeType) : MIME_BY_EXT[extname(name).toLowerCase()] ?? "application/octet-stream";
-      return { ok: true, name, mimeType, buffer };
-    }
-    const data = typeof args.data === "string" ? args.data : typeof file?.data === "string" ? file.data : null;
-    if (data) {
-      const name = typeof args.name === "string" && args.name ? args.name : file?.name ? String(file.name) : "upload.bin";
-      const mimeType = file?.mimeType ? String(file.mimeType) : MIME_BY_EXT[extname(name).toLowerCase()] ?? "application/octet-stream";
-      let buffer: Buffer;
-      try {
-        buffer = Buffer.from(data, "base64");
-      } catch (e) {
-        return { ok: false, error: `cannot decode base64 payload: ${e instanceof Error ? e.message : String(e)}` };
-      }
-      return { ok: true, name, mimeType, buffer };
-    }
-    return { ok: false, error: "upload payload required: args.path, or args.file={name,mimeType,data|path}, or args.data(base64)+args.name" };
-  }
+  // GOAL 88: the old resolveUpload() (caller-mime gate + readFileSync on a
+  // caller path) is GONE. Every attach on this runner goes through the shared
+  // validator above — see src/runtime/file-attach.ts.
 
   // --- duckduckgo_reasoning: REAL composer reasoning toggle (VERIFIED 2026-09-23) ---
   // button[aria-label='Reasoning mode'] reads "Fast"/"Reasoning". Clicking it

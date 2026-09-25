@@ -34,7 +34,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
-import { listAccounts, type StoredAccount } from "../runtime/session-store.js";
+import { listAccounts, verifyStoredAccount, withAccountVerdict, type StoredAccount } from "../runtime/session-store.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -113,8 +113,26 @@ export interface RegistryPackage {
    * `[]` is honest: it means "no accounts stored for this site's host". The
    * field is ABSENT (undefined) only when the package has no resolvable url
    * (no host to key the vault by) — never an empty-by-accident array.
+   *
+   * GOAL 89: every row carries the RECONCILED verdict (`usable` + a NAMED
+   * `reason` when it cannot drive requests) — see `accountsSummary` below.
    */
   accounts?: StoredAccount[];
+  /**
+   * GOAL 89 host-level rollup of the account verdicts above. The registry is
+   * the ONLY info source a consumer has, so an all-unusable host must be
+   * visible as such and not merely look like an empty choice set: `usable: 0`
+   * with the NAMED reasons listed. ABSENT when the package has no accounts.
+   */
+  accountsSummary?: RegistryAccountsSummary;
+}
+
+export interface RegistryAccountsSummary {
+  total: number;
+  usable: number;
+  unusable: number;
+  /** Deduped NAMED reasons behind the unusable rows (empty when all usable). */
+  reasons: string[];
 }
 
 export interface RegistryVerified {
@@ -416,13 +434,35 @@ export function buildRegistryPackages(): RegistryPackage[] {
     // Stored vault accounts for this site, keyed by the packaged profile's host
     // — EXACTLY the host GET /accounts?site= uses (http.ts: new URL(profile.url).host).
     // No url → no host to key the vault by → field omitted (undefined).
+    //
+    // GOAL 89: the index is RECONCILED, not trusted. Every row is re-checked
+    // against the snapshot actually on disk by the SAME pure reconciler
+    // /accounts serves (`verifyStoredAccount`), so a row that points at a
+    // missing / unreadable / anonymous / wrong-shaped snapshot is advertised
+    // as `usable: false` with its NAMED reason — a consumer that trusts the
+    // registry (the ONLY info source it has) can never pick an account that
+    // can only replay signed-out. An unusable row is still LISTED (a real
+    // stored row the user may want to see and delete), and the host-level
+    // rollup makes an all-unusable host visible instead of silently empty.
     let accounts: StoredAccount[] | undefined;
+    let accountsSummary: RegistryAccountsSummary | undefined;
     const profileUrl = profile.url;
     if (profileUrl) {
       try {
-        accounts = listAccounts(dataDir, new URL(profileUrl).host);
+        const host = new URL(profileUrl).host;
+        accounts = listAccounts(dataDir, host).map((a) => withAccountVerdict(a, verifyStoredAccount(dataDir, host, a)));
+        if (accounts.length > 0) {
+          const reasons = [...new Set(accounts.filter((a) => a.usable === false).map((a) => a.reason ?? "unknown"))];
+          accountsSummary = {
+            total: accounts.length,
+            usable: accounts.filter((a) => a.usable !== false).length,
+            unusable: accounts.filter((a) => a.usable === false).length,
+            reasons,
+          };
+        }
       } catch {
         accounts = undefined;
+        accountsSummary = undefined;
       }
     }
     packages.push({
@@ -438,6 +478,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       ...(chatSurfaceIds.has(siteId) ? { chat: { model: siteId, streaming: true } } : {}),
       tools,
       ...(accounts !== undefined ? { accounts } : {}),
+      ...(accountsSummary !== undefined ? { accountsSummary } : {}),
     });
   }
   return packages;

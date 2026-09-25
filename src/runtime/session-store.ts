@@ -293,6 +293,18 @@ export interface StoredAccount {
   source: AccountSource;
   capturedAt: string;
   profileDir?: string; // where an ingest/import pulled the data from
+  // --- GOAL 89: RECONCILED verdict (ADDITIVE, derived, never persisted) ---
+  /**
+   * Can this stored row actually drive a request? Computed at READ time by
+   * `verifyStoredAccount` against what is on disk — the index row itself is
+   * never trusted to assert it. `undefined` ONLY on a hand-built row object
+   * that never went through `listAccounts`.
+   */
+  usable?: boolean;
+  /** NAMED reason when `usable === false`; ABSENT on a usable row. */
+  reason?: string;
+  /** The specific field message behind a `shape-invalid` refusal. */
+  reasonDetail?: string;
 }
 
 export function slugifyIdentity(identity: string): string {
@@ -316,6 +328,151 @@ export function accountsIndexPath(sitesDir: string, host: string): string {
   return resolve(vaultRoot(sitesDir), sanitizeHost(host), "accounts.json");
 }
 
+// --- GOAL 89: the vault INDEX is RECONCILED, never assumed ---
+//
+// Every honest write seam (GOAL 49 anonymous-content, GOAL 50 slug collision,
+// GOAL 60 index shape) only governs what THIS code writes FROM NOW ON. A
+// pre-existing, hand-edited, externally-written or partially-deleted index row
+// is still a claim with nothing behind it: the row can point at a MISSING
+// snapshot, an UNREADABLE (corrupt-JSON) one, an ANONYMOUS one (zero cookies
+// AND zero localStorage — exactly the class the GOAL 49 write gate refuses to
+// create, but which can pre-date it), or a wrong-SHAPED one (GOAL 59).
+//
+// Deriving /accounts, the registry `accounts[]` and the requirements vault
+// verdict from accounts.json is only sound if that index is reconciled against
+// what is actually on disk. Nothing did — so an account that can only ever
+// replay signed-out was advertised as a normal available account, and a
+// consumer could pick it.
+//
+// `verifyStoredAccount` is that reconciliation: PURE, fs-only, no browser, no
+// network, no writes, and it REUSES the existing gates rather than
+// re-implementing them (validStoredAccount for the row, GOAL 51's
+// resolveStoredAccount for the reference, validateSnapshotShape for the file,
+// snapshotHasAuth for the auth signal). Every verdict reason is a NAMED string
+// a human can act on.
+export const VAULT_NO_INDEX_ROW = "no index row";
+export const VAULT_SNAPSHOT_MISSING = "snapshot-missing";
+export const VAULT_SNAPSHOT_UNREADABLE = "snapshot-unreadable";
+export const VAULT_ANONYMOUS =
+  "anonymous (no cookies and no localStorage — the GOAL 49 write gate refuses to create this)";
+export const VAULT_SHAPE_INVALID = "shape-invalid (see validateSnapshotShape)";
+
+export interface AccountVerdict {
+  /** True only when a resolvable index row points at a readable, well-shaped, AUTHED snapshot. */
+  usable: boolean;
+  /** NAMED reason when `usable === false`; absent when usable. */
+  reason?: string;
+  /** The specific field message behind a `shape-invalid` refusal. */
+  detail?: string;
+  /** Cookie COUNT (never values) the snapshot actually carries. */
+  cookies: number;
+  /** localStorage entry COUNT the snapshot actually carries. */
+  localStorage: number;
+  /** Whether the snapshot FILE exists on disk (false for a missing row/file). */
+  exists: boolean;
+}
+
+/**
+ * GOAL 89: reconcile ONE account reference against the vault on disk. Never
+ * throws, never writes, never launches anything.
+ *
+ *   account: a reference STRING (exact stored identity or exact stored slug —
+ *     GOAL 51 semantics, no folding; a hostile `../../..` slug resolves to
+ *     nothing and NEVER reaches a path build) or a `StoredAccount` ROW object
+ *     (as served by listAccounts, already GOAL-60-gated).
+ */
+export function verifyStoredAccount(
+  sitesDir: string,
+  host: string,
+  account: string | StoredAccount
+): AccountVerdict {
+  const h = sanitizeHost(host);
+  // GOAL 51: an account reference resolves ONLY on the exact stored identity or
+  // the exact stored slug. A row object must itself pass the GOAL 60 gate
+  // before it is trusted as a key.
+  const row = typeof account === "string" ? resolveStoredAccount(sitesDir, h, account) : validStoredAccount(account) ? account : null;
+  if (!row) {
+    // No resolvable row: nothing on disk was even pointed at. The path is NOT
+    // built here, so a traversal-shaped reference can never escape the vault.
+    return { usable: false, reason: VAULT_NO_INDEX_ROW, cookies: 0, localStorage: 0, exists: false };
+  }
+  const path = accountSnapshotPath(sitesDir, h, row.slug);
+  if (!existsSync(path)) {
+    return { usable: false, reason: VAULT_SNAPSHOT_MISSING, cookies: 0, localStorage: 0, exists: false };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    // Corrupt JSON, or the file is unreadable (permissions, a directory, a
+    // half-written capture). Same honest verdict: this account cannot drive a
+    // request and the reason is named.
+    return { usable: false, reason: VAULT_SNAPSHOT_UNREADABLE, cookies: 0, localStorage: 0, exists: true };
+  }
+  // GOAL 59 gate, reused (never re-implemented): a wrong-shaped stored snapshot
+  // is refused, with validateSnapshotShape's own field message as the detail.
+  const shape = validateSnapshotShape(parsed);
+  if (shape !== null) {
+    return { usable: false, reason: VAULT_SHAPE_INVALID, detail: shape, cookies: 0, localStorage: 0, exists: true };
+  }
+  const snap = parsed as Pick<ProfileSnapshot, "cookies" | "localStorage">;
+  const cookies = Array.isArray(snap.cookies) ? snap.cookies.length : 0;
+  const localStorage = Array.isArray(snap.localStorage) ? snap.localStorage.length : 0;
+  // GOAL 49 gate, reused (never re-implemented): zero cookies AND zero
+  // localStorage = an anonymous session, which can only ever replay signed-out.
+  if (!snapshotHasAuth(snap)) {
+    return { usable: false, reason: VAULT_ANONYMOUS, cookies, localStorage, exists: true };
+  }
+  return { usable: true, cookies, localStorage, exists: true };
+}
+
+/** Attach a verdict to an index row: `usable` always, the NAMED reason only
+ *  when unusable. Any stale verdict already on the row is DROPPED first, so a
+ *  re-reconciled row can never carry a leftover reason from an earlier pass. */
+export function withAccountVerdict(row: StoredAccount, verdict: AccountVerdict): StoredAccount {
+  const base = toIndexRow(row);
+  const out: StoredAccount = { ...base, usable: verdict.usable };
+  if (verdict.reason) out.reason = verdict.reason;
+  if (verdict.detail) out.reasonDetail = verdict.detail;
+  return out;
+}
+
+/** The ON-DISK index row shape — every DERIVED verdict field is stripped. A
+ *  computed verdict is never persisted into accounts.json: it is read-time
+ *  state, it would go stale the moment a snapshot is re-captured, and the read
+ *  seam recomputes it anyway. Writing it back would make the index assert
+ *  something it cannot know. */
+function toIndexRow(row: StoredAccount): StoredAccount {
+  const { usable: _u, reason: _r, reasonDetail: _rd, ...rest } = row;
+  return rest;
+}
+
+/**
+ * The NAMED refusal for a caller that asked for an account that exists in the
+ * index but can never drive a request. Counts only — never a cookie value.
+ */
+export function unusableAccountMessage(ref: string, host: string, verdict: AccountVerdict): string {
+  const h = sanitizeHost(host);
+  return `stored account "${ref}" for "${h}" cannot drive requests: ${verdict.reason} (cookies=${verdict.cookies}, localStorage=${verdict.localStorage}) — re-capture: 'profile add-all --known' (or 'profile capture/import ${h}')`;
+}
+
+/**
+ * The one call a request seam makes after GOAL 51 resolution succeeds: throw a
+ * NAMED error when the resolved account cannot drive requests. Never falls back
+ * to another account — refusing is correct, silently substituting is the
+ * failure this repo forbids. Returns the verdict when the account is usable.
+ */
+export function assertUsableStoredAccount(
+  sitesDir: string,
+  host: string,
+  account: string | StoredAccount
+): AccountVerdict {
+  const ref = typeof account === "string" ? account : account.slug;
+  const verdict = verifyStoredAccount(sitesDir, host, account);
+  if (!verdict.usable) throw new Error(unusableAccountMessage(ref, host, verdict));
+  return verdict;
+}
+
 export function listAccounts(sitesDir: string, host: string): StoredAccount[] {
   const idx = accountsIndexPath(sitesDir, host);
   try {
@@ -329,7 +486,14 @@ export function listAccounts(sitesDir: string, host: string): StoredAccount[] {
     // path resolution (accountSnapshotPath's resolve() would escape the vault
     // with a `../../..` slug). Writes are safe (slugifyIdentity at save);
     // this closes the read seam for hand-edited / partial / stale indexes.
-    return raw.accounts.filter(validStoredAccount);
+    //
+    // GOAL 89: a row that PASSES the shape gate is still only a CLAIM. Every
+    // served row is RECONCILED against the snapshot actually on disk by the
+    // pure `verifyStoredAccount`, and the verdict rides on the row as the
+    // additive `usable` + `reason` fields. An unusable row stays LISTED (it is
+    // a real stored row a user may want to see and delete) but is never
+    // presented as able to drive a request — no blind-empty, no silent drop.
+    return raw.accounts.filter(validStoredAccount).map((a) => withAccountVerdict(a, verifyStoredAccount(sitesDir, host, a)));
   } catch {
     return [];
   }
@@ -376,7 +540,11 @@ export function saveAccountSnapshot(
   };
   // Write the snapshot first, then append/replace in the index.
   saveSnapshot(accountSnapshotPath(sitesDir, host, slug), snap);
-  const existing = listAccounts(sitesDir, host).filter((a) => a.slug !== slug);
+  // GOAL 89: the rows carried over are stripped back to their ON-DISK index
+  // shape — a derived verdict is read-time state and must never be persisted
+  // into accounts.json (it would go stale on the next re-capture, and the read
+  // seam reconciles every row again anyway).
+  const existing = listAccounts(sitesDir, host).filter((a) => a.slug !== slug).map(toIndexRow);
   mkdirSync(dirname(accountsIndexPath(sitesDir, host)), { recursive: true });
   writeFileSync(accountsIndexPath(sitesDir, host), JSON.stringify({ accounts: [...existing, account] }, null, 2));
   return account;

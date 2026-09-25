@@ -65,6 +65,7 @@
 // analytics ride every RPC — driving the site's own UI (ChatDriver) is the only
 // posture that keeps the session alive; the DOM paths below never re-send it.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -88,6 +89,17 @@ export interface KimiCapabilityResult {
   rpcNote?: string;
   note?: string;
 }
+
+// GOAL 88: what kimi_file_upload may hand the composer. Kimi's own accept list
+// was not measured, so the gate holds to the signature-verified set (images +
+// pdf + office packages). A text payload has no magic signature and is refused
+// by name — that class (.env, id_rsa, credentials) is the exfiltration target.
+const KIMI_ATTACH_ACCEPT = [
+  "image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+].join(",");
 
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
@@ -353,20 +365,39 @@ export class KimiCapabilities {
   }
 
   // --- kimi_file_upload: attach a file through the REAL file input (VERIFIED) ---
+  //
+  // GOAL 88: the payload goes through the SHARED attach gate
+  // (src/runtime/file-attach.ts) BEFORE the browser opens. It used to be
+  // `String(args.path ?? args.filePath)` straight into setInputFiles, i.e. the
+  // capability could read and upload ANY local file the daemon could reach. The
+  // accept list is the signature-verified set (images + pdf + office packages);
+  // a text/json payload has no magic signature and is refused by name, which is
+  // exactly the class (.env, id_rsa, credentials) that must never be attachable.
   private async fileUpload(args: Record<string, unknown>): Promise<KimiCapabilityResult> {
-    const path = String(args.path ?? args.filePath ?? "");
-    if (!path) return this.fail("kimi_file_upload", "path (local file) is required");
+    const attach = validateAttachRequest(args, { siteId: "kimi", accept: KIMI_ATTACH_ACCEPT });
+    if (!attach.ok) {
+      const refusal = attachRefusal(attach, "kimi_file_upload");
+      return {
+        capability: refusal.capability,
+        ok: false,
+        data: { code: refusal.code, rule: attach.code, message: refusal.message },
+        method: "dom.input.setFiles",
+        error: `[${refusal.code}] ${refusal.message} (GOAL 88 attach gate, src/runtime/file-attach.ts — refused before any browser launched)`,
+      };
+    }
+    const payload = attachPayload(attach);
     const page = await this.openPage();
     await page.waitForSelector('[data-testid="toolkit-trigger-btn"]', { timeout: 15000 }).catch(() => {});
     try {
-      const attach = page.locator('label.toolkit-item').filter({ hasText: "Add files & images" }).first();
-      await openToolkitItem(page, attach);
-      await itemReady(page, attach);
+      const attachBtn = page.locator('label.toolkit-item').filter({ hasText: "Add files & images" }).first();
+      await openToolkitItem(page, attachBtn);
+      await itemReady(page, attachBtn);
       // The "Add files & images" label wraps a hidden <input class="hidden-input">
       // (charset input). setInputFiles sets the value AND fires the change event,
       // so the site's own JS performs the multipart upload — no synthetic XHR.
-      const fileInput = attach.locator('input[type="file"]');
-      await fileInput.setInputFiles(path);
+      // The GATED bytes go over in memory (vetted name + SNIFFED mimeType).
+      const fileInput = attachBtn.locator('input[type="file"]');
+      await fileInput.setInputFiles(payload);
       await page.waitForTimeout(1800);
       await page.waitForTimeout(1800);
       const attached = await page.evaluate(() => {
@@ -379,7 +410,7 @@ export class KimiCapabilities {
         capability: "kimi_file_upload",
         ok: true,
         method: "dom.input.setFiles",
-        data: { file: path.split("/").pop(), attached },
+        data: { file: payload.name, attached },
         note: "the site's own JS performs the multipart POST to notilo.kimi.com/apiv2-files/file/upload (FileService.Upload) + GetFileParseProgress tracking",
       };
     } catch (e) {
