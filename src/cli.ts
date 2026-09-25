@@ -25,6 +25,35 @@ import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
 
+/**
+ * The CLI usage block printed by the `default:` case (bare `ui2api`, `ui2api
+ * help`, any unknown command). Pure string table so tests pin the command
+ * surface honestly — every advertised command must exist and behave as
+ * described (GOAL 67: `ui2api package` is REFUSED since GOAL 66, so the help
+ * line says so instead of advertising a working --author invocation).
+ */
+export const HELP_LINES: readonly string[] = [
+  "UI2API — turn any website into MCP tools for AI\n",
+  "  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]",
+  "  ui2api generate <host>  [--out DIR]",
+  "  ui2api serve    <host>  [--out DIR] [--engine native|wigolo]  (wigolo = drive the browser side through a local wigolo daemon)",
+  "  ui2api remap    <host>  [--out DIR]",
+  "  ui2api package  <host>       (REFUSED — GOAL 66 write-truth: only knows the DEAD metadata+action-map pair nothing serves; package the modern way: ui2api analyse → capabilities/<id>/ with manifest.json + profile.json + session.lock.json + CAPABILITIES.md, then it is served by /registry + install)",
+  "  ui2api install  <host>  [--registry URL] [--out DIR]  (install a site package from the community registry; default = master branch; --out = isolated, NOT served by the daemon)",
+  "  ui2api install  --catalog [--registry URL]  (list the registry catalog: site, version, trust)",
+  "  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)",
+  "  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)",
+  "  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)",
+  "  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)",
+  "  ui2api profile capture <url> [--data-dir DIR] [--login]  (login once, save cookies+localStorage+IndexedDB snapshot)",
+  "  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)",
+  "  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)",
+  "  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)",
+  "  ui2api prompt --sites                (list the configured AI chat websites)",
+  "  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready) [--json = the same report as a machine-readable object, honoring the <site> scope]",
+  "  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1)) [--json = {ok, site, answer?, ms?, message, installedAnon?, report}]",
+];
+
 interface Flags {
   root?: string;
   out?: string;
@@ -319,21 +348,51 @@ async function cmdInstallCatalog(flags: Flags): Promise<void> {
   }
 }
 
+/**
+ * GOAL 67 (2026-09-25): the honest post-install follow-up lines. The daemon
+ * serves packages from `daemonRoot` (defaultPackagesRoot() — the repo-root
+ * `capabilities/` climb) and NEVER from an `--out` dir, so the default case
+ * names the RESOLVED root (not the old "defaultPackagesRoot" placeholder) and
+ * the `--out` case says the install is isolated instead of printing the
+ * daemon/promptd/registry lines the package cannot appear on.
+ */
+export function installFollowUp(
+  installDir: string,
+  daemonRoot: string,
+  opts: { outOverride: boolean; registryBase: string }
+): string[] {
+  if (opts.outOverride) {
+    return [
+      `NOTE: the daemon serves packages from ${daemonRoot}, NOT ${installDir} — this --out install is isolated.`,
+      `To serve it, install without --out.`,
+    ];
+  }
+  return [
+    `The daemon serves installed capability packages from ${daemonRoot}:`,
+    `  ui2api promptd`,
+    `  curl -s ${opts.registryBase}/registry`,
+  ];
+}
+
 async function cmdInstall(host: string, flags: Flags): Promise<void> {
   const reg = flags.registry ?? process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
   // The install target is the packages root (capabilities/<site>/) — the same
   // layout the daemon serves from (resolvePackagedProfile / buildRegistryPackages).
   // --out overrides it (e.g. into a temp dir for a clean/isolated install).
-  const root = flags.out ?? defaultPackagesRoot();
+  const daemonRoot = defaultPackagesRoot();
+  const root = flags.out ?? daemonRoot;
   const result = await installPackage(host, reg, root);
   const profileAbs = existsSync(resolve(result.dir, "profile.json"))
     ? resolve(result.dir, "profile.json")
     : undefined;
   console.log(`Installed ${host} v${result.version} (${result.trust}) -> ${result.dir}`);
   console.log(`Files: ${result.files.join(", ")}`);
-  console.log(`The daemon serves installed capability packages (package dir = defaultPackagesRoot):`);
-  console.log(`  ui2api promptd`); // GET /sites, GET /capabilities/<site>, POST /capability/<site>
-  console.log(`  curl -s localhost:${process.env.PORT ? Number(process.env.PORT) : 9797}/registry`);
+  for (const line of installFollowUp(result.dir, daemonRoot, {
+    outOverride: flags.out !== undefined,
+    registryBase: `localhost:${process.env.PORT ? Number(process.env.PORT) : 9797}`,
+  })) {
+    console.log(line);
+  }
   if (profileAbs) {
     console.log(`Or prompt it directly via the ChatDriver with its packaged profile:`);
     console.log(`  ui2api prompt "hello" --site ${host} --profile ${profileAbs}`);
@@ -1201,25 +1260,7 @@ async function main(): Promise<void> {
     case "live-proof":
       return cmdLiveProof(flags);
     default:
-      console.log("UI2API — turn any website into MCP tools for AI\n");
-      console.log("  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]");
-      console.log("  ui2api generate <host>  [--out DIR]");
-      console.log("  ui2api serve    <host>  [--out DIR] [--engine native|wigolo]  (wigolo = drive the browser side through a local wigolo daemon)");
-      console.log("  ui2api remap    <host>  [--out DIR]");
-      console.log("  ui2api package  <host>  --author NAME --use 'authorized-use statement' [--out DIR]");
-      console.log("  ui2api install  <host>  [--registry URL] [--out DIR]  (install a site package from the community registry; default = master branch)");
-      console.log("  ui2api install  --catalog [--registry URL]  (list the registry catalog: site, version, trust)");
-      console.log("  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)");
-      console.log("  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)");
-      console.log("  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)");
-      console.log("  ui2api plugin serve <module.ts> [--base-url URL]  (serve a plugin module as MCP)");
-      console.log("  ui2api profile capture <url> [--data-dir DIR] [--login]  (login once, save cookies+localStorage+IndexedDB snapshot)");
-      console.log("  ui2api profile ingest <host> [--profile DIR] [--data-dir DIR]  (OFFLINE: read the real Chrome profile DBs — cookies+localStorage — no browser)");
-      console.log("  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)");
-      console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)");
-      console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
-      console.log("  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready) [--json = the same report as a machine-readable object, honoring the <site> scope]");
-      console.log("  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1)) [--json = {ok, site, answer?, ms?, message, installedAnon?, report}]");
+      for (const line of HELP_LINES) console.log(line);
       process.exit(cmd ? 1 : 0);
   }
 }
