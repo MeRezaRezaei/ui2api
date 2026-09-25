@@ -699,6 +699,30 @@ async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void>
   }
 }
 
+// GOAL 40: the buy-first one-command anonymous self-test. The smoke module
+// (src/prompt/smoke.ts) runs the real gates and decides the verdict line; this
+// command only prints the outcome + maps it to the exit code — the same data
+// dir resolution cmdRequirements uses, the real install seam for the missing
+// anonymous package, and a REAL headless ChatDriver round-trip.
+async function cmdSmoke(flags: Flags): Promise<void> {
+  const { runSmoke, smokeExitCode } = await import("./prompt/smoke.js");
+  const outcome = await runSmoke({
+    deps: {
+      dataDir: resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data"),
+      ...(flags.registry ? { registryBaseUrl: flags.registry } : {}),
+      ...(flags.out ? { packagesRoot: flags.out } : {}),
+    },
+  });
+  if (outcome.installedAnon) {
+    const res = outcome.installedAnon;
+    console.log(
+      `smoke: anonymous chat package "${res.siteId}" was missing — installed v${res.version} (${res.trust}) via the registry seam -> ${res.dir}`
+    );
+  }
+  console.log(outcome.message);
+  process.exitCode = smokeExitCode(outcome);
+}
+
 // Import EVERY site session found in the OS's Chrome profiles into the vault in
 // ONE command — "a mother fucking command" (verbatim:1582). Scans all profiles,
 // lets the user pick from a checkbox list (interactive, default) or bulk-imports
@@ -993,6 +1017,8 @@ async function main(): Promise<void> {
     case "requirements":
     case "doctor":
       return cmdRequirements(arg ?? "", flags);
+    case "smoke":
+      return cmdSmoke(flags);
     case "proof":
     case "live-proof":
       return cmdLiveProof(flags);
@@ -1015,6 +1041,7 @@ async function main(): Promise<void> {
       console.log("  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)");
       console.log("  ui2api prompt --sites                (list the configured AI chat websites)");
       console.log("  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready)");
+      console.log("  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1))");
       process.exit(cmd ? 1 : 0);
   }
 }

@@ -35,16 +35,30 @@ sees it.
 
 ## 3. The 30-second path (anonymous)
 
-Not every site needs a login. For a zero-setup smoke test:
+The zero-setup smoke test — one command, headless, no login anywhere:
 
 ```
-npx tsx src/cli.ts prompt 'say hello' --site copilot
+npx tsx src/cli.ts smoke
+```
+
+It gates on `ui2api requirements` first (any OS-level fail → the named reason,
+exit 1), ensures the anonymous DuckDuckGo AI Chat package is present
+(installing it via the registry seam if it is missing, and saying so), then
+does ONE real anonymous chat round-trip through the ChatDriver and prints
+`smoke OK: duckduckgo answered "<first line>" in Nms` (exit 0) or the named
+failure (exit 1). The same verified anonymous path directly:
+
+```
+npx tsx src/cli.ts prompt 'say hello' --site duckduckgo
 ```
 
 > Note: on THIS box copilot is region-gated ("Not available in your region")
-> and https://www.perplexity.ai answers "Just a moment…" (Cloudflare). Your
-> region/network decides which anonymous site actually answers. The honest
-> anonymous-capable list is in §7.
+> and https://www.perplexity.ai answers "Just a moment…" (Cloudflare) —
+> duckduckgo (duck.ai) is the live-verified anonymous path instead:
+> headless-capable, "Anonymous site — never login-gated"
+> (capabilities/duckduckgo, VERIFIED 2026-09-23). Your region/network still
+> decides which anonymous site actually answers. The honest anonymous-capable
+> list is in §7.
 
 ## 4. Capture once, summon your session (the login-UX flow)
 

@@ -156,8 +156,15 @@ you would** — paste the prompt into the composer, hit Enter, and read the stre
 answer off the page. All in your own browser session.
 
 ```bash
-# One command: prompt Microsoft Copilot anonymously (no sign-in needed)
-npx tsx src/cli.ts prompt "summarize the last three books you know"
+# ONE command — the buy-first self-test: OS requirements gate + one REAL
+# anonymous AI-chat round-trip (no sign-in, no API key, no capture). Prints
+# `smoke OK: duckduckgo answered "<answer>" in Nms` (exit 0) or the named
+# failure (exit 1); installs the DuckDuckGo AI Chat package if it is missing.
+npx tsx src/cli.ts smoke
+
+# Zero-setup anonymous prompt — DuckDuckGo AI Chat (duck.ai) is the verified
+# anonymous path: headless-capable, never login-gated
+npx tsx src/cli.ts prompt "hello" --site duckduckgo
 
 # Pick the site explicitly, or reuse your logged-in Chrome for sites that need it
 npx tsx src/cli.ts prompt "hello" --site gemini            # needs a sign-in session
