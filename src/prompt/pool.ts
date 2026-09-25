@@ -21,7 +21,41 @@ export interface PoolOptions {
      the daemon never spawns/kills a browser — so the pool survives exactly like
      its attached host. Enabled automatically when UI2API_ATTACH_PORT is set. */
   attach?: boolean;
+  /* GOAL 83 — BOUNDED over-capacity queue. Past `max` pages a request waits
+     for the next free one, but the wait is bounded on BOTH axes: at most
+     `maxWaiters` requests may be parked at once, and each may wait at most
+     `waiterTimeoutMs`. Past either bound `acquire()` REJECTS with a named
+     cause instead of parking forever — an unbounded queue is what made the
+     daemon un-stoppable: a parked request kept its HTTP handler (and its
+     socket) alive indefinitely, so `server.close()` never finished and
+     SIGINT/SIGTERM could not stop promptd. 0 disables that axis entirely
+     (fail fast). Env overrides: UI2API_POOL_MAX_WAITERS,
+     UI2API_POOL_WAITER_TIMEOUT_MS. */
+  maxWaiters?: number;
+  waiterTimeoutMs?: number;
 }
+
+/* A queued acquire(). It carries BOTH settle handles: `resolve` hands it a
+   page, `reject` ends the wait with a named cause. GOAL 83: the old waiter had
+   a resolve only, so every path that dropped it (close, drain, a failed
+   re-acquire) left the promise pending forever. */
+type PoolWaiter = {
+  siteId: string;
+  resolve: (w: PoolWorker) => void;
+  reject: (e: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+  settled: boolean;
+};
+
+/* Queue bounds. `maxWaiters` 16 keeps a burst of parallel consumers serviceable
+   (well past the 1-4 pages the pool actually runs) while refusing the pile-on
+   that used to park without limit. `waiterTimeoutMs` 240s sits ABOVE the worst
+   single-page occupancy (a real round-trip is page.goto 60s + captureMs, whose
+   packaged maximum is 120s) so a legitimate wait is never cut short, and BELOW
+   the daemon's 300s request deadline so a doomed request is told WHY it never
+   got a page instead of running into the request-level timeout blind. */
+const DEFAULT_MAX_WAITERS = 16;
+const DEFAULT_WAITER_TIMEOUT_MS = 240_000;
 
 export interface PoolWorker {
   profileId: string;
@@ -40,11 +74,22 @@ export type PoolStatus = {
   busy: number;
   total: number;
   max: number;
+  /* GOAL 83: how many requests are parked waiting for a free page right now,
+     and the bound they are held to. Surfaces saturation in /status instead of
+     leaving it invisible until requests start failing. */
+  queued: number;
+  maxWaiters: number;
   perSite: Record<string, { idle: number; busy: number; total: number }>;
 };
 
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
+}
+
+// Non-negative integer from the environment, else the fallback.
+function envCount(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : fallback;
 }
 
 // Cap the pool at what the host's memory allows: each warm page costs a few
@@ -60,9 +105,11 @@ function resourceMax(): number {
 export class ChatPool {
   private browser?: Browser;
   private workers: PoolWorker[] = [];
-  private waiters: Array<{ siteId: string; resolve: (w: PoolWorker) => void }> = [];
+  private waiters: PoolWaiter[] = [];
   private readonly min: number;
   private readonly max: number;
+  private readonly maxWaiters: number;
+  private readonly waiterTimeoutMs: number;
   private readonly defaultProfile: string;
   private readonly dataDir: string;
   private readonly attach: boolean;
@@ -72,6 +119,8 @@ export class ChatPool {
     const min = opts.min ?? (Number.isFinite(envMin) && envMin >= 1 ? Math.floor(envMin) : 1);
     this.min = Math.max(1, min);
     this.max = Math.max(this.min, opts.max ?? resourceMax());
+    this.maxWaiters = Math.max(0, opts.maxWaiters ?? envCount("UI2API_POOL_MAX_WAITERS", DEFAULT_MAX_WAITERS));
+    this.waiterTimeoutMs = Math.max(0, opts.waiterTimeoutMs ?? envCount("UI2API_POOL_WAITER_TIMEOUT_MS", DEFAULT_WAITER_TIMEOUT_MS));
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.defaultProfile = opts.defaultProfile ?? opts.profiles[0]?.id ?? "";
     this.attach = Boolean(opts.attach || process.env.UI2API_ATTACH_PORT);
@@ -148,20 +197,78 @@ export class ChatPool {
         return w;
       });
     }
-    return new Promise((resolve) => {
-      this.waiters.push({
-        siteId,
-        resolve: (w) => {
-          if (w.profileId !== siteId) {
-            // wrong site freed; re-enqueue
-            this.waiters.push({ siteId, resolve });
-            return;
-          }
-          w.busy = true;
-          resolve(w);
-        },
-      });
+    // Over capacity: wait for the next free page — but only inside the two
+    // bounds. GOAL 83.
+    if (this.waiters.length >= this.maxWaiters) {
+      return Promise.reject(
+        new Error(
+          `pool saturated (${this.waiters.length} waiting, limit ${this.maxWaiters}) — no page is free and the queue is full`
+        )
+      );
+    }
+    return new Promise<PoolWorker>((resolve, reject) => {
+      const waiter: PoolWaiter = { siteId, resolve, reject, settled: false };
+      // A page of the WRONG site freed: re-park THIS waiter (its deadline keeps
+      // running, the queue is still bounded) rather than hand over a page we
+      // cannot use.
+      waiter.resolve = (w: PoolWorker) => {
+        if (w.profileId !== siteId) {
+          if (!waiter.settled) this.waiters.push(waiter);
+          return;
+        }
+        this.settleDelivered(waiter);
+        w.busy = true;
+        resolve(w);
+      };
+      if (this.waiterTimeoutMs > 0) {
+        waiter.timer = setTimeout(() => {
+          this.settleWaiter(
+            waiter,
+            new Error(
+              `pool queue timeout after ${this.waiterTimeoutMs}ms waiting for a "${siteId}" page ` +
+                `(${this.waiters.length} waiting, limit ${this.maxWaiters})`
+            )
+          );
+        }, this.waiterTimeoutMs);
+        waiter.timer.unref?.();
+      }
+      this.waiters.push(waiter);
     });
+  }
+
+  // A waiter was handed its page: stop its deadline so the timer can never
+  // reject a request that is already being served.
+  private settleDelivered(waiter: PoolWaiter): void {
+    waiter.settled = true;
+    if (waiter.timer) {
+      clearTimeout(waiter.timer);
+      waiter.timer = undefined;
+    }
+  }
+
+  // GOAL 83: settle ONE queued waiter with a named cause and take it out of
+  // the queue. Every path that used to leave a waiter pending forever — its own
+  // deadline, drain's failed re-acquire, shutdown — settles through here.
+  private settleWaiter(waiter: PoolWaiter, err: Error): void {
+    if (waiter.settled) return;
+    this.settleDelivered(waiter);
+    this.waiters = this.waiters.filter((w) => w !== waiter);
+    waiter.reject(err);
+  }
+
+  // Settle EVERY queued waiter at once. The old `this.waiters = []` DROPPED
+  // them: their resolve was never called and they carried no reject, so each
+  // parked acquire() — and the HTTP handler awaiting it — stayed pending
+  // forever, server.close() (http.ts) never finished, and the daemon could not
+  // be stopped. Named cause, nothing silent.
+  private settleAllWaiters(cause: string): void {
+    const pending = this.waiters;
+    this.waiters = [];
+    for (const waiter of pending) {
+      if (waiter.settled) continue;
+      this.settleDelivered(waiter);
+      waiter.reject(new Error(`${cause} — ${pending.length} queued request(s) rejected`));
+    }
   }
 
   private async spawn(siteId: string, account?: string): Promise<PoolWorker> {
@@ -218,11 +325,17 @@ export class ChatPool {
       this.browser = undefined;
       this.workers = [];
       // Waiting requests re-acquire on a fresh browser (their waiters are
-      // re-triggered through acquire()).
+      // re-triggered through acquire()). GOAL 83: the waiter carries its reject
+      // handle, so a failed re-acquire is settled with the NAMED cause instead
+      // of being swallowed by `() => undefined` (which left the request
+      // pending forever).
       const waiters = this.waiters;
       this.waiters = [];
-      for (const { siteId, resolve } of waiters) {
-        void this.acquire(siteId).then(resolve, () => undefined);
+      for (const waiter of waiters) {
+        void this.acquire(waiter.siteId).then(
+          (w) => waiter.resolve(w),
+          (e) => this.settleWaiter(waiter, e instanceof Error ? e : new Error(String(e)))
+        );
       }
     }
   }
@@ -263,9 +376,17 @@ export class ChatPool {
 
   private drain(siteId: string): void {
     const waiting = this.waiters.shift();
-    if (waiting) {
-      void this.acquire(siteId).then(waiting.resolve, () => undefined);
-    }
+    if (!waiting || waiting.settled) return;
+    // A page was discarded: serve the head waiter with a fresh one. GOAL 83:
+    // BOTH outcomes settle the waiter — success hands it the page, failure
+    // rejects it with the NAMED cause. The old `() => undefined` rejection
+    // handler dropped the error on the floor and left the request pending
+    // forever; if the re-acquire itself parks, the waiter's own queue deadline
+    // still applies, so nothing stays unbounded.
+    void this.acquire(siteId).then(
+      (w) => waiting.resolve(w),
+      (e) => this.settleWaiter(waiting, e instanceof Error ? e : new Error(String(e)))
+    );
   }
 
   get status(): PoolStatus {
@@ -289,6 +410,8 @@ export class ChatPool {
       busy,
       total: this.workers.length,
       max: this.max,
+      queued: this.waiters.length,
+      maxWaiters: this.maxWaiters,
       perSite,
     };
   }
@@ -297,8 +420,18 @@ export class ChatPool {
     return this.workers.length;
   }
 
+  /* GOAL 83: how many requests are parked right now (0 after a close — nothing
+     is left waiting on a promise that will never settle). */
+  get queued(): number {
+    return this.waiters.length;
+  }
+
   async close(): Promise<void> {
-    this.waiters = [];
+    // Shutdown settles EVERY queued waiter with a named cause before the
+    // browser goes away. Never `this.waiters = []` (a silent drop: the parked
+    // acquire() promises had no reject, so the awaiting HTTP handlers never
+    // answered and their sockets kept server.close() waiting forever).
+    this.settleAllWaiters("pool closed (daemon shutdown)");
     // In attach mode the browser is the operator's own Chrome: the daemon must
     // never close/kill it. Only the pool's own tabs (workers) are closed; the
     // stand-by pages quietly close as the daemon goes down.

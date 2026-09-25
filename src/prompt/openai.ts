@@ -39,9 +39,19 @@ export interface OpenAIOptions {
 const PREFIX = "ui2api/";
 
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
+  // GOAL 83: answer at most once. The daemon's aggregate deadline answers an
+  // over-deadline /v1 request with a named 504 while this route's browser work
+  // is still in flight; when that work finally settles, this guard makes the
+  // late answer a no-op instead of a second write on a finished response. The
+  // happy-path bytes are unchanged.
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   const body = JSON.stringify(data);
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(body);
+  try {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(body);
+  } catch {
+    // socket already gone (client hung up / shutdown destroyed it)
+  }
 }
 
 // profilesById is the daemon's configured allow-list; a site that is not

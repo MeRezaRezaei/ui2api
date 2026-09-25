@@ -85,12 +85,57 @@ export interface PromptdOptions {
   profiles?: ChatSiteProfile[] | { [id: string]: ChatSiteProfile };
   min?: number;
   max?: number;
+  /* GOAL 83 — aggregate deadline for the WORK routes (POST /prompt,
+     POST /capability/<site>, POST /v1/chat/completions). Over it the daemon
+     answers a NAMED 504 instead of holding the socket open forever. Env:
+     UI2API_REQUEST_TIMEOUT_MS. */
+  requestTimeoutMs?: number;
+  /* GOAL 83 — how long close() waits for in-flight requests before destroying
+     whatever is still open, so a wedged request can never make the daemon
+     un-stoppable. Env: UI2API_SHUTDOWN_GRACE_MS. */
+  shutdownGraceMs?: number;
 }
 
 export interface PromptdServer {
   server: Server;
   port: number;
   close(): Promise<void>;
+}
+
+/* GOAL 83 defaults.
+ *
+ * `REQUEST_TIMEOUT_MS` = 300s sits comfortably ABOVE the real worst case of one
+ * legitimate round-trip: page.goto 60s (driver.ts) + the profile's captureMs,
+ * whose packaged maximum is 120s, i.e. ~180s of work, plus pool-queue time and
+ * a realProfileOnly browser respawn (pool.spawn retries once with a fresh
+ * Chrome, another goto). 180s would have been exactly the measured worst case
+ * with ZERO headroom; 300s never cuts a legitimate 90s capture (the flagship
+ * chat profiles' captureMs) and still bounds a wedged request.
+ *
+ * `SHUTDOWN_GRACE_MS` = 15s is how long close() waits for in-flight requests
+ * before destroying the sockets: long enough for a normal request to finish
+ * answering, short enough that a stopped daemon stops. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 300_000;
+const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
+
+function envMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+}
+
+function resolveRequestTimeoutMs(explicit?: number): number {
+  if (Number.isFinite(explicit) && (explicit as number) > 0) return Math.floor(explicit as number);
+  return envMs("UI2API_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_TIMEOUT_MS);
+}
+
+// GOAL 83: the routes that drive a browser get the aggregate deadline. Every
+// other route is a local read (models/sites/status/accounts/registry/
+// requirements/health) that finishes in milliseconds — including the GOAL 81
+// terminal 404 fallbacks, which must keep answering exactly as they do.
+function isWorkRoute(req: IncomingMessage): boolean {
+  if (req.method !== "POST") return false;
+  const url = req.url ?? "";
+  return url === "/prompt" || url.startsWith("/capability/") || url.startsWith("/v1/chat/completions");
 }
 
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -117,10 +162,33 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-function send(res: ServerResponse, status: number, data: unknown): void {
+// Write one JSON response, at most once per request. GOAL 83: a work route that
+// trips the aggregate deadline has ALREADY been answered with the named 504
+// while its browser call is still in flight (a Playwright call cannot be
+// cancelled mid-flight). When that call finally settles, the handler tries to
+// answer as usual — the guard below makes that a no-op instead of a second
+// write on a finished response (which would throw ERR_HTTP_HEADERS_SENT), so
+// the response is written EXACTLY once either way.
+function send(res: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}): void {
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   const payload = JSON.stringify(data, null, 2);
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(payload) });
-  res.end(payload);
+  try {
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(payload), ...headers });
+    res.end(payload);
+  } catch {
+    // socket already gone (client hung up / shutdown destroyed it)
+  }
+}
+
+// A pool refusal is not a server fault: the queue is full, a page never freed
+// in time, or the daemon is shutting down. Answer 503 with a stable code AND
+// the named cause, so a client can tell "come back later" from "this is
+// broken" — never a bare 500 with no reason.
+function poolRefusal(message: string): { code: string } | null {
+  if (/^pool saturated /.test(message)) return { code: "pool_saturated" };
+  if (/^pool queue timeout /.test(message)) return { code: "pool_queue_timeout" };
+  if (/^pool closed /.test(message)) return { code: "pool_closed" };
+  return null;
 }
 
 // Resolve a site id from the request. Accept only built-in ids or the ids of
@@ -207,7 +275,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
   // down), keep going — requests will open pages on demand.
   await pool.warm().catch(() => undefined);
 
-  const server = createServer(async (req, res) => {
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (token && req.headers.authorization !== `Bearer ${token}`) {
         return send(res, 401, { error: "unauthorized" });
@@ -1401,10 +1469,64 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
 
       send(res, 404, { error: "not found" });
     } catch (e) {
+      // GOAL 83: a pool refusal (queue full / page never freed in time /
+      // shutdown) answers 503 with a stable code + the NAMED cause, so a client
+      // can retry instead of reading a bare server fault.
+      const msg = e instanceof Error ? e.message : String(e);
+      const refusal = poolRefusal(msg);
+      if (refusal) {
+        return send(res, 503, { error: { code: refusal.code, message: msg } });
+      }
       // 400 for request-shape/identity errors the caller can correct: unknown
       // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
       send(res, e instanceof Error && /unknown site |no stored account |is installed and serves POST \/capability\//.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
     }
+  };
+
+  // The work-route deadline. `requestTimeout: 0` disables Node's OWN 5-minute
+  // request timeout: it would kill a long round-trip with an unnamed socket
+  // destroy, so the daemon's own deadline below is the single authority and
+  // every over-deadline answer is the NAMED shape
+  // {error:{code:"request_timeout", message:"request timeout after Nms ..."}}.
+  const requestTimeoutMs = resolveRequestTimeoutMs(opts.requestTimeoutMs);
+  const server = createServer({ requestTimeout: 0 }, (req, res) => {
+    // The routed work; every failure path inside it already answers (the
+    // handler's own catch), so this never rejects in practice — the catch here
+    // is the last-resort net.
+    const work = handleRequest(req, res).catch((e) => {
+      send(res, 500, { error: e instanceof Error ? e.message : String(e) });
+    });
+    if (!isWorkRoute(req)) {
+      void work;
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<"deadline">((resolve) => {
+      timer = setTimeout(() => resolve("deadline"), requestTimeoutMs);
+      timer.unref?.();
+    });
+    void Promise.race([work.then(() => "done" as const, () => "done" as const), deadline]).then((winner) => {
+      if (timer) clearTimeout(timer);
+      if (winner !== "deadline") return;
+      // The browser call cannot be cancelled mid-flight, so it keeps running in
+      // the background and the pool is still released by its own handler — but
+      // the client gets a NAMED 504 now, and `send`'s guard means the late
+      // handler cannot write a second response. `connection: close` because the
+      // abandoned request body leaves that socket unusable for keep-alive.
+      send(
+        res,
+        504,
+        {
+          error: {
+            code: "request_timeout",
+            message:
+              `request timeout after ${requestTimeoutMs}ms on ${req.method} ${req.url} — ` +
+              "the browser work outlived the daemon's aggregate deadline; raise UI2API_REQUEST_TIMEOUT_MS to allow more",
+          },
+        },
+        { connection: "close" }
+      );
+    });
   });
 
   const host = opts.host ?? "127.0.0.1";
@@ -1413,11 +1535,35 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
     server.listen(opts.port, host, () => resolve());
   });
   const port = (server.address() as { port: number }).port;
+  const shutdownGraceMs =
+    Number.isFinite(opts.shutdownGraceMs) && (opts.shutdownGraceMs as number) > 0
+      ? Math.floor(opts.shutdownGraceMs as number)
+      : envMs("UI2API_SHUTDOWN_GRACE_MS", DEFAULT_SHUTDOWN_GRACE_MS);
   return {
     server,
     port,
     close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // Stop accepting new work. In-flight requests keep their sockets while
+      // they finish, but only for a bounded grace — after that whatever is
+      // still open is destroyed. Without this bound a wedged request (or one
+      // parked on a pool page) held the close promise open forever and SIGINT /
+      // SIGTERM could not stop promptd: the un-stoppable daemon. The pool's
+      // close() then settles every queued waiter with a named cause, so those
+      // handlers answer instead of hanging.
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+      // Idle keep-alive sockets are not in-flight work — close them now instead
+      // of waiting out their keep-alive timeout (a client that never asks again
+      // must not hold the daemon open for seconds).
+      server.closeIdleConnections();
+      const grace = setTimeout(() => {
+        server.closeAllConnections();
+      }, shutdownGraceMs);
+      grace.unref?.();
+      try {
+        await closed;
+      } finally {
+        clearTimeout(grace);
+      }
       await pool.close();
     },
   };
