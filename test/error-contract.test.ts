@@ -71,6 +71,7 @@ export function contractGaps(emitted: Emitted, documented: Emitted): string[] {
 }
 
 d("GOAL 91: the daemon's named error contract is documented and machine-pinned", () => {
+  t("the emitted set is measured from source and the shipped doc agrees both ways", () => {
   const emitted = measureEmitted();
   const documented = parseDocTable(README);
 
@@ -87,25 +88,28 @@ d("GOAL 91: the daemon's named error contract is documented and machine-pinned",
 
   // (3) THE CONTRACT: both directions, statuses included.
   assert.deepEqual(contractGaps(emitted, documented), [], "the shipped error contract and the source must agree");
+  });
 });
 
 d("negative: a doc that drops a code falls RED (the pin CAN fail)", () => {
-  const emitted = measureEmitted();
-  const full = parseDocTable(README);
-  assert.deepEqual(contractGaps(emitted, full), [], "precondition: the real doc is green");
+  t("a doc that drops a code, or invents one, is reported (the pin CAN fail)", () => {
+    const emitted = measureEmitted();
+    const full = parseDocTable(README);
+    assert.deepEqual(contractGaps(emitted, full), [], "precondition: the real doc is green");
 
-  // Drop one row from a scratch copy of the shipped table.
-  const scratch = README.replace(/^\|\s*503\s*\|\s*`pool_closed`\s*\|.*$/m, "");
-  const dropped = parseDocTable(scratch);
-  assert.equal(dropped.has("pool_closed"), false, "the scratch fixture really dropped the row");
+    // Drop one row from a scratch copy of the shipped table.
+    const scratch = README.replace(/^\|\s*503\s*\|\s*`pool_closed`\s*\|.*$/m, "");
+    const dropped = parseDocTable(scratch);
+    assert.equal(dropped.has("pool_closed"), false, "the scratch fixture really dropped the row");
 
-  const gaps = contractGaps(emitted, dropped);
-  assert.ok(gaps.some((g) => g.includes("pool_closed") && g.includes("documented nowhere")), `dropping a code must be reported, got ${JSON.stringify(gaps)}`);
+    const gaps = contractGaps(emitted, dropped);
+    assert.ok(gaps.some((g) => g.includes("pool_closed") && g.includes("documented nowhere")), `dropping a code must be reported, got ${JSON.stringify(gaps)}`);
 
-  // And a doc entry with no code behind it must fall RED too (the other direction).
-  const invented = parseDocTable(`${README}\n| 418 | \`teapot\` | nothing emits this | retry forever |\n`);
-  assert.ok(
-    contractGaps(emitted, invented).some((g) => g.includes("teapot") && g.includes("never emits")),
-    "an invented doc entry must be reported",
-  );
+    // And a doc entry with no code behind it must fall RED too (the other direction).
+    const invented = parseDocTable(`${README}\n| 418 | \`teapot\` | nothing emits this | retry forever |\n`);
+    assert.ok(
+      contractGaps(emitted, invented).some((g) => g.includes("teapot") && g.includes("never emits")),
+      "an invented doc entry must be reported",
+    );
+  });
 });
