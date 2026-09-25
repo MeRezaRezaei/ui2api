@@ -3,7 +3,7 @@
 // every other ui2api site (and ChatDriver).
 //
 // GOAL 19 — the user's flagship adoption pitch ("as working with gmail agent
-// without paying for google ai plan", docs/verbatim.md:313). NOT an AI chat
+// without paying for google ai plan", .brain/verbatim.md:313). NOT an AI chat
 // site: there is no composer→answer chat surface here — the surface is the
 // user's own inbox driven through gmail's own UI (read / list / open / search /
 // send).

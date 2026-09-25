@@ -243,7 +243,7 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `a[href*='/v/']`, h1 lands ~3.5s before desc/related.
 
 - **Full-surface audit fold #17f (2026-09-22, done)** — per-site status after
-  double-check + code-audit (details in `docs/verbatim-goals.md` GOAL 6):
+  double-check + code-audit (details in `.brain/verbatim-goals.md` GOAL 6):
   - **WORKS LIVE (re-verified this fold through the wire/attach)**: `gemini`
     (vault, PONG), `deepseek` (vault, PONG), `kimi` (vault, PONG),
     `tencent-aistudio` (headed .tencent.ai cookie session — the refreshed

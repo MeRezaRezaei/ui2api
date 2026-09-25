@@ -1,6 +1,6 @@
 # Gmail (mail.google.com) — capability surface
 
-> MISSION (docs/verbatim.md:313): "as working with gmail agent without paying
+> MISSION (.brain/verbatim.md:313): "as working with gmail agent without paying
 > for google ai plan" — mail.google.com buttons and abilities callable as API.
 > The user's flagship adoption pitch. Everything here is HONEST: capabilities
 > are listed only where gmail's own UI genuinely has them; NOTHING is claimed

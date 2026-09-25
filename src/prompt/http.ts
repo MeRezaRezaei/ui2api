@@ -751,7 +751,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
       // Gmail capability surface — the user's flagship adoption pitch
-      // (docs/verbatim.md:313): mail.google.com abilities callable as API.
+      // (.brain/verbatim.md:313): mail.google.com abilities callable as API.
       // NOT a chat site — no ChatDriver. GOAL 19 static wire analysis
       // (2026-09-23): mail.google.com is 100% auth-walled (every path 302s to
       // accounts.google.com/ServiceLogin), so every runner selector is

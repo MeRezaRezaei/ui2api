@@ -2,7 +2,7 @@
 // The flagship chat site had ZERO file/image attach surface (manifest listed
 // only chat/list_conversations/model_list/search_toggle) while the verbatim's
 // final-success list explicitly demands "send files vision ... end to end"
-// (docs/verbatim.md:1753/:1862) and kimi/duckduckgo already carry LIVE-VERIFIED
+// (.brain/verbatim.md:1753/:1862) and kimi/duckduckgo already carry LIVE-VERIFIED
 // file_upload capabilities. These pins assert the WIRING + SHAPE only — the
 // upload round-trip itself stays an honest unverified-candidate until a live
 // signed-in run (Google auth cookies are browser-bound; nothing fabricated).

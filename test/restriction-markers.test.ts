@@ -1,7 +1,7 @@
 // GOAL 54 (2026-09-25): restriction-marker coverage gate for builtin chat
 // profiles — node-only pins.
 //
-// Verbatim ask (docs/verbatim.md:1570): "all users does not have the same
+// Verbatim ask (.brain/verbatim.md:1570): "all users does not have the same
 // abiltiy as others ... the gemini itself someone has pro some noe not and the
 // work i dont know if it can spot the restrcition message if ter use or
 // selecting model or ablities of model the same thing is for kimi or hy3".

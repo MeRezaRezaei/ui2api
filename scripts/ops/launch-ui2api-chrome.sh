@@ -1,6 +1,6 @@
 #!/bin/bash
 # Corrected launcher: long-lived headed Chrome AS the ui2api OS user (verbatim 1495/1897,
-# docs/verbatim.md 1115: "Long-lived Chrome as ui2api user, debug port 9222").
+# .brain/verbatim.md 1115: "Long-lived Chrome as ui2api user, debug port 9222").
 # Never the `me` user's Chrome, never :20/:10 displays.
 set -u
 # Parametrized: the OS user to run Chrome as, and the profile dir to use.

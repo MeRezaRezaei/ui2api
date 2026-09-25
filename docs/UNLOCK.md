@@ -3,7 +3,7 @@
 > One page for the capabilities ui2api cannot unlock by itself. Every blocker
 > below is **measured** (a live probe recorded it — see the per-site
 > `capabilities/<site>/CAPABILITIES.md` for the raw evidence, and GOALs
-> 4/15/19/21 in `docs/verbatim-goals.md`). Nothing here is invented, and no
+> 4/15/19/21 in `.brain/verbatim-goals.md`). Nothing here is invented, and no
 > capability is declared unblocked until a **real round-trip answers `ok:true`**
 > on your machine. When the honest answer is "no unblock exists", this page says
 > so plainly instead of promising a trick that cannot work.
@@ -187,4 +187,4 @@ fits it. Two rows have **no unblock** — say so loudly.
 - Per-site detail (the full two-step + raw evidence):
   `capabilities/{gmail,google-ai-search,youtube,gemini,kimi,tencent-aistudio}/CAPABILITIES.md`.
 - Full per-site inventory: `capabilities/README.md`.
-- Nearest-to-production truth: `docs/verbatim-goals.md` GOALs 4, 15, 19, 21.
+- Nearest-to-production truth: `.brain/verbatim-goals.md` GOALs 4, 15, 19, 21.
