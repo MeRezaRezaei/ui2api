@@ -312,7 +312,13 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   shape, plus an explicit `send` shape check) — a typo'd key or wrong-typed
   composer/answer/send entry fails LOUD at load, naming the file and the exact
   offending field/entry (never a silent drop → late "no composer found"
-  timeout, answer-join TypeError, or Enter-press send fallback).
+  timeout, answer-join TypeError, or Enter-press send fallback). Installed
+  `capabilities/<id>/profile.json` runs the same gate on the packaged running
+  seam (CLI packaged id + `/capability` fallbacks, GOAL 48) — a wrong-typed or
+  unparseable entry fails LOUD at serve time, naming the file + exact
+  field/entry (never a late `answer.join` TypeError inside a runner); well-typed
+  empty/absent/host-keyed-object fields (capability-only packages, chatglm)
+  keep resolving.
 - **When adding a site**: analyze (static bundles + wire) → package under
   `capabilities/<id>/` (manifest/profile/recipes/session.lock/CAPABILITIES.md +
   `metadata.json`) → builtin profile entry → runner in `src/capabilities/` →
