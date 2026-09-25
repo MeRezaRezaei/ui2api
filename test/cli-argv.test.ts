@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { firstNonFlagArg, importIdentityArg, promptTextArg, requirementsSiteArg } from "../src/cli.js";
+import { addAllModeArg, declaredAuthorUse, firstNonFlagArg, HELP_LINES, importIdentityArg, promptTextArg, requirementsSiteArg } from "../src/cli.js";
 
 test("GOAL 44: prompt positional-first works — text before a flag is the text", () => {
   assert.equal(promptTextArg(["prompt", "hello", "--json"]), "hello");
@@ -112,4 +112,142 @@ test("GOAL 80: docs<->code contract — the ONBOARDING copy-paste command's flag
     onboarding.includes("profile import <host> [--identity|--account email]"),
     "the ONBOARDING quoted scan output matches the corrected runtime hint",
   );
+});
+// --- GOAL 85: `profile add-all --interactive` was advertised at SIX sites
+// (README:432, AGENTS:79, ONBOARDING:94, ONBOARDING:119's quoted "real
+// output", the cli.ts scan hint, the cli.ts usage throw) and read NOWHERE —
+// cmdProfileAddAll read only dataDir/identity/identityPrefix/known, and the
+// selection branch was `if (flags.known) … else …`, so the flag was INERT and
+// `--known --interactive` silently took the --known branch, INVERTING the
+// documented "checkbox-pick exactly which hosts to import". The flag is now
+// real, and the contradiction REFUSES (named, nonzero exit) instead of being
+// swallowed. ---
+
+test("GOAL 85: addAllModeArg — bare / --interactive = checkbox pick, --known = bulk import", () => {
+  assert.equal(addAllModeArg({} as never), "interactive");
+  assert.equal(addAllModeArg({ known: false, interactive: false } as never), "interactive");
+  assert.equal(addAllModeArg({ interactive: true } as never), "interactive");
+  assert.equal(addAllModeArg({ known: true } as never), "known");
+});
+
+test("GOAL 85: THE silent swallow pinned — --known --interactive REFUSES and the message names BOTH flags", () => {
+  assert.throws(
+    () => addAllModeArg({ known: true, interactive: true } as never),
+    (e: unknown) => {
+      const msg = (e as Error).message;
+      assert.match(msg, /cannot combine --known and --interactive/);
+      assert.match(msg, /--known/, "the refusal must name --known");
+      assert.match(msg, /--interactive/, "the refusal must name --interactive");
+      assert.match(msg, /bulk import vs checkbox pick/, "the refusal must name what each flag would have meant");
+      return true;
+    },
+  );
+});
+
+test("GOAL 85: cmdProfileAddAll READS the mode (--interactive is no longer inert) and the branch honors it", () => {
+  const cli = readFileSync("src/cli.ts", "utf8");
+  const start = cli.indexOf("async function cmdProfileAddAll");
+  const body = cli.slice(start, cli.indexOf("async function cmdProfileCapabilities", start));
+  assert.ok(start > 0 && body.length > 0, "cmdProfileAddAll body located");
+  // The body consumes the RESOLVED mode, and the branch keys on it (not on a raw
+  // `flags.known` read — the old shape is what made --interactive inert).
+  assert.match(body, /const mode = addAllModeArg\(flags\);/);
+  assert.match(body, /if \(mode === "known"\)/);
+  assert.ok(!/if \(flags\.known\)/.test(body), "the raw `if (flags.known)` branch is gone — the mode decides");
+  // The decision itself reads BOTH flags — the flag is live, not decorative.
+  const hStart = cli.indexOf("export function addAllModeArg");
+  const helper = cli.slice(hStart, hStart + 600);
+  assert.match(helper, /flags\.known && flags\.interactive/);
+  assert.match(helper, /return flags\.known \? "known" : "interactive";/);
+  // A contradictory pair refuses BEFORE any OS profile scan — nothing is touched.
+  assert.ok(
+    body.indexOf("addAllModeArg(flags)") < body.indexOf("findAllChromeProfilesOnOs"),
+    "the --known/--interactive refusal must precede the profile scan",
+  );
+});
+
+test("GOAL 85: docs<->code contract — every --interactive advertising site names a flag the add-all path READS", () => {
+  const cli = readFileSync("src/cli.ts", "utf8");
+  // The tokens the sites use are the tokens the parser maps onto the two
+  // properties addAllModeArg reads (no doc can drift onto a dead spelling).
+  assert.match(cli, /if \(argv\[i\] === "--interactive"\) f\.interactive = true;/);
+  assert.match(cli, /if \(argv\[i\] === "--known"\) f\.known = true;/);
+  const hStart = cli.indexOf("export function addAllModeArg");
+  const helper = cli.slice(hStart, hStart + 600);
+  assert.match(helper, /flags\.interactive/);
+  assert.match(helper, /flags\.known/);
+  // The five documentation surfaces (AGENTS.md is another agent's file, but its
+  // wording must stay TRUE — it is asserted, not edited).
+  const sites: Array<[string, string]> = [
+    ["README.md", "profile add-all --interactive"],
+    ["AGENTS.md", "profile add-all [--known|--interactive]"],
+    ["docs/ONBOARDING.md", "profile add-all --interactive"],
+  ];
+  for (const [file, needle] of sites) {
+    const text = readFileSync(file, "utf8");
+    assert.ok(text.includes(needle), `${file} must still show \`${needle}\``);
+    assert.ok(
+      text.includes("--known"),
+      `${file} shows --interactive without the --known it is exclusive with`,
+    );
+  }
+  // The two runtime surfaces a user actually lands on.
+  assert.ok(
+    cli.includes("ui2api profile add-all [--known|--interactive]"),
+    "the scan hint still names both modes",
+  );
+  assert.ok(
+    cli.includes("add-all [--known|--interactive] [--identity-prefix STR]"),
+    "the profile usage throw still names both modes",
+  );
+  // No doc promises the old silent swallow: both copy-paste sites state the refusal.
+  assert.match(readFileSync("README.md", "utf8"), /cannot be combined/);
+  assert.match(readFileSync("docs/ONBOARDING.md", "utf8"), /mutually exclusive/);
+});
+
+test("GOAL 85: docs<->code contract — ONBOARDING's quoted \"real output\" is what the scan hint actually prints", () => {
+  const cli = readFileSync("src/cli.ts", "utf8");
+  const printed = "[ui2api] tip: add ALL known hosts in one step →  ui2api profile add-all [--known|--interactive]";
+  assert.ok(
+    cli.includes(`console.log("${printed}");`),
+    "the scan hint must stay byte-stable — ONBOARDING quotes this exact line",
+  );
+  assert.ok(
+    readFileSync("docs/ONBOARDING.md", "utf8").includes(printed),
+    "ONBOARDING's quoted real output must equal the printed hint",
+  );
+});
+
+test("GOAL 85 (a): --author/--use are WIRED — the package path reads them and the refusal carries the declaration", () => {
+  // No declared values ⇒ no extra text on the refusal (unchanged verdict).
+  assert.equal(declaredAuthorUse({} as never), "");
+  const both = declaredAuthorUse({ author: "alice", use: "My own account" } as never);
+  assert.match(both, /author="alice"/);
+  assert.match(both, /authorized-use="My own account"/);
+  assert.match(both, /capabilities\/<id>\/manifest\.json/, "the verdict names where a real package declares them");
+  const cli = readFileSync("src/cli.ts", "utf8");
+  // The package path CONSUMES it — the flag is no longer parsed-then-dropped.
+  assert.match(cli, /throw new Error\(packageCommandRefusal\(host, root\) \+ declaredAuthorUse\(flags\)\);/);
+  // The parser still teaches both flags, and the usage throw still names them
+  // — truthfully now, because the package path reads them.
+  assert.match(cli, /if \(argv\[i\] === "--author"\) f\.author = argv\[\+\+i\];/);
+  assert.match(cli, /if \(argv\[i\] === "--use"\) f\.use = argv\[\+\+i\];/);
+  assert.match(cli, /usage: ui2api package <host> \[--author NAME --use 'authorized-use statement'\]/);
+  // GOAL 67's honest-help pin still holds: the help block refuses the command
+  // and never advertises a working --author invocation.
+  const pkgLine = HELP_LINES.find((l) => l.includes("ui2api package"));
+  assert.ok(pkgLine && pkgLine.includes("REFUSED"), "help must still mark ui2api package REFUSED");
+  assert.ok(!pkgLine!.includes("--author"), "help must not advertise a working --author invocation");
+});
+
+test("GOAL 85 (3): --trust is DISCOVERABLE — the serve help line documents the gate cmdServe already enforces", () => {
+  const serveLine = HELP_LINES.find((l) => l.includes("ui2api serve"));
+  assert.ok(serveLine, "help must still list ui2api serve");
+  assert.match(serveLine!, /--trust/, "the only gate flag a user could not find from help is now in the help");
+  const cli = readFileSync("src/cli.ts", "utf8");
+  assert.match(
+    cli,
+    /if \(!map\.trusted && !flags\.trust\) throw new Error\("action-map is untrusted — review it and re-run with --trust"\);/,
+  );
+  assert.match(cli, /if \(argv\[i\] === "--trust"\) f\.trust = true;/);
 });

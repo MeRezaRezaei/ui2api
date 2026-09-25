@@ -429,7 +429,8 @@ there, and lets you import the ones you want into the identity-keyed vault.
 ```bash
 # THE recommended first login: every known site session, read-back verified
 npx tsx src/cli.ts profile add-all --known        # non-interactive bulk import
-npx tsx src/cli.ts profile add-all --interactive  # checkbox-pick which hosts to import
+npx tsx src/cli.ts profile add-all --interactive  # checkbox-pick which hosts to import (the default; bare = same)
+# --known and --interactive cannot be combined — the CLI refuses and names both.
 
 # Or target one host explicitly:
 npx tsx src/cli.ts profile scan      # every site in every Chrome profile on the OS

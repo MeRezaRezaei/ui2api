@@ -36,7 +36,7 @@ export const HELP_LINES: readonly string[] = [
   "UI2API — turn any website into MCP tools for AI\n",
   "  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]",
   "  ui2api generate <host>  [--out DIR]",
-  "  ui2api serve    <host>  [--out DIR] [--engine native|wigolo]  (wigolo = drive the browser side through a local wigolo daemon)",
+  "  ui2api serve    <host>  [--out DIR] [--trust] [--engine native|wigolo]  (--trust = the explicit consent gate cmdServe demands before an untrusted action-map runs; wigolo = drive the browser side through a local wigolo daemon)",
   "  ui2api remap    <host>  [--out DIR]",
   "  ui2api package  <host>       (REFUSED — GOAL 66 write-truth: only knows the DEAD metadata+action-map pair nothing serves; package the modern way: ui2api analyse → capabilities/<id>/ with manifest.json + profile.json + session.lock.json + CAPABILITIES.md, then it is served by /registry + install)",
   "  ui2api install  <host>  [--registry URL] [--out DIR]  (install a site package from the community registry; default = master branch; --out = isolated, NOT served by the daemon)",
@@ -324,13 +324,36 @@ async function cmdServe(host: string, flags: Flags): Promise<void> {
   await (mod as any).runServer();
 }
 
+/**
+ * GOAL 85: `ui2api package --author NAME --use 'authorized-use statement'` is
+ * the wire shape a package submitter reaches for, and the runtime usage throw
+ * taught it — but NOTHING read the two flags, so the throw advertised a dead
+ * knob (the GOAL 80 defect). Resolution (a) — WIRED: the declared values are
+ * now read and echoed into the refusal/verdict, so what the user declared is
+ * never silently dropped, and the verdict names where a real package declares
+ * them (capabilities/<id>/manifest.json). Nothing is written either way — the
+ * GOAL 66 refusal stands; only the dead flag became live. Pure flag read.
+ */
+export function declaredAuthorUse(flags: Pick<Flags, "author" | "use">): string {
+  const parts: string[] = [];
+  if (flags.author) parts.push(`author="${flags.author}"`);
+  if (flags.use) parts.push(`authorized-use="${flags.use}"`);
+  if (parts.length === 0) return "";
+  return (
+    ` Declared on the command line: ${parts.join(", ")} — recorded in this verdict only;` +
+    ` a real capability package declares author/authorized-use in capabilities/<id>/manifest.json.`
+  );
+}
+
 async function cmdPackage(host: string, flags: Flags): Promise<void> {
   const root = sitesRoot(flags);
   // GOAL 66: the standalone packaging command refuses LOUD — buildPackage
   // writes the DEAD metadata+action-map pair into a dir nothing serves, and a
   // capture-level action-map cannot produce a modern capability package.
   // Nothing is written; the modern path is named (analyze → capabilities/<id>/).
-  throw new Error(packageCommandRefusal(host, root));
+  // GOAL 85: --author/--use are no longer dead knobs — their declared values
+  // ride along in the refusal instead of vanishing.
+  throw new Error(packageCommandRefusal(host, root) + declaredAuthorUse(flags));
 }
 
 async function cmdInstallCatalog(flags: Flags): Promise<void> {
@@ -953,13 +976,32 @@ async function cmdSmoke(flags: Flags): Promise<void> {
   process.exitCode = smokeExitCode(outcome);
 }
 
+// GOAL 85: `profile add-all` MODE selection — the checkbox pick vs the bulk
+// import. `--interactive` was advertised at six sites (README, AGENTS,
+// ONBOARDING ×2, the scan hint, the usage throw) and read NOWHERE, so the
+// branch was `if (flags.known) … else …`: bare == the checkbox pick, the flag
+// itself INERT, and `--known --interactive` silently took the --known branch —
+// inverting the documented "checkbox-pick exactly which hosts to import" with no
+// refusal and no warning. Now the flag is REAL and the contradiction REFUSES
+// (named, nonzero exit) instead of being swallowed. Pure flag read — no I/O, no
+// browser, directly unit-testable without spawning the CLI.
+export function addAllModeArg(flags: Pick<Flags, "known" | "interactive">): "known" | "interactive" {
+  if (flags.known && flags.interactive) {
+    throw new Error("cannot combine --known and --interactive (bulk import vs checkbox pick) — re-run with exactly one");
+  }
+  return flags.known ? "known" : "interactive";
+}
+
 // Import EVERY site session found in the OS's Chrome profiles into the vault in
 // ONE command — "a mother fucking command" (verbatim:1582). Scans all profiles,
-// lets the user pick from a checkbox list (interactive, default) or bulk-imports
-// every KNOWN host with no prompting (--known, the CI/bulk-demo path). Every
-// import is then READ BACK from the vault — snapshot on disk, account listed,
-// cookies/localStorage present — never an unverified "ok".
+// lets the user pick from a checkbox list (interactive: bare or --interactive)
+// or bulk-imports every KNOWN host with no prompting (--known, the CI/bulk-demo
+// path). Every import is then READ BACK from the vault — snapshot on disk,
+// account listed, cookies/localStorage present — never an unverified "ok".
 async function cmdProfileAddAll(flags: Flags): Promise<void> {
+  // GOAL 85: the mode is decided (and a contradictory flag pair refused) BEFORE
+  // any OS profile scan runs — a refused invocation costs nothing.
+  const mode = addAllModeArg(flags);
   const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
   const { findAllChromeProfilesOnOs, scanProfilesForSites, renderCheckboxList, importSiteSnapshot } = await import("./runtime/profile-scan.js");
   const { profiles, skipped } = findAllChromeProfilesOnOs();
@@ -984,9 +1026,12 @@ async function cmdProfileAddAll(flags: Flags): Promise<void> {
   }
   console.log("");
 
-  // Choose which hosts to import. --known = every KNOWN hit, no prompting.
+  // Choose which hosts to import. GOAL 85: the branch keys on the RESOLVED mode
+  // (addAllModeArg), not on a raw flag read — so --interactive really is the
+  // checkbox pick it is documented to be, and a contradictory pair already
+  // refused above.
   const chosen: (typeof index.hits)[number][] = [];
-  if (flags.known) {
+  if (mode === "known") {
     chosen.push(...index.hits.filter((h) => h.known));
     if (chosen.length === 0) {
       console.log(`[ui2api] --known: no KNOWN AI chat hosts found — nothing to import.`);
@@ -1207,7 +1252,7 @@ async function main(): Promise<void> {
       if (!arg) throw new Error("usage: ui2api remap <host> [--out DIR]");
       return cmdRemap(arg, flags);
     case "package":
-      if (!arg) throw new Error("usage: ui2api package <host> --author NAME --use 'authorized-use statement'");
+      if (!arg) throw new Error("usage: ui2api package <host> [--author NAME --use 'authorized-use statement']  (the command REFUSES — GOAL 66: it only knows the DEAD metadata+action-map pair; --author/--use are read and echoed in the refusal, a real package declares them in capabilities/<id>/manifest.json)");
       return cmdPackage(arg, flags);
     case "langgen":
       // Optional <host> targets one package; without it, every served package.

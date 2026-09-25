@@ -94,6 +94,11 @@ npx tsx src/cli.ts profile add-all --known        # non-interactive: every KNOWN
 npx tsx src/cli.ts profile add-all --interactive  # checkbox-pick exactly which hosts to import
 ```
 
+`--interactive` is the checkbox pick (bare `add-all` is the same path); `--known`
+is the bulk import. They are mutually exclusive — `add-all --known --interactive`
+refuses with a named error and a nonzero exit rather than quietly doing the
+`--known` bulk import.
+
 Real output shape (live run 2026-09-22): a per-account read-back verdict
 table — `imported` (snapshot on disk, account listed, cookies/localStorage
 present), `decrypt-limited (portal v20)` (e.g. chatgpt.com app-bound
