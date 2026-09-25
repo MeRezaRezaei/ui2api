@@ -485,7 +485,11 @@ export function resolveProfile(idOrPath?: string): ChatSiteProfile {
   // the driver cannot drive.
   const packagedFile = packagedProfilePath(value);
   if (packagedFile) {
-    const packaged = resolvePackagedProfileFile(packagedFile);
+    // GOAL 64: packaged-profile id agreement at the CLI branch too — the file
+    // must declare the id it was resolved as (resolveProfile("kimi") only
+    // accepts capabilities/kimi/profile.json whose "id" is kimi; a mismatch
+    // fails LOUD naming both sides, never a silent wrong-base tune).
+    const packaged = resolvePackagedProfileFile(packagedFile, value);
     if (isChatShapedProfile(packaged)) return packaged;
   }
   throw new Error(
@@ -930,10 +934,28 @@ function packagedProfilePath(siteId: string): string | null {
  * this throws on missing/corrupt files (same caller contract resolveProfile
  * had).
  */
-export function resolvePackagedProfileFile(file: string): ChatSiteProfile {
+export function resolvePackagedProfileFile(file: string, expectedId?: string): ChatSiteProfile {
   const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ChatSiteProfile> &
     Record<string, unknown>;
   if (!raw.id) throw new Error(`profile file ${file} must carry an "id"`);
+  // GOAL 64: packaged-profile id AGREEMENT — when the caller knows which
+  // package this file belongs to (resolvePackagedProfile passes the package
+  // dir id; resolveProfile's packaged branch and the http.ts /capability
+  // fallbacks pass the requested site id), a file whose "id" differs is a
+  // copied-from-another-package tuning doc: mergeProfileFile would apply the
+  // WRONG builtin base (BUILTIN_PROFILES[raw.id] — the other site's
+  // composer/answer selectors against THIS package's page) and the profile
+  // would self-identify as the wrong site. Fail LOUD naming both sides,
+  // before the merge — the GOAL 62 override-seam contract applied to the
+  // packaged running seam (GOAL 48/56 family). Opt-in: seams that know the
+  // package identity pass it; legacy callers without one are unchanged (the
+  // gate is never derived from an arbitrary file path).
+  if (typeof expectedId === "string" && expectedId !== raw.id) {
+    throw new Error(
+      `profile file ${file} declares "id" "${raw.id}" but is resolved as package "${expectedId}" — ` +
+        `refusing to silently tune the wrong site (fix the file's "id" or move it under capabilities/${raw.id}/)`
+    );
+  }
   const merged = mergeProfileFile(file, raw);
   // GOAL 48 packaged running-seam gate (see validatePackagedProfileShape).
   validatePackagedProfileShape(file, merged);
@@ -1053,13 +1075,17 @@ export function isDriveableChatProfile(p: ChatSiteProfile): boolean {
  * profile is excluded from /registry exactly like an absent one (GOAL 48 —
  * a malformed package must never surface as a provider; the /capability
  * fallback seam + CLI packaged branch load the SAME file through the gated
- * loader and fail LOUD instead). Returns null when the packaged profile is
- * absent, unreadable, or fails the shape gate.
+ * loader and fail LOUD instead). The package dir id is passed as the file's
+ * expected id (GOAL 64): a profile.json declaring a DIFFERENT id than the
+ * package it lives in is treated like any other malformed install — excluded
+ * here (never surfaced, never merged against the wrong builtin base), refused
+ * LOUD by the /capability + CLI seams. Returns null when the packaged profile
+ * is absent, unreadable, or fails the shape/id gates.
  */
 export function resolvePackagedProfile(siteId: string): ChatSiteProfile | null {
   try {
     const file = packagedProfilePath(siteId);
-    return file ? resolvePackagedProfileFile(file) : null;
+    return file ? resolvePackagedProfileFile(file, siteId) : null;
   } catch {
     // Absent OR malformed — same exclusion for /registry + chat surface.
     return null;

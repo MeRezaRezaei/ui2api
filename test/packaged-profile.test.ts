@@ -203,7 +203,10 @@ describe("packaged-profile running seam (GOAL 48 gate)", () => {
       const path = join(CAPABILITIES_DIR, id, "profile.json");
       let p;
       try {
-        p = resolvePackagedProfileFile(path);
+        // GOAL 64: the audit ALSO enforces id agreement at the load seam —
+        // each shipped packaged profile must declare the id it is resolved as
+        // (validate-packages test C pins the same contract at the file level).
+        p = resolvePackagedProfileFile(path, id);
       } catch (e) {
         assert.fail(`${id}: packaged profile fails the GOAL 48 gate — ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -285,5 +288,52 @@ describe("packaged-profile running seam (GOAL 48 gate)", () => {
       },
     });
     assert.equal(resolvePackagedProfileFile(f).id, "x", "well-typed GOAL 55 capability block passes");
+  });
+
+  it("(g) GOAL 64: packaged-profile id AGREEMENT — a profile.json declaring a different id than the package it is resolved as refuses LOUD naming both sides, before any merge", () => {
+    // Twin of GOAL 62 on the packaged running seam: resolvePackagedProfile
+    // (siteId) + resolveProfile's packaged branch + all 32 http.ts
+    // /capability fallbacks now resolve the file AS the package-dir identity.
+    // A copied-from-another-package tuning doc (id mismatch) would previously
+    // merge BUILTIN_PROFILES[raw.id] — the WRONG site's composer/answer
+    // selectors against this package's page — and self-identify as the wrong
+    // site. The package dir is truth: a mismatched "id" is a
+    // malformed-install signature (same class validate-packages test C pins
+    // for shipped packages, now enforced at the load seam instead of only by
+    // the suite).
+    const base = {
+      id: "deepseek",
+      name: "DeepSeek",
+      url: "https://chat.deepseek.com",
+      composer: ["textarea"],
+      send: { kind: "keyEnter" },
+      answer: ["[class*=ds-markdown]"],
+    };
+    const f = writeJson(tmpDir(), "mismatch/profile.json", base);
+
+    // (g1) explicit expectedId — the seam resolvePackagedProfile / http.ts
+    // fallbacks pass: mismatched id fails LOUD naming file + BOTH ids.
+    const m = (() => {
+      try {
+        resolvePackagedProfileFile(f, "kimi");
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    })();
+    assert.ok(m, "expected a loud throw for the mismatched package id");
+    assert.ok(m.includes(f), `names the file: ${m}`);
+    assert.ok(m.includes('"deepseek"') && m.includes("kimi"), `names BOTH ids (declared + package): ${m}`);
+    assert.ok(/refusing to silently tune the wrong site/.test(m), `GOAL-62 message shape: ${m}`);
+
+    // (g2) agreement works — expectedId == declared id resolves normally.
+    const ok = resolvePackagedProfileFile(f, "deepseek");
+    assert.equal(ok.id, "deepseek");
+
+    // (g3) harness regression: NO expectedId (legacy callers, test fixtures)
+    // is unchanged — the gate is opt-in at the seams that know the package
+    // identity, never derived from an arbitrary file path (a flat
+    // <tmp>/profile.json with id "x" must keep resolving).
+    assert.equal(resolvePackagedProfileFile(f).id, "deepseek");
   });
 });
