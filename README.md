@@ -162,6 +162,14 @@ answer off the page. All in your own browser session.
 # failure (exit 1); installs the DuckDuckGo AI Chat package if it is missing.
 npx tsx src/cli.ts smoke
 
+# Machine-readable verdicts for your CI/setup scripts — same honest gate,
+# JSON output, the site token may come before OR after --json:
+npx tsx src/cli.ts smoke --json
+# {"ok":true,"site":"duckduckgo","answer":"SMOKE OK","ms":6926,
+#  "message":"smoke OK: duckduckgo answered \"SMOKE OK\" in 6926ms",
+#  "report":{"generatedAt":"...","node":"...","checks":[...],"packages":[...],"summary":{...}}}
+# exit 0 = ok; exit 1 = any named failure (OS gate, install seam, round-trip)
+
 # Zero-setup anonymous prompt — DuckDuckGo AI Chat (duck.ai) is the verified
 # anonymous path: headless-by-default (verified headed; headless may hit the
 # site's anti-bot wall), never login-gated
@@ -408,8 +416,18 @@ Every `add-all` row is read back from the vault and reported honestly —
 ```bash
 npx tsx src/cli.ts requirements            # alias: doctor — per-package verdict
 npx tsx src/cli.ts requirements gemini     # one site (exit nonzero on not-ready)
+npx tsx src/cli.ts requirements --json     # machine-readable (same honest gate,
+                                           #   same shape as GET /requirements);
+                                           #   `requirements gemini --json` and
+                                           #   `requirements --json gemini` scope
+                                           #   identically; exit 0 = all pass in
+                                           #   scope, exit 1 = named fail/not-ready
 curl http://127.0.0.1:9797/requirements    # same report from a running promptd
 ```
+
+JSON payload keys: `generatedAt`, `node`, `checks[]` (id/status/detail/reason),
+`packages[]` (id/url/verdict/reason + `vault.{capturedAt,ageDays,stale}` where a
+vault session exists), `summary {ready,working,on-hold,not-ready}`.
 
 Every check runs for real (Chrome binary + version via the launchBrowser
 ladder's execute-only probe, display/Xvfb, Playwright browser cache, the

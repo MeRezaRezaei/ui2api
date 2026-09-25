@@ -6,8 +6,10 @@
 // asserts the NAMED reason strings incl. every on-hold branch.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import type { StoredAccount } from "../src/runtime/session-store.js";
 import type { RegistryVerified } from "../src/prompt/registry.js";
+import { requirementsSiteArg } from "../src/cli.js";
 import {
   checkNodeVersion,
   checkRequirements,
@@ -713,4 +715,42 @@ test("GOAL 42: scoping to a non-ready site keeps the not-ready verdict + reason 
     // cmdRequirements maps this to exit 1: not-ready present in the scoped set.
     assert.equal(payload.packages.some((p: { verdict: string }) => p.verdict === "not-ready"), true);
   });
+});
+
+// --- GOAL 43: the requirements/doctor argv seam (arg-order silent scope-drop) ---
+// The pure helper reads the <site> positional flag-aware from the whole argv:
+// both arg orders must scope identically (measured: `requirements gemini
+// --json` → 1 package/exit 0 vs `requirements --json gemini` → full 33-package
+// report/exit 1 driven by unrelated dormant sites), a flag's VALUE is never
+// misread as a site, and the `--json`-as-site guard stays. No browser, no
+// network — pure argv parsing.
+
+test("GOAL 43: --json-only (or no flags) is not a site — the --json-as-site guard is preserved", () => {
+  assert.equal(requirementsSiteArg(["requirements"]), "");
+  assert.equal(requirementsSiteArg(["requirements", "--json"]), "");
+  assert.equal(requirementsSiteArg(["doctor", "--json"]), "");
+});
+
+test("GOAL 43: the site is honored regardless of position — before OR after --json (the silent scope-drop pinned)", () => {
+  assert.equal(requirementsSiteArg(["requirements", "gemini", "--json"]), "gemini");
+  assert.equal(requirementsSiteArg(["requirements", "--json", "gemini"]), "gemini");
+  assert.equal(requirementsSiteArg(["doctor", "--json", "deepseek"]), "deepseek");
+});
+
+test("GOAL 43: a value-taking flag's VALUE is never misread as the site (flag-value pairs skipped)", () => {
+  assert.equal(requirementsSiteArg(["requirements", "--data-dir", "/tmp/d", "--json", "gemini"]), "gemini");
+  assert.equal(requirementsSiteArg(["requirements", "--out", "/tmp/o", "gemini"]), "gemini");
+  // The token after a value-taking flag is skipped even when --json also sits
+  // before it; the FIRST non-flag token wins, so flag-VALUE pairs cannot leak.
+  assert.equal(requirementsSiteArg(["requirements", "--registry", "URL", "--out", "/tmp/o", "--json"]), "");
+});
+
+test("GOAL 43: the requirements/doctor dispatch consumes requirementsSiteArg from the whole argv (cli-anchor)", () => {
+  const cli = readFileSync("src/cli.ts", "utf8");
+  assert.match(cli, /return cmdRequirements\(requirementsSiteArg\(process\.argv\.slice\(2\)\), flags\);/);
+  assert.match(cli, /export function requirementsSiteArg\(argv: string\[\]\): string/);
+  assert.match(cli, /VALUE_TAKING_FLAGS\.has\(tok\)/);
+  // main() must not run when the module is imported (tests import the pure
+  // helper) — the entry guard keeps process.exit out of the test runner.
+  assert.match(cli, /if \(isCliEntry\(\)\)/);
 });

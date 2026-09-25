@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
@@ -103,6 +103,53 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--lang") f.lang = argv[++i];
   }
   return f;
+}
+
+// Flags that CONSUME the next argv token as their value (mirror parseFlags
+// above). requirementsSiteArg needs this so a flag's VALUE is never misread as
+// the <site> positional — e.g. `--data-dir /tmp/d` must not yield "/tmp/d".
+const VALUE_TAKING_FLAGS = new Set([
+  "--root",
+  "--out",
+  "--cookies",
+  "--max-tasks",
+  "--author",
+  "--use",
+  "--registry",
+  "--data-dir",
+  "--port",
+  "--registry-repo",
+  "--base-url",
+  "--engine",
+  "--site",
+  "--profile",
+  "--timeout-ms",
+  "--pool-min",
+  "--pool-max",
+  "--account",
+  "--identity",
+  "--identity-prefix",
+  "--model",
+  "--lang",
+]);
+
+// GOAL 43: the requirements/doctor <site> positional, read flag-aware from the
+// WHOLE command argv. `requirements --json gemini` and
+// `requirements gemini --json` scope IDENTICALLY — a site token is honored no
+// matter where it sits (the old positional-only dispatch silently dropped a
+// site that came after a flag: full 33-package report, exit 1 driven by
+// unrelated dormant sites, no error, no hint). Flags and their VALUES are
+// skipped (a flag-value token is never a site, the `--json`-as-site guard is
+// preserved), and no site token ⇒ "" = the full report — never a partial
+// verdict. argv[0] is the command itself ("requirements"/"doctor"). Pure: no
+// env, no I/O — directly unit-testable.
+export function requirementsSiteArg(argv: string[]): string {
+  for (let i = 1; i < argv.length; i++) {
+    const tok = argv[i];
+    if (!tok.startsWith("--")) return tok;
+    if (VALUE_TAKING_FLAGS.has(tok)) i++; // skip the flag's value token
+  }
+  return "";
 }
 
 function sitesRoot(flags: Flags): string {
@@ -1045,9 +1092,14 @@ async function main(): Promise<void> {
       return cmdPromptd(flags);
     case "requirements":
     case "doctor":
-      // <site> is optional — a leading-dash positional is a flag (e.g.
-      // `requirements --json`), never a site id.
-      return cmdRequirements(arg && !arg.startsWith("--") ? arg : "", flags);
+      // GOAL 43: <site> is read flag-aware from the WHOLE argv — so
+      // `requirements --json gemini` and `requirements gemini --json` scope
+      // identically (the old positional-only guard silently dropped a site
+      // that came after a flag: full 33-package report + a lying exit 1 from
+      // unrelated dormant sites). A leading-dash positional is still never a
+      // site (`--json`-as-site guard preserved); no site token ⇒ "" = the
+      // full report, and the exit code always matches the printed scope.
+      return cmdRequirements(requirementsSiteArg(process.argv.slice(2)), flags);
     case "smoke":
       return cmdSmoke(flags);
     case "proof":
@@ -1077,7 +1129,22 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  console.error("Error:", e.message);
-  process.exit(1);
-});
+// Run the CLI only when this module IS the entry point. Importing cli.ts from
+// a test pulls the pure helpers (requirementsSiteArg) without executing main()
+// — process.exit at the end of main() would otherwise kill the test runner.
+function isCliEntry(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(argv1);
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntry()) {
+  main().catch((e) => {
+    console.error("Error:", e.message);
+    process.exit(1);
+  });
+}

@@ -32,6 +32,11 @@ sees it.
 > set, and env-knob conflicts — printing each package's verdict
 > **ready / working / on-hold / not-ready** with the named reason. Never a
 > fabricated check and never a browser launch (execute-only probes).
+> Machine-readable for CI: `npx tsx src/cli.ts requirements --json` — same
+> report as JSON (`generatedAt/node/checks[]/packages[]/summary`; exit 0 =
+> all pass in scope, exit 1 = named fail/not-ready). The site token works
+> before OR after `--json` (`requirements gemini --json` = `requirements
+> --json gemini`).
 
 ## 3. The 30-second path (anonymous)
 
@@ -46,7 +51,11 @@ exit 1), ensures the anonymous DuckDuckGo AI Chat package is present
 (installing it via the registry seam if it is missing, and saying so), then
 does ONE real anonymous chat round-trip through the ChatDriver and prints
 `smoke OK: duckduckgo answered "<first line>" in Nms` (exit 0) or the named
-failure (exit 1). The same verified anonymous path directly:
+failure (exit 1). Machine-readable for CI: `npx tsx src/cli.ts smoke --json`
+emits `{ok, site, answer?, ms?, message, installedAnon?, report}` (the `report`
+carries the same `checks[]/packages[]/summary` as `requirements --json`,
+including vault `capturedAt/ageDays/stale`); exit 0 = ok, exit 1 = any named
+failure. The same verified anonymous path directly:
 
 ```
 npx tsx src/cli.ts prompt 'say hello' --site duckduckgo
