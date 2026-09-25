@@ -109,6 +109,10 @@ namespace Ui2api\\Map\\${phpClassName(siteId)};
  *
  * It never fabricates traffic and knows nothing about the site's internals:
  * the daemon reads the answer off the page and returns it.
+ *
+ * Both chat() and capability() accept an optional $account (a vault slug or
+ * identity from GET /accounts?site=, GOAL 52) — one user, several accounts,
+ * pick which one drives the request.
  */
 final class Ui2apiClient
 {
@@ -120,7 +124,7 @@ final class Ui2apiClient
     }
 
     /** Chat through the daemon's OpenAI-compatible surface. */
-    public function chat(string $model, array $messages, bool $stream = false, bool $newChat = false): array
+    public function chat(string $model, array $messages, bool $stream = false, bool $newChat = false, ?string $account = null): array
     {
         $payload = [
             'model' => $model,
@@ -128,6 +132,9 @@ final class Ui2apiClient
             'stream' => $stream,
             'new_chat' => $newChat,
         ];
+        if ($account !== null) {
+            $payload['account'] = $account;
+        }
         $data = $this->request('/v1/chat/completions', $payload);
         if (($data['choices'][0]['message']['content'] ?? null) !== null) {
             return $data['choices'][0]['message'];
@@ -136,12 +143,16 @@ final class Ui2apiClient
     }
 
     /** Run one non-chat capability (web_search, list_conversations, ...). */
-    public function capability(string $site, string $capability, array $args = []): mixed
+    public function capability(string $site, string $capability, array $args = [], ?string $account = null): mixed
     {
-        $data = $this->request('/capability/' . $site, [
+        $payload = [
             'capability' => $capability,
             'args' => $args,
-        ]);
+        ];
+        if ($account !== null) {
+            $payload['account'] = $account;
+        }
+        $data = $this->request('/capability/' . $site, $payload);
         if (($data['ok'] ?? false) === false) {
             throw new \\RuntimeException($data['error'] ?? 'ui2api capability failed');
         }

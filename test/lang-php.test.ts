@@ -138,3 +138,36 @@ d("generated php lints when php is available", () => {
     rmSync(out, { recursive: true, force: true });
   }
 });
+d("GOAL 52: the generated Ui2apiClient forwards an optional $account to both surfaces", () => {
+  const out = mkTmp();
+  try {
+    const dir = generatePhpMap(pkg, resolve(out, "deepseek"));
+    const clientSrc = readFileSync(resolve(dir, "src", "Ui2apiClient.php"), "utf8");
+    // chat(): optional trailing $account, forwarded into the /v1 payload.
+    assert.ok(
+      clientSrc.includes(
+        "public function chat(string $model, array $messages, bool $stream = false, bool $newChat = false, ?string $account = null): array"
+      ),
+      "chat() signature carries the optional account (GOAL 52)"
+    );
+    assert.ok(
+      clientSrc.includes("if ($account !== null) {\n            $payload['account'] = $account;\n        }"),
+      "chat() forwards account only when set (never sends empty-string account)"
+    );
+    // capability(): same optional trailing $account for /capability/<site>.
+    assert.ok(
+      clientSrc.includes(
+        "public function capability(string $site, string $capability, array $args = [], ?string $account = null): mixed"
+      ),
+      "capability() signature carries the optional account (GOAL 52)"
+    );
+    // The map's per-tool call sites keep working — the generated Map methods
+    // call chat()/capability() positionally; adding the trailing param is
+    // backward compatible (check the map source still calls both).
+    const mapSrc = readFileSync(resolve(dir, "src", "DeepseekMap.php"), "utf8");
+    assert.ok(mapSrc.includes("$this->client->chat('deepseek'"));
+    assert.ok(mapSrc.includes("$this->client->capability('deepseek', 'deepseek_web_search'"));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});

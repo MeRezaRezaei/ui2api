@@ -8,7 +8,7 @@ export interface PluginManifest {
 export interface ToolDefinition { name: string; description: string; inputSchema: Record<string, unknown>; }
 export type ToolHandler = (args: Record<string, unknown>, ctx: Ui2ApiContext) => Promise<unknown>;
 export interface Logger { info(m: string): void; warn(m: string): void; error(m: string): void; }
-export interface HubConfig { dataDir: string; registryUrl?: string; }
+export interface HubConfig { dataDir: string; registryUrl?: string; account?: string; }
 export interface AnalyseOpts { root?: string; outDir?: string; llm?: boolean; maxTasks?: number; }
 export interface AnalyseInfo { host: string; url: string; actionCount: number; }
 export interface PendingRequest { url: string; method: string; headers: Record<string, string>; body?: unknown; }

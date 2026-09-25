@@ -52,7 +52,7 @@ export async function loadPluginModule(a: string, b: Ui2ApiContext | HubConfig, 
   const mod = await import(a);
   const plugin: Ui2ApiPlugin = mod.default ?? mod.plugin;
   if (!plugin?.setup) throw new Error(`plugin at ${a} must export a default Ui2ApiPlugin with setup()`);
-  const ctx = createContext(config, { baseUrl });
+  const ctx = createContext(config, { baseUrl, account: config.account });
   plugin.setup(ctx);
   return { manifest: plugin.manifest, context: ctx, tools: ctx.tools, hooks: plugin.hooks || {} };
 }

@@ -414,10 +414,10 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
 }
 
 async function cmdPluginServe(modulePath: string, flags: Flags): Promise<void> {
-  if (!modulePath) throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR]");
+  if (!modulePath) throw new Error("usage: ui2api plugin serve <module.ts> [--base-url URL] [--data-dir DIR] [--account SLUG|EMAIL]");
   const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
   const baseUrl = flags.baseUrl ?? "https://example.com";
-  const loaded = await loadPluginModule(resolve(modulePath), { dataDir }, baseUrl);
+  const loaded = await loadPluginModule(resolve(modulePath), { dataDir, account: flags.account }, baseUrl);
   console.log(`[ui2api] serving plugin ${loaded.manifest?.name ?? modulePath} (${loaded.tools.size} tools) over MCP`);
   await servePlugin(loaded, { trust: true });
 }

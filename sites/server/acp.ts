@@ -6,7 +6,12 @@ import type { ActionMap, Action } from "/home/me/Documents/projects/ui2api/src/t
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8")) as ActionMap;
 const SITES_ROOT = "/home/me/Documents/projects/ui2api/sites";
-const session = new BrowserSession(map, SITES_ROOT);
+// GOAL 52: UI2API_ACCOUNT (a vault slug/identity) picks WHICH stored account
+// drives this generated server; UI2API_DATA_DIR points at the vault root.
+const session = new BrowserSession(map, SITES_ROOT, {
+  account: process.env.UI2API_ACCOUNT || undefined,
+  dataDir: process.env.UI2API_DATA_DIR || undefined,
+});
 
 function sanitize(v: unknown): string {
   try {

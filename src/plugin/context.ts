@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { launchBrowser, sessionPath, loadCookies, usingUserChrome, defaultSitesDir } from "../runtime/browser.js";
-import { injectSnapshot, loadSnapshot, loadAccountSnapshot, snapshotPath, listAccounts } from "../runtime/session-store.js";
+import { injectSnapshot, loadSnapshot, loadAccountSnapshot, snapshotPath, listAccounts, resolveStoredAccount } from "../runtime/session-store.js";
 import { makeDomPrimitives } from "../runtime/dom-primitives.js";
 import { sameOrigin } from "../runtime/ssrf.js";
 import { analyse } from "../analyzer/explore.js";
@@ -10,7 +10,7 @@ import type { Ui2ApiContext, HubConfig, Logger, ToolDefinition, ToolHandler, Ana
 
 export { createWigoloContext }; // re-exported so callers can pin an engine directly
 
-export interface ContextDeps { baseUrl: string; logger?: Logger; dataDir?: string; authRequired?: boolean; }
+export interface ContextDeps { baseUrl: string; logger?: Logger; dataDir?: string; authRequired?: boolean; account?: string; }
 type ToolEntry = { def: ToolDefinition; handler: ToolHandler };
 
 export type EngineName = "native" | "wigolo";
@@ -52,18 +52,38 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
     // though a real vault session is stored (flat state.json on this box).
     const host = new URL(deps.baseUrl).host;
     if (!usingUserChrome()) {
-      let snap = loadSnapshot(snapshotPath(dataDir, host));
-      if (!snap) {
-        // Fall back to the first stored vault account when no flat snapshot
-        // exists (identity-keyed vault is the bulk-import layout of record).
-        const accts = listAccounts(dataDir, host);
-        if (accts.length) snap = loadAccountSnapshot(dataDir, host, accts[0].slug);
-      }
-      if (snap) {
-        await injectSnapshot(ctx, snap);
+      // GOAL 52: an explicitly requested vault account wins — exact resolution
+      // (resolveStoredAccount: identity or canonical slug only, GOAL 51), never
+      // a silent accts[0]. A miss is a loud throw.
+      if (deps.account) {
+        const acct = resolveStoredAccount(dataDir, host, deps.account);
+        if (!acct) {
+          throw new Error(
+            `no stored account "${deps.account}" for "${host}" — run \`ui2api profile add-all --known\` or pick one from \`ui2api profiles ${host}\``
+          );
+        }
+        const snap = loadAccountSnapshot(dataDir, host, acct.slug);
+        if (snap) {
+          await injectSnapshot(ctx, snap);
+        } else {
+          throw new Error(
+            `vault account "${deps.account}" for "${host}" has no snapshot (${dataDir}/sessions/${host}/${acct.slug})`
+          );
+        }
       } else {
-        const cookies = loadCookies(sessionPath(dataDir, host));
-        if (cookies.length > 0) await ctx.addCookies(cookies as never[]);
+        let snap = loadSnapshot(snapshotPath(dataDir, host));
+        if (!snap) {
+          // Fall back to the first stored vault account when no flat snapshot
+          // exists (identity-keyed vault is the bulk-import layout of record).
+          const accts = listAccounts(dataDir, host);
+          if (accts.length) snap = loadAccountSnapshot(dataDir, host, accts[0].slug);
+        }
+        if (snap) {
+          await injectSnapshot(ctx, snap);
+        } else {
+          const cookies = loadCookies(sessionPath(dataDir, host));
+          if (cookies.length > 0) await ctx.addCookies(cookies as never[]);
+        }
       }
     }
     page = await ctx.newPage();

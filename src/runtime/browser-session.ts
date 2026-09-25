@@ -2,10 +2,38 @@ import { type Browser, type BrowserContext, type Page } from "playwright";
 import type { ActionMap, Action } from "../types.js";
 import { launchBrowser, sessionPath, defaultSitesDir } from "./browser.js";
 import { sameOrigin } from "./ssrf.js";
+import { resolveStoredAccount, loadAccountSnapshot, injectSnapshot } from "./session-store.js";
+import type { ProfileSnapshot, StoredAccount } from "./session-store.js";
 
 // Long-lived browser session per site. Loads the URL, keeps it authenticated,
 // and executes a generated tool's recipe — either by calling the real in-page
 // JS function (live-js) or by replaying the captured request (replay).
+export interface BrowserSessionOptions {
+  /** Vault account (slug or identity, GOAL 52) to drive the page. */
+  account?: string;
+  /** Data root holding the vault (default: env UI2API_DATA_DIR → "data"). */
+  dataDir?: string;
+}
+
+// GOAL 52 pure resolution core: an explicitly requested account resolves
+// EXACTLY (resolveStoredAccount: identity or canonical slug only, GOAL 51) to
+// its vault snapshot; undefined → null (caller falls back to the flat legacy
+// cookie file). Never a silent first-account or slug-folding fallback. The
+// caller throws on a null-for-requested-account (loud miss).
+export function resolveSessionAccountSnapshot(
+  dataDir: string,
+  host: string,
+  account: string | undefined
+): ProfileSnapshot | null {
+  if (!account) return null;
+  const acct = resolveStoredAccount(dataDir, host, account);
+  if (!acct) return null;
+  return loadAccountSnapshot(dataDir, host, acct.slug);
+}
+
+export { resolveStoredAccount };
+export type { StoredAccount };
+
 export class BrowserSession {
   private map: ActionMap;
   private browser!: Browser;
@@ -13,10 +41,14 @@ export class BrowserSession {
   private page!: Page;
   private started = false;
   private outDir: string;
+  private account?: string;
+  private dataDir?: string;
 
-  constructor(map: ActionMap, outDir: string = defaultSitesDir()) {
+  constructor(map: ActionMap, outDir: string = defaultSitesDir(), opts: BrowserSessionOptions = {}) {
     this.map = map;
     this.outDir = outDir;
+    this.account = opts.account;
+    this.dataDir = opts.dataDir ?? process.env.UI2API_DATA_DIR ?? "data";
   }
 
   async start(): Promise<void> {
@@ -54,6 +86,25 @@ export class BrowserSession {
 
   private async loadSession(): Promise<void> {
     if (!this.map.auth?.required) return;
+    // GOAL 52: an explicitly requested vault account wins — resolved EXACTLY
+    // (resolveStoredAccount: identity or canonical slug only, GOAL 51), never a
+    // silent first-account or folding fallback. A miss is a loud throw: a
+    // generated consumer must pick a REAL stored account or none, and "none"
+    // means the flat legacy cookie file below.
+    if (this.account) {
+      const host = this.map.host ?? new URL(this.map.url).host;
+      const snap = resolveSessionAccountSnapshot(this.dataDir!, host, this.account);
+      if (!snap) {
+        const acct = resolveStoredAccount(this.dataDir!, host, this.account);
+        throw new Error(
+          acct
+            ? `vault account "${this.account}" for "${host}" has no snapshot (${this.dataDir}/sessions/${host}/${acct.slug})`
+            : `no stored account "${this.account}" for "${host}" in vault ${this.dataDir}/sessions — run \`ui2api profile add-all --known\` or pick one from GET /accounts?site=`
+        );
+      }
+      await injectSnapshot(this.ctx, snap);
+      return;
+    }
     // Session cookies are stored at sites/<host>/.session/cookies.json (gitignored).
     try {
       const { readFileSync } = await import("node:fs");
