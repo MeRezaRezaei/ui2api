@@ -5,7 +5,11 @@
 //       NAMED failure + exit 1 — never a guessed verdict);
 //   (b) an anonymous driveable chat package must be present — the named
 //       candidate is duckduckgo (metadata.json VERIFIED 2026-09-23, full
-//       surface, "Anonymous site — never login-gated", headless-capable). If
+//       surface, "Anonymous site — never login-gated"). The smoke runs
+//       headless by default — the requirements gate in (a) governs that — but
+//       duckduckgo's verified round-trips are HEADED (Xvfb): headless may hit
+//       the site's anti-bot wall (anonymous code 02f8, CAPABILITIES.md), so the
+//       smoke never claims headless capability for it. If
 //       its package is not installed, the proven install-registry seam
 //       (installPackage — the same one `ui2api install <pkg>` uses) installs
 //       it and the CLI prints that it did;

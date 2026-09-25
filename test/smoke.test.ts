@@ -112,7 +112,7 @@ test("OS-fail -> exit 1 + named reason (never a guessed verdict)", async () => {
             {
               id: "display",
               status: "fail",
-              reason: "headless: playwright browser cache missing — run `npx playwright install chromium`",
+              reason: "headless: no usable Chrome executable (nothing the launchBrowser ladder resolves, or its --version probe failed) — install Chrome or run `npx playwright install chromium`",
             },
             {
               id: "browser-home",
@@ -124,7 +124,7 @@ test("OS-fail -> exit 1 + named reason (never a guessed verdict)", async () => {
     });
     assert.equal(outcome.ok, false);
     assert.match(outcome.message, /OS-level requirements not met/);
-    assert.match(outcome.message, /display: headless: playwright browser cache missing/);
+    assert.match(outcome.message, /display: headless: no usable Chrome executable/);
     assert.match(outcome.message, /browser-home: ui2api data dir not usable/);
     assert.equal(smokeExitCode(outcome), 1);
   });

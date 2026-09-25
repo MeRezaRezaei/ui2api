@@ -7,6 +7,9 @@
 //   - every check is EXECUTED for real (tests inject-and-assert instead of
 //     faking results); a check that cannot run reports not-ready + reason,
 //     never a guessed verdict;
+//   - every NAMED remedy the checker prints is verified to achieve its fix
+//     (GOAL 41 fold): a "run X" / "set Y" appears only when the checker itself
+//     honors that knob or command — a check never prints a remedy it ignores;
 //   - this module NEVER launches a browser: the chrome check resolves the
 //     binary through browser.ts's ladder (resolveChromeExec, exported) and
 //     reads its version via a `chrome --version` execute-only probe (no
@@ -308,8 +311,12 @@ function browserHomeCheck(deps: RequirementsDeps): RequirementsCheck {
   const copied = deps.copiedProfileProbe(user);
   const problems: string[] = [];
   if (dataDir === null) {
+    // HONEST remedy only: ui2apiUserDataDir() reads NO env knob (it probes the
+    // ui2api user's XDG dir, xhost-capture.ts:169-183) — UI2API_DATA_DIR feeds
+    // only the vault (resolveDataDir), so it can never flip this check and is
+    // never printed here (GOAL 41 fold).
     problems.push(
-      `ui2api data dir not usable from this session (${user}'s XDG data dir unwritable) — run one setup pass as root/sudo -u ${user}, or set UI2API_DATA_DIR`
+      `ui2api data dir not usable from this session (${user}'s XDG data dir unwritable) — run one setup pass as root/sudo -u ${user}`
     );
   }
   if (copied === "missing") {
@@ -342,6 +349,7 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
   checks.push(checkNodeVersion(node));
   // (b) chrome binary via the launchBrowser ladder (folded, never duplicated)
   const exec = deps.chromeResolve();
+  const chromeVer = exec ? deps.chromeVersion(exec) : null;
   if (!exec) {
     checks.push({
       id: "chrome",
@@ -349,20 +357,25 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
       reason:
         "no Chrome binary resolvable through the launchBrowser ladder (UI2API_CHROME_PATH, /usr/bin/google-chrome[-stable], /opt/google/chrome/chrome, playwright browser cache) — run `npx playwright install chromium` or install Chrome",
     });
+  } else if (chromeVer) {
+    checks.push({ id: "chrome", status: "pass", detail: `${exec} ${chromeVer}` });
   } else {
-    const ver = deps.chromeVersion(exec);
-    if (ver) {
-      checks.push({ id: "chrome", status: "pass", detail: `${exec} ${ver}` });
-    } else {
-      checks.push({
-        id: "chrome",
-        status: "fail",
-        detail: exec,
-        reason: `chrome binary at ${exec} but --version probe failed (execute-only probe, no browser session)`,
-      });
-    }
+    checks.push({
+      id: "chrome",
+      status: "fail",
+      detail: exec,
+      reason: `chrome binary at ${exec} but --version probe failed (execute-only probe, no browser session)`,
+    });
   }
-  // (c) display: headed needs a real display; headless needs the playwright cache
+  // (c) display: headed needs a real display; headless mirrors launchBrowser's
+  // real zero-config fallback — the ladder-resolved chrome serves headless even
+  // when the playwright cache is missing (spawnChromeAndConnect → resolveChromeExec,
+  // browser.ts:191-208), so headless passes ⇔ a ladder-resolvable chrome whose
+  // --version probe passed (the same chrome the gate just passed above). The
+  // bundled cache is only the DETAIL string when it is what resolved. The fail
+  // remedy names what can actually flip the check ("install Chrome / npx
+  // playwright install chromium") — UI2API_CHROME_PATH is env-blind here by
+  // design (the ladder seam owns it), so it is never printed as a remedy.
   const headed = process.env.UI2API_HEADED === "1";
   if (headed) {
     const disp = deps.detectDisplay();
@@ -379,17 +392,23 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
         reason: "UI2API_HEADED=1 but no display detected — headed needs one (start Xvfb, or unset UI2API_HEADED)",
       });
     }
-  } else {
+  } else if (chromeVer && exec) {
     const bundled = deps.bundledChromium();
-    if (bundled) {
-      checks.push({ id: "display", status: "pass", detail: `headless — playwright browser cache present (${bundled})` });
-    } else {
-      checks.push({
-        id: "display",
-        status: "fail",
-        reason: "headless: playwright browser cache missing — run `npx playwright install chromium` (or set UI2API_CHROME_PATH)",
-      });
-    }
+    checks.push({
+      id: "display",
+      status: "pass",
+      detail:
+        bundled && exec === bundled
+          ? `headless — playwright browser cache present (${bundled})`
+          : `headless — ladder-resolved chrome ${exec} ${chromeVer}`,
+    });
+  } else {
+    checks.push({
+      id: "display",
+      status: "fail",
+      reason:
+        "headless: no usable Chrome executable (nothing the launchBrowser ladder resolves, or its --version probe failed) — install Chrome or run `npx playwright install chromium`",
+    });
   }
   // (d) machine-owned browser home
   checks.push(browserHomeCheck(deps));

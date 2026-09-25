@@ -156,22 +156,47 @@ test("display headed: no display → on-hold reason 'UI2API_HEADED=1 but no disp
   });
 });
 
-test("display headless: playwright browser cache present → pass", async () => {
+test("display headless: the bundled playwright cache is what the ladder resolved → pass with the cache detail (GOAL 41 keeps that detail text)", async () => {
   await withCleanEnv(async () => {
-    const { checks } = await runOsChecks(makeDeps());
+    const bundled = "/root/.cache/ms-playwright/chromium-1228/chrome-linux/chrome";
+    const { checks } = await runOsChecks(makeDeps({ chromeResolve: () => bundled, bundledChromium: () => bundled }));
     const c = checks.find((x) => x.id === "display")!;
     assert.equal(c.status, "pass");
     assert.match(c.detail ?? "", /playwright browser cache present/);
+    assert.match(c.detail ?? "", /chromium-1228/);
   });
 });
 
-test("display headless: cache missing → fail naming 'playwright browser cache missing' + fix", async () => {
+test("display headless: cache missing but system Chrome resolves (launchBrowser's real fallback) → pass naming the binary", async () => {
   await withCleanEnv(async () => {
     const { checks } = await runOsChecks(makeDeps({ bundledChromium: () => null }));
     const c = checks.find((x) => x.id === "display")!;
+    assert.equal(c.status, "pass");
+    assert.match(c.detail ?? "", /ladder-resolved chrome \/usr\/bin\/google-chrome-stable 152\.0\.7977\.82/);
+  });
+});
+
+test("display headless: cache missing + no ladder chrome → fail with the honest remedy, never the env-blind UI2API_CHROME_PATH leaf", async () => {
+  await withCleanEnv(async () => {
+    const { checks } = await runOsChecks(makeDeps({ chromeResolve: () => null, bundledChromium: () => null }));
+    const c = checks.find((x) => x.id === "display")!;
     assert.equal(c.status, "fail");
-    assert.match(c.reason ?? "", /playwright browser cache missing/);
-    assert.match(c.reason ?? "", /npx playwright install chromium/);
+    assert.match(c.reason ?? "", /install Chrome or run `npx playwright install chromium`/);
+    assert.doesNotMatch(c.reason ?? "", /UI2API_CHROME_PATH/); // setting it cannot flip this check — never printed as a remedy
+  });
+});
+
+test("display headless: UI2API_CHROME_PATH resolved by the ladder + cache missing → pass (the ladder is env-aware; the seam stands in for it)", async () => {
+  await withCleanEnv(async () => {
+    // The default ladder reads UI2API_CHROME_PATH FIRST (resolveChromeExec,
+    // browser.ts:191-193) — the injected seam IS that ladder boundary, so the
+    // check passes on the env-resolved binary with no playwright cache.
+    const { checks } = await runOsChecks(
+      makeDeps({ chromeResolve: () => "/opt/chrome/chrome", bundledChromium: () => null, chromeVersion: () => "150.0.0.0" })
+    );
+    const c = checks.find((x) => x.id === "display")!;
+    assert.equal(c.status, "pass");
+    assert.match(c.detail ?? "", /ladder-resolved chrome \/opt\/chrome\/chrome 150\.0\.0\.0/);
   });
 });
 
@@ -196,21 +221,24 @@ test("browser-home: ui2api OS user missing → fail naming 'sudo useradd'", asyn
   });
 });
 
-test("browser-home: data dir not usable from this session → fail named", async () => {
+test("browser-home: data dir not usable from this session → fail named, and the reason NEVER offers UI2API_DATA_DIR (GOAL 41: that knob feeds only the vault; setting it cannot flip this check)", async () => {
   await withCleanEnv(async () => {
     const { checks } = await runOsChecks(makeDeps({ ui2apiUserDataDir: () => null }));
     const c = checks.find((x) => x.id === "browser-home")!;
     assert.equal(c.status, "fail");
     assert.match(c.reason ?? "", /ui2api data dir not usable from this session/);
+    assert.match(c.reason ?? "", /run one setup pass as root\/sudo -u ui2api/); // the REAL remedy stays named
+    assert.doesNotMatch(c.reason ?? "", /UI2API_DATA_DIR/); // the env-blind leaf is gone
   });
 });
 
-test("browser-home: copied Chrome profile missing → fail naming '.ui2api-chrome'", async () => {
+test("browser-home: copied Chrome profile missing → fail naming '.ui2api-chrome' + the copy-of-official-Chrome fix", async () => {
   await withCleanEnv(async () => {
     const { checks } = await runOsChecks(makeDeps({ copiedProfileProbe: () => "missing" }));
     const c = checks.find((x) => x.id === "browser-home")!;
     assert.equal(c.status, "fail");
     assert.match(c.reason ?? "", /copied Chrome profile dir \/home\/ui2api\/\.ui2api-chrome missing or empty/);
+    assert.match(c.reason ?? "", /copy-of-official-Chrome/); // the named fix that can actually flip this check
   });
 });
 

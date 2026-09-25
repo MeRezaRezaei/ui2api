@@ -55,7 +55,8 @@ npx tsx src/cli.ts prompt 'say hello' --site duckduckgo
 > Note: on THIS box copilot is region-gated ("Not available in your region")
 > and https://www.perplexity.ai answers "Just a moment…" (Cloudflare) —
 > duckduckgo (duck.ai) is the live-verified anonymous path instead:
-> headless-capable, "Anonymous site — never login-gated"
+> headless-by-default (verified headed; headless may hit the anti-bot wall),
+> "Anonymous site — never login-gated"
 > (capabilities/duckduckgo, VERIFIED 2026-09-23). Your region/network still
 > decides which anonymous site actually answers. The honest anonymous-capable
 > list is in §7.

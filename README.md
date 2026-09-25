@@ -163,7 +163,8 @@ answer off the page. All in your own browser session.
 npx tsx src/cli.ts smoke
 
 # Zero-setup anonymous prompt — DuckDuckGo AI Chat (duck.ai) is the verified
-# anonymous path: headless-capable, never login-gated
+# anonymous path: headless-by-default (verified headed; headless may hit the
+# site's anti-bot wall), never login-gated
 npx tsx src/cli.ts prompt "hello" --site duckduckgo
 
 # Pick the site explicitly, or reuse your logged-in Chrome for sites that need it
