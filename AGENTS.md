@@ -310,7 +310,17 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
   **863 tests / 44 suites** (862 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f) are history; this is the
-  current number (re-measured 2026-09-25, GOALs 83-87 flip).
+  current number (re-measured 2026-09-25, GOALs 83-87 flip). GOALs 88-90 add
+  three files (attach-gate 26 assertions, vault-integrity 9, lang-php 8
+  blocks) whose per-file counts are verified green; the FULL total is
+  deliberately NOT restated because the aggregate run could not complete on a
+  box concurrently running two sibling projects' phpunit suites — restating a
+  number I did not measure is exactly the fabrication this file forbids.
+  `test:unit` is now `--test-concurrency=4`: unbounded 57-way parallelism let
+  each of 16 workers spawn its own esbuild/tsx subprocess, and the box hit
+  `ERR_WORKER_INIT_FAILED`/`EAGAIN`, which surfaced as ~12 spurious file-level
+  failures (the "suite hangs" symptom). If you see a mass failure burst, check
+  the box for foreign load before suspecting the code.
 - **Readiness checks are never fabricated**: `ui2api requirements` (GOAL 33,
   `src/runtime/requirements.ts`) only reports verdicts a real check can stand
   behind — every check runs for real (execute-only probes; a check that cannot
