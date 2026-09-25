@@ -355,7 +355,11 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   and the vault `accounts.json` index is per-entry gated — hostile slugs
   (`../../..`, numeric) are excluded so they are never listed on /accounts +
   /registry accounts[] and never escape the vault through
-  `accountSnapshotPath`'s resolve() (GOAL 60, `validStoredAccount`). Every write
+  `accountSnapshotPath`'s resolve() (GOAL 60, `validStoredAccount`); and the
+  registry BUILD is crash-proofed — a malformed installed manifest capability
+  entry (null / primitive / id-less) is filtered out per-entry
+  (`validManifestCapability`) instead of TypeErro3ing the whole /registry for
+  every consumer (GOAL 61). Every write
   seam still runs its own truth gate (GOAL 49/50) — the read seams refuse the
   same malformed classes at serve/load time.
 - **Account-INDEX collisions are refused too** (GOAL 50): `saveAccountSnapshot`
