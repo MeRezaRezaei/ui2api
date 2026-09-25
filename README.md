@@ -179,6 +179,11 @@ npx tsx src/cli.ts prompt "hello" --site duckduckgo
 npx tsx src/cli.ts prompt "hello" --site gemini            # needs a sign-in session
 npx tsx src/cli.ts prompt --sites                          # list the available sites
 
+# --json (and any other flag) is valid BEFORE or AFTER the prompt text — both
+# ask the SAME text (a flag is never sent to the site as the prompt, so the
+# flag-first form is safe and equivalent):
+npx tsx src/cli.ts prompt --json "hello"                   # ≡ prompt "hello" --json
+
 # Or expose it as a localhost JSON service so live apps (e.g. anything in /var/www)
 # can call it WITHOUT touching them:
 UI2API_PROMPTD_TOKEN=op-secret npx tsx src/cli.ts promptd   # http://127.0.0.1:9797

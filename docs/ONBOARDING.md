@@ -37,6 +37,10 @@ sees it.
 > all pass in scope, exit 1 = named fail/not-ready). The site token works
 > before OR after `--json` (`requirements gemini --json` = `requirements
 > --json gemini`).
+> The same order freedom holds for the prompt command: `--json` (and any
+> flag) is valid before OR after the prompt text — `npx tsx src/cli.ts
+> prompt --json "hello"` ≡ `prompt "hello" --json` (a flag is never sent to
+> the site as the prompt text).
 
 ## 3. The 30-second path (anonymous)
 
@@ -60,6 +64,10 @@ failure. The same verified anonymous path directly:
 ```
 npx tsx src/cli.ts prompt 'say hello' --site duckduckgo
 ```
+
+`--json` (and any flag) is valid before OR after the prompt text — `npx tsx
+src/cli.ts prompt --json "hello"` ≡ `prompt "hello" --json` (both ask the
+same text; a flag is never sent to the site as the prompt).
 
 > Note: on THIS box copilot is region-gated ("Not available in your region")
 > and https://www.perplexity.ai answers "Just a moment…" (Cloudflare) —

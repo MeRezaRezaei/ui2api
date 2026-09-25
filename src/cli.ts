@@ -133,6 +133,23 @@ const VALUE_TAKING_FLAGS = new Set([
   "--lang",
 ]);
 
+// GOAL 44: the pure flag-aware first-positional reader shared by every
+// free-string positional command. Iterates argv, skipping `--flag` tokens and
+// (for VALUE_TAKING_FLAGS members) their VALUE token — so a flag's value is
+// never mistaken for a positional and a positional is honored no matter where
+// it sits (before OR after any flag). Returns the first remaining non-flag
+// token, "" if none. Callers pass the argv slice AFTER their command token
+// (a flag token can never be a positional value). Pure: no env, no I/O —
+// directly unit-testable.
+export function firstNonFlagArg(argv: string[]): string {
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (!tok.startsWith("--")) return tok;
+    if (VALUE_TAKING_FLAGS.has(tok)) i++; // skip the flag's value token
+  }
+  return "";
+}
+
 // GOAL 43: the requirements/doctor <site> positional, read flag-aware from the
 // WHOLE command argv. `requirements --json gemini` and
 // `requirements gemini --json` scope IDENTICALLY — a site token is honored no
@@ -144,12 +161,18 @@ const VALUE_TAKING_FLAGS = new Set([
 // verdict. argv[0] is the command itself ("requirements"/"doctor"). Pure: no
 // env, no I/O — directly unit-testable.
 export function requirementsSiteArg(argv: string[]): string {
-  for (let i = 1; i < argv.length; i++) {
-    const tok = argv[i];
-    if (!tok.startsWith("--")) return tok;
-    if (VALUE_TAKING_FLAGS.has(tok)) i++; // skip the flag's value token
-  }
-  return "";
+  return firstNonFlagArg(argv.slice(1));
+}
+
+// GOAL 44: the prompt <text> positional — the argv slice the prompt case sees
+// (process.argv.slice(2), command token first). `prompt --json "hello"` and
+// `prompt "hello" --json` MUST ask the SAME text: the old raw argv[2]
+// pass-through sent the literal flag token to the live default site with
+// "hello" dropped in rest (never read) — a plausible JSON answer to the wrong
+// question, no error, no hint. A flag (and its value) is skipped, never sent
+// as text; no text token ⇒ "" → the existing usage throw fires (honest).
+export function promptTextArg(argv: string[]): string {
+  return firstNonFlagArg(argv.slice(1));
 }
 
 function sitesRoot(flags: Flags): string {
@@ -1087,7 +1110,13 @@ async function main(): Promise<void> {
       throw new Error("usage: ui2api profile capture <url> [--assist] [--login] | ingest <host> [--profile DIR] | scan | import <host> | add-all [--known|--interactive] [--identity-prefix STR] | list <host> | capabilities <host> [--account email]");
     }
     case "prompt":
-      return cmdPrompt(arg ?? "", flags);
+      // GOAL 44: <text> is read flag-aware from the whole argv — so
+      // `prompt --json "hello"` and `prompt "hello" --json` ask the SAME
+      // text (the old raw argv[2] pass-through sent the literal "--json"
+      // flag token to the live default site with "hello" dropped in rest,
+      // never read). A flag is never sent as text; no text token ⇒ "" →
+      // the cmdPrompt usage throw fires (honest).
+      return cmdPrompt(promptTextArg(process.argv.slice(2)), flags);
     case "promptd":
       return cmdPromptd(flags);
     case "requirements":
