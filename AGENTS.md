@@ -382,7 +382,16 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   `capabilities/<id>/profile.json` runs the same gate on the packaged running
   seam (CLI packaged id + `/capability` fallbacks, GOAL 48) — a wrong-typed or
   unparseable entry fails LOUD at serve time, naming the file + exact
-  field/entry (never a late `answer.join` TypeError inside a runner); well-typed
+  field/entry (never a late `answer.join` TypeError inside a runner); GOAL 56
+  extends that gate to the `capability` block GOAL 54/55 made first-class on
+  the chat surface: `restrictionMarkers` (kind ⊆ {upgrade,limit,login} +
+  non-empty string patterns), `tierSelectors`/`pickerOpen`/`pickerOption`
+  (parseable selector lists), `abilityToggles` (id/selector/label/selectedClass)
+  — a wrong-typed capability entry (e.g. a string `restrictionMarkers`) refuses
+  LOUD naming file + field + entry instead of a late `matchRestrictionMarkers`
+  `for…of undefined` TypeError at answer time; absent capability
+  (capability-only packages, chatglm) keeps resolving.
+  Well-typed
   empty/absent/host-keyed-object fields (capability-only packages, chatglm)
   keep resolving.
 - **When adding a site**: analyze (static bundles + wire) → package under
