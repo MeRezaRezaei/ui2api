@@ -323,6 +323,20 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   never surface an anonymous session as fresh + valid. Decrypt-limited partials
   (cookies matched but undecryptable) keep their honest warning — they are a
   real logged-in session, not the anonymous class this gate kills.
+- **Package installs are write-gated too** (GOAL 65): `ui2api install`
+  (`src/registry/install.ts`) validates the WHOLE fetched package BEFORE any
+  file lands on disk — every fetched JSON file must parse (corrupt
+  metadata/profile/session.lock/recipe refuses naming the file), every manifest
+  capability entry passes `validManifestCapability` (the GOAL 61 read-side
+  filter, now also at the write seam — null/primitive/id-less entries refuse
+  naming the index instead of silently landing to be dropped from /registry
+  later), and profile.json passes `validatePackagedProfileShape` (GOAL 48/56
+  shape) PLUS id agreement (profile.id must equal the package dir — a mismatch
+  refuses naming file + both ids, the GOAL 64 shape). Any refusal throws with
+  a named verdict and NOTHING is written (the write loop never runs, the dir
+  never exists) — a broken package can no longer install "successfully" and
+  be refused only later by the read/serve seams; same principle as the GOAL
+  49/50 session-write gate, applied to packages.
 - **Restriction walls are reported, never blind-empty** (GOAL 54 + GOAL 55): every
   builtin chat profile declares `capability.restrictionMarkers` (11/11 — gemini/kimi/
   deepseek predated the gate; chatgpt/claude/copilot/perplexity/huggingchat/
