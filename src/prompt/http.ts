@@ -41,7 +41,7 @@ import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
-import { listAccounts, slugifyIdentity, loadCapabilities } from "../runtime/session-store.js";
+import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount } from "../runtime/session-store.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -158,10 +158,13 @@ function registryPackageFor(siteId: string): RegistryPackage | undefined {
 export function resolveCapabilityAccount(account: string | undefined, profile: ChatSiteProfile, dataDir: string): void {
   if (!account || account === "default") return;
   const host = new URL(profile.url).host;
-  const slug = slugifyIdentity(account);
-  const stored = listAccounts(dataDir, host);
-  const match = stored.find((a) => a.slug === slug || a.identity === account);
+  // GOAL 51: canonical resolution — an account reference resolves ONLY on the
+  // exact stored identity or the exact stored slug. A write-refused alias
+  // ("john  smith" when "John Smith" is stored) 400s here instead of silently
+  // driving the survivor's session.
+  const match = resolveStoredAccount(dataDir, host, account);
   if (!match) {
+    const stored = listAccounts(dataDir, host);
     throw new Error(`no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`);
   }
 }
@@ -350,6 +353,14 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         if (!site || !account) return send(res, 400, { error: "site and account are required" });
         const profile = idFrom(site, profilesById);
         const host = new URL(profile.url).host;
+        // GOAL 51: canonical resolution — an unresolvable account (write-refused
+        // alias) 400s instead of reading a fingerprint under a folded slug.
+        if (!resolveStoredAccount(dataDir, host, account)) {
+          const stored = listAccounts(dataDir, host);
+          return send(res, 400, {
+            error: `no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`,
+          });
+        }
         const slug = slugifyIdentity(account);
         const stored = loadCapabilities(dataDir, host, slug);
         if (!stored) {

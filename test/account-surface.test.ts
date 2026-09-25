@@ -8,7 +8,7 @@ import { createServer, type Server } from "node:http";
 
 import { buildRegistryPackages, resolveDataDir } from "../src/prompt/registry.js";
 import { resolvePackagedProfile, resolveProfile } from "../src/profile/profile.js";
-import { listAccounts, loadAccountSnapshot, slugifyIdentity } from "../src/runtime/session-store.js";
+import { listAccounts, loadAccountSnapshot, slugifyIdentity, resolveStoredAccount } from "../src/runtime/session-store.js";
 import { startPromptd, resolveCapabilityAccount } from "../src/prompt/http.js";
 import { handleOpenAIRoutes } from "../src/prompt/openai.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
@@ -207,9 +207,11 @@ test("GOAL8(c): an unknown account misses resolveCapabilityAccount's predicate a
   const bogus = "no-such-account@example.com";
 
   // Exact predicate resolveCapabilityAccount runs BEFORE any browser work:
+  // GOAL 51 canonical resolution — exact identity OR exact stored slug, no
+  // slugify folding, no blind path read.
   const stored = listAccounts(dataDir, host);
-  const match = stored.find((a) => a.slug === slugifyIdentity(bogus) || a.identity === bogus);
-  assert.equal(match, undefined, `bogus identity must not match any stored account at ${host}`);
+  const match = resolveStoredAccount(dataDir, host, bogus);
+  assert.equal(match, null, `bogus identity must not resolve to any stored account at ${host}`);
 
   // The throw message shape is pinned in http.ts (must not drift):
   const template =

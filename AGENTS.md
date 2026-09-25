@@ -325,6 +325,15 @@ resolution + stealth posture). Never `launch()` a browser ad-hoc.
   "<identity>")` verdict, nothing written, the original account intact. Same
   identity string = latest-wins re-capture, never a false positive; slugs are
   host-scoped, so an identical slug on two hosts is valid.
+- **Account READs are exact too** (GOAL 51): `resolveStoredAccount`
+  (`src/runtime/session-store.ts`) is the canonical reader — an account
+  reference resolves ONLY on the exact stored identity or the exact stored
+  slug (the form `/accounts` lists); NO slugify folding and no blind snapshot
+  path load. A write-refused alias ("john  smith" when "John Smith" is stored)
+  now 400s with the named `no stored account "<acct>" for "<host>"; available:
+  [<slugs>]` from `resolveCapabilityAccount` (`src/prompt/http.ts`) and
+  `GET /capabilities?site=&account=` — it never silently drives the survivor's
+  session (the write gate and the read gate agree on the same key space).
 - **Selector rot**: site UIs change. Re-tune via JSON profile override
   (`--profile FILE`), not by editing one-off probe scripts; keep probe scripts
   out of the repo (delete after use). Overrides are validated with the same

@@ -68,7 +68,9 @@ returns the result — no brittle screen-scraping.
   refused at the write seam with a named `skipped-no-auth` verdict — the vault
   and `/accounts` never list a session that carries no sign-in. A same-slug
   different identity is likewise refused (`slug-collision`) instead of silently
-  overwriting an existing account. See
+  overwriting an existing account — and account reads are exact too
+  (`resolveStoredAccount`): a refused alias 400s with the named available
+  slugs, never silently driving the survivor's session. See
   [V1 gate](#v1-gate--login-made-simple-end-user-sessions).
 - **Capability reflection** — learn what a specific account can actually do on a
   chat site (plan tier, available models, restriction walls) from what the site

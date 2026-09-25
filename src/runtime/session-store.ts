@@ -297,8 +297,25 @@ export function slugCollision(
   return listAccounts(sitesDir, host).find((a) => a.slug === slug && a.identity !== identity) ?? null;
 }
 
+// GOAL 51: the canonical READ resolver — an account reference resolves ONLY on
+// the exact stored identity string OR the exact stored slug (the form
+// /accounts lists). NO slugify folding: a write-refused alias ("john  smith"
+// when "John Smith" is stored) must NOT silently resolve to the survivor's
+// snapshot. The index is the key, the snapshot path is the cache.
+export function resolveStoredAccount(
+  sitesDir: string,
+  host: string,
+  account: string | undefined
+): StoredAccount | null {
+  if (!account || account === "default") return null;
+  const stored = listAccounts(sitesDir, host);
+  return stored.find((a) => a.identity === account || a.slug === account) ?? null;
+}
+
 // Load a snapshot for (host, identity|slug|undefined). Never throws.
-//   - identity/slug given -> the vault account, else null
+//   - identity/slug given -> the vault account (EXACT identity or EXACT stored
+//     slug ONLY — GOAL 51: a write-refused alias never resolves to the
+//     survivor's snapshot), else null
 //   - undefined            -> the legacy default path (old captures), else null
 //   - "default"            -> explicit legacy path
 export function loadAccountSnapshot(
@@ -308,12 +325,8 @@ export function loadAccountSnapshot(
 ): ProfileSnapshot | null {
   const h = sanitizeHost(host);
   if (identity && identity !== "default") {
-    const slug = slugifyIdentity(identity);
-    const snap = loadSnapshot(accountSnapshotPath(sitesDir, h, slug));
-    if (snap) return snap;
-    // Identity may be an already-slugged account id.
-    const bySlug = listAccounts(sitesDir, h).find((a) => a.slug === slug || a.identity === identity);
-    if (bySlug) return loadSnapshot(accountSnapshotPath(sitesDir, h, bySlug.slug));
+    const acct = resolveStoredAccount(sitesDir, h, identity);
+    if (acct) return loadSnapshot(accountSnapshotPath(sitesDir, h, acct.slug));
     return null;
   }
   return loadSnapshot(snapshotPath(sitesDir, h));

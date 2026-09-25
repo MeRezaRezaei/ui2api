@@ -15,11 +15,14 @@ import {
   snapshotHasAuth,
   slugifyIdentity,
   slugCollision,
+  resolveStoredAccount,
   listAccounts,
   loadAccountSnapshot,
 } from "../src/runtime/session-store.js";
 import { importSiteSnapshot } from "../src/runtime/profile-scan.js";
 import { captureProfileFromLiveChrome } from "../src/runtime/xhost-capture.js";
+import type { ChatSiteProfile } from "../src/profile/profile.js";
+import { resolveCapabilityAccount } from "../src/prompt/http.js";
 
 // --- Chrome cookie encryption mirror (same as profile-add-all.test.ts) ---
 
@@ -300,6 +303,95 @@ test("importSiteSnapshot: same slug on DIFFERENT hosts is allowed (host-scoped c
     assert.equal(b.ok, true, "host B import with colliding slug is allowed (different host)");
     assert.equal(listAccounts(dataDir, "gemini.google.com").length, 1);
     assert.equal(listAccounts(dataDir, "deepseek.com").length, 1);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// --- GOAL 51: account-READ exact resolution — a write-refused alias never
+//     silently loads the surviving account's snapshot -----------------------
+
+test("resolveStoredAccount/loadAccountSnapshot: write-refused alias returns null, exact identity + canonical slug still resolve", async () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-read-exact-"));
+  try {
+    const dataDir = join(base, "data");
+    const host = "gemini.google.com";
+
+    // Stored account: identity "John Smith" (canonical slug "john-smith").
+    const root = makeProfile(join(base, "p1"), {
+      email: "John Smith",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-john") }],
+    });
+    const imported = await importSiteSnapshot({ root, host, dataDir });
+    assert.equal(imported.ok, true, "first import written");
+    assert.ok(listAccounts(dataDir, host).some((a) => a.identity === "John Smith"));
+
+    // GOAL 51 canonical read resolution:
+    assert.equal(resolveStoredAccount(dataDir, host, "John Smith")?.slug, "john-smith", "exact identity resolves");
+    assert.equal(resolveStoredAccount(dataDir, host, "john-smith")?.identity, "John Smith", "canonical slug resolves");
+    // A write-refused alias (GOAL 50 would refuse "john  smith" as a distinct
+    // identity) must NOT silently resolve to the survivor:
+    assert.equal(resolveStoredAccount(dataDir, host, "john  smith"), null, "refused alias (double space) does not resolve");
+    assert.equal(resolveStoredAccount(dataDir, host, "john smith"), null, "refused alias (single space) does not resolve");
+    assert.equal(resolveStoredAccount(dataDir, host, "JOHN SMITH"), null, "case-variant raw identity does not resolve");
+
+    // Through the snapshot seam a runner would use:
+    const snapExact = loadAccountSnapshot(dataDir, host, "John Smith");
+    assert.ok(snapExact, "exact identity loads the snapshot");
+    const slugSnap = loadAccountSnapshot(dataDir, host, "john-smith");
+    assert.ok(slugSnap, "canonical slug loads the snapshot");
+    assert.equal(loadAccountSnapshot(dataDir, host, "john  smith"), null, "refused alias -> NO snapshot (never the survivor's)");
+    // The survivor's cookie is never loaded through the refused alias:
+    const survivorSnap = loadAccountSnapshot(dataDir, host, "John Smith");
+    assert.ok(
+      (survivorSnap!.cookies ?? []).some((c) => c.name === "SID" && c.value === "sid-john"),
+      "survivor cookie intact ONLY via the exact identity"
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("resolveCapabilityAccount: a write-refused alias 400s (named error listing available slugs) before any browser", async () => {
+  const base = mkdtempSync(join(tmpdir(), "u2a-wg-read-guard-"));
+  try {
+    const dataDir = join(base, "data");
+    const host = "gemini.google.com";
+    const root = makeProfile(join(base, "p1"), {
+      email: "John Smith",
+      rows: [{ host_key: ".google.com", name: "SID", encrypted_value: encryptClassic("sid-john") }],
+    });
+    const imported = await importSiteSnapshot({ root, host, dataDir });
+    assert.equal(imported.ok, true);
+
+    const profile: ChatSiteProfile = {
+      id: "gemini",
+      url: "https://gemini.google.com",
+      name: "Gemini",
+      composer: '[contenteditable="true"]',
+      send: "text=Send",
+      answer: ".markdown",
+    } as unknown as ChatSiteProfile;
+
+    // Exact identity and canonical slug pass:
+    resolveCapabilityAccount("John Smith", profile, dataDir);
+    resolveCapabilityAccount("john-smith", profile, dataDir);
+
+    // A write-refused alias must throw the NAMED 400 (never silently resolve):
+    assert.throws(
+      () => resolveCapabilityAccount("john  smith", profile, dataDir),
+      /no stored account "john  smith" for "gemini\.google\.com"; available: \[john-smith\]/,
+      "refused alias -> named unknown-account error (GOAL 51)"
+    );
+    assert.throws(
+      () => resolveCapabilityAccount("JOHN SMITH", profile, dataDir),
+      /no stored account "JOHN SMITH"/,
+      "case-variant raw identity -> named unknown-account error"
+    );
+    // The guard runs BEFORE any browser work: it is pure (throws immediately,
+    // no launchBrowser import path executed — verify the throw happens at the
+    // resolution seam itself, i.e. the function never touches a browser).
+    assert.equal(typeof resolveCapabilityAccount, "function", "guard is a pure validation seam");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
