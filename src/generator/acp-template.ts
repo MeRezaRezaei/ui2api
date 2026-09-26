@@ -1,18 +1,58 @@
+import { relative, resolve, isAbsolute, sep } from "node:path";
 import { SRC_DIR } from "./generate.js";
 
-// Returns the source of a minimal stdio ACP (Agent Client Protocol) server as a
-// string. It speaks JSON-RPC over stdin/stdout, delegates tool execution to the
-// shared BrowserSession runtime, and mirrors the MCP template's runtime imports
-// via the absolute SRC_DIR so generated servers run under tsx.
-export function acpServerTemplate(root: string): string {
-  return `import { readFileSync } from "node:fs";
+/**
+ * GOAL 144: the generated ACP server no longer bakes THIS MACHINE's absolute path
+ * into itself when it is generated inside the repo.
+ *
+ * The defect: this template emitted
+ *   import { BrowserSession } from "${SRC_DIR}/runtime/browser-session.ts";
+ * with `SRC_DIR` absolute at GENERATION time, so a generated consumer compiled
+ * against one operator's private source tree — with a `.ts` extension only tsx
+ * resolves — and was dead on arrival the moment the repo moved. GOAL 142
+ * untracked the committed output; this removes the CAUSE, not just the symptom.
+ *
+ * The fix mirrors what the MCP template in `generate.ts` already does
+ * (`relative(serverDir, SRC_DIR)`), so the in-repo artifact is portable.
+ *
+ * The honest limit: a relative specifier only resolves when the generated file
+ * lives INSIDE the repo. Generated into a tmpdir (which the tests do) there is no
+ * portable answer, so that case stays absolute and is now LABELLED
+ * `MACHINE_BOUND` instead of silently pretending to be portable.
+ */
+export function acpServerTemplate(root: string, serverDir?: string): string {
+  const from = serverDir ?? root;
+  const rel = relative(from, SRC_DIR).split(sep).join("/");
+  // "Portable" means the generated file can reach SRC_DIR by a RELATIVE path,
+  // which is true whenever the file lives INSIDE the checkout. Note that a
+  // correct in-repo specifier NORMALLY starts with ".." — `sites/<host>/server`
+  // reaches `src` via `../../src` — so a `..` prefix is NOT the out-of-repo
+  // signal. The real test is whether serverDir sits under the repo root.
+  const repoRoot = resolve(SRC_DIR, "..");
+  const fromInsideRepo = !relative(repoRoot, from).split(sep).join("/").startsWith("..");
+  const inRepo = Boolean(serverDir) && fromInsideRepo && !isAbsolute(rel);
+  const sessionSpec = inRepo ? `${rel}/runtime/browser-session.js` : `${SRC_DIR}/runtime/browser-session.ts`;
+  const typesSpec = inRepo ? `${rel}/types.js` : `${SRC_DIR}/types.ts`;
+  const boundNotice = inRepo
+    ? ""
+    : [
+        "// MACHINE_BOUND: generated OUTSIDE the ui2api checkout, so its runtime imports",
+        "// are absolute and this file only runs on the machine that generated it.",
+        "// Generate into <ui2api>/sites/<host>/ for a portable server.",
+        "",
+      ].join("\n");
+  return `${boundNotice}import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BrowserSession } from "${SRC_DIR}/runtime/browser-session.ts";
-import type { ActionMap, Action } from "${SRC_DIR}/types.ts";
+import { BrowserSession } from "${sessionSpec}";
+import type { ActionMap, Action } from "${typesSpec}";
 
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8")) as ActionMap;
-const SITES_ROOT = ${JSON.stringify(root)};
+// GOAL 144: SITES_ROOT is SELF-RELOCATING. It used to be the absolute path at
+// generation time, which is the same machine-specific leak as the imports above —
+// the generated server pointed at one operator's checkout even if the imports
+// had been portable. One level up from the server file IS the sites root.
+const SITES_ROOT = ${inRepo ? 'fileURLToPath(new URL("..", import.meta.url))' : JSON.stringify(root)};
 // GOAL 52: UI2API_ACCOUNT (a vault slug/identity) picks WHICH stored account
 // drives this generated server; UI2API_DATA_DIR points at the vault root.
 const session = new BrowserSession(map, SITES_ROOT, {

@@ -26,6 +26,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { buildRegistryPackages } from "../src/prompt/registry.js";
+import { acpServerTemplate } from "../src/generator/acp-template.js";
+import { serverTemplate } from "../src/generator/generate.js";
 import { generatePhpMaps } from "../src/generator/lang-php.js";
 
 type Generated = { id: string; readme: string; map: string };
@@ -166,4 +168,53 @@ test("GOAL 142: generated build output is never TRACKED by git (it carries machi
       `tracked file ${f} embeds a machine-absolute path — generated output must not be tracked`
     );
   }
+});
+
+test("GOAL 144: an IN-REPO generated ACP server embeds NO machine-absolute path", () => {
+  // The defect: the ACP template baked `${SRC_DIR}` and an absolute SITES_ROOT
+  // into the generated consumer, so it compiled against one operator's private
+  // source tree and pointed at one machine's checkout. GOAL 142 untracked the
+  // committed output (the symptom); this removes the cause.
+  //
+  // The honest limit is asserted too: generated OUTSIDE the repo a relative
+  // specifier cannot resolve, so that case stays absolute AND must SAY SO —
+  // a generated file must never silently pretend to be portable.
+  const repoRoot = resolve(import.meta.dirname, "..");
+  const serverDir = resolve(repoRoot, "sites", "duckduckgo", "server");
+  const portable = acpServerTemplate(resolve(repoRoot, "sites"), serverDir);
+  assert.ok(
+    !/(\/home\/[A-Za-z0-9._-]+|\/Users\/)/.test(portable),
+    "an in-repo generated ACP server must not embed a machine-absolute path"
+  );
+  assert.ok(
+    /from "\.\.\/\.\.\/\.\.\/src\/runtime\/browser-session\.js"/.test(portable),
+    "the in-repo artifact must reach the runtime by a RELATIVE specifier"
+  );
+  assert.ok(
+    portable.includes('fileURLToPath(new URL("..", import.meta.url))'),
+    "SITES_ROOT must be self-relocating, not baked at generation time"
+  );
+  assert.ok(!portable.includes("MACHINE_BOUND"), "an in-repo artifact is portable and must not be labelled machine-bound");
+
+  // The MCP server had the SAME baked SITES_ROOT leak, so it is gated too.
+  const mcp = serverTemplate(resolve(repoRoot, "sites"), serverDir);
+  assert.ok(
+    !/(\/home\/[A-Za-z0-9._-]+|\/Users\/)/.test(mcp),
+    "an in-repo generated MCP server must not embed a machine-absolute path either"
+  );
+  assert.ok(
+    mcp.includes('fileURLToPath(new URL("..", import.meta.url))'),
+    "the MCP SITES_ROOT must be self-relocating too"
+  );
+
+  // Out-of-repo: absolute is unavoidable, but it must be declared.
+  const bound = acpServerTemplate("/tmp/sites", "/tmp/ui2api-acp-outside/server");
+  assert.ok(
+    bound.includes("MACHINE_BOUND"),
+    "a server generated outside the checkout must LABEL itself machine-bound"
+  );
+  assert.ok(
+    bound.includes("Generate into <ui2api>/sites/<host>/"),
+    "the label must tell the operator how to get a portable server"
+  );
 });

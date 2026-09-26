@@ -11,7 +11,9 @@ import { skillTemplate, skillLoaderTemplate } from "./skill-template.js";
 // shared runtime/types under tsx.
 export const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-function serverTemplate(root: string, serverDir: string): string {
+export function serverTemplate(root: string, serverDir: string): string {
+  const repoRoot = resolve(SRC_DIR, "..");
+  const fromInsideRepo = !relative(repoRoot, serverDir).split(sep).join("/").startsWith("..");
   // Relative path from the emitted server file back to the repo's src/ so the
   // generated server imports the real loader/serve modules at runtime under tsx.
   // Computed per-generation so it resolves correctly regardless of where the
@@ -26,7 +28,12 @@ import { servePlugin } from ${JSON.stringify(serveImport)};
 
 const mapPath = fileURLToPath(new URL("./action-map.json", import.meta.url));
 const map = JSON.parse(readFileSync(mapPath, "utf8"));
-const SITES_ROOT = ${JSON.stringify(root)};
+// GOAL 144: same machine-specific leak as the ACP template — the root was baked
+// absolute at generation time. One level up from the server file IS the root, so
+// the generated server relocates with itself. Falls back to the absolute path
+// only when the server was written OUTSIDE the repo, where a relative parent
+// would be wrong.
+const SITES_ROOT = ${fromInsideRepo ? 'fileURLToPath(new URL("..", import.meta.url))' : JSON.stringify(root)};
 const loaded = loadPluginFromMap(map, { dataDir: SITES_ROOT }, map.url);
 
 export async function runServer(): Promise<void> {
@@ -55,7 +62,7 @@ export function generate(
   mkdirSync(serverDir, { recursive: true });
   writeFileSync(resolve(serverDir, "index.ts"), serverTemplate(root, serverDir));
   if (target === "acp") {
-    writeFileSync(resolve(serverDir, "acp.ts"), acpServerTemplate(root));
+    writeFileSync(resolve(serverDir, "acp.ts"), acpServerTemplate(root, serverDir));
   }
   if (opts.skill) {
     writeFileSync(resolve(serverDir, "SKILL.md"), skillTemplate(map));
