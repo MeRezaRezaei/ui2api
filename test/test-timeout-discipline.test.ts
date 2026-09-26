@@ -47,7 +47,13 @@ d("GOAL 102: the measuring instrument is itself trustworthy", () => {
   t("every subprocess/network call in test/ is bounded (timeout or a kill)", () => {
     const unbounded: string[] = [];
     for (const f of TEST_FILES) {
-      const src = readFileSync(f, "utf8");
+      // Strip comments before scanning: a PROSE mention of `spawn(` cannot hang,
+      // and flagging it made this gate fire on documentation of the very defect
+      // it exists to prevent. Same rule as every other source-scan pin in this
+      // repo (the no-fabricated-traffic gate, the GOAL 126 grep gate). The
+      // negative test below still proves a REAL unbounded spawn is reported.
+      const raw = readFileSync(f, "utf8");
+      const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
       // SYNC calls must carry `timeout:` — without it spawnSync waits FOREVER.
       execCalls(src, SYNC_FAMILY).forEach((c, i) => {
         if (!/timeout\s*:/.test(c.text)) unbounded.push(`${f} sync-call#${i + 1} (needs timeout)`);

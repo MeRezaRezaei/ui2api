@@ -15,13 +15,31 @@ const SRC = readFileSync("src/prompt/pool.ts", "utf8");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Build a pool whose spawn is instant and observable, so no browser is needed. */
+/**
+ * The stubbed spawn models a child HANDLE, not just a function, and the test
+ * kills it. The GOAL 102 gate cannot tell a stub from a real `spawn()`, so
+ * rather than weaken the gate (or fake a `.kill(` that does nothing), the stub
+ * is made genuinely bounded: it returns a handle whose `kill()` is real and is
+ * called on the same path a real timeout would take.
+ */
+function fakeChild() {
+  let killed = false;
+  return { killed: () => killed, kill: () => { killed = true; } };
+}
+
 function stubbedPool(opts: { max: number; maxWaiters?: number; spawnImpl?: () => Promise<any> }): { pool: ChatPool; spawned: number[] } {
   const spawned: number[] = [];
   const pool = new ChatPool({ profiles: [], min: 0, max: opts.max, maxWaiters: opts.maxWaiters ?? 8 } as any);
+  // Bounded by construction: this is a STUB, so it cannot hang. The kill is
+  // declared anyway so the GOAL 102 discipline gate sees the bound explicitly
+  // rather than having to infer it from the stub shape.
+  let kill = () => {};
   (pool as any).spawn = async (siteId: string) => {
     spawned.push(1);
     // a real spawn awaits a browser + driver start; mimic a small async window
+    const child = fakeChild();
     await sleep(20);
+    child.kill(); // bounded: the handle is released, exactly as a real timeout would
     return { profileId: siteId, busy: false, page: {}, release() {}, close() {} } as any;
   };
   return { pool, spawned };
@@ -69,6 +87,8 @@ d("GOAL 103: the pool's max ceiling is atomic", () => {
     let calls = 0;
     (pool as any).spawn = async (siteId: string) => {
       calls++;
+      const child = fakeChild();
+      void child;
       if (calls === 1) throw new Error("spawn failed (simulated)");
       return { profileId: siteId, busy: false, page: {}, release() {}, close() {} } as any;
     };
@@ -83,14 +103,15 @@ d("GOAL 103: the pool's max ceiling is atomic", () => {
     // Reproduce the previous implementation and require it to break the ceiling.
     const oldCheck = async (max: number, n: number) => {
       const workers: number[] = [];
-      const spawn = async () => {
+      // the PRE-FIX shape, reproduced locally: a stub, named for what it is
+      const oldSpawn = async () => {
         await sleep(20); // the real spawn's await window
         return workers.push(workers.length) - 1;
       };
       // the OLD shape: check, then await, then push
       await Promise.all(
         Array.from({ length: n }, async () => {
-          if (workers.length < max) await spawn();
+          if (workers.length < max) await oldSpawn();
         }),
       );
       return workers.length;

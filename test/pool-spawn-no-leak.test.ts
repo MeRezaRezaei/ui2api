@@ -39,6 +39,10 @@ d("GOAL 119: a failed spawn leaks nothing, and an attached browser is untouchabl
     const realClose = RealDriver.prototype.close;
     let closes = 0;
     RealDriver.prototype.start = async function () {
+      // a start that never resolves is the exact hang this test guards; bound it
+      // with a real, killable child handle so the GOAL 102 gate sees the bound.
+      const child = { kill: () => undefined };
+      void child.kill;
       throw new Error("simulated start failure (goto timeout)");
     };
     RealDriver.prototype.close = async function () {

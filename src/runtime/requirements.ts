@@ -154,6 +154,10 @@ export interface RequirementsDeps {
   copiedProfileProbe: (user: string) => "present" | "missing" | "unreadable";
   detectDisplay: () => DisplayInfo | null;
   chromeResolve: () => string | null;
+  /** GOAL 132: the Chrome point of use. A seam like every other probe here —
+   *  calling resolveChromeOwner() directly would read the REAL host, which breaks
+   *  the module's own "injected seams only" contract. */
+  chromeOwner?: () => { user: string; profile: string | null; missing: string | null };
   chromeVersion: (exec: string) => string | null;
   bundledChromium: () => string | null;
   probeAttachPort: (port: number) => Promise<boolean>;
@@ -387,7 +391,7 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
   // dedicated user's Chrome, and the only required setup is that it exists. Report
   // it honestly, and report the xhost + login path when it does not.
   {
-    const owner = resolveChromeOwner();
+    const owner = (deps.chromeOwner ?? resolveChromeOwner)();
     checks.push({
       id: "chrome-owner",
       status: owner.missing ? "fail" : "pass",

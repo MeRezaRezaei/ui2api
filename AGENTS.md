@@ -120,6 +120,29 @@ is the ONLY info source, no site knowledge lives in the consumer):
   answer as SSE — honest: ChatDriver reads the page, it does not synthesize
   traffic). Non-chat capabilities stay on `/capability/<site>`.
 
+## WHEN A SITE CHALLENGES YOU — reach for WIGOLO, not a retry loop
+
+**If a site answers with an abuse challenge, a consent wall, or an
+`ERR_CHALLENGE`, wigolo is the bypass tier.** Full detail: `docs/WIGOLO_BYPASS.md`.
+
+MEASURED live (2026-09-26, real duckduckgo.com through the `ui2api` Chrome):
+`no answer appeared on duckduckgo — either ERR_CHALLENGE (abuse signal) or the
+consent wall re-blocked; honest on-page read returned empty`. The failure is
+honest (no fabricated answer) but it is still a failure.
+
+- **Do NOT** retry the plain path in a loop or raise a timeout — that only
+  deepens the rate-limit signal.
+- **DO** use the wigolo tier (`src/runtime/wigolo.ts`,
+  `src/plugin/wigolo-context.ts`): a separate browser tier for exactly this.
+- **DO** keep the honest verdict. If wigolo cannot get a real answer either, the
+  result stays `ok:false` with the named reason, and the site is recorded with
+  its honest status like any other blocked site.
+- Wigolo's rules are NOT to be weakened: loopback only
+  (`UI2API_WIGOLO_ALLOW_REMOTE`), the bearer token never leaves loopback without
+  the SECOND opt-in (`UI2API_WIGOLO_ALLOW_REMOTE_TOKEN`), and a cross-origin
+  daemon answer is REFUSED so a 200 from any base can never be served as a page's
+  answer (GOAL 123). No fabricated results outranks convenience.
+
 ## THE PERSISTENT CHROME DAEMON — do not fire Chrome per request
 
 **"We should not fire the Chrome each time. Run a user daemon from the `ui2api`
@@ -137,7 +160,14 @@ is what the code now does.
   worked. The daemon makes that deliberate instead of accidental.
 
 ```bash
+ui2api chrome start       # idempotent — never fires a second Chrome
+ui2api chrome status      # where it is, and the port to attach to
+ui2api chrome stop        # refuses to kill a Chrome we did not start
+
+# or explicitly as the dedicated owner:
 sudo -u ui2api -H npx tsx src/cli.ts chrome start    # idempotent
+npx tsx src/cli.ts chrome status   # where is it, and what port to attach
+npx tsx src/cli.ts chrome stop     # refuses to kill a Chrome we did not start
 sudo -u ui2api -H npx tsx src/cli.ts chrome status
 sudo -u ui2api -H npx tsx src/cli.ts chrome stop     # refuses to kill a Chrome we did not start
 ```

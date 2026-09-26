@@ -22,7 +22,7 @@ d("GOAL 132: the point of use is provisioned by code and survives a reboot", () 
   t("the provisioning script exists and is valid bash", () => {
     assert.ok(existsSync(SCRIPT), `${SCRIPT} must exist`);
     // `bash -n` parses without executing — safe, and it is a real check
-    execFileSync("bash", ["-n", SCRIPT], { stdio: "pipe" });
+    execFileSync("bash", ["-n", SCRIPT], { stdio: "pipe", timeout: 15_000 });
   });
 
   t("it creates the dedicated user, idempotently", () => {

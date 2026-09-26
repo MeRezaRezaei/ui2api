@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "
 import { createServer } from "node:net";
 import { resolve, dirname } from "node:path";
 import { resolveChromeOwner, type ChromeOwner } from "./chrome-owner.js";
+import { resolvedHeadless } from "./browser.js";
 
 /**
  * THE PERSISTENT CHROME DAEMON.
@@ -237,7 +238,10 @@ export async function startChromeDaemon(opts: {
     return { started: false, state: null, note: `no Chrome profile for ${owner.user} — see docs/CHROME_POINT_OF_USE.md` };
   }
 
-  const headless = opts.headless ?? process.env.UI2API_HEADED !== "1";
+  // GOAL 126: ask the ONE resolver, never the env. Reading UI2API_HEADED here
+  // would reintroduce the exact split-brain this cycle removed: the daemon
+  // believing "headed" while the launch seam spawned --headless=new.
+  const headless = opts.headless ?? resolvedHeadless();
   const args = [
     "--no-first-run",
     "--no-default-browser-check",

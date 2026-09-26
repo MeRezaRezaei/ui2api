@@ -276,7 +276,10 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
   });
 
   t("the state file is tracked, not ignored (it is the real record)", () => {
-    const out = execFileSync("git", ["ls-files", "--error-unmatch", ".brain/PRODUCTION_READINESS.md"], { encoding: "utf8" });
+    const out = execFileSync("git", ["ls-files", "--error-unmatch", ".brain/PRODUCTION_READINESS.md"], {
+      encoding: "utf8",
+      timeout: 15_000,
+    });
     assert.match(out, /PRODUCTION_READINESS\.md/, "the readiness state must be tracked in git");
   });
 });

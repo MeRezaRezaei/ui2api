@@ -67,6 +67,9 @@ function makeDeps(overrides: Partial<RequirementsDeps> = {}): RequirementsDeps {
     copiedProfileProbe: () => "present",
     detectDisplay: () => ({ display: ":20", source: "env" }),
     chromeResolve: () => "/usr/bin/google-chrome-stable",
+    // GOAL 132: the Chrome point of use is an INJECTED seam, so the fixture
+    // decides it rather than reading the real host.
+    chromeOwner: () => ({ user: "ui2api", profile: "/home/ui2api/.config/ui2api-chrome", missing: null }),
     chromeVersion: () => "152.0.7977.82",
     bundledChromium: () => "/root/.cache/ms-playwright/chromium-1228/chrome-linux/chrome",
     probeAttachPort: async () => true,

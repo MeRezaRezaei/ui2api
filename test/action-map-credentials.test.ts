@@ -113,7 +113,11 @@ d("GOAL 125: a captured credential never reaches disk, a generated server, or a 
   });
 
   t("the action map is gitignored (the backstop behind redaction)", () => {
-    const out = execFileSync("git", ["check-ignore", "-v", "sites/somehost/action-map.json"], { encoding: "utf8" });
+    // bounded: a hang here would hang the whole suite (GOAL 102)
+    const out = execFileSync("git", ["check-ignore", "-v", "sites/somehost/action-map.json"], {
+      encoding: "utf8",
+      timeout: 15_000,
+    });
     assert.match(out, /action-map\.json/, "the per-site action map must be gitignored");
   });
 

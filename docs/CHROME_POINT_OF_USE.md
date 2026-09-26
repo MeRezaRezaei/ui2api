@@ -81,9 +81,12 @@ Chrome is started **once** and reused. Run the daemon as the owner; every
 request attaches to it over CDP.
 
 ```bash
-sudo -u ui2api -H npx tsx src/cli.ts chrome start     # idempotent — never spawns twice
-sudo -u ui2api -H npx tsx src/cli.ts chrome status
-sudo -u ui2api -H npx tsx src/cli.ts chrome stop      # refuses to kill a Chrome we did not start
+ui2api chrome start     # idempotent — never spawns twice; adopts an existing Chrome
+ui2api chrome status    # where it is, and the port to attach to
+ui2api chrome stop      # refuses to kill a Chrome we did not start
+
+# as the dedicated owner (the supported way):
+sudo -u ui2api -H npx tsx src/cli.ts chrome start
 ```
 
 `start` **adopts** a Chrome for the owner that is already running on any port,

@@ -42,6 +42,7 @@ export const HELP_LINES: readonly string[] = [
   "  ui2api package  <host>       (REFUSED — GOAL 66 write-truth: only knows the DEAD metadata+action-map pair nothing serves; package the modern way: ui2api analyse → capabilities/<id>/ with manifest.json + profile.json + session.lock.json + CAPABILITIES.md, then it is served by /registry + install)",
   "  ui2api install  <host>  [--registry URL] [--out DIR]  (install a site package from the community registry; default = master branch; --out = isolated, NOT served by the daemon)",
   "  ui2api install  --catalog [--registry URL]  (list the registry catalog: site, version, trust)",
+  "  ui2api chrome <start|status|stop>  (the PERSISTENT Chrome daemon: one long-lived browser owned by the dedicated ui2api user; start is idempotent and adopts an existing one)",
   "  ui2api hub            [--port N] [--data-dir DIR]  (start registry server)",
   "  ui2api hub publish <host> [--mirror] [--registry-repo URL]  (build + PUT to hub; --mirror also pushes to community registry)",
   "  ui2api hub run <host> [--acp] [--port N] [--data-dir DIR] [--engine native|wigolo]  (serve a registered plugin)",
