@@ -55,10 +55,47 @@ function listTools(): unknown {
   };
 }
 
+// GOAL 107: a DOM-extract action reports a MISS as a plain JS \`null\` —
+// BrowserSession.executeRecipe returns null when querySelector found no element
+// (or the requested attribute was absent). For those actions a null result can
+// only mean "nothing was extracted", so we can name the exact miss. Mirrors the
+// parseExtract grammar in browser-session.ts.
+function extractTarget(action: Action): { sel: string; kind: string; arg: string | null } | null {
+  if (action.result?.mode !== "dom" || !action.result.extract) return null;
+  const m = action.result.extract.trim().match(/^(text|attr|json)\\s+(\\S+)(?:\\s+(\\S+))?$/);
+  if (!m) return null;
+  if (m[1] === "attr" && m[3] === undefined) return null;
+  return { kind: m[1], sel: m[2], arg: m[3] ?? null };
+}
+
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const action = map.actions.find((a) => a.name === name);
   if (!action) return { is_error: true, content: [{ type: "text", text: "unknown tool: " + name }] };
   const res = await session.executeRecipe(action as Action, args || {});
+  /* GOAL_107_MISS_CHECK_BEGIN */
+  // Never report a failed extraction as a success carrying the string "null":
+  // that is indistinguishable from a real answer to the consumer. A null from a
+  // js-function action is a genuine value the site's own code returned, so only
+  // a DOM-extract action's null is treated as a miss.
+  const miss = extractTarget(action as Action);
+  if (res === null && miss) {
+    const what =
+      miss.kind === "attr"
+        ? "attribute " + JSON.stringify(miss.arg) + " of selector " + JSON.stringify(miss.sel)
+        : "selector " + JSON.stringify(miss.sel);
+    return {
+      is_error: true,
+      content: [
+        {
+          type: "text",
+          text:
+            name + ": extraction failed — no match for " + what + " on " + map.url +
+            " (the element does not exist on the live page, so nothing was read)",
+        },
+      ],
+    };
+  }
+  /* GOAL_107_MISS_CHECK_END */
   return { content: [{ type: "text", text: sanitize(res) }] };
 }
 

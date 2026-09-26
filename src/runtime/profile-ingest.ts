@@ -7,7 +7,7 @@
 //
 // Reading strategy on locked dirs: COPY the live files to a temp dir first.
 // SQLite WAL is replayed on open of the copy; LevelDB opens read-only.
-import { readFileSync, existsSync, mkdtempSync, cpSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, cpSync, readdirSync, chmodSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { pbkdf2Sync, createDecipheriv } from "node:crypto";
@@ -272,8 +272,20 @@ export function findProfileDirsIn(profileDir: string): string[] {
 }
 
 // Copy a running Chrome's session DB + Local State to a temp dir (the originals
-// are locked). Returns paths to the readable copy.
-function copyProfileForReading(profileDir: string): { dbPath: string; localStatePath: string } {
+// are locked), hand the readable copies to `use`, then REMOVE the temp dir in a
+// finally — GOAL 106. Those copies are decrypted-credential material (the cookie
+// DB plus the `Local State` os_crypt key); leaving them in os.tmpdir() meant a
+// world-readable cookie DB and key stayed on disk indefinitely. The callback
+// shape is what makes the finally possible: the copies must not outlive the
+// function, so the work happens INSIDE, never on returned paths.
+//
+// mkdtempSync already creates the dir 0700, but the copies inherit the source
+// files' permissive modes under the default umask — hence chmod 0600 below, so
+// the window between copy and cleanup is not a world-readable read.
+export function copyProfileForReading<T>(
+  profileDir: string,
+  use: (paths: { dbPath: string; localStatePath: string }) => T
+): T {
   const def = join(profileDir, "Default");
   // Newer Chrome keeps cookies under Default/Network/; older under Default/.
   const dbSrc = existsSync(join(def, "Network", "Cookies"))
@@ -281,16 +293,30 @@ function copyProfileForReading(profileDir: string): { dbPath: string; localState
     : join(def, "Cookies");
   if (!existsSync(dbSrc)) throw new Error(`no chrome cookies database at ${dbSrc}`);
   const tmp = mkdtempSync(join(tmpdir(), "u2a-ingest-"));
-  const dbPath = join(tmp, "Cookies");
-  for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-    const src = dbSrc + suffix;
-    if (existsSync(src)) cpSync(src, dbPath + suffix);
+  try {
+    const dbPath = join(tmp, "Cookies");
+    for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+      const src = dbSrc + suffix;
+      if (existsSync(src)) {
+        cpSync(src, dbPath + suffix);
+        try { chmodSync(dbPath + suffix, 0o600); } catch { /* best effort */ }
+      }
+    }
+    const localStatePath = join(tmp, "Local State");
+    if (existsSync(join(profileDir, "Local State"))) {
+      cpSync(join(profileDir, "Local State"), localStatePath);
+      try { chmodSync(localStatePath, 0o600); } catch { /* best effort */ }
+    }
+    return use({ dbPath, localStatePath });
+  } finally {
+    // Best-effort, never throws: a cleanup failure must not mask the real result
+    // (or the real error) from the read.
+    try {
+      rmSyncSafe(tmp, { recursive: true, force: true });
+    } catch {
+      // left a dir? the profile-scan sweep retries any new `u2a-ingest-` dir.
+    }
   }
-  const localStatePath = join(tmp, "Local State");
-  if (existsSync(join(profileDir, "Local State"))) {
-    cpSync(join(profileDir, "Local State"), localStatePath);
-  }
-  return { dbPath, localStatePath };
 }
 
 // Read all cookies from a copied DB, filtered + decrypted for `targetHost`.
@@ -458,8 +484,12 @@ export async function ingestProfile(opts: IngestOptions): Promise<IngestResult> 
   if (!existsSync(join(profileDir, "Local State")) && !existsSync(join(profileDir, "Default", "Cookies"))) {
     throw new Error(`no chrome cookies database under ${profileDir}`);
   }
-  const { dbPath } = copyProfileForReading(profileDir);
-  const { cookies, total, matched, decrypted, undecryptable } = readCookiesFor(dbPath, opts.targetHost);
+  // The read happens INSIDE the callback so the temp copy (cookie DB + os_crypt
+  // key) is removed before this function returns — GOAL 106.
+  const { cookies, total, matched, decrypted, undecryptable } = copyProfileForReading(
+    profileDir,
+    ({ dbPath }) => readCookiesFor(dbPath, opts.targetHost)
+  );
   const origin = `https://${opts.targetHost}`;
   const localStorage = await readLocalStorageFor(profileDir, origin);
   if (total === 0) warnings.push("cookies table is empty — is this the right profile?");

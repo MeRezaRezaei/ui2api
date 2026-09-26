@@ -56,6 +56,15 @@ async function handle(msg: any, plugin: LoadedPlugin): Promise<unknown> {
       const entry = plugin.tools.get(name);
       if (!entry) return { is_error: true, content: [{ type: "text", text: "unknown tool: " + name }] };
       const out = await entry.handler(args, plugin.context);
+      // GOAL 107: a "nothing found" result is an ERROR, not a success carrying
+      // the literal string "null". A consumer must be able to tell an absent
+      // element from a real value.
+      if (out === null || out === undefined) {
+        return {
+          is_error: true,
+          content: [{ type: "text", text: `${name}: execution produced no result (the target does not exist or returned nothing — nothing was read)` }],
+        };
+      }
       const text = typeof out === "string" ? out : JSON.stringify(out, null, 2);
       return { content: [{ type: "text", text }] };
     }

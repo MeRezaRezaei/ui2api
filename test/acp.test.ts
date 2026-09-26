@@ -8,6 +8,7 @@ import assert from "node:assert";
 import { validateActionMap } from "../src/schema.js";
 import { generate } from "../src/generator/generate.js";
 import type { ActionMap } from "../src/types.js";
+import { startAcpServer as harnessServer, startLocalSite, type RpcClient as HarnessClient } from "./helpers/acp-harness.js";
 
 const TIMEOUT_MS = 15000;
 
@@ -154,4 +155,90 @@ test("generated ACP server answers initialize and list_tools over stdio JSON-RPC
   const names = listed.tools.map((x: any) => x.name);
   assert.ok(names.includes("get_status"), "expected get_status in " + names.join(","));
   assert.ok(names.includes("fetch_report"), "expected fetch_report in " + names.join(","));
+});
+
+// GOAL 107: the emitted callTool used to return executeRecipe's raw result
+// unconditionally, so a FAILED extraction (target element absent -> null) came
+// back as a JSON-RPC success whose text was the literal string "null". These
+// tests drive call_tool end-to-end through a REAL browser against a hermetic
+// local page (no external network).
+
+const PAGE = `<!doctype html><html><body>
+<div class="report">quarterly revenue up 12%</div>
+<div class="absent-holder"></div>
+</body></html>`;
+
+function buildExtractMap(url: string): ActionMap {
+  const map = {
+    host: "example-site",
+    url,
+    capturedAt: new Date().toISOString(),
+    trusted: false,
+    auth: { required: false },
+    actions: [
+      {
+        name: "read_present",
+        description: "Read the text of .report, which exists on the page.",
+        execution: "live-js" as const,
+        parameters: [] as any[],
+        recipe: { kind: "js-function" as const, target: "window.noop", argsFrom: {} },
+        result: { mode: "dom" as const, extract: "text .report" },
+        verified: true,
+      },
+      {
+        name: "read_missing",
+        description: "Read a selector that does not exist on the page.",
+        execution: "live-js" as const,
+        parameters: [] as any[],
+        recipe: { kind: "js-function" as const, target: "window.noop", argsFrom: {} },
+        result: { mode: "dom" as const, extract: "text #nope-not-here" },
+        verified: true,
+      },
+    ],
+  };
+  return validateActionMap(map);
+}
+
+test("generated ACP call_tool on a MISSING selector returns is_error with a named reason, not success \"null\"", async (t) => {
+  const tmp = mkdtempSync(resolve(tmpdir(), "ui2api-acp-miss-"));
+  const site = await startLocalSite(PAGE);
+  let client: HarnessClient | null = null;
+  t.after(async () => {
+    if (client) client.close();
+    await site.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const serverDir = generate(buildExtractMap(site.url), tmp, "acp");
+  const { client: c } = harnessServer(resolve(serverDir, "acp.ts"));
+  client = c;
+
+  const res = await c.send("call_tool", { name: "read_missing", args: {} });
+  assert.strictEqual(res.is_error, true, "a failed extraction must be is_error, not a success: " + JSON.stringify(res));
+  const text = String(res.content?.[0]?.text ?? "");
+  assert.ok(text.length > 0, "the error must carry a reason");
+  assert.ok(!/^null$/.test(text), 'must not surface the literal "null": ' + text);
+  assert.ok(text.includes("read_missing"), "reason must name the tool: " + text);
+  assert.ok(text.includes("#nope-not-here"), "reason must name the selector: " + text);
+  assert.ok(/extraction failed|no match/i.test(text), "reason must name the failure: " + text);
+});
+
+test("generated ACP call_tool on an EXISTING selector returns a normal success with the real text", async (t) => {
+  const tmp = mkdtempSync(resolve(tmpdir(), "ui2api-acp-ok-"));
+  const site = await startLocalSite(PAGE);
+  let client: HarnessClient | null = null;
+  t.after(async () => {
+    if (client) client.close();
+    await site.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const serverDir = generate(buildExtractMap(site.url), tmp, "acp");
+  const { client: c } = harnessServer(resolve(serverDir, "acp.ts"));
+  client = c;
+
+  const res = await c.send("call_tool", { name: "read_present", args: {} });
+  assert.notStrictEqual(res.is_error, true, "a real extraction must not be an error: " + JSON.stringify(res));
+  const text = String(res.content?.[0]?.text ?? "");
+  assert.ok(text.includes("quarterly revenue up 12%"), "expected the real page text, got: " + text);
 });

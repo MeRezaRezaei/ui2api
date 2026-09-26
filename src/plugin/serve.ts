@@ -33,7 +33,16 @@ export async function servePlugin(loaded: LoadedPlugin, opts: { transport?: "std
   for (const { def, handler } of loaded.tools.values()) {
     server.registerTool(def.name, { description: def.description, inputSchema: jsonSchemaToZodShape(def.inputSchema) }, async (args: Record<string, unknown>) => {
       const out = await handler(args, loaded.context);
-      return { content: [{ type: "text" as const, text: typeof out === "string" ? out : JSON.stringify(out, null, 2) }] };
+      // GOAL 107: same honesty rule as the ACP surface — no result is an error.
+      // The explicit result type keeps the union assignable to the SDK's
+      // CallToolResult without widening `text` to `unknown`.
+      if (out === null || out === undefined) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: `${def.name}: execution produced no result (nothing was read)` }],
+        } as { isError: true; content: { type: "text"; text: string }[] };
+      }
+      return { content: [{ type: "text" as const, text: String(typeof out === "string" ? out : JSON.stringify(out, null, 2)) }] };
     });
   }
   if (opts.transport === "ws") throw new Error("ws transport implemented in sub-project 3");
