@@ -7,8 +7,16 @@ data/
 .opencode/
 skills-lock.json
 
-# Generated per-site servers are build output of the workflow
+# Generated per-site servers are build output of the workflow.
+#
+# GOAL 142: `sites/*/server/` did NOT cover the directory that actually exists.
+# A run that targets `sites/` directly (rather than `sites/<host>/`) wrote
+# `sites/server/`, which the pattern cannot match, so six generated files were
+# COMMITTED — including an ACP server embedding this machine's absolute path
+# (`/home/me/.../src/runtime/browser-session.ts`). Build output that carries a
+# machine-specific path must never be tracked. Both shapes are ignored now.
 sites/*/server/
+sites/server/
 
 # Dependencies / build
 node_modules/

@@ -20,7 +20,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -131,6 +132,38 @@ test("GOAL 141: the per-site Capabilities list is still derived from the registr
     assert.ok(
       readme.includes(`\`${m}()\``),
       `youtube's Capabilities list must mention its real method ${m}()`
+    );
+  }
+});
+
+test("GOAL 142: generated build output is never TRACKED by git (it carries machine paths)", () => {
+  // The defect: `.gitignore` said `sites/*/server/`, which cannot match the
+  // `sites/server/` directory that a direct-target run actually produces — so six
+  // generated files were COMMITTED, one embedding this machine's absolute source
+  // path. Build output is regenerable and machine-specific, so it must never be
+  // tracked. Asserted against git itself rather than by re-reading .gitignore,
+  // because the point is what git ACTUALLY does with the path.
+  const tracked = execFileSync("git", ["ls-files", "sites/"], {
+    cwd: resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+    timeout: 60_000,
+  })
+    .split("\n")
+    .filter(Boolean);
+  const offenders = tracked.filter((f) => /(^|\/)server\//.test(f));
+  assert.deepEqual(
+    offenders,
+    [],
+    `generated server output is tracked and would ship machine-specific paths: ${offenders.join(", ")}`
+  );
+  // And an absolute machine path must not be sitting in a tracked file.
+  for (const f of tracked) {
+    const abs = resolve(import.meta.dirname, "..", f);
+    if (!existsSync(abs)) continue;
+    const src = readFileSync(abs, "utf8");
+    assert.ok(
+      !/(^|[\s"'`])(\/home\/[A-Za-z0-9._-]+|\/Users\/)/m.test(src),
+      `tracked file ${f} embeds a machine-absolute path — generated output must not be tracked`
     );
   }
 });
