@@ -44,6 +44,7 @@
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool, type PoolStatus } from "./pool.js";
+import { daemonPosture } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
@@ -393,6 +394,9 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
 
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {
   const token = opts.token ?? process.env.UI2API_PROMPTD_TOKEN ?? "";
+  // GOAL 100: the SAME bind address the listener uses, resolved up front so the
+  // posture report can never disagree with where we actually listen.
+  const bindAddr = opts.host ?? "127.0.0.1";
   const dataDir = opts.dataDir ?? process.env.UI2API_DATA_DIR ?? "data";
 
   // Build a per-id profile map. When explicit profiles are handed in (CLI
@@ -651,7 +655,10 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       if (req.method === "GET" && req.url === "/status") {
         const st = pool.status;
-        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st) });
+        // GOAL 100: disclose the daemon's OWN posture (auth mode + active
+        // trust knobs) so "is it safe to expose this?" is answerable without
+        // reading the source. Shapes/counts only — never a token value.
+        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st), posture: daemonPosture(process.env, bindAddr) });
       }
       // GOAL 87 — the bounded request ring, read-only. Same localhost-only +
       // optional-bearer posture as every other route here (it lives behind the
@@ -688,7 +695,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       if (req.method === "GET" && (req.url === "/health" || req.url === "/")) {
         const st = pool.status;
-        return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: st, liveness: livenessBlock(st) });
+        return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: st, posture: daemonPosture(process.env, bindAddr), liveness: livenessBlock(st) });
       }
       if (req.method === "POST" && req.url === "/prompt") {
         const body = await readJson(req);
@@ -1737,7 +1744,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
     });
   });
 
-  const host = opts.host ?? "127.0.0.1";
+  const host = bindAddr;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(opts.port, host, () => resolve());
