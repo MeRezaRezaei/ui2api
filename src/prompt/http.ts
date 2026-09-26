@@ -312,6 +312,26 @@ export class HttpClientError extends Error {
 
 const MAX_BODY_BYTES = 1e6;
 
+/**
+ * GOAL 117: all 32 `/capability/<site>` handlers answered
+ * `500 {ok:false, error: e.message}` — echoing internal exception text (an
+ * absolute path, a hostname, a library internal, a selector string) straight to
+ * any caller. This is the same class GOAL 104 fixed on the request-level net,
+ * which is exactly why it survived: the criterion that "passed" was scoped to
+ * the region GOAL 104 had touched, and the readiness gate caught it by
+ * re-deriving from the WHOLE file.
+ *
+ * The failure stays a real, useful 500 with the capability id and a stable
+ * reason_code — only the raw internal text is removed. `UI2API_DEBUG=1` still
+ * prints the full error server-side, where an operator can see it.
+ */
+function capabilityFailure(capability: string, err: unknown): string {
+  if (process.env.UI2API_DEBUG === "1") {
+    console.error(`[ui2api] capability ${capability} failed:`, err);
+  }
+  return `capability "${capability}" failed inside the runner — see the daemon log (UI2API_DEBUG=1) for the internal error`;
+}
+
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   // Cache the parsed body on the request so a pre-dispatch guard (capability
   // validation) and the routed handler can both read the same body.
@@ -808,7 +828,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -838,7 +858,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -867,7 +887,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -895,7 +915,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -924,7 +944,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -954,7 +974,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -982,7 +1002,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1009,7 +1029,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1036,7 +1056,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1063,7 +1083,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1092,7 +1112,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1127,7 +1147,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1158,7 +1178,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1186,7 +1206,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1215,7 +1235,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1244,7 +1264,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1273,7 +1293,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1302,7 +1322,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1331,7 +1351,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1360,7 +1380,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1392,7 +1412,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1421,7 +1441,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1450,7 +1470,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1479,7 +1499,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1508,7 +1528,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1537,7 +1557,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1566,7 +1586,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1595,7 +1615,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1624,7 +1644,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1653,7 +1673,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1682,7 +1702,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1711,7 +1731,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1740,7 +1760,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
         } catch (e) {
-          return send(res, 500, { capability, ok: false, error: e instanceof Error ? e.message : String(e) });
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
         } finally {
           await caps.close().catch(() => {});
         }
@@ -1758,7 +1778,15 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       // 400 for request-shape/identity errors the caller can correct: unknown
       // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
-      send(res, e instanceof Error && /unknown site |no stored account |is installed and serves POST \/capability\//.test(e.message) ? 400 : 500, { error: e instanceof Error ? e.message : String(e) });
+      const isRequestShape = e instanceof Error && /unknown site |no stored account |is installed and serves POST \/capability\//.test(e.message);
+      // GOAL 117: a request-shape error keeps its NAMED message (the caller can
+      // correct it); anything else is an internal fault and must NOT echo the
+      // internal text to the client.
+      send(res, isRequestShape ? 400 : 500, {
+        error: isRequestShape
+          ? e instanceof Error ? e.message : String(e)
+          : { code: "internal_error", message: "internal error" },
+      });
     }
   };
 
