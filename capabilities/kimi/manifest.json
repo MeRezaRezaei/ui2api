@@ -36,7 +36,27 @@
       "description": "Send a prompt on the composer; streamed answer off the page (ChatService.Chat server-stream on notilo.kimi.com/apiv2)",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "implementation": "ChatService.Chat (kimi.gateway.chat.v1) server-streaming POST /apiv2/kimi.gateway.chat.v1/ChatService/Chat; ChatRequest carries chat_id, kimiplus_id, scenario (enum CHAT=1/THINK=2/DEEP_RESEARCH=3/…), tools, message (kimi.chat.v1.ChatMessage), options{thinking, reasoning_effort, context_length, model(10)}. Payload field layout NOT yet verified on the wire — a later incarnation may call it directly via page fetch + protobuf; the DOM path below drives the SPA.",
-      "recipe": "recipes/kimi_chat.json"
+      "recipe": "recipes/kimi_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "kimi_web_search",
@@ -44,7 +64,12 @@
       "description": "Flip the composer web-search switch so the answer is grounded by live search (feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH, search{force}} on ChatService.Chat). VERIFIED LIVE 2026-09-19: triggered via the toolkit drawer — [data-testid='toolkit-trigger-btn'] opens it, then click button.toolkit-item 'Web Search'; pre-boot clicks dropped → openToolkitItem() polls/re-clicks the trigger up to 15s.",
       "method": "ui-toggle (toolkit drawer Web Search) — LIVE-VERIFIED 2026-09-19",
       "implementation": "openToolkitItem(page, 'Web Search'): click [data-testid='toolkit-trigger-btn'], wait for button.toolkit-item rows (re-click trigger when none render), click the matching row, close toolkit. In-chat search is a tool on the chat RPC (Tool{type:TOOL_TYPE_SEARCH, search{force}}); per-message citations via ChatService.GetSearchCitation + GetToolBlock.",
-      "recipe": "recipes/kimi_web_search.json"
+      "recipe": "recipes/kimi_web_search.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "kimi_list_conversations",
@@ -52,7 +77,17 @@
       "description": "List past chats (ChatService.ListChats / ListMessages). VERIFIED LIVE 2026-09-19: sidebar DOM read returns 15 real conversations via a.next-sidebar-history-item__link (fallback a[href^='/chat/']), href /chat/<uuid>?chat_enter_method=history — page.waitForSelector({timeout:15000}) replaces the fixed 3s wait (raced cold boot).",
       "method": "ui-path (DOM sidebar read) — LIVE-VERIFIED 2026-09-19; wire ListChats RPC still needs protobuf framing",
       "implementation": "openPage() → wait a.next-sidebar-history-item__link (15s) → page.evaluate extracting {id (uuid from href), title (innerText)} deduped, capped at 20. Wire equivalent ChatService.ListChats (kimi.gateway.chat.v1) documented in CAPABILITIES.md §4; payload layout to be verified on a future live capture.",
-      "recipe": "recipes/kimi_list_conversations.json"
+      "recipe": "recipes/kimi_list_conversations.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "kimi_file_upload",
@@ -61,7 +96,12 @@
       "method": "ui-path (composer attach UI) — LIVE-VERIFIED 2026-09-19",
       "implementation": "openToolkitItem('Add files & images') → page.locator('input[type=file]').setInputFiles(path) (NOT filechooser). Wire: POST https://notilo.kimi.com/apiv2-files/file/upload (multipart, responseType text) + lightweight POST /file/upload_simple; kimi.gateway.file.v1.FileService.Upload (client-streaming), GetFileParseProgress, ChatService.ListChatFiles; image blob host https://kimi-img.moonshot.cn.",
       "recipe": "recipes/kimi_file_upload.json",
-      "notes": "Upload flow VERIFIED live 2026-09-19 (attach UI path); wire-first /apiv2-files/file/upload recipe retained for future direct-RPC use"
+      "notes": "Upload flow VERIFIED live 2026-09-19 (attach UI path); wire-first /apiv2-files/file/upload recipe retained for future direct-RPC use",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "kimi_long_context",
@@ -70,7 +110,21 @@
       "method": "composer context-length picker (model panel submenu)",
       "implementation": "MEASURED LIVE 2026-09-23: picker = button[data-testid='model-context-length-item'] (only renders for models carrying contextLengthOptions — K3 family, not Instant); options = button[data-testid='model-context-length-option'] with data-context-length=<ContextLength enum> (decoded: 5=L 'Standard' default, 6=XL 'Extra Long'). Applying Standard → ok:true; Extra Long is PLAN-GATED on free accounts (measured upgrade modal data-testid='confirm-dialog': 'Available to subscribers on the Max plan or higher') → honest blocker. Feeds ChatRequestOptions.context_length on the next ChatService.Chat send.",
       "recipe": "recipes/kimi_long_context.json",
-      "notes": "Picker + enum codes live-verified 2026-09-23 (runner proof); Extra Long plan-gated on this account; needs a Max-plan session to apply XL"
+      "notes": "Picker + enum codes live-verified 2026-09-23 (runner proof); Extra Long plan-gated on this account; needs a Max-plan session to apply XL",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "length": {
+            "type": "number",
+            "description": "read by the runner as args.length"
+          },
+          "longContext": {
+            "type": "string",
+            "description": "read by the runner as args.longContext"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "kimi_model_list",
@@ -78,7 +132,12 @@
       "description": "Read the available models from the model picker DOM (selectModelEntry state key + GetAvailableModels RPC proven in bundles). VERIFIED LIVE 2026-09-19: click [data-testid='model-select-trigger'] → read button.model-item rows (name = first innerText line), selected flagged via .checked class; Escape closes. Live read returned: K3, K3 Swarm, K2.8, Instant (selected).",
       "method": "dom.picker — LIVE-VERIFIED 2026-09-19",
       "implementation": "page.locator('[data-testid=\"model-select-trigger\"]').click() → wait button.model-item → evaluate rows {id:null, name: first line, selected: contains '.checked'} → Escape to close. Returns {model, selected} per row.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
@@ -86,7 +145,11 @@
     "kind": "session-snapshot",
     "host": "www.kimi.ai",
     "apiHost": "https://notilo.kimi.com",
-    "localStorageKeys": ["access_token", "refresh_token", "msh_user_id"],
+    "localStorageKeys": [
+      "access_token",
+      "refresh_token",
+      "msh_user_id"
+    ],
     "capture": "ui2api profile capture \"https://www.kimi.ai\" --login",
     "note": "Auth is localStorage access_token (replayed as Bearer on notilo.kimi.com/apiv2, plus site-internal x-msh-shield-data TrustDecision header). Refresh via AuthService.RefreshToken; on Unauthenticated cleanToken() logs out. Verified live 2026-09-18: session with access_token/refresh_token/msh_user_id drives the ChatService.Chat UI round-trip."
   },

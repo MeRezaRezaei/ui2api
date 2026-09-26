@@ -11,84 +11,144 @@
       "name": "Chat",
       "method": "ui-path (ChatDriver) + POST /samantha/chat/completion",
       "recipe": "recipes/doubao_chat.json",
-      "status": "awaiting capture"
+      "status": "awaiting capture",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_image-generation",
       "name": "Image Generation",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_video-generation",
       "name": "Video Generation",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_web-search",
       "name": "Web Search",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_deep-research",
       "name": "Deep Research",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_code-interpreter",
       "name": "Code Interpreter",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_canvas",
       "name": "Canvas",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_document-analysis",
       "name": "Document Analysis",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_audio-voice",
       "name": "Audio Voice",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_writing",
       "name": "Writing",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_ppt-generation",
       "name": "Ppt Generation",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "doubao_search-images",
       "name": "Search Images",
       "method": "to-verify on first live capture",
       "recipe": null,
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "transport": {

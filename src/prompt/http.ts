@@ -46,7 +46,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ChatPool, type PoolStatus } from "./pool.js";
 import { daemonPosture } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
-import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
+import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount } from "../runtime/session-store.js";
@@ -614,6 +614,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       // else: GET /registry -> { packages: [...] }
       if (req.method === "GET" && req.url === "/registry") {
         return send(res, 200, {
+          ...buildRegistryContract(Boolean(process.env.UI2API_PROMPTD_TOKEN)),
           packages: buildRegistryPackages(),
           generatedAt: new Date().toISOString(),
         });

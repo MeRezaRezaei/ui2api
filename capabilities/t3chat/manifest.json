@@ -34,7 +34,12 @@
       "description": "Send a prompt via the chat composer; streamed answer from the selected LLM backend (Convex mutation or /api/chat route — wire path UNKNOWN)",
       "method": "ui-path (trusted input + Enter, site's own send handler) — UNVERIFIED",
       "implementation": "UNVERIFIED — clone repos suggest a Convex mutation (e.g. api.chat.send) invoked from the React component on submit; streaming response delivered via Convex subscription or HTTP stream. The site's own JS drives the flow; no RPC payloads recovered. Confirm on first live capture.",
-      "recipe": "recipes/t3chat_chat.json"
+      "recipe": "recipes/t3chat_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "t3chat_model_switch",
@@ -42,7 +47,12 @@
       "description": "Select which LLM backend to use (Claude, GPT, Gemini, Llama, etc.) via the model picker dropdown",
       "method": "ui-picker (UNVERIFIED selector) — select the desired model before or during chat",
       "implementation": "UNVERIFIED — public discourse and clone repos confirm multi-model support; no DOM selectors, state keys, or API payloads recovered from the live site bundles. The model selection likely persists in Convex chat state or is passed per-request. Confirm on first live capture.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "t3chat_conversation_crud",
@@ -50,7 +60,12 @@
       "description": "List/get/rename/delete conversations — Convex-backed (chats table in clone repos)",
       "method": "in-page Convex queries (UNVERIFIED) or DOM sidebar read",
       "implementation": "UNVERIFIED — clone repos define Convex functions chat.list, chat.get, chat.delete, message.list. Live site may use the same or different Convex function names. No payloads verified.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "t3chat_file_upload",
@@ -58,7 +73,12 @@
       "description": "Attach files or images to a chat (UNVERIFIED — clone repos suggest Convex Blob storage or Vercel Blob)",
       "method": "composer attach UI (UNVERIFIED selector)",
       "implementation": "UNVERIFIED — no evidence from static analysis. Clone repos show file upload via Convex actions with Blob storage. Confirm on first live capture.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "t3chat_model_list",
@@ -66,7 +86,12 @@
       "description": "Read available models from the model picker DOM — UNVERIFIED selectors",
       "method": "dom.picker (unverified selectors)",
       "implementation": "UNVERIFIED — no DOM class or state key proven by bundles. Public knowledge: supports Claude 3.5/4, GPT-4o/4, Gemini Pro/Ultra, Llama 3, Mistral, etc. Confirm picker structure on first live capture.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

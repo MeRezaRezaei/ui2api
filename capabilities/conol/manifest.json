@@ -26,7 +26,12 @@
       "description": "Send a prompt on the composer; streamed answer -- wire protocol, selectors, and streaming transport all unknown from static analysis (requires headed capture)",
       "method": "ui-path (presumed -- composer + Enter; site's own send handler; exact selectors unverified)",
       "implementation": "APP CODE IS LAZY-LOADED BEHIND AUTH. No chat/agent API endpoints or streaming transports found in the 22 static JS bundles. The SPA app renders client-side after session injection. All selectors, API paths, and streaming protocol must be captured from a live headed session.",
-      "recipe": "recipes/conol_chat.json"
+      "recipe": "recipes/conol_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
@@ -35,7 +40,10 @@
     "host": "conol.ai",
     "cookieName": "__Secure-better-auth.session_token",
     "betterAuthVersion": "1.6.16",
-    "plugins": ["passkey", "organization"],
+    "plugins": [
+      "passkey",
+      "organization"
+    ],
     "signInMethod": "passkey (WebAuthn) only -- no email/password or social login",
     "capture": "ui2api profile capture \"https://conol.ai\" --login",
     "note": "Auth is passkey-only via better-auth. The passkey registration uses WebAuthn generateRegistrationOptions + verifyRegistrationOptions (browser-native prompt). After registration, authentication uses generateAuthenticationOptions + verifyAuthenticationOptions. Cookie is __Secure-better-auth.session_token (Secure prefix, HttpOnly). Session check: GET /api/auth/get-session returns null when unauthenticated. Admin plugin is present (/api/auth/admin/list-users returns 401 without bearer). Organization plugin is present but not probed."

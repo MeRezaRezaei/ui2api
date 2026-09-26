@@ -30,7 +30,35 @@
       "method": "ui-path (navigate to /search/<q>, read rendered results) — LIVE-VERIFIED 2026-09-20",
       "implementation": "openPage() → goto /search/<q> → waitForSelector(\"a[href*='/v/']\") (~7-10s hydration; readyState is NOT enough) → dedupe anchors by /v/<id> → titles (skip duration-only img.alt like '2:03:10') + bare URLs. Implemented in src/capabilities/araprat.ts.",
       "recipe": "recipes/araprat_search.json",
-      "verified": "2026-09-20"
+      "verified": "2026-09-20",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "read by the runner as args.q"
+          },
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "q"
+            ],
+            "description": "the runner reads args.q ?? args.query, so args.q alone satisfies it"
+          },
+          {
+            "required": [
+              "query"
+            ],
+            "description": "the runner reads args.q ?? args.query, so args.query alone satisfies it"
+          }
+        ]
+      }
     },
     {
       "id": "araprat_trending",
@@ -39,7 +67,12 @@
       "method": "ui-path (homepage DOM read) — LIVE-VERIFIED 2026-09-20",
       "implementation": "openPage() → goto https://www.aparat.com (301s to /home) → waitForSelector(\"a[href*='/v/']\") → dedupe + titles. Implemented in src/capabilities/araparat.ts.",
       "recipe": "recipes/araprat_trending.json",
-      "verified": "2026-09-20"
+      "verified": "2026-09-20",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_video_detail",
@@ -48,7 +81,19 @@
       "method": "ui-path (video page DOM read) — LIVE-VERIFIED 2026-09-20",
       "implementation": "openPage() → goto /v/<id> → waitForSelector('h1') → read h1 + div.description + deduped a[href*='/v/'] related list. Implemented in src/capabilities/araparat.ts.",
       "recipe": "recipes/araprat_video_detail.json",
-      "verified": "2026-09-20"
+      "verified": "2026-09-20",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "read by the runner as args.id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
     },
     {
       "id": "araprat_comment",
@@ -60,7 +105,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_comment.json"
+      "recipe": "recipes/araprat_comment.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_like",
@@ -72,7 +122,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_like.json"
+      "recipe": "recipes/araprat_like.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_follow",
@@ -84,7 +139,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_follow.json"
+      "recipe": "recipes/araprat_follow.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_subscribe",
@@ -96,7 +156,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_subscribe.json"
+      "recipe": "recipes/araprat_subscribe.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_upload",
@@ -108,7 +173,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required login-owns-video",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_upload.json"
+      "recipe": "recipes/araprat_upload.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "araprat_playlist",
@@ -120,7 +190,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/araprat_playlist.json"
+      "recipe": "recipes/araprat_playlist.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

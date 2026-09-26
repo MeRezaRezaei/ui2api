@@ -19,14 +19,24 @@
       "name": "Chat stream (composer)",
       "description": "Send a prompt on the composer and read the streamed answer off the page. UNVERIFIED transport: the chat SPA's module graph is not present in the static HTML/JS (login-gated, code-split) — composer/send/answer DOM and the exact chat wire must be confirmed on the first live capture",
       "method": "ui-path (site's own composer + send handler)",
-      "recipe": "recipes/blackbox_chat.json"
+      "recipe": "recipes/blackbox_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "blackbox_inference_api",
       "name": "Inference API (OpenAI-compatible + enc stream)",
       "description": "Verified (static) API surface: POST https://enterprise.blackbox.ai/chat/completions and SSE path /enc/<model>/message_stream. Live request/response shapes to verify — endpoint literals seen only in the marketing terminal demo (6.js), not yet exercised",
       "method": "in-page fetch or direct API — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

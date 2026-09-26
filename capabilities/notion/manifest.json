@@ -9,35 +9,60 @@
       "name": "Notion AI chat",
       "description": "Open /ai (or a workspace page's Notion AI) and send a prompt; answer renders in the AI chat thread. Same-origin eventName-RPC transport (POST /api/v3/<eventName>) with model orange-mousse; streaming transport UNVERIFIED.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/notion_chat.json"
+      "recipe": "recipes/notion_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "notion_qna",
       "name": "Workspace Q&A",
       "description": "Ask across connected workspace sources on /ai (Q&A model orange-mousse, promptCategory filter); exact request body NOT statically recoverable — live shape to verify.",
       "method": "ui-path — ROUTE/FLAG-VERIFIED / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "notion_ai_commands",
       "name": "In-page AI commands",
       "description": "Inline AI commands (Improve writing, Summarize, etc.) on workspace pages; ai_writer / create_form / db_agent settings tabs — flag literals in bundle, exact command list TO-VERIFY.",
       "method": "site UI toggle (ai_writer flag); live command set TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "notion_ai_search",
       "name": "AI search tool",
       "description": "injectSearchTool flag / targetConfig types=[search, researcher] / promptCategory=deep_research — grounded flags, live search flow TO-VERIFY.",
       "method": "ui-path (targetConfig + injectSearchTool); live walk TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "notion_ai_connectors",
       "name": "QnA source connectors",
       "description": "Manage external source ingestions (google_drive_qna_ingestion, jira_qna_ingestion_v2, github_qna, gmail_ai_connector, etc.) under aicustomagents/aiconnectors* — connector map grounded in bundle, UI shapes TO-VERIFY.",
       "method": "site settings UI (aicustomagents/aiconnectors*); live shapes TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

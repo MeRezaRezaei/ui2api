@@ -25,7 +25,12 @@
       "method": "ui-path placeholder — selectors UNVERIFIED, recipe schema-compatible, will not run against a dead origin",
       "implementation": "NOT INVESTIGABLE — no app/bundles served. If/once the site returns, re-run static bundle analysis to recover the real chat endpoint, transport, auth cookie and model list, then promote this capability.",
       "recipe": "recipes/zenmux_chat.json",
-      "status": "dormant"
+      "status": "dormant",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

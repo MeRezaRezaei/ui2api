@@ -32,7 +32,17 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "dom-unverified-auth-walled",
-      "recipe": "recipes/gmail_read_inbox.json"
+      "recipe": "recipes/gmail_read_inbox.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "max": {
+            "type": "number",
+            "description": "read by the runner as args.max"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "gmail_list_threads",
@@ -42,7 +52,39 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "dom-unverified-auth-walled",
-      "recipe": "recipes/gmail_list_threads.json"
+      "recipe": "recipes/gmail_list_threads.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "read by the runner as args.label"
+          },
+          "max": {
+            "type": "number",
+            "description": "read by the runner as args.max"
+          },
+          "view": {
+            "type": "string",
+            "description": "read by the runner as args.view"
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "label"
+            ],
+            "description": "the runner reads args.label ?? args.view, so args.label alone satisfies it"
+          },
+          {
+            "required": [
+              "view"
+            ],
+            "description": "the runner reads args.label ?? args.view, so args.view alone satisfies it"
+          }
+        ]
+      }
     },
     {
       "id": "gmail_open_thread",
@@ -52,7 +94,35 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "dom-unverified-auth-walled",
-      "recipe": "recipes/gmail_open_thread.json"
+      "recipe": "recipes/gmail_open_thread.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          },
+          "subject": {
+            "type": "string",
+            "description": "read by the runner as args.subject"
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "query"
+            ],
+            "description": "the runner reads args.query ?? args.subject, so args.query alone satisfies it"
+          },
+          {
+            "required": [
+              "subject"
+            ],
+            "description": "the runner reads args.query ?? args.subject, so args.subject alone satisfies it"
+          }
+        ]
+      }
     },
     {
       "id": "gmail_search",
@@ -62,7 +132,23 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "dom-unverified-auth-walled",
-      "recipe": "recipes/gmail_search.json"
+      "recipe": "recipes/gmail_search.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "max": {
+            "type": "number",
+            "description": "read by the runner as args.max"
+          },
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
     },
     {
       "id": "gmail_send",
@@ -74,7 +160,27 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required google-web-session",
       "status": "login-gated-recipe-only",
-      "recipe": "recipes/gmail_send.json"
+      "recipe": "recipes/gmail_send.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "read by the runner as args.body"
+          },
+          "subject": {
+            "type": "string",
+            "description": "read by the runner as args.subject"
+          },
+          "to": {
+            "type": "string",
+            "description": "read by the runner as args.to"
+          }
+        },
+        "required": [
+          "to"
+        ]
+      }
     }
   ],
   "auth": {

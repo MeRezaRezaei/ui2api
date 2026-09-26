@@ -35,7 +35,23 @@
       "description": "Send a prompt on the composer; SSE-streamed answer via POST /duckchat/v1/chat (accept: text/event-stream). Model configurable per message.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "implementation": "POST /duckchat/v1/chat with JSON body {model, messages[{role,content[{type,text}]}], metadata{toolChoice}, reasoningEffort, canUseWebSearch, ...}; SSE response parsed for [DONE], assistant role content, error markers. VQD token from GET /status preflight.",
-      "recipe": "recipes/duckduckgo_chat.json"
+      "recipe": "recipes/duckduckgo_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "duckduckgo_web_search",
@@ -43,7 +59,17 @@
       "description": "Toggle in-chat web search (metadata.toolChoice.WebSearch → backend performs search, injects results + citations)",
       "method": "ui-toggle (composer Tools → Web Search row)",
       "implementation": "Composer 'Tools' button → popover row \"Web Search / Source answers from the web\" ([role='menuitemradio']); enabled state read back from the composer chip button[aria-label='Remove Web Search']. VERIFIED live 2026-09-23 (headed Xvfb): enable→chip, chat after enable carried a REAL WebSearch tool-invocation with 5 citations in saved-chats.",
-      "recipe": "recipes/duckduckgo_web_search.json"
+      "recipe": "recipes/duckduckgo_web_search.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "string",
+            "description": "read by the runner as args.enable"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "duckduckgo_model_picker",
@@ -51,7 +77,12 @@
       "description": "Read available AI models from the embedded bundle config (gpt-4o/5.x, claude-sonnet-4-x/opus-4-x, llama-4, mistral-small, kimi-k2-5)",
       "method": "ui.model-picker (composer chip → [role='menu'][aria-label='Choose a model'])",
       "implementation": "Composer model chip (text '5.6 Luna', w≈100 h≈32) opens [role='menu'][aria-label='Choose a model']; rows are [role='menuitemradio'] with data-testid=\"model-picker-row-<id>\" and aria-checked=\"true\" on the active model. VERIFIED live 2026-09-23: 6 rows read (GPT-5.6 Luna selected, GPT-5.4 mini, Claude Haiku 4.5, Mistral Small 4, gpt-oss 120B, Gemma 4 31B BETA). Post-chat composer hides the chip → New Chat retry.",
-      "recipe": "recipes/duckduckgo_model_picker.json"
+      "recipe": "recipes/duckduckgo_model_picker.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "duckduckgo_file_upload",
@@ -59,7 +90,12 @@
       "description": "Attach files and images to a chat message (base64-encoded in request body)",
       "method": "ui.file-upload (setInputFiles on hidden input[type='file'])",
       "implementation": "Attach button (button[aria-label='Add images or PDFs']) wraps input[type='file'] accept=\"image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf\"; setInputFiles → attachment chip button[aria-label^='Remove image '] read-back. VERIFIED live 2026-09-23 with a 1x1 PNG (chip 'Remove image 1'). Content parts: {type:'image', mimeType, image:dataUrl} or {type:'file', content:base64, encoding:'base64', mimeType, filename}.",
-      "recipe": "recipes/duckduckgo_file_upload.json"
+      "recipe": "recipes/duckduckgo_file_upload.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "duckduckgo_reasoning",
@@ -67,7 +103,35 @@
       "description": "Set reasoning effort (fast / reasoning / extended) for supported models",
       "method": "ui.toggle (button[aria-label='Reasoning mode'] popover)",
       "implementation": "Composer button[aria-label='Reasoning mode'] text Fast/Reasoning; popover rows [role='menuitemradio'] 'Reasoning Takes longer to respond' / 'Fast Answers right away'. VERIFIED live 2026-09-23: selecting flips the button text (read-back). 'extended' is NOT offered for the free-tier GPT-5.6 Luna composer (measured limit, honest ok:false). reasoningEffort rides the chat POST; extendedThinking in request metadata for plus/pro models.",
-      "recipe": "recipes/duckduckgo_reasoning.json"
+      "recipe": "recipes/duckduckgo_reasoning.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "read by the runner as args.mode"
+          },
+          "state": {
+            "type": "string",
+            "description": "read by the runner as args.state"
+          }
+        },
+        "required": [],
+        "anyOf": [
+          {
+            "required": [
+              "mode"
+            ],
+            "description": "the runner reads args.mode ?? args.state, so args.mode alone satisfies it"
+          },
+          {
+            "required": [
+              "state"
+            ],
+            "description": "the runner reads args.mode ?? args.state, so args.state alone satisfies it"
+          }
+        ]
+      }
     },
     {
       "id": "duckduckgo_chat_history",
@@ -75,36 +139,68 @@
       "description": "Read recent chats from IndexedDB (anonymous, device-local) or DDG-account sync",
       "method": "indexeddb.saved-chats + dom.sidebar",
       "implementation": "Anonymous chats live in IndexedDB 'savedAIChatData' (v6), stores saved-chats / pre-canonical-chats keyed by chatId {title, model, messages[], reasoningMode, lastEdit, pinned}; sidebar input[aria-label='Search chats'] + per-row button[aria-label='Delete Chat'] corroborate. VERIFIED live 2026-09-23 (sendProbe read-back: 'Abilities list' row, model gpt-5.6-luna, stored + sidebar match). DDG sync via /duckchat/v1/auth/* + internal_duckchat_user cookie (optional).",
-      "recipe": "recipes/duckduckgo_chat_history.json"
+      "recipe": "recipes/duckduckgo_chat_history.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sendProbe": {
+            "type": "string",
+            "description": "read by the runner as args.sendProbe"
+          }
+        },
+        "required": []
+      }
     }
   ],
   "models": {
     "note": "Model list is embedded in the JS bundle (NOT fetched from a /models endpoint). The following are the literal model IDs found. Subscription tier (free/plus/pro) gates access server-side.",
     "free": [
       "gpt-4o",
-      "claude-3-haiku-20240307", "claude-haiku",
+      "claude-3-haiku-20240307",
+      "claude-haiku",
       "Llama-3.3-70B-Instruct-Turbo",
-      "Mistral-Small-3", "Mistral-Small-24B-Instruct-2501",
+      "Mistral-Small-3",
+      "Mistral-Small-24B-Instruct-2501",
       "Mixtral-8x7B-Instruct-v0.1"
     ],
     "plus": [
-      "gpt-4.1", "gpt-4.5",
-      "claude-3-7-sonnet-latest", "claude-sonnet-4", "claude-sonnet-4-5", "claude-sonnet-4-6",
+      "gpt-4.1",
+      "gpt-4.5",
+      "claude-3-7-sonnet-latest",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-6",
       "claude-haiku-4-5",
-      "Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct",
-      "o3-mini", "o4-mini", "mistral-small-2603"
+      "Llama-4-Maverick-17B-128E-Instruct-FP8",
+      "Llama-4-Scout-17B-16E-Instruct",
+      "o3-mini",
+      "o4-mini",
+      "mistral-small-2603"
     ],
     "pro": [
-      "gpt-5", "gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.6",
-      "claude-opus-4", "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-6-thinking",
-      "claude-opus-4-7", "claude-opus-4-8",
+      "gpt-5",
+      "gpt-5.1",
+      "gpt-5.2",
+      "gpt-5.4",
+      "gpt-5.6",
+      "claude-opus-4",
+      "claude-opus-4-5",
+      "claude-opus-4-6",
+      "claude-opus-4-6-thinking",
+      "claude-opus-4-7",
+      "claude-opus-4-8",
       "kimi-k2-5"
     ],
     "internal": [
-      "claude-sonnet-4-internal", "Llama-4-Maverick-internal",
-      "gpt-realtime", "gpt-realtime-2.1-mini", "gpt-oss"
+      "claude-sonnet-4-internal",
+      "Llama-4-Maverick-internal",
+      "gpt-realtime",
+      "gpt-realtime-2.1-mini",
+      "gpt-oss"
     ],
-    "voice": ["voice-mode"]
+    "voice": [
+      "voice-mode"
+    ]
   },
   "auth": {
     "required": false,
@@ -115,7 +211,12 @@
     "ddgAccount": {
       "optional": true,
       "cookie": "internal_duckchat_user",
-      "authEndpoints": ["/duckchat/v1/auth/authorize", "/duckchat/v1/auth/token", "/duckchat/v1/auth/callback", "/duckchat/v1/auth/logout"],
+      "authEndpoints": [
+        "/duckchat/v1/auth/authorize",
+        "/duckchat/v1/auth/token",
+        "/duckchat/v1/auth/callback",
+        "/duckchat/v1/auth/logout"
+      ],
       "purpose": "chat history sync across devices only; chat functionality not gated on this"
     }
   },

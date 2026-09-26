@@ -9,49 +9,99 @@
       "name": "Chat stream",
       "description": "Send a prompt on the composer; SSE-streamed answer off the page (POST /backend-api/f/conversation, text/event-stream)",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/chatgpt_chat.json"
+      "recipe": "recipes/chatgpt_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "chatgpt_conversation_crud",
       "name": "Conversation CRUD + history",
       "description": "List/get/rename/delete conversations via /backend-api/conversation/* (endpoint literals in bundle; live shapes to verify)",
       "method": "in-page fetch (Bearer access token + csrfToken) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatgpt_web_search",
       "name": "Web search / tools toggle",
       "description": "web_search + cloud_browser tool flags feed client_tools of the conversation request (flag literals in bundle)",
       "method": "composer-sidebar toggle (site UI); exact tool-shape to-verify",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatgpt_upload_attach",
       "name": "File upload / Estuary",
       "description": "Attachment + artifact content via /backend-api/estuary/content and /backend-api/estuary/upload_content_bytes (upload_url_expiry, direct_azure/direct_aws strategies)",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatgpt_artifacts",
       "name": "Artifacts / Canvas (Canmore)",
       "description": "window.CanmoreNative hook + artifact_* message fields; /conversation/{id}/textdocs endpoint",
       "method": "site iframe/artifact-mode (read DOM evidence in bundle)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatgpt_gpts",
       "name": "GPTs (custom assistants)",
       "description": "conversation_mode { kind: GizmoInteraction, gizmo_id } + model_slug on custom GPTs",
       "method": "ui-path (site picker) — payload field verified, live walk to verify",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatgpt_voice",
       "name": "Voice transcription / input",
       "description": "/backend-api/transcribe endpoint literal; voice dictation UI",
       "method": "in-page fetch/UI — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

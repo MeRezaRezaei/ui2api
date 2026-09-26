@@ -33,8 +33,16 @@
   },
   "auth": {
     "kind": "cookie+jwt+localStorage",
-    "cookieCandidates": ["manus_session (from provider-catalog)", "*_session (bundle refs)"],
-    "localStorageKeys": ["manus", "manus-account", "manus_account_package", "webrtc_token"],
+    "cookieCandidates": [
+      "manus_session (from provider-catalog)",
+      "*_session (bundle refs)"
+    ],
+    "localStorageKeys": [
+      "manus",
+      "manus-account",
+      "manus_account_package",
+      "webrtc_token"
+    ],
     "jwt": "present in bundles",
     "login": true,
     "loginRequired": true,
@@ -46,31 +54,56 @@
       "name": "Chat (UI path)",
       "method": "ui-path (unverified selectors)",
       "recipe": "recipes/manus_chat.json",
-      "status": "awaiting capture"
+      "status": "awaiting capture",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "manus_session_start",
       "name": "Session start",
       "method": "rest /api/chat/getSessionV2 + createSession literal (bundle-verified endpoint, live shape to-verify)",
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "manus_session_list",
       "name": "Session list",
       "method": "rest /api/chat/getSessionV2 (bundle-verified endpoint, live shape to-verify)",
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "manus_sandbox",
       "name": "Sandbox control",
       "method": "rest /api/chat/startSandbox + getSandboxStatus (bundle-verified endpoints, VNC OTP flow to-verify)",
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "manus_upload",
       "name": "File upload",
       "method": "rest /api/chat/getPresignedUploadUrl + uploadComplete (bundle-verified endpoints, presign flow to-verify)",
-      "status": "verified-endpoint / live-to-verify"
+      "status": "verified-endpoint / live-to-verify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "antiBot": "none observed statically (plain curl 200, bundles served; server-side auth gating expected)",

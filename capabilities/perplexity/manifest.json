@@ -14,7 +14,12 @@
       "name": "Chat / Ask stream",
       "description": "Send a prompt on the Ask composer; streamed answer + citations read off the page. Playwright/CDP UI path: type into composer, keyEnter, read answer until stable. Wire transport behind the composer is unobservable statically (Cloudflare wall) and is driven by the site's own JS — no wire reconstruction needed for the UI path.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/perplexity_chat.json"
+      "recipe": "recipes/perplexity_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "transport": {
@@ -49,7 +54,9 @@
     "required": true,
     "kind": "session-snapshot",
     "host": "www.perplexity.ai",
-    "cookies": ["__Secure-next-auth.session-token"],
+    "cookies": [
+      "__Secure-next-auth.session-token"
+    ],
     "capture": "ui2api analyse https://www.perplexity.ai --login",
     "regionNote": "Probe-verified NextAuth surface (2026-09-16): providers apple/email/google/googleonetap/pplx-jwt-to-cookie/workos; magic-link (email) is the most automation-friendly credential path. Cookie name __Secure-next-auth.session-token matches capabilities/provider-catalog.md perplexity-web entry; exact cookie set, expiry, sameSite and any Cloudflare challenge cookies to be confirmed on first live capture. NOTE: the src/profile/profile.ts built-in currently allows anonymous 'Ask' (loginRequired false); this package requires a real session per the catalog — profile.json pins loginRequired true."
   },

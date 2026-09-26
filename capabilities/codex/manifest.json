@@ -39,7 +39,12 @@
       "description": "Create a Codex task from the /codex composer and read the task/turn stream (POST /backend-api/wham/tasks {new_task, input_items} + SSE GET /backend-api/tasks/{task_id}/stream)",
       "method": "ui-path (trusted input + send on the Codex composer, site's own handler) — wire documented for a later wire-first driver",
       "implementation": "POST /wham/tasks body {new_task:{environment_id, branch, run_environment_in_qa_mode}, input_items:[{type:message, role:user, content:[{content_type:text, text}]}]} with Sentinel token (mode codex_create_task_turn) in additionalHeaders; SSE stream read off /tasks/{task_id}/stream with parent_conversation_id + message_id query; task_status/final_message/row/title JSON events, [DONE] terminator",
-      "recipe": "recipes/codex_chat.json"
+      "recipe": "recipes/codex_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_task_crud",
@@ -47,7 +52,12 @@
       "description": "List, search, get, archive, cancel, fork, mark-read, recover Codex tasks via /wham/tasks*",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /wham/tasks (query limit/cursor/task_filter), GET /wham/tasks/list, GET /wham/tasks/search, GET /wham/tasks/{task_id}; POST /wham/tasks/{task_id}/archive|cancel|fork|mark_read|recover; GET /wham/task_suggestions/github/user_handle; GET /share/codex/task_samples",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_task_turns",
@@ -55,7 +65,12 @@
       "description": "Turn list/detail, logs, cancel, copy-git-apply, viewed, and pull-request create/update",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /wham/tasks/{task_id}/turns, GET .../turns/{task_turn_id}, GET .../turns/{task_turn_id}/logs; POST .../turns/{task_turn_id}/cancel|viewed|copy_git_apply|pr; POST|PATCH .../turns/{task_turn_id}/pr/{pr_id}",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_environment",
@@ -63,7 +78,12 @@
       "description": "Sandbox environment CRUD + machine inventory for Codex tasks",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /wham/environments, /recent, /search, /with-creators; POST /wham/environments; PATCH|DELETE /wham/environments/{environment_id}; POST .../reset-cache; POST /wham/environments/test/{test_session_id}/command; GET /wham/machines",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_repo_connect",
@@ -71,7 +91,12 @@
       "description": "Repo discovery, branch search, installations, code review + GitLab service-account config",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /wham/github/installations(/(events)? etc), GET /wham/github/repositories/*, GET /wham/github/branches/{repo_id}/search, POST /wham/github/repositories/{repo_id}/pull-requests/review, /wham/github/repositories/{repo_id}/pull-requests; POST /wham/github/installations/{installation_id}/repositories/{repo_id}/pull-request/{pr_number}/review (post variant); GitLab: /wham/gitlab/groups, /groups/{group_id}/webhook, /service-account-credential*",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_usage_credits",
@@ -79,7 +104,12 @@
       "description": "Token/credit usage breakdowns, credit events, rate-limit reset credits",
       "method": "in-page fetch (Bearer) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /wham/usage, /wham/usage/approximate-credit-usage, /credit-usage-events, /daily-token-usage-breakdown, /daily-workspace-user-token-usage-breakdown, /daily-enterprise-token-usage-breakdown; GET /wham/rate-limit-reset-credits(+ /history), POST .../consume",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_cloud",
@@ -87,7 +117,12 @@
       "description": "Codex Cloud SPA surface (universe/tasks/access/security/settings) + cloud task PR page",
       "method": "ui-path / in-page fetch — ROUTES-VERIFIED / CLOUD-WIRE-TO-VERIFY",
       "implementation": "SPA routes /codex/cloud, /codex/cloud/tasks, /codex/cloud/tasks/:taskId, /codex/cloud/tasks/:taskId/turns/:turnId/pr, /codex/cloud/access, /codex/cloud/security, /codex/cloud/settings, /codex/cloud/failwhale; cloud-specific REST prefix not separated in shared bundles — confirm on first live capture",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "codex_oauth_cli",
@@ -95,7 +130,12 @@
       "description": "OAuth client config for the Codex CLI + desktop/install entrypoints",
       "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "GET /oauth/codex/client.json, GET /oauth/codex/:callbackId/client.json (device-code pairing, gate codex_device_code_auth); routes /codex/install.sh, /codex/install.ps1, /codex/desktop-auth, /codex/desktop-session, /codex/rosalind-download",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

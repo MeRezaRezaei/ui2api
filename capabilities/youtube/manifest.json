@@ -22,7 +22,23 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "verified-2026-09-20",
-      "recipe": "recipes/youtube_search.json"
+      "recipe": "recipes/youtube_search.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "max": {
+            "type": "number",
+            "description": "read by the runner as args.max"
+          },
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
     },
     {
       "id": "youtube_transcript",
@@ -32,7 +48,19 @@
       "workType": "ui-path",
       "reloadAfterSuccess": true,
       "status": "verified-2026-09-20-ui-path-anonymous-gated (segments pending logged-in capture)",
-      "recipe": "recipes/youtube_transcript.json"
+      "recipe": "recipes/youtube_transcript.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "videoId": {
+            "type": "string",
+            "description": "read by the runner as args.videoId"
+          }
+        },
+        "required": [
+          "videoId"
+        ]
+      }
     },
     {
       "id": "youtube_comment",
@@ -44,7 +72,24 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
-      "recipe": "recipes/youtube_comment.json"
+      "recipe": "recipes/youtube_comment.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "read by the runner as args.text"
+          },
+          "videoId": {
+            "type": "string",
+            "description": "read by the runner as args.videoId"
+          }
+        },
+        "required": [
+          "text",
+          "videoId"
+        ]
+      }
     },
     {
       "id": "youtube_like",
@@ -56,7 +101,23 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
-      "recipe": "recipes/youtube_like.json"
+      "recipe": "recipes/youtube_like.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "read by the runner as args.action"
+          },
+          "videoId": {
+            "type": "string",
+            "description": "read by the runner as args.videoId"
+          }
+        },
+        "required": [
+          "videoId"
+        ]
+      }
     },
     {
       "id": "youtube_subscribe",
@@ -68,7 +129,19 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
-      "recipe": "recipes/youtube_subscribe.json"
+      "recipe": "recipes/youtube_subscribe.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channelId": {
+            "type": "string",
+            "description": "read by the runner as args.channelId"
+          }
+        },
+        "required": [
+          "channelId"
+        ]
+      }
     },
     {
       "id": "youtube_upload",
@@ -80,7 +153,12 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required login-owns-video",
       "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session + real file)",
-      "recipe": "recipes/youtube_upload.json"
+      "recipe": "recipes/youtube_upload.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "youtube_playlist_add",
@@ -92,7 +170,19 @@
       "reloadAfterSuccess": true,
       "auth": "cookie-login-required",
       "status": "implemented-dom-unverified (auth required; status open pending a live round-trip on a captured logged-in session)",
-      "recipe": "recipes/youtube_playlist_add.json"
+      "recipe": "recipes/youtube_playlist_add.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "videoId": {
+            "type": "string",
+            "description": "read by the runner as args.videoId"
+          }
+        },
+        "required": [
+          "videoId"
+        ]
+      }
     }
   ],
   "auth": {

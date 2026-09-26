@@ -26,7 +26,12 @@
       "name": "Chat stream",
       "description": "Send a prompt on the grok.com composer; streamed answer read off the page. UI-path only — grok.com's wire transport is unobservable from this host (Cloudflare WAF), so over-the-wire reconstruction is deferred to a headed capture. Composer/answer selectors and the captured URLs are to be verified on first live capture.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/grok_chat.json"
+      "recipe": "recipes/grok_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "permissions": [
@@ -38,7 +43,10 @@
     "required": true,
     "kind": "session-snapshot",
     "host": "grok.com",
-    "cookies": ["sso", "sso-rw"],
+    "cookies": [
+      "sso",
+      "sso-rw"
+    ],
     "capture": "ui2api analyse https://grok.com --login",
     "regionNote": "credential names from capabilities/provider-catalog.md grok-web entry (kind: cookie, credentialName \"sso + sso-rw\"); NOT yet confirmed against a live grok.com session — bot-wall prevented any auth-surface observation",
     "botWall": "grok.com returns Cloudflare 403 + JSD challenge for non-browser clients (2026-09-16 probe); expect the headed capture to be the first point where real cookie names/flags are observable"

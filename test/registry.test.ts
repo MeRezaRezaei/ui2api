@@ -20,7 +20,19 @@ function vaultPresent(host: string): boolean {
 }
 
 describe("prompt registry", () => {
-  it("derives a chat tool schema with prompt required and site toggles", () => {
+  // GOAL 139: this assertion INVERTED, deliberately, and the reason matters.
+  //
+  // It used to assert that `thinking` and `search` appear as boolean args
+  // because the manifest description mentions them. That was the registry
+  // advertising capabilities the daemon CANNOT HONOR: measured across every
+  // runner in src/capabilities/, `args.thinking`, `args.search` and
+  // `args.new_chat` have ZERO reads. A consumer generating a client from this
+  // schema would offer a toggle that silently does nothing.
+  //
+  // Keying a schema on description PROSE is guessing by another name. The way to
+  // declare a toggle is the package's own `inputSchema` (derived from the runner
+  // that reads it), so the contract follows the implementation.
+  it("derives a chat tool schema with prompt required and NO unimplemented toggles", () => {
     const s = capabilityInputSchema(
       "deepseek",
       "deepseek_chat",
@@ -30,8 +42,11 @@ describe("prompt registry", () => {
     assert.equal(s.type, "object");
     assert.deepEqual(s.required, ["prompt"]);
     assert.ok(s.properties.prompt);
-    assert.ok(s.properties.thinking, "thinking toggle surfaced from manifest description");
-    assert.ok(s.properties.search, "search toggle surfaced from manifest description");
+    assert.ok(s.properties.newChat, "newChat is read by the runners, so it is advertised");
+    assert.ok(
+      !s.properties.thinking && !s.properties.search,
+      "a toggle no runner reads must NOT be advertised — that is a promise the daemon cannot keep"
+    );
   });
 
   it("derives toggle and read schemas for non-chat capabilities", () => {

@@ -10,7 +10,12 @@
       "name": "Chat (dead-end scaffold)",
       "method": "none — no live product",
       "recipe": "recipes/tinycms_chat.json",
-      "status": "dead-end"
+      "status": "dead-end",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
@@ -29,9 +34,18 @@
   "deadEnd": {
     "reason": "No AI chat product found at any tinycms domain. Catalog entry appears to be a placeholder or refers to a product that no longer exists.",
     "domainsProbed": [
-      "tinycms.cc", "tinycms.app", "tinycms.com", "www.tinycms.com",
-      "tinycms.io", "tinycms.ai", "tinycms.net", "tiny-cms.com",
-      "tinycms.chat", "tinycms.com.cn", "tinycms.cn", "tinycms.xyz",
+      "tinycms.cc",
+      "tinycms.app",
+      "tinycms.com",
+      "www.tinycms.com",
+      "tinycms.io",
+      "tinycms.ai",
+      "tinycms.net",
+      "tiny-cms.com",
+      "tinycms.chat",
+      "tinycms.com.cn",
+      "tinycms.cn",
+      "tinycms.xyz",
       "app.tinycms.xyz"
     ],
     "tinycmsXyzVerdict": "200 OK but is a docute-based CMS documentation site for Chinese foreign-trade inquiry forms (leadscloud/inquiry), NOT an AI chat product"

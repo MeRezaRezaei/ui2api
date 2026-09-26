@@ -9,21 +9,36 @@
       "name": "Chat (MiMo Studio composer)",
       "description": "Send a prompt in MiMo Studio's composer and read the streamed answer. Chat surface EXISTS per platform console evidence ('Xiaomi MiMo Studio' product label + open-apis/v1/genLoginUrl login gate + console_studio_chat_click analytics event), but aistudio.xiaomimimo.com is publicly DNS-pinned to 127.0.0.1 — wire transport, endpoints, and DOM selectors are UNOBSERVED",
       "method": "ui-path (ChatDriver) — NOT-ARRIVED: no live chat DOM or wire to ground on; all selectors UNVERIFIED",
-      "recipe": "recipes/xiaomimimo_chat.json"
+      "recipe": "recipes/xiaomimimo_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "xiaomimimo_api_gateway",
       "name": "OpenAI/Anthropic-compatible API gateway",
       "description": "POST api.xiaomimimo.com/v1 (OpenAI chat-completions shape) and /anthropic (Anthropic shape); auth via 'api-key' HTTP header. Anonymous probe → 401 'invalid_key'. Verified model literals: MiMo-V2.5, MiMo-V2.5-Pro, MiMo-2.5-Pro-UltraSpeed, MiMo-V2.5-ASR, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceClone, MiMo-V2.5-TTS-VoiceDesign. Server MiFE/3.4.29, DNS mimo-pri-azams.alb.xiaomi.com",
       "method": "REST (api-key header) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY (no authed call made)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "xiaomimimo_console",
       "name": "MiMo Open Platform console (token-plan / billing / API keys)",
       "description": "platform.xiaomimimo.com Rspack SPA. Routes: /authorize (/authorize/code, /authorize/success), /api/v1/logout, /auth/{sendCode, verifyCode, verificationStatus, checkBindCard, faceRecognitionUrl, nonMainlandUserStatus, enterprise/*}, /console/{api-keys, balance, inbox, invoice, plan-manage, plugin, profile, recharge, usage}, /inbox/{messages, recent, unreadCount, read, readAll, delete}, /invitation/{code, eligible, bind, progress}, /abtest/experiments. 429 rate-limit popup on abuse",
       "method": "in-page fetch (cookie/session auth) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

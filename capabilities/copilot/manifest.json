@@ -16,35 +16,75 @@
       "name": "Chat stream",
       "description": "Send a prompt on the composer (#userInput, Enter); streamed answer appends in-page. Underlying wire = WebSocket /c/api/chat (event:send → appendText/replaceText ... done) — verified in bundles",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/copilot_chat.json"
+      "recipe": "recipes/copilot_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "copilot_search_mode",
       "name": "Web search / grounding mode",
       "description": "Composer chat mode 'search' (Bing) — grounded answers with citation events on the wire",
       "method": "ui-mode toggle (wire mode map verified: 'cs' → search)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "copilot_thinking_mode",
       "name": "Think deeper (reasoning) mode",
       "description": "Composer chat mode 'Think deeper' — reasoning tokens via chainOfThought events",
       "method": "ui-mode toggle (wire mode map verified: 'td' → reasoning)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "copilot_history",
       "name": "Conversation history / persistence",
       "description": "REST /c/api/conversations CRUD + /conversations/{id}/history?api-version=2; autotitle via titleUpdate events",
       "method": "in-page REST (api-version=2; Authorization Bearer when authed)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "copilot_image_gen",
       "name": "Image generation (Imagine)",
       "description": "Image gen over the chat socket (generatingImage/imageGenerated events) with /imagine gallery; Bing Image Creator pipeline",
       "method": "ui-path + in-band WS events (pipeline verified, endpoint to-confirm-live)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

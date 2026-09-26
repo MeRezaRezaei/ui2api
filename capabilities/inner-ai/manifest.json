@@ -28,7 +28,12 @@
       "description": "Send a prompt on the composer (multi-model: 27 pickable models); answer streamed via Centrifuge WS turn-events subscription (v3 agentic chat), seq-paginated REST fallback GET …/turns/{turn_id}/events",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "implementation": "POST https://platformapi.innerai.com/api/v1/chat/messages body {session_id, message, document_ids?, metadata{capability_hint?}} -> {turn_id, assistant_message_id}; realtime via Centrifuge on wss://chat-api-v3-ws.innerai.com/connection/websocket with tokens from POST /api/v1/realtime/tokens {session_id}; turn events REST fallback GET /api/v1/chat/conversations/{id}/turns/{turn_id}/events (since_seq, limit). Request/response shapes bundle-verified; exact subscription channel literal + event schema to verify live.",
-      "recipe": "recipes/inner_ai_chat.json"
+      "recipe": "recipes/inner_ai_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "inner_ai_conversations",
@@ -36,7 +41,12 @@
       "description": "List/get conversations and messages, cancel turns, list feedback reasons, post feedback (AgentChatAPI)",
       "method": "in-page REST (USER-EMAIL/USER-TOKEN/DEVICE-ID headers)",
       "implementation": "GET /api/v1/chat/conversations (params), GET /api/v1/chat/conversations/{id}, GET …/messages/{message_id}, POST /api/v1/chat/turns/{turn_id}/cancel, GET /api/v1/chat/feedback_reasons, POST …/messages/{message_id}/feedback. Live shapes to verify on first authenticated call.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "inner_ai_models",
@@ -44,7 +54,12 @@
       "description": "Read the 27-model catalog and drive the picker (model id, llm_model slug, categories, pro/ultra gating)",
       "method": "public REST (PRIVATE_KEY) + in-page fetch",
       "implementation": "Public GET /api/v1/ai_models/index_unauthenticated (PRIVATE_KEY: 5xxiJxA7xC@jTLT4h, bundled literal) returns [{id, llm_model, name, ai_model_categories[], visible, can_use, pro_only, ultra_only, …}]; authenticated GET /api/v1/ai_model_categories(?category=). Picker writes localStorage llm_model + POSTs {ai_model_id}; fusion route llm_model='inner-ai-assistant', guest default fragment 'gemini-2.5-flash'. Endpoint verified live (200, 27 models).",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "inner_ai_files",
@@ -52,7 +67,12 @@
       "description": "Attach files (multipart upload lifecycle) and read generated artifacts / workspace archive",
       "method": "in-page REST (auth headers)",
       "implementation": "POST /api/v1/chat/conversations/{id}/uploads, POST /api/v1/chat/uploads/{id}/complete, POST …/uploads/{id}/cancel, GET …/uploads/{id}/content (blob, variant param); artifacts: GET …/artifacts, GET …/artifacts/{id}, GET …/artifacts/{id}/content (blob), workspace GET …/workspace + folder_archive {path}; jurisprudence GET …/jurisprudence/{id}. Shapes bundle-verified, live-to-verify.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "inner_ai_realtime_history",
@@ -60,7 +80,12 @@
       "description": "Live history invalidation via Centrifuge subscription (token: POST /api/v1/realtime/tokens/history); event literal 'history.conversation.deleted' seen",
       "method": "in-page WebSocket (Centrifuge)",
       "implementation": "createHistoryRealtimeToken() -> {connection_token, subscription_token}; Centrifuge WS; events include 'history.conversation.deleted'. Channel name + full event set to verify live.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "inner_ai_voice",
@@ -68,7 +93,12 @@
       "description": "Read voice catalog for pickers and call the prompt-enhancer lambda",
       "method": "in-page REST",
       "implementation": "GET /api/v1/get_voices -> [{voice_id, names, previews[].voiceUrl}]; prompt enhancer: https://lambda.innerai.com/promptEnhancer. Guest/v2 chat had api-based TTS hooks in bundle; live-to-verify.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
@@ -76,7 +106,11 @@
     "kind": "session-snapshot",
     "host": "app.innerai.com",
     "apiHost": "https://platformapi.innerai.com/api/",
-    "cookieNames": ["token", "email", "deviceId"],
+    "cookieNames": [
+      "token",
+      "email",
+      "deviceId"
+    ],
     "capture": "ui2api profile capture \"https://app.innerai.com\" --login",
     "note": "provider-catalog: inner-ai kind=cookie credentialName 'token + email'. Confirmed: request interceptor reads cookies 'token', 'email', 'deviceId' and sets USER-TOKEN/USER-EMAIL/DEVICE-ID headers on every platformapi call (bundle-verified). Login UI = https://platform.innerai.com/login.html (inputs #email, #password, social Google/Microsoft/Apple). Guest mode exists (gemini-2.5-flash) but full chat needs a session. Exact cookie-set materialization to confirm on first live capture."
   },

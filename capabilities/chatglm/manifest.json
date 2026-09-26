@@ -27,56 +27,96 @@
       "name": "Chat stream",
       "description": "Send a prompt on the composer; streamed answer off the page",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
-      "recipe": "recipes/chatglm_chat.json"
+      "recipe": "recipes/chatglm_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_conversation_crud",
       "name": "Conversation CRUD + history",
       "description": "List/get/rename/delete conversations — zh: /chatglm/backend-api/v1/conversation/*; intl: /api/v1/chats/* (endpoint literals verified, live shapes to-verify)",
       "method": "in-page fetch (cookie/token auth) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_web_search",
       "name": "Web search / tools toggle",
       "description": "Z.ai: client-side web_search toggle feeds chat completions; zh: server-controlled per assistant config",
       "method": "Z.ai: composer toggle (site UI); zh: assistant config — exact tool-shape to-verify",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_image_gen",
       "name": "Image generation (CogView)",
       "description": "CogView image gen — zh: drawing-api config + chat tool; intl: /api/v1/images base",
       "method": "in-page fetch or tool call — VERIFIED-TOOL-NAME / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_model_list",
       "name": "Model picker read",
       "description": "Read available models — intl: GET /api/models; zh: GET /chatglm/agent-api/operation/detail?tag=available_models",
       "method": "in-page fetch or DOM read",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_file_upload",
       "name": "File upload",
       "description": "Attach files to chat — zh: POST /chatglm/productivity-api/file/chat_upload; intl: GET/DELETE /api/v1/files/",
       "method": "in-page fetch multipart — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_ppt",
       "name": "PPT generation",
       "description": "PPT creation/editing — intl: /api/chat/ppt/*; zh: CogView slides tools in GLMS engine",
       "method": "in-page fetch — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "chatglm_glms_assistant",
       "name": "GLMS task-engine assistant",
       "description": "Server-configured assistant chat via POST /chatglm/mainchat-api/engine/submit (zh only); tools/prompts selected by assistant_id server-side",
       "method": "in-page fetch (zh mainchat-api) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "transport": {

@@ -9,35 +9,75 @@
       "name": "Chat stream",
       "description": "Create conversation (POST /chat/conversation) + send prompt on the composer; NDJSON answer stream off POST /chat/conversation/{id} (Chunked ReadableStream, newline-delimited JSON events), resume via EventSource /chat/conversation/{id}/stream, stop via /stop-generating",
       "method": "ui-path (trusted input + Enter, site's own send handler); full wire pinned in bundles",
-      "recipe": "recipes/huggingchat_chat.json"
+      "recipe": "recipes/huggingchat_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "huggingchat_conversations",
       "name": "Conversation CRUD / history",
       "description": "GET/POST/PATCH/DELETE /chat/api/v2/conversations(?p=), /conversations/{id}, /conversations/{id}/message/{messageId}, delete-all, import-share",
       "method": "v2 REST over same-origin cookies",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "huggingchat_models",
       "name": "Model catalog & picker",
       "description": "GET /chat/api/v2/models (140 + omni router, live payload) and /models/{id}; activeModel + system prompt + tools/reasoning/artifacts overrides via /chat/settings and the conversation-create body",
       "method": "v2 REST over same-origin cookies",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "huggingchat_settings",
       "name": "Settings read/upsert",
       "description": "GET /chat/api/v2/user/settings and debounced POST /chat/settings (streamingMode smooth|raw, customPrompts, toolsOverrides, artifactsOverrides, providerOverrides, reasoningOverrides)",
       "method": "v2 REST over same-origin cookies",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "huggingchat_mcp",
       "name": "MCP servers",
       "description": "GET /chat/api/mcp/servers (base Web Search (Exa) + Hugging Face); enabled servers attached to each send (selectedMcpServerNames/selectedMcpServers)",
       "method": "v2 REST over same-origin cookies + per-turn body field",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "transport": {

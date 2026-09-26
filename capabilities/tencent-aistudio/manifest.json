@@ -37,12 +37,30 @@
     },
     "streaming": "Per-chunk JSON decode: response body parsed via JSON.parse(e.data) yielding {type, content, code, msg}; type mapped to internal HYCSpeechType enum; exact wire framing (newline-delimited JSON? length-prefixed? custom separator?) to verify on live capture",
     "responseTypes": [
-      "text", "card", "ai_search_pro", "ai_search_pro_fin", "reasoner",
-      "deep_think_box", "multiModelResult", "outline", "multimodal",
-      "image-group", "deep_thought", "doc_card", "doc_deep_mode",
-      "doc_deep_read_card", "podcast", "search_deep_mode", "search_deep_mode_fin",
-      "multi_model_output", "olympic_poster", "status", "message_revoke",
-      "use_model", "local_mock_loading", "thought_with_img"
+      "text",
+      "card",
+      "ai_search_pro",
+      "ai_search_pro_fin",
+      "reasoner",
+      "deep_think_box",
+      "multiModelResult",
+      "outline",
+      "multimodal",
+      "image-group",
+      "deep_thought",
+      "doc_card",
+      "doc_deep_mode",
+      "doc_deep_read_card",
+      "podcast",
+      "search_deep_mode",
+      "search_deep_mode_fin",
+      "multi_model_output",
+      "olympic_poster",
+      "status",
+      "message_revoke",
+      "use_model",
+      "local_mock_loading",
+      "thought_with_img"
     ]
   },
   "capabilities": [
@@ -52,7 +70,27 @@
       "description": "Send a prompt on the composer; streamed answer via POST /api/new-portal/chat/{chatId} (JSON chunk parsing). VERIFIED LIVE 2026-09-19: proof round-trips PASS (13717, 12, 72 — 'Reply with ONLY the number') on headed real Chrome + injected snapshot.",
       "method": "ui-path (trusted input + Enter, site's own send handler) — LIVE-VERIFIED 2026-09-19",
       "implementation": "DOM path (what is live-verified): composer textarea.t-textarea__inner (placeholder 'Ask me anything', TDesign) → dom.type focus+insertText+Enter → answer streams into .agent-chat__bubble--ai .hyc-content-md (markdown body .hyc-common-markdown), completion marker 'Completed'. preComposeDelayMs 8000 (cold boot: sends typed before ~5-8s are silently dropped). Wire: POST https://aistudio.tencent.ai/api/new-portal/chat/{chatId}; body = {model, prompt, options, plugin, searchDeepMode, aiRoleClone, ...}; response = JSON chunks parsed by JSON.parse(e.data) with type field → HYCSpeechType mapping; generate/id endpoint needed to create chatId; conversation continue for multi-turn.",
-      "recipe": "recipes/tencent_aistudio_chat.json"
+      "recipe": "recipes/tencent_aistudio_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "tencent_aistudio_web_search",
@@ -60,7 +98,12 @@
       "description": "Toggle deep-search mode for grounded answers; sets searchDeepMode=true on the chat request",
       "method": "composer toggle (unverified DOM)",
       "implementation": "searchDeepMode + searchDeepModeParentIndex fields on chat request body. Stream speech types SEARCH_DEEP_MODE, SEARCH_DEEP_MODE_FIN, ai_search_pro, card carry search-grounded content. Config: POST /api/new-portal/config {key:'getAgentConfig'}. Toggle DOM unverified.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_deep_think",
@@ -68,7 +111,12 @@
       "description": "Chain-of-Thought reasoning mode (DEEP_THOUGHT / DEEP_THINK / REASONER stream speech types)",
       "method": "composer toggle or model config (unverified)",
       "implementation": "Stream speech types DEEP_THOUGHT (11 refs), DEEP_THINK (9 refs), REASONER (8 refs), THOUGHT_WITH_IMG (11 refs) carry reasoning blocks. Exact toggle/request field to verify on live capture.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_conversation_crud",
@@ -76,7 +124,25 @@
       "description": "List/open conversations via the live History surface. LIST + OPEN LIVE-VERIFIED 2026-09-23 (headed real Chrome + snapshot): History → /chat-history renders the user's real dated conversation list as div.list-item rows (title/model/type); clicking a row navigates into /chat/HunyuanDefault/<id>?from=history. rename/delete DOM not located on this revision — honest ok:false for those actions. Wire: POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, history/del, clear, share, /api/new-portal/user/agent/conversation/continue.",
       "method": "ui-path (History surface) — list + open LIVE-VERIFIED 2026-09-23; rename/delete unverified (no DOM control)",
       "implementation": "GET https://aistudio.tencent.ai/chat-history renders the user's conversation list as div.list-item rows (no href — ids are click-only). runner: list → read .list-item rows; open → click a row (by title or index) → read back URL /chat/HunyuanDefault/<id>?from=history. POST /api/new-portal/user/agent/conversation/v1/detail, /api/new-portal/chat/conversation/update, /api/new-portal/chat/conversation/history/del, /api/new-portal/chat/conversation/clear, /api/new-portal/chat/conversation/share, /api/new-portal/user/agent/conversation/continue for the (unverified) CRUD writes.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "read by the runner as args.action"
+          },
+          "index": {
+            "type": "number",
+            "description": "read by the runner as args.index"
+          },
+          "title": {
+            "type": "string",
+            "description": "read by the runner as args.title"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_image_gen",
@@ -84,7 +150,12 @@
       "description": "Generate images via /api/vision_platform/generation (DIT model at dit.hunyuan.tencent.com); poll via query_task",
       "method": "in-page fetch (credentials: include) — VERIFIED-ENDPOINT / LIVE-SHAPE-TO-VERIFY",
       "implementation": "POST /api/vision_platform/generation, /api/vision_platform/query_task, /api/vision_platform/query_task_list, /api/vision_platform/taskHistoryDel. Config: POST /api/new-portal/config {key:'visionGeneration'}. Supports style/clarity/outpainting/elimination/watermark-removal/OCR endpoints. 3D model host: 3d-models.hunyuan.tencent.com; video host: aivideo.hunyuan.tencent.com.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_code_run",
@@ -92,7 +163,12 @@
       "description": "Execute code in a sandbox (coder/runCode features; env to verify)",
       "method": "in-page or composer mode — VERIFIED-FEATURE / LIVE-SHAPE-TO-VERIFY",
       "implementation": "coder (36 refs in index), runCode (7 refs) present in bundles. Execution environment type, language support, and invocation API not yet captured. Candidate for deep-think/code hybrid mode.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_file_upload",
@@ -100,7 +176,12 @@
       "description": "Upload docs via COS tempCred → genUploadInfo; parse via /api/resource/fileParse; document analysis rides chat as DOC_CARD/DOC_DEEP_MODE speech types",
       "method": "in-page COS upload (Tencent COS SDK) or composer attach UI",
       "implementation": "POST /api/new-portal/tempCred → COS upload → POST /api/new-portal/chat/resource/genUploadInfo → POST /api/resource/fileParse. Supported: pdf/doc/docx/ppt/pptx/xls/xlsx/txt/csv/md/video (from speechContent parser). Stream types: DOC_CARD, DOC_DEEP_MODE, DOC_DEEP_READ_CARD, doc_percent, docDeepModeInfo.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_tts",
@@ -108,7 +189,12 @@
       "description": "Text-to-speech via /api/new-portal/audio/synthesis; speech recognition via /api/new-portal/asr/ + asr.cloud.tencent.com",
       "method": "in-page fetch (TTS); ASR may require WebSocket to asr.cloud.tencent.com",
       "implementation": "POST /api/new-portal/audio/synthesis (TTS). ASR: POST /api/new-portal/asr/file/recognize + queryTask; history: asr/history/list, asr/history/del. Real-time ASR via WebSocket to asr.cloud.tencent.com (events: 'asr.started'). WebRecorder/WebAudioSpeechRecognizer window globals present.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_podcast",
@@ -116,7 +202,12 @@
       "description": "Generate podcast content: audioDeltaBase64 chunks + script timing; interact via /api/new-portal/podcast/*",
       "method": "in-page fetch (credentials: include)",
       "implementation": "POST /api/new-portal/podcast/hint, /api/new-portal/podcast/relInfo, /api/new-portal/podcast/interact. Stream speech type PODCAST (10 refs). Podcast data includes audioDeltaBase64 (chunked base64 audio) and script.text for word-level timing. Configure show/podcast-related localStorage flags.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "tencent_aistudio_translations",
@@ -124,7 +215,12 @@
       "description": "Translate via translateModelList + sourceLang/targetLang fields on chat request",
       "method": "composer options (unverified DOM)",
       "implementation": "Chat request body includes translateModelList, sourceLang, targetLang, sourceLangLabel, targetLangLabel. Translation model list sourced from GET /api/agent/model/list or /api/models. Exact picker DOM to verify on live capture.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
@@ -138,7 +234,9 @@
       "WeChat — direct login (UI button)",
       "Access check: POST /api/getuserinfo returns user profile; 403 → re-auth"
     ],
-    "cookieNames": ["hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai — VERIFIED on live capture 2026-09-18 (NOT hy_user/hy_token)"],
+    "cookieNames": [
+      "hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai — VERIFIED on live capture 2026-09-18 (NOT hy_user/hy_token)"
+    ],
     "capture": "ui2api profile capture \"https://aistudio.tencent.ai\" --login",
     "note": "provider-catalog: tencent-aistudio-web kind=cookie (Cookie header (full)). VERIFIED: the web session is cookie-auth via hunyuan_token + hunyuan_user + hunyuan_source (Tencent Hunyuan umbrella cookies) on the .tencent.ai domain. HEADED session required — Tencent Cloud EdgeOne blocks headless (HTTP 567 Restricted Access). X-Token/X-ID/Space-Id headers are injected for miniprogram mode only (not the primary web path)."
   },

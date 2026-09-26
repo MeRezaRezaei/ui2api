@@ -25,49 +25,101 @@
       "name": "Chat",
       "description": "OpenAI-compatible chat completion: POST https://api.venice.ai/api/v1/chat/completions with {model, messages, venice_parameters:{enable_web_search:'auto', enable_web_citations:true}}. UI path on /chat/v2 as fallback; composer/send/answer selectors still unverified candidates.",
       "method": "api-path (POST /api/v1/chat/completions, Bearer auth) with ui-path fallback on /chat/v2",
-      "recipe": "recipes/venice_chat.json"
+      "recipe": "recipes/venice_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "venice_image",
       "name": "Image generation",
       "description": "POST https://api.venice.ai/api/v1/image/generate with {model:'flux-2-pro', prompt, width, height}. Studio UI at /studio/image (edit/upscale/background-remove advertised). Response shape (file url on media.venice.ai vs base64) to-verify.",
       "method": "api-path (POST /api/v1/image/generate, Bearer auth)",
-      "recipe": "recipes/venice_image.json"
+      "recipe": "recipes/venice_image.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "venice_video",
       "name": "Video generation",
       "description": "POST https://api.venice.ai/api/v1/video/queue with {model:'veo3-full-text-to-video', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/video.",
       "method": "api-path (POST /api/v1/video/queue, Bearer auth)",
-      "recipe": "recipes/venice_video.json"
+      "recipe": "recipes/venice_video.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "venice_audio",
       "name": "Music / audio generation",
       "description": "POST https://api.venice.ai/api/v1/audio/queue with {model:'stable-audio-25', prompt} — async queue; job-poll/download endpoints to-verify. Studio UI at /studio/audio.",
       "method": "api-path (POST /api/v1/audio/queue, Bearer auth)",
-      "recipe": "recipes/venice_audio.json"
+      "recipe": "recipes/venice_audio.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "venice_list_conversations",
       "name": "Conversation history list",
       "description": "List past chats from the live page's sidebar DOM (always mirrors the current logged-in session). The production wire API (api.venice.ai/api/v1, OpenAI-compatible) needs the session cookie 'session' -> token-mint bearer hop, which is UNVERIFIED (chat-app chunks lazy-loaded, absent from the landing bundle graph), so no direct-REST list call is built.",
       "method": "dom.sidebar on /chat/v2 (same browser + session machinery as venice_chat)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "venice_model_list",
       "name": "Model list",
       "description": "Enumerate available models. capabilities/venice/profile.json carries no model-picker DOM candidate (only composer/answer selectors), and the logged-in /chat/v2 model catalog is a lazy chunk absent from the landing bundle graph, so the runner returns an honest ok:false rather than guessing a catalog.",
       "method": "dom.picker (unverified — no model-picker selectors in profile.json)",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {
     "required": true,
     "kind": "session-snapshot",
     "host": "venice.ai",
-    "cookies": ["session"],
+    "cookies": [
+      "session"
+    ],
     "capture": "ui2api analyse https://venice.ai --login",
     "note": "provider-catalog.md (OmniRoute webSessionCredentials, venice-web): auth kind=cookie, credential='session'. Public REST API instead takes a plain API key (Authorization: Bearer) — a capability may alternatively use a Venice API key. Exact cookie set beyond session to be verified on first live capture."
   },

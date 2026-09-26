@@ -25,7 +25,12 @@
       "method": "ui-path (trusted input + Enter, site's own send handler) — selectors unverifiable, no DOM rendered",
       "implementation": "None derivable. No app JS bundles exist to extract endpoints / streaming / model literals from (parking page ships only /js/searchlinks.js + /css/*). Endpoint, wire transport, stream-delta shape and model set are UNKNOWN.",
       "recipe": "recipes/adapta_chat.json",
-      "notes": "Recipe shipped for schema parity with gemini_chat.json but is inoperable until the domain/brand is re-identified."
+      "notes": "Recipe shipped for schema parity with gemini_chat.json but is inoperable until the domain/brand is re-identified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

@@ -31,7 +31,27 @@
       "description": "Send a prompt on the DeepSeek composer; streamed answer off the page. Wire: POST /api/v0/chat/completion {chat_session_id, parent_message_id, model_type, prompt, ref_file_ids, thinking_enabled, search_enabled, source, action, preempt}; answer = SSE delta patches applied to a state tree.",
       "method": "ui-path (trusted input + Enter, site's own send handler)",
       "implementation": "composer POST → SSE stream. Session mgmt /api/v0/chat_session/{create,delete,delete_all,fetch_page,update_title,batch_update_pinned}; resume /api/v0/chat/resume_stream; variants /api/v0/chat/{continue,regenerate,edit_message,stop_stream,message_feedback}; history GET /api/v0/chat/history_messages. PoW header required on completion (see transport.antiBot). Envelope: biz_code/biz_data/biz_msg.",
-      "recipe": "recipes/deepseek_chat.json"
+      "recipe": "recipes/deepseek_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "newChat": {
+            "type": "boolean",
+            "description": "read by the runner as args.newChat"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "read by the runner as args.timeoutMs"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
     },
     {
       "id": "deepseek_list_conversations",
@@ -39,7 +59,17 @@
       "description": "Read the logged-in session's conversation list from the live DOM sidebar (a[href*='/chat/'] anchors; matches both /chat/<id> and /a/chat/s/<id> href shapes, static nav routes excluded). Verified live 2026-09-19: real items returned (waitForSelector up to 15s, then hrefs + titles, deduped, capped at 20). Wire RPC (POST /api/v0/chat_session/fetch_page) needs the PoW challenge headers only available inside the page — DOM path is the honest, verified one.",
       "method": "ui-path (DOM sidebar a[href*='/chat/'] on the live page) — LIVE-VERIFIED 2026-09-19",
       "implementation": "openPage() + page.waitForSelector(\"a[href*='/chat/']\", {timeout:15000}), then page.evaluate over a[href*='/chat/'] extracting conversation id + innerText title, deduped by id, capped at 20. Proven against the locked 2026-09-18 session.",
-      "recipe": null
+      "recipe": null,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "read by the runner as args.query"
+          }
+        },
+        "required": []
+      }
     },
     {
       "id": "deepseek_reasoner",
@@ -47,7 +77,12 @@
       "description": "Toggle reasoning (CoT) on per request/session. VERIFIED LIVE 2026-09-19: the composer carries a real toggle div.ds-toggle-button:has-text('DeepThink') whose state class is ds-toggle-button--selected; clicking flips it both ways and the state reaches the wire as thinking_enabled on the next POST /api/v0/chat/completion. (Bundle fact unchanged: literal 'deepseek-reasoner'/'deepseek-chat' ids do NOT appear in DTOs — model_type values are server-driven from /api/v0/client/settings; the UI toggle is the grounded way to address reasoning.)",
       "method": "ui-path (flip in-page thinking toggle) — LIVE-VERIFIED 2026-09-19",
       "implementation": "set args.state on/off → click div.ds-toggle-button:has-text('DeepThink') on the live page; state class ds-toggle-button--selected reflects the toggle; reasoning text arrives in the same SSE delta/title patch stream.",
-      "recipe": "recipes/deepseek_chat.json"
+      "recipe": "recipes/deepseek_chat.json",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "id": "deepseek_web_search",
@@ -55,7 +90,12 @@
       "description": "Flip the composer 'Search' toggle (div.ds-toggle-button:has-text('Search'), state = ds-toggle-button--selected class) so the next completion carries search_enabled. Verified live 2026-09-19: click flips the --selected class both ways; the state reaches the wire as search_enabled in the next POST /api/v0/chat/completion body.",
       "method": "ui-path (real toggle click in the logged-in page)",
       "implementation": "verified DOM toggle on the composer; feeds search_enabled in the completion body; localStorage searchEnabledStorageHandle stayed null in the verified session (state held in the app store)",
-      "recipe": ""
+      "recipe": "",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     }
   ],
   "auth": {

@@ -40,6 +40,14 @@ export interface RegistryToolInputSchema {
   type: "object";
   properties: Record<string, { type: string; description?: string; default?: unknown }>;
   required: string[];
+  /**
+   * GOAL 139: "at least one of these" groups. A runner that reads
+   * `args.q ?? args.query` accepts EITHER name — declaring BOTH required would
+   * be a false claim (a consumer would send both, or reject a valid call), and
+   * declaring NEITHER would let it send nothing. `anyOf` is the honest form, and
+   * it is what a validating consumer needs to check a call correctly.
+   */
+  anyOf?: { required: string[]; description?: string }[];
 }
 
 export interface RegistryTool {
@@ -70,6 +78,12 @@ export interface RegistryTool {
    */
   reloadAfterSuccess: boolean;
   method: string;  inputSchema: RegistryToolInputSchema;
+  /**
+   * GOAL 139: was `inputSchema` DECLARED by the package, or guessed? A guessed
+   * schema has been measurably wrong, so a consumer that auto-generates a client
+   * must be able to see the difference rather than trust a fabrication.
+   */
+  argsDeclared: boolean;
 }
 
 export interface RegistryChat {
@@ -156,6 +170,22 @@ interface ManifestCapability {
   name?: string;
   description?: string;
   method?: string;
+  /**
+   * GOAL 139: the DECLARED arg contract — the real fix for the app authoring the
+   * registry's own metadata. Measured: 0 of 33 packages declared one, so
+   * `capabilityInputSchema` had to GUESS from the capability id, and it guessed
+   * wrong (youtube_search advertised `{}` while its runner requires `args.query`;
+   * it advertised `new_chat` which no runner reads — they read `newChat`).
+   *
+   * The arg names live in the RUNNER, so a guess can never be right by
+   * construction. Declaring them here puts the contract in the PACKAGE — which
+   * is the registry — so the app only READS it, and a consumer (a skill, a doc,
+   * a generated client) reads the same single source. `test/registry-args-truth`
+   * then fails LOUD when a declaration drifts from what the runner reads, so the
+   * manifest cannot quietly become a lie.
+   */
+  inputSchema?: unknown;
+  args?: unknown;
 }
 
 interface Manifest {
@@ -212,31 +242,100 @@ export function bareCapabilityId(siteId: string, capabilityId: string): string {
   return capabilityId;
 }
 
-/** Derive an MCP-tool-shaped input schema for a capability from its manifest entry. */
+/**
+ * GOAL 139: a DECLARED arg contract, validated before any consumer can see it.
+ *
+ * A malformed declaration must be REFUSED, never served: an empty-but-present
+ * schema is worse than none, because a consumer trusts it. Mirrors the GOAL 61
+ * per-entry filter (a bad capability is excluded, it does not poison the list).
+ * Returns null when absent or wrong-shaped, so the caller falls back honestly.
+ */
+export function declaredCapabilityInputSchema(
+  c: ManifestCapability
+): RegistryToolInputSchema | null {
+  const raw = c.inputSchema ?? c.args;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const o = raw as { type?: unknown; properties?: unknown; required?: unknown; anyOf?: unknown };
+  if (o.type !== "object") return null;
+  if (typeof o.properties !== "object" || o.properties === null || Array.isArray(o.properties)) {
+    return null;
+  }
+  // Every property must itself be a {type} object — an untyped property is
+  // exactly the kind of half-declaration that misleads a consumer.
+  for (const [k, v] of Object.entries(o.properties as Record<string, unknown>)) {
+    if (k.trim() === "") return null;
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+    if (typeof (v as { type?: unknown }).type !== "string") return null;
+  }
+  const required = Array.isArray(o.required)
+    ? o.required.filter((r): r is string => typeof r === "string" && r.trim() !== "")
+    : [];
+  // A required key that is not a declared property is a self-contradiction.
+  const propNames = new Set(Object.keys(o.properties as Record<string, unknown>));
+  if (required.some((r) => !propNames.has(r))) return null;
+  // anyOf ("at least one of") must be well-formed for the same reason: each
+  // branch needs a non-empty `required` naming only declared properties.
+  let anyOf: RegistryToolInputSchema["anyOf"];
+  if (o.anyOf !== undefined) {
+    if (!Array.isArray(o.anyOf) || o.anyOf.length === 0) return null;
+    const branches: { required: string[]; description?: string }[] = [];
+    for (const raw of o.anyOf as unknown[]) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+      const b = raw as { required?: unknown; description?: unknown };
+      if (!Array.isArray(b.required)) return null;
+      const names = b.required.filter((r): r is string => typeof r === "string" && r.trim() !== "");
+      if (names.length === 0) return null;
+      if (names.some((r) => !propNames.has(r))) return null;
+      branches.push({
+        required: names,
+        ...(typeof b.description === "string" ? { description: b.description } : {}),
+      });
+    }
+    anyOf = branches;
+  }
+  return {
+    type: "object",
+    properties: o.properties as RegistryToolInputSchema["properties"],
+    required,
+    ...(anyOf ? { anyOf } : {}),
+  };
+}
+
+/**
+ * Derive an MCP-tool-shaped input schema for a capability from its manifest entry.
+ *
+ * A DECLARED contract wins outright. The regex branches below are now an
+ * explicitly-labelled LAST RESORT for a package that has not declared one yet —
+ * they are a guess, they have been measurably wrong, and `argsDeclared:false`
+ * on the served tool tells every consumer not to trust them.
+ */
 export function capabilityInputSchema(
   siteId: string,
   capabilityId: string,
   _method: string | undefined,
-  description: string | undefined
+  description: string | undefined,
+  declared?: RegistryToolInputSchema | null
 ): RegistryToolInputSchema {
+  if (declared) return declared;
   const bare = bareCapabilityId(siteId, capabilityId);
   // Chat capabilities carry the composer args.
   if (/_chat$/.test(capabilityId) || bare === "chat") {
     const properties: RegistryTool["inputSchema"]["properties"] = {
       prompt: { type: "string", description: "The prompt to send on the site's own composer" },
-      new_chat: { type: "boolean", description: "Start a fresh conversation first (default false)" },
+      // GOAL 139: the runners read camelCase `newChat` (gemini.ts:259,
+      // kimi.ts:215). The old `new_chat` was read by NOTHING, so a consumer
+      // following the schema sent it and silently continued the old
+      // conversation instead of starting a new one — a wrong answer, not an
+      // error. The name now matches the code that actually reads it.
+      newChat: { type: "boolean", description: "Start a fresh conversation first (default false)" },
     };
     const required = ["prompt"];
     // Site-specific rendered toggles named in the manifest description surface as
-    // extra boolean args so a single chat tool can flip them inline.
-    for (const key of ["thinking", "search"]) {
-      if (description && new RegExp(`\\b${key}\\b`, "i").test(description)) {
-        properties[key] = {
-          type: "boolean",
-          description: `Enable the in-page "${key}" toggle (default: as left in the browser)`,
-        };
-      }
-    }
+    // extra boolean args so a single chat tool can flip them inline. GUESS ONLY:
+    // these are keyed on description prose, and no runner reads them yet, so they
+    // are deliberately NOT emitted (a schema property nothing implements is a
+    // lie a consumer can act on). Declared args are the way to add one.
+    void description;
     return { type: "object", properties, required };
   }
   // Toggle capabilities ("reasoner", "web_search", ...) — flip a real UI toggle.
@@ -388,6 +487,87 @@ export function validManifestCapability(c: unknown): c is ManifestCapability & {
   return typeof id === "string" && id.trim() !== "";
 }
 
+/**
+ * GOAL 139: the SELF-SUFFICIENCY BLOCK.
+ *
+ * The audit that started this found the load-bearing gap: `/registry` described
+ * WHAT exists but never HOW to call it. A third-party consumer — a generated
+ * PHP client, a skill teaching an AI to register a site, per-site docs — had to
+ * know the verb, the path, and the body keys out of band, i.e. it had to know
+ * ui2api's HTTP internals. That is precisely the coupling the registry exists to
+ * remove, and it is why the PHP generator had to hardcode `/capability/` and
+ * `{capability, args}` (lang-php.ts:363-369).
+ *
+ * So the daemon now ships its own call contract alongside its inventory. A
+ * consumer reads this and can construct a valid request with zero knowledge of
+ * the app. `contractVersion` is the DRIFT GATE: it changes whenever the wire
+ * contract does, so a consumer built against an older daemon can detect the
+ * mismatch instead of failing silently at runtime.
+ */
+export const REGISTRY_CONTRACT_VERSION = 1;
+
+export interface RegistryContract {
+  contractVersion: number;
+  endpoints: {
+    capability: { method: string; pathTemplate: string; bodyKeys: string[]; requiredBodyKeys: string[] };
+    chatCompletions: { method: string; pathTemplate: string; bodyKeys: string[]; requiredBodyKeys: string[]; openAICompatible: boolean };
+    registry: { method: string; pathTemplate: string };
+    models: { method: string; pathTemplate: string };
+    accounts: { method: string; pathTemplate: string; note: string };
+  };
+  auth: { header: string; scheme: string; required: boolean; note: string };
+  /**
+   * Honest scope note, so a consumer never over-reads the payload: the package
+   * list is built ONLY from installed packages under capabilities/<id>/. The
+   * daemon cannot fetch or publish registry content — that is a CLI action.
+   */
+  scope: { source: string; daemonFetchesRegistry: false; daemonPublishesRegistry: false };
+}
+
+export function buildRegistryContract(tokenRequired: boolean): RegistryContract {
+  return {
+    contractVersion: REGISTRY_CONTRACT_VERSION,
+    endpoints: {
+      capability: {
+        method: "POST",
+        pathTemplate: "/capability/{site}",
+        // `account` is a TOP-LEVEL body key, not an arg — the audit found the
+        // old schema advertising it inside `properties`, which would have made
+        // a consumer nest it under args and have it ignored.
+        bodyKeys: ["capability", "args", "account"],
+        requiredBodyKeys: ["capability"],
+      },
+      chatCompletions: {
+        method: "POST",
+        pathTemplate: "/v1/chat/completions",
+        bodyKeys: ["model", "messages", "stream", "new_chat", "account"],
+        requiredBodyKeys: ["model", "messages"],
+        openAICompatible: true,
+      },
+      registry: { method: "GET", pathTemplate: "/registry" },
+      models: { method: "GET", pathTemplate: "/v1/models" },
+      accounts: {
+        method: "GET",
+        pathTemplate: "/accounts?site={site}",
+        note: "`account` accepted by the capability/chat endpoints is a slug or identity from this list",
+      },
+    },
+    auth: {
+      header: "Authorization",
+      scheme: "Bearer",
+      required: tokenRequired,
+      note: tokenRequired
+        ? "this daemon is token-gated; send `Authorization: Bearer <UI2API_PROMPTD_TOKEN>` on every call"
+        : "no daemon token is configured; this daemon is loopback-only posture",
+    },
+    scope: {
+      source: "installed packages under capabilities/<id>/ (manifest.json + metadata.json)",
+      daemonFetchesRegistry: false,
+      daemonPublishesRegistry: false,
+    },
+  };
+}
+
 export function buildRegistryPackages(): RegistryPackage[] {
   const ids = listInstalledPackageIds();
   const dataDir = resolveDataDir();
@@ -429,15 +609,24 @@ export function buildRegistryPackages(): RegistryPackage[] {
     }
     // GOAL 61: per-entry filter — a malformed capability entry is EXCLUDED
     // (never advertised), never a TypeError that kills the whole registry.
-    const tools: RegistryTool[] = caps.filter(validManifestCapability).map((c) => ({
-      name: `${siteId}_${bareCapabilityId(siteId, c.id)}`,
-      id: c.id,
-      description: c.description || c.name || c.id,
-      method: c.method || "ui-path",
-      workType: c.method === "js-function" ? "js-function" : "ui-path",
-      reloadAfterSuccess: true,
-      inputSchema: capabilityInputSchema(siteId, c.id, c.method, c.description),
-    }));
+    const tools: RegistryTool[] = caps.filter(validManifestCapability).map((c) => {
+      const declared = declaredCapabilityInputSchema(c);
+      return {
+        name: `${siteId}_${bareCapabilityId(siteId, c.id)}`,
+        id: c.id,
+        description: c.description || c.name || c.id,
+        method: c.method || "ui-path",
+        workType: c.method === "js-function" ? "js-function" : "ui-path",
+        reloadAfterSuccess: true,
+        inputSchema: capabilityInputSchema(siteId, c.id, c.method, c.description, declared),
+        // GOAL 139: the honesty flag. `false` means the schema above is a
+        // best-effort GUESS, because the package declared no arg contract. A
+        // consumer can then refuse to auto-generate a client for a tool it
+        // cannot trust, instead of shipping a call that silently sends the
+        // wrong fields.
+        argsDeclared: declared !== null,
+      };
+    });
     // Stored vault accounts for this site, keyed by the packaged profile's host
     // — EXACTLY the host GET /accounts?site= uses (http.ts: new URL(profile.url).host).
     // No url → no host to key the vault by → field omitted (undefined).
