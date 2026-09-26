@@ -372,7 +372,7 @@ trust posture — read them before deploying.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **925 tests / 47 suites** (924 pass + 1 env skip) — dated fold-log counts
+  **928 tests / 48 suites** (927 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
   900/48 → 908/40 → 911/42 → 914/44 mid-fold) are history; this is the
   current number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
