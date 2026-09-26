@@ -239,6 +239,15 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
     assert.match(ci, /npm run test:unit/, "the pipeline must actually run the full unit suite");
     assert.match(ci, /timeout:\s*30 minutes/, "and must carry its own time cap, since this box must not run it");
     assert.match(ci, /check:verbatim/, "and must run the verbatim-completeness gates (P1..P5)");
+    // Pipeline 173 died here: the build job uploaded the cloned wigolo tree
+    // (node_modules + a Playwright chromium) and GitLab answered 413, killing
+    // the job. A pipeline that cannot actually complete must not count as the
+    // CI lane, so the fat upload is now itself a pinned prohibition.
+    assert.ok(
+      !/paths:\s*\[wigolo/.test(ci) && !/junit:\s*reports/.test(ci),
+      "the pipeline must not upload a multi-hundred-MB artifact — that 413s and kills the job (pipeline 173)",
+    );
+    assert.match(ci, /413 Payload Too Large/, "and the reason must be recorded in the file so nobody re-adds it");
     assert.ok(
       /\.github\/workflows\/ci\.yml/.test(READY) === false,
       "the readiness state must not point at the old GitHub lane — GitLab is the CI",
