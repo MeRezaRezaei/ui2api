@@ -120,6 +120,24 @@ is the ONLY info source, no site knowledge lives in the consumer):
   answer as SSE — honest: ChatDriver reads the page, it does not synthesize
   traffic). Non-chat capabilities stay on `/capability/<site>`.
 
+## GIT WIRING — both remotes, and the privacy gate
+
+The project lives on **GitHub AND GitLab**, and both are **private**.
+`.brain/` is the operator's private IP and must never reach a public remote.
+
+- `origin` fetches from GitHub and **pushes to BOTH** (two push URLs), so one
+  `git push origin` lands in both places. `gitlab` is the explicit GitLab remote.
+- **Port 22 is blocked on this box** — an SSH push hangs until timeout. GitLab is
+  therefore HTTPS (443) with a token in a `0600` credential file, never in the
+  repo. Do not "fix" a push by switching to SSH; it will hang.
+- **CI is GitLab** (`.gitlab-ci.yml`). The GitHub workflow is a redundant lane.
+- Verify privacy before any push that carries `.brain/`:
+  `gh repo view MeRezaRezaei/ui2api --json isPrivate` -> `true`, and
+  `glab api "projects/MeRezaRezaei%2Fui2api"` -> `visibility: private`.
+- Export `GITLAB_HOST=gitlab.pubg-sell.ir` before `glab ci status`, or it reports
+  "no GitLab remotes found" (it reads `origin`'s fetch URL, which is GitHub).
+- Full detail, verification commands and gotchas: **`docs/GIT_WIRING.md`**.
+
 ## THE CHROME POINT OF USE — read this before touching any browser code
 
 **ui2api drives the Chrome of a DEDICATED LINUX USER, not the operator's own browser.**

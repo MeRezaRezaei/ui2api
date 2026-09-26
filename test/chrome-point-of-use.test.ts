@@ -21,6 +21,7 @@ import { userChromeProfile } from "../src/runtime/browser.js";
 
 const AGENTS = readFileSync("AGENTS.md", "utf8");
 const DOC = readFileSync("docs/CHROME_POINT_OF_USE.md", "utf8");
+const GITIGNORE = readFileSync(".gitignore", "utf8");
 
 d("the Chrome point of use is a dedicated user, and it is pinned", () => {
   t("the owner is named by env, defaulting to ui2api — data, not a hardcode", () => {
@@ -125,5 +126,38 @@ d("the Chrome point of use is a dedicated user, and it is pinned", () => {
     assert.match(wrongModel, /interactive Chrome/, "precondition: the old model targeted the human's browser");
     assert.match(DOC, /cannot be driven|refuses/i, "the real doc must state that this is refused");
     assert.match(DOC, /dedicated/i, "and that the point of use is a dedicated user");
+  });
+});
+
+// GOAL 128: the project lives on BOTH remotes, both PRIVATE, and CI is GitLab.
+d("GOAL 128: GitHub and GitLab are both wired, and .brain only reaches private remotes", () => {
+  const WIRING = readFileSync("docs/GIT_WIRING.md", "utf8");
+  const GITIGNORE = readFileSync(".gitignore", "utf8");
+
+  t("origin pushes to BOTH remotes, so one push lands in both", () => {
+    // the doc must state the invariant, and the knob for it is real config
+    assert.match(WIRING, /push to BOTH|pushes to BOTH/i, "the dual-push invariant must be documented");
+    assert.match(WIRING, /gitlab\.pubg-sell\.ir/, "and the GitLab host named");
+    assert.match(AGENTS, /GIT WIRING/, "AGENTS must point at the wiring doc");
+  });
+
+  t("CI is GitLab and the pipeline actually runs the full unit suite", () => {
+    const ci = readFileSync(".gitlab-ci.yml", "utf8");
+    assert.match(ci, /npm run test:unit/, "the GitLab pipeline must run the full unit suite");
+    assert.match(ci, /check:verbatim/, "and the verbatim gates");
+    assert.match(ci, /timeout:\s*30 minutes/, "and a time cap — this box must not run it");
+  });
+
+  t("the privacy gate is stated for BOTH remotes, and data/ stays ignored", () => {
+    for (const [name, text] of [["AGENTS.md", AGENTS], ["docs/GIT_WIRING.md", WIRING]] as const) {
+      assert.match(text, /isPrivate/, `${name} must carry the GitHub privacy check`);
+      assert.match(text, /private/i, `${name} must state that the remotes are private`);
+    }
+    assert.match(GITIGNORE, /^data\/?$/m, "data/ (real sessions + credentials) must stay gitignored");
+  });
+
+  t("the SSH trap is documented so nobody 'fixes' a push into a hang", () => {
+    assert.match(WIRING, /Port 22 is blocked|port 22 is blocked/i, "the SSH hang must be documented");
+    assert.match(WIRING, /0600/, "and the credential file's mode must be stated");
   });
 });
