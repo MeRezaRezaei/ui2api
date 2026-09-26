@@ -316,6 +316,9 @@ it, fails the suite), so it cannot silently rot.
 
 | status | `code` | when you get it | what to do |
 | --- | --- | --- | --- |
+| 400 | `invalid_json` | the request body is not a JSON **object** (`null`, an array, a bare string/number) | send a JSON object; a caller mistake is never a 500 |
+| 413 | `payload_too_large` | the request body exceeds 1 MB — the upload is refused and the stream destroyed | split the request; the server stops reading immediately |
+| 500 | `internal_error` | a genuine internal fault | retry later; the message is deliberately generic so no internal text, path or hostname leaks |
 | 404 | `not_found` | unknown endpoint, or a model id `GET /v1/models` does not list (a refused/dormant package) | list `GET /v1/models`; do not retry — the id is not servable |
 | 404 | `unknown_model` | the `model` is not a servable chat id (capability-only, dormant, or url-less package) | list `GET /v1/models`; do not retry — the id carries no chat surface |
 | 503 | `pool_saturated` | every warm browser slot is busy | retry with backoff, or raise `UI2API_POOL_MIN` |

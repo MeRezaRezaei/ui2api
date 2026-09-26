@@ -292,6 +292,26 @@ function isWorkRoute(req: IncomingMessage): boolean {
   return url === "/prompt" || url.startsWith("/capability/") || url.startsWith("/v1/chat/completions");
 }
 
+/**
+ * GOAL 104: a typed client fault. Before this, a body of literal `null` was
+ * accepted as a "body object", the handler's `body.prompt` threw a TypeError,
+ * and the last-resort net answered `500 {"error":"Cannot read properties of
+ * null (reading 'prompt')"}` — a caller mistake rendered as a server fault with
+ * a JavaScript internal string. A caller mistake is a 4xx with a NAMED code.
+ */
+export class HttpClientError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HttpClientError";
+  }
+}
+
+const MAX_BODY_BYTES = 1e6;
+
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   // Cache the parsed body on the request so a pre-dispatch guard (capability
   // validation) and the routed handler can both read the same body.
@@ -301,13 +321,25 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
     let body = "";
     req.on("data", (c) => {
       body += c;
-      if (body.length > 1e6) reject(new Error("body too large"));
+      if (body.length > MAX_BODY_BYTES) {
+        // Stop the upload: without this the client keeps streaming megabytes at
+        // a server that already refused the request.
+        req.destroy();
+        reject(new HttpClientError(413, "payload_too_large", `request body exceeds ${MAX_BODY_BYTES} bytes`));
+      }
     });
     req.on("end", () => {
       try {
-        const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
-        (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache = parsed;
-        resolve(parsed);
+        const parsed = body ? JSON.parse(body) : {};
+        // A JSON body must be an OBJECT. `null`, an array, a string and a number
+        // all parse fine and would otherwise be handed to a handler that reads
+        // `body.<field>` — a TypeError surfacing as a 500.
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          reject(new HttpClientError(400, "invalid_json", "request body must be a JSON object"));
+          return;
+        }
+        (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache = parsed as Record<string, unknown>;
+        resolve(parsed as Record<string, unknown>);
       } catch (e) {
         reject(new Error("invalid JSON body"));
       }
@@ -1709,7 +1741,15 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
     // handler's own catch), so this never rejects in practice — the catch here
     // is the last-resort net.
     const work = handleRequest(req, res).catch((e) => {
-      send(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      // GOAL 104: a caller mistake keeps its named 4xx; a REAL internal fault
+      // still answers 500 — but neither may echo the internal message, which can
+      // carry absolute paths, hostnames or library internals to a client.
+      if (e instanceof HttpClientError) {
+        send(res, e.status, { error: { code: e.code, message: e.message } });
+        return;
+      }
+      if (process.env.UI2API_DEBUG === "1") console.error("[ui2api] unhandled request error:", e);
+      send(res, 500, { error: { code: "internal_error", message: "internal error" } });
     });
     if (!isWorkRoute(req)) {
       void work;

@@ -32,6 +32,19 @@ function envelopeCodes(src: string, into: Emitted): void {
   }
 }
 
+/**
+ * GOAL 104: a typed `HttpClientError` carries its code dynamically, so the
+ * envelope scan above cannot see it. These codes are EMITTED, and they are
+ * measured from the real constructor call sites — a precise pattern
+ * (`new HttpClientError(<status>, "<code>"`), not a hand-kept list, so a code
+ * that is documented but never thrown still fails the bidirectional check.
+ */
+function typedClientErrorCodes(src: string, into: Emitted): void {
+  for (const m of src.matchAll(/new HttpClientError\(\s*(\d{3})\s*,\s*"([a-z_]+)"/g)) {
+    into.set(m[2]!, Number(m[1]));
+  }
+}
+
 /** poolRefusal answers one code per pool refusal, all under the status its own doc comment states. */
 function poolRefusalCodes(src: string, into: Emitted): void {
   const start = src.indexOf("function poolRefusal");
@@ -47,6 +60,9 @@ export function measureEmitted(): Emitted {
   envelopeCodes(HTTP, out);
   envelopeCodes(OPENAI, out);
   poolRefusalCodes(HTTP, out);
+  typedClientErrorCodes(HTTP, out);
+  // the last-resort net's named generic 500
+  if (/code:\s*"internal_error"/.test(HTTP)) out.set("internal_error", 500);
   return out;
 }
 

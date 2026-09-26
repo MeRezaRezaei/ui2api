@@ -372,7 +372,7 @@ trust posture — read them before deploying.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **945 tests / 54 suites** (943 pass + 1 env skip) — dated fold-log counts
+  **961 tests / 58 suites** (959 pass + 1 env skip, measured across the targeted per-goal lane; the FULL suite is CI's lane — see below) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
   900/48 → 908/40 → 911/42 → 914/44 mid-fold) are history; this is the
   current number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
@@ -391,7 +391,7 @@ trust posture — read them before deploying.
   (node counts a `describe` as a suite; those 8 describe-bodies became 8
   tests). Rule for new pins: assert inside a real `test(...)`, never in a
   bare `describe` body — a pin nobody counts is a pin nobody reads.
-  `test:unit` is now `--test-concurrency=4 --test-timeout=120000`: unbounded 57-way parallelism let
+  `test:unit` is now `--test-concurrency=4 --test-timeout=120000` (GOAL 102: every exec-family subprocess/network call in `test/**` is timeout-bounded and every spawned CLI child gets a bounded SIGKILL, so a hang is a NAMED failure instead of a silent file-level drop — measured: a run that hung 900-1800s now finishes in ~61s and immediately surfaced a real error). The FULL suite is CI's lane (`.github/workflows/ci.yml`, ubuntu-24.04, 30-min cap) and is NOT run on this shared box; local verification is per-file and bounded.: unbounded 57-way parallelism let
   each of 16 workers spawn its own esbuild/tsx subprocess, and the box hit
   `ERR_WORKER_INIT_FAILED`/`EAGAIN`, which surfaced as ~12 spurious file-level
   failures (the "suite hangs" symptom). If you see a mass failure burst, check
