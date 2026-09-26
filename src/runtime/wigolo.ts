@@ -9,8 +9,19 @@
 //
 // The daemon is loopback-open by default: no token is required on 127.0.0.1.
 // If it is bound off-loopback, WIGOLO_API_TOKEN is sent as a Bearer token.
+//
+// LOOPBACK-ONLY GATE: that second sentence is not a licence to point anywhere.
+// A base that is not loopback RECEIVES the WIGOLO_API_TOKEN bearer credential
+// and has its payloads returned verbatim as MCP tool results — a hostile base
+// could answer 200 with a FABRICATED page, which the project's no-fabricated-
+// traffic rule forbids outright. So every configured endpoint (the daemon base
+// and the forwarded CDP endpoint) must be loopback; an explicit
+// UI2API_WIGOLO_ALLOW_REMOTE=1 is the only way out, and even then the bearer
+// token is NEVER attached (see resolveDaemonBase / wigoloRequest).
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { accessSync, statSync } from "node:fs";
+import { constants as FS } from "node:fs";
 
 export type WigoloAction =
   | { type: "click"; selector: string }

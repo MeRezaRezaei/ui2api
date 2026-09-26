@@ -668,7 +668,38 @@ export function loadAccountSnapshot(
     if (acct) return loadSnapshot(accountSnapshotPath(sitesDir, h, acct.slug));
     return null;
   }
-  return loadSnapshot(snapshotPath(sitesDir, h));
+  return loadSnapshotVerdict(snapshotPath(sitesDir, h)).snapshot;
+}
+
+// GOAL 124 — the ACCOUNT-level load verdict. A requested account that cannot
+// be loaded is NOT "no session": it is a REFUSAL that must be reported by name
+// (an unknown reference, a missing/unreadable/wrong-shaped snapshot) rather than
+// degrading into an anonymous run. `no-index-row` reuses the GOAL 89
+// `VAULT_NO_INDEX_ROW` name so both seams speak one vocabulary.
+export type AccountLoadStatus = SnapshotLoadStatus | "no-index-row";
+
+export interface AccountLoadVerdict {
+  status: AccountLoadStatus;
+  snapshot: ProfileSnapshot | null;
+  detail?: string;
+  /** The resolved index row's slug, when the reference resolved. */
+  slug?: string;
+}
+
+export function loadAccountSnapshotVerdict(
+  sitesDir: string,
+  host: string,
+  identity?: string
+): AccountLoadVerdict {
+  const h = sanitizeHost(host);
+  if (identity && identity !== "default") {
+    const acct = resolveStoredAccount(sitesDir, h, identity);
+    if (!acct) return { status: "no-index-row", snapshot: null };
+    const v = loadSnapshotVerdict(accountSnapshotPath(sitesDir, h, acct.slug));
+    return { status: v.status, snapshot: v.snapshot, detail: v.detail, slug: acct.slug };
+  }
+  const v = loadSnapshotVerdict(snapshotPath(sitesDir, h));
+  return { status: v.status, snapshot: v.snapshot, detail: v.detail };
 }
 
 // --- Capability reflection storage: capabilities.json next to each account ---

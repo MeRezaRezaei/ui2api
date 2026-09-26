@@ -6,7 +6,7 @@
 // own JS, and the streamed answer is read off the page's event bus.
 import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives, type AnswerRegionRead } from "../runtime/dom-primitives.js";
-import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import { injectSnapshot, loadAccountSnapshotVerdict, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { matchRestrictionMarkers, type RestrictionHit } from "../runtime/capability-probe.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
@@ -212,20 +212,34 @@ export class ChatDriver {
         // legacy cookie file. The snapshot makes the fresh incognito context
         // indistinguishable from the user's logged-in session — so Gemini et al.
         // persist chat history into the real account.
-        const host = new URL(this.profile.url).host;
-        if (!usingDefaultContext) {
-          // Identity-keyed account wins when one is requested ("default" picks
-          // the legacy single-account path); otherwise fall back to the legacy
-          // snapshot so zero-config runs keep working unchanged.
-          const snap =
-            this.account && this.account !== "default"
-              ? loadAccountSnapshot(this.dataDir, host, this.account)
-              : loadSnapshot(snapshotPath(this.dataDir, host));
-          if (snap) {
-            await injectSnapshot(context, snap);
+          const host = new URL(this.profile.url).host;
+          if (!usingDefaultContext) {
+          // GOAL 124: a REQUESTED account that cannot be loaded REFUSES BY
+          // NAME. The old code asked loadAccountSnapshot for a bare `null` and,
+          // on null, fell through to the legacy cookie file and then to no
+          // session at all — a refused (unknown / missing / corrupt /
+          // wrong-shaped) account silently became an ANONYMOUS run that still
+          // answered ok:true. Only the un-requested path may be anonymous.
+          if (this.account && this.account !== "default") {
+            const verdict = loadAccountSnapshotVerdict(this.dataDir, host, this.account);
+            if (!verdict.snapshot) {
+              const why = verdict.status === "shape-invalid" ? `shape-invalid: ${verdict.detail ?? "unknown field"}` : verdict.status;
+              throw new Error(
+                `no stored session for ${this.profile.id} account "${this.account}" on ${host} (${why}) — capture it ` +
+                  `first (ui2api profile capture <url> --login) or omit account for the legacy default snapshot`
+              );
+            }
+            await injectSnapshot(context, verdict.snapshot);
           } else {
-            const cookies = loadCookies(sessionPath(this.dataDir, host));
-            if (cookies.length > 0) await context.addCookies(cookies as never[]);
+            // No account requested: the legacy flat snapshot, else the legacy
+            // cookie file, else an honest ANONYMOUS run (duckduckgo et al.).
+            const snap = loadSnapshot(snapshotPath(this.dataDir, host));
+            if (snap) {
+              await injectSnapshot(context, snap);
+            } else {
+              const cookies = loadCookies(sessionPath(this.dataDir, host));
+              if (cookies.length > 0) await context.addCookies(cookies as never[]);
+            }
           }
         }
         this.page = await context.newPage();
