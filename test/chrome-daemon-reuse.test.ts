@@ -74,6 +74,26 @@ d("GOAL 131: one long-lived Chrome, reused, never refired", () => {
     assert.match(AGENTS, /UI2API_DAEMON_PORT/, "AGENTS must carry the daemon port knob");
   });
 
+  t("GOAL 135: the daemon says when it is headless, and how to get a real display", () => {
+    const src = readFileSync("src/runtime/chrome-daemon.ts", "utf8");
+    // it must NOT silently choose headless: the measured blocker
+    assert.match(src, /headless-degraded/, "the degraded case must be named");
+    assert.match(src, /Xvfb :99/, "and the remedy must be printed — Xvfb is what makes UI2API_HEADED=1 true");
+    assert.match(src, /ERR_CHALLENGE/, "and it must say WHY (headless is challenged), not just that it is degraded");
+    // the provisioning unit must not ship --headless for the long-lived daemon
+    const prov = readFileSync("scripts/ops/provision-ui2api-user.sh", "utf8");
+    assert.ok(!/--headless=new about:blank/.test(prov), "the long-lived Chrome must NOT be launched headless");
+    assert.match(prov, /ui2api-xvfb\.service/, "a virtual display must be a first-class unit");
+    assert.match(prov, /Environment=DISPLAY=:\$XVFB_DISPLAY/, "and the chrome unit must get that display");
+  });
+
+  t("the finding is written where an operator will hit it", () => {
+    for (const [name, text] of [["AGENTS.md", AGENTS], ["docs/CHROME_POINT_OF_USE.md", DOC]] as const) {
+      assert.match(text, /Xvfb/, `${name} must name Xvfb`);
+      assert.match(text, /ERR_CHALLENGE/, `${name} must carry the measured challenge that proves it`);
+    }
+  });
+
   t("negative: the OLD port-only behaviour is required to be the failure (mutation proof)", () => {
     // the first implementation: "is MY port live?" only
     const portOnlyCheck = (ourPort: number, ownerChromePort: number) => ourPort === ownerChromePort;

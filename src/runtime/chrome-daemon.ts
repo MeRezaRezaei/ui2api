@@ -241,7 +241,26 @@ export async function startChromeDaemon(opts: {
   // GOAL 126: ask the ONE resolver, never the env. Reading UI2API_HEADED here
   // would reintroduce the exact split-brain this cycle removed: the daemon
   // believing "headed" while the launch seam spawned --headless=new.
+  // GOAL 135: headless is what gets us BLOCKED. MEASURED, same site, same
+  // request, only headfulness changed: `--headless=new` -> ERR_CHALLENGE;
+  // headed on Xvfb :99 -> `ok:true` with a real DOM-read answer. So the daemon
+  // must never SILENTLY pick headless: it says which mode it is in and why,
+  // and it tells the operator how to get a real one.
   const headless = opts.headless ?? resolvedHeadless();
+  const display = process.env.DISPLAY || process.env.WAYLAND_DISPLAY;
+  if (headless) {
+    const asked = process.env.UI2API_HEADED === "1";
+    console.error(
+      asked
+        ? `[ui2api] headless-degraded: UI2API_HEADED=1 was requested but no DISPLAY is set, so this ` +
+          `browser is --headless=new. That is MEASURED to get challenged (ERR_CHALLENGE). ` +
+          `Start a virtual display first:  Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &  then ` +
+          `DISPLAY=:99 ui2api chrome start`
+        : `[ui2api] WARNING: starting --headless=new (no DISPLAY, UI2API_HEADED!=1). Headless is ` +
+          `MEASURED to be challenged. For a real browser: Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & ` +
+          `then DISPLAY=:99 UI2API_HEADED=1 ui2api chrome start`,
+    );
+  }
   const args = [
     "--no-first-run",
     "--no-default-browser-check",

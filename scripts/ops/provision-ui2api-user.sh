@@ -24,6 +24,7 @@ set -euo pipefail
 CHROME_USER="${CHROME_USER:-${UI2API_CHROME_USER:-ui2api}}"
 CHROME_DIR=".config/ui2api-chrome"
 DAEMON_PORT="${UI2API_DAEMON_PORT:-9222}"
+XVFB_DISPLAY="${UI2API_XVFB_DISPLAY:-99}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DO_SYSTEMD=1
@@ -93,14 +94,37 @@ say "chrome: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null | head -1))"
 if [[ "$DO_SYSTEMD" -eq 1 ]] && have systemctl; then
   UNIT_DIR="/etc/systemd/system"
 
-  # The ONE persistent Chrome. Started once; every request ATTACHES over CDP.
+  # The VIRTUAL DISPLAY. MEASURED: headless is what gets us blocked — the same
+  # site answers ERR_CHALLENGE headless and returns a real DOM-read answer
+  # headed on Xvfb. So the display is a first-class service, not a convenience.
+  cat > "$UNIT_DIR/ui2api-xvfb.service" <<EOF
+[Unit]
+Description=ui2api virtual display (Xvfb :99) — a headed Chrome needs a real X display
+Before=ui2api-chrome.service
+
+[Service]
+Type=simple
+User=$CHROME_USER
+Group=$CHROME_USER
+ExecStart=/usr/bin/Xvfb :$XVFB_DISPLAY -screen 0 1920x1080x24 -nolisten tcp
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # The ONE persistent Chrome, HEADED, on that display. Started once; every
+  # request ATTACHES over CDP.
   # Restart=on-failure only — a clean stop must NOT resurrect it, or `chrome stop`
   # would be undone by systemd a second later.
   cat > "$UNIT_DIR/ui2api-chrome.service" <<EOF
 [Unit]
 Description=ui2api persistent Chrome (the point of use for the $CHROME_USER user)
 Documentation=file://$REPO_DIR/docs/CHROME_POINT_OF_USE.md
-After=graphical-session.target
+After=ui2api-xvfb.service
+Requires=ui2api-xvfb.service
 
 [Service]
 Type=simple
@@ -109,6 +133,7 @@ Group=$CHROME_USER
 Environment=HOME=$USER_HOME
 Environment=UI2API_CHROME_USER=$CHROME_USER
 Environment=UI2API_DAEMON_PORT=$DAEMON_PORT
+Environment=DISPLAY=:$XVFB_DISPLAY
 ExecStart=$CHROME_BIN \\
   --no-first-run --no-default-browser-check \\
   --disable-background-networking --disable-component-update \\
@@ -117,7 +142,7 @@ ExecStart=$CHROME_BIN \\
   --disable-renderer-backgrounding \\
   --remote-debugging-port=$DAEMON_PORT --remote-debugging-address=127.0.0.1 \\
   --user-data-dir=$USER_HOME/$CHROME_DIR \\
-  --headless=new about:blank
+  about:blank
 Restart=on-failure
 RestartSec=3
 # One instance per profile is a CHROME rule, not ours: let systemd's stop win.
@@ -148,6 +173,8 @@ Environment=HOME=$USER_HOME
 Environment=UI2API_CHROME_USER=$CHROME_USER
 Environment=UI2API_PROMPTD_PORT=$API_PORT
 Environment=UI2API_ATTACH_PORT=$DAEMON_PORT
+Environment=UI2API_HEADED=1
+Environment=DISPLAY=:$XVFB_DISPLAY
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/env npx tsx $REPO_DIR/src/cli.ts promptd
 Restart=on-failure
@@ -160,9 +187,9 @@ PrivateTmp=false
 WantedBy=multi-user.target
 EOF
 
-  say "wrote $UNIT_DIR/ui2api-chrome.service and ui2api-api.service"
+  say "wrote ui2api-xvfb.service, ui2api-chrome.service and ui2api-api.service"
   systemctl daemon-reload
-  systemctl enable ui2api-chrome.service ui2api-api.service >/dev/null 2>&1 \
+  systemctl enable ui2api-xvfb.service ui2api-chrome.service ui2api-api.service >/dev/null 2>&1 \
     && say "enabled both units at boot" || say "could not enable (container?) — start them manually"
   systemctl restart ui2api-chrome.service 2>/dev/null && say "started ui2api-chrome" || say "chrome unit not started here"
   systemctl restart ui2api-api.service 2>/dev/null && say "started ui2api-api" || say "api unit not started here"

@@ -120,6 +120,28 @@ is the ONLY info source, no site knowledge lives in the consumer):
   answer as SSE — honest: ChatDriver reads the page, it does not synthesize
   traffic). Non-chat capabilities stay on `/capability/<site>`.
 
+## HEADLESS IS WHAT GETS US BLOCKED — run the daemon HEADED under Xvfb
+
+MEASURED on the same site, the same request, changing ONLY headfulness:
+
+| browser | live result |
+| --- | --- |
+| `--headless=new` | `ok:false` — *"either ERR_CHALLENGE (abuse signal) or the consent wall re-blocked"* |
+| **headed on `Xvfb :99`** | `ok:true` — `answer: "GPT-5.6 Luna\n\nPONG-HEADED"`, DOM-read, the site's own JS driving `POST /duckchat/v1/chat` (SSE) |
+
+A headless browser is a forgery and it fails differently from a plain bot. **The
+point of use is a HEADED Chrome on a virtual display:**
+
+```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+DISPLAY=:99 ui2api chrome start        # NO --headless
+```
+
+`UI2API_HEADED=1` **without** a display is `headless-degraded` and is NOT a
+substitute — the daemon falls back to `--headless=new` and gets challenged again.
+**Xvfb is what makes `UI2API_HEADED=1` true.** Confirm with
+`GET /status` -> `"headful":true, "headlessDegraded":false`.
+
 ## WHEN A SITE CHALLENGES YOU — reach for WIGOLO, not a retry loop
 
 **If a site answers with an abuse challenge, a consent wall, or an

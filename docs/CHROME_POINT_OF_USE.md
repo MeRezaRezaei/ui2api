@@ -95,6 +95,44 @@ will refuse anyway. When it adopts, `status` prints the port to attach to, which
 is what `UI2API_ATTACH_PORT` uses. When no daemon is live, the pool falls back to
 spawning per request, so nothing breaks if the daemon is down.
 
+## RUN IT HEADED UNDER A VIRTUAL DISPLAY — this is not optional
+
+**Headless is what gets us blocked. MEASURED, same site, same request, only
+headfulness changed:**
+
+| browser | result |
+| --- | --- |
+| `--headless=new` | `ok:false` — *"either ERR_CHALLENGE (abuse signal) or the consent wall re-blocked"* |
+| **headed inside Xvfb** | `ok:true` — `answer: "GPT-5.6 Luna\n\nPONG-HEADED"`, read off the live page, the site's own JS driving `POST /duckchat/v1/chat` (SSE) |
+
+A headless browser is a *forgery*, and it fails differently from a plain bot: no
+window chrome, no extensions, a temp profile, and CDP-level tells. A browser on a
+real (even virtual) X display does not present that. The anti-bot stack is not
+guessing — it is reading.
+
+So the point of use is **a headed Chrome on a virtual display**, not a headless one:
+
+```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &      # the virtual display
+DISPLAY=:99 google-chrome-stable \
+  --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
+  --user-data-dir=/home/ui2api/.config/ui2api-chrome about:blank   # NO --headless
+```
+
+Confirm it is genuinely headed, not silently headless:
+
+```bash
+curl -s http://127.0.0.1:9797/status | grep -o '"headful":[a-z]*'
+# "headful":true   — and "headlessDegraded":false
+```
+
+`UI2API_HEADED=1` with no display is the `headless-degraded` state, and it is NOT
+a substitute: the daemon will fall back to `--headless=new` and you will be
+challenged again. **Xvfb is what makes `UI2API_HEADED=1` true.**
+
+`xvfb-run` also works for a one-off, but a long-lived daemon wants a
+long-lived `Xvfb :99`.
+
 ## Provision it (a new box needs one command)
 
 ```bash
