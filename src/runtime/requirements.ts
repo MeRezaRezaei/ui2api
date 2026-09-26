@@ -160,6 +160,7 @@ export interface RequirementsDeps {
   missingSharedLibraries: (libs: string[]) => string[];
   fontCount: () => number;
   hasBinary: (name: string) => boolean;
+  displayUsable?: () => { name: string; declared: boolean; usable: boolean };
   chromeOwner?: () => { user: string; profile: string | null; missing: string | null };
   chromeVersion: (exec: string) => string | null;
   bundledChromium: () => string | null;
@@ -424,6 +425,31 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
         : why.join("; "),
       ...(ready ? {} : { reason: `${why.join("; ")} — install the desktop/X11 stack (e.g. xvfb + fonts-noto-core + libgtk-3-0 + libnss3)` }),
     } as any);
+
+    // GOAL 138: a DISPLAY that LOOKS present but is unusable. MEASURED: Xvfb died
+    // and left /tmp/.X11-unix/X99 + /tmp/.X99-lock behind, so the socket existed
+    // and every "is there a display" test said yes — while `xdpyinfo` failed and
+    // Chrome exited with "Missing X server or $DISPLAY". The whole point of use
+    // then fails with an error that names Chrome, not the dead display. So we
+    // CONNECT to the display rather than trusting a socket's existence.
+    const display = (deps.displayUsable ?? defaultDisplayUsable)();
+    if (display.declared && !display.usable) {
+      checks.push({
+        id: "display-usable",
+        status: "fail",
+        detail: `DISPLAY=${display.name} is declared but NOT connectable`,
+        reason:
+          `the display ${display.name} does not accept connections — a stale /tmp/.X11-unix socket and ` +
+          `/tmp/.X*-lock survive a DEAD Xvfb, so the display looks present and is not. ` +
+          `Fix: sudo rm -f /tmp/.X*-lock /tmp/.X11-unix/X* and start the display again.`,
+      } as any);
+    } else if (display.usable) {
+      checks.push({
+        id: "display-usable",
+        status: "pass",
+        detail: `${display.name} accepts connections`,
+      } as any);
+    }
   }
 
   // THE CHROME POINT OF USE, as a first-class check (see src/runtime/chrome-owner.ts).
@@ -700,6 +726,7 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
     missingSharedLibraries: defaultMissingSharedLibraries,
     fontCount: defaultFontCount,
     hasBinary: defaultHasBinary,
+    displayUsable: defaultDisplayUsable,
     chromeVersion: defaultChromeVersion,
     bundledChromium: bundledChromiumPath,
     probeAttachPort: defaultProbeAttachPort,
@@ -748,6 +775,22 @@ function defaultHasBinary(name: string): boolean {
     if (dir && existsSync(join(dir, name))) return true;
   }
   return false;
+}
+
+
+/**
+ * GOAL 138: is the display ACTUALLY usable, or merely declared? Connecting is the
+ * only honest test — a stale socket survives a dead X server.
+ */
+function defaultDisplayUsable(): { name: string; declared: boolean; usable: boolean } {
+  const name = process.env.DISPLAY || process.env.WAYLAND_DISPLAY || "";
+  if (!name) return { name: "(none)", declared: false, usable: false };
+  try {
+    execFileSync("xdpyinfo", ["-display", name], { stdio: "ignore", timeout: 5000 });
+    return { name, declared: true, usable: true };
+  } catch {
+    return { name, declared: true, usable: false };
+  }
 }
 
 /** The full requirements report: global OS checks + per-package verdicts. */

@@ -45,9 +45,23 @@ export function userChromeProfile(): string | undefined {
   // case), or when it is named explicitly. Otherwise a managed launch, which is
   // hermetic. `chrome start` is how the daemon gets it, and it always runs AS
   // the owner.
-  const owner = resolveChromeOwner();
-  if (owner.runningAsOwner) return owner.profile ?? undefined;
-  if ((process.env.UI2API_CHROME_OWNER_PROFILE ?? "") === "1") return owner.profile ?? undefined;
+  // NO ambient owner fallback — and the reason is measured, twice.
+  //
+  // The owner's profile is used by EXACTLY ONE caller: the daemon
+  // (`chrome start`), which always runs AS the owner. Everything else — the app,
+  // and every test — reaches it by ATTACHING over CDP, which is the operator's
+  // model anyway. An earlier version fell back to the owner profile whenever the
+  // process "was" the owner, and a test run then launched its own --headless
+  // Chrome onto the live profile, silently taking it over: CDP moved to a random
+  // port, the headed daemon's 9222 went dead, attach failed, and the launch fell
+  // through to a doomed respawn (`chrome exited early (code 21)`). The suite was
+  // coupled to machine state AND to whoever happened to hold the profile.
+  //
+  // So: explicit env, or the explicit opt-in. Otherwise a hermetic managed
+  // launch. The daemon is the only owner of the owner's profile.
+  if ((process.env.UI2API_CHROME_OWNER_PROFILE ?? "") === "1") {
+    return resolveChromeOwner().profile ?? undefined;
+  }
   return undefined;
 }
 
