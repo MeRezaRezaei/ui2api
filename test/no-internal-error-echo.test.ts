@@ -22,7 +22,12 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/
 const LEAK = /ok: false, error: e instanceof Error \? e\.message : String\(e\)/g;
 
 d("GOAL 117: no route echoes internal exception text to a client", () => {
-  t("ZERO capability handlers echo a raw e.message (all 32 covered, not sampled)", () => {
+  t("ZERO capability handlers echo a raw e.message (the ONE handler covers every site)", () => {
+    // GOAL 140 collapsed 33 per-site routes into ONE table-driven handler, so
+    // "all 32 covered, not sampled" is now STRUCTURAL rather than counted: there
+    // is a single handler, so there is nothing to sample and nothing to miss.
+    const handlers = (code(HTTP).match(/req\.url\?\.startsWith\("\/capability\/"\)/g) ?? []).length;
+    assert.equal(handlers, 1, `expected exactly ONE capability handler, found ${handlers}`);
     const hits = [...code(HTTP).matchAll(LEAK)];
     assert.deepEqual(
       hits.map((h) => h.index),
@@ -32,8 +37,17 @@ d("GOAL 117: no route echoes internal exception text to a client", () => {
   });
 
   t("the fix is applied to EVERY site, not a subset", () => {
+    // Every site now flows through the single handler, so the guard existing
+    // there IS the guarantee that no site can bypass it. We also assert no
+    // per-site route survives that could be added without the guard.
     const used = (code(HTTP).match(/capabilityFailure\(capability, e\)/g) ?? []).length;
-    assert.ok(used >= 32, `expected the guard on all 32 capability routes, found ${used}`);
+    assert.ok(used >= 1, "the capability handler must route failures through capabilityFailure()");
+    const perSite = code(HTTP).match(/req\.url === "\/capability\/[a-z0-9-]+"/g) ?? [];
+    assert.deepEqual(
+      perSite,
+      [],
+      "a per-site capability route exists again — it could serve a site without the guard"
+    );
   });
 
   t("the failure stays a real 500 with a NAMED reason and the capability id", () => {
@@ -47,8 +61,22 @@ d("GOAL 117: no route echoes internal exception text to a client", () => {
     const seg = code(HTTP).slice(code(HTTP).lastIndexOf("const isRequestShape"));
     assert.match(seg, /isRequestShape \? 400 : 500/, "a request-shape error is 400, anything else 500");
     assert.match(seg, /internal_error/, "the non-request-shape branch must use the generic code");
+    // GOAL 143: the named 400 now travels as {code, message} like every other
+    // refusal, so a client reads the CODE instead of regex-matching our prose.
+    // The security property is unchanged and is what this test exists for: the
+    // non-shape branch must still emit the GENERIC message, never e.message.
+    assert.match(
+      seg,
+      /code: "internal_error", message: "internal error"/,
+      "a non-request-shape fault must NOT echo the internal message"
+    );
+    assert.doesNotMatch(
+      seg,
+      /\{ code: "internal_error", message: e instanceof Error \? e\.message/,
+      "the internal_error branch must never carry the real exception text"
+    );
     // the NAMED 400 keeps its message, because the caller can act on it
-    assert.match(seg, /\? e instanceof Error \? e\.message : String\(e\)/, "a request-shape 400 must keep its named message");
+    assert.match(seg, /message: e instanceof Error \? e\.message : String\(e\)/, "a request-shape 400 must keep its named message");
   });
 
   t("the two remaining e.message uses are NAMED contracts, not leaks", () => {
@@ -59,7 +87,7 @@ d("GOAL 117: no route echoes internal exception text to a client", () => {
     // 2) the request-shape 400 above
     assert.match(
       code(HTTP),
-      /error: isRequestShape\s*\?\s*e instanceof Error \? e\.message : String\(e\)/,
+      /message: e instanceof Error \? e\.message : String\(e\)/,
       "the request-shape 400 keeps its named message",
     );
   });
