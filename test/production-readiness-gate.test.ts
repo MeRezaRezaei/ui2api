@@ -198,6 +198,28 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
     assert.notEqual(headline, gateVerdict, "the naive reader and the gate DISAGREE — that disagreement is the pin working");
   });
 
+  t("the CI lane really exists in the repo (5.1 is not a hand-wave)", () => {
+    // 5.1 records the full suite as `unverifiable` HERE. That is only honest if
+    // the CI lane genuinely exists — otherwise "CI owns it" is an excuse.
+    assert.ok(existsSync(".github/workflows/ci.yml"), "the CI workflow must exist for 5.1 to be an honest deferral");
+    const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+    assert.match(ci, /npm run test:unit|test:unit/, "the CI workflow must actually run the unit suite");
+    assert.match(ci, /timeout-minutes/, "and must carry its own time cap, since this box must not run it");
+    // and the local script must NOT be the thing that runs the whole suite here
+    assert.match(PKG.scripts["test:unit"] ?? "", /--test-timeout=\d+/, "the local lane stays timeout-bounded");
+  });
+
+  t("READY cannot be claimed while any criterion is not `pass`", () => {
+    const stored = storedVerdicts();
+    const nonPass = [...stored.entries()].filter(([, v]) => v !== "pass");
+    const headline = /## Current state — \*\*(NOT READY FOR PRODUCTION|READY FOR PRODUCTION)\*\*/.exec(READY)?.[1];
+    if (headline === "READY FOR PRODUCTION") {
+      assert.deepEqual(nonPass, [], "READY was claimed while criteria are not pass — an unverifiable gate is NOT a pass");
+    } else {
+      assert.ok(nonPass.length > 0 || !existsSync("test/production-readiness-gate.test.ts"), "a NOT-READY state must have a real reason");
+    }
+  });
+
   t("the state file is tracked, not ignored (it is the real record)", () => {
     const out = execFileSync("git", ["ls-files", "--error-unmatch", ".brain/PRODUCTION_READINESS.md"], { encoding: "utf8" });
     assert.match(out, /PRODUCTION_READINESS\.md/, "the readiness state must be tracked in git");

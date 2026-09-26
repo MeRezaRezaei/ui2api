@@ -51,11 +51,14 @@ npx tsx src/cli.ts smoke
 ```
 
 It gates on `ui2api requirements` first (any OS-level fail → the named reason,
-exit 1), ensures the anonymous DuckDuckGo AI Chat package is present
-(installing it via the registry seam if it is missing, and saying so), then
+exit 1), ensures the anonymous DuckDuckGo AI Chat package is present, then
 does ONE real anonymous chat round-trip through the ChatDriver and prints
 `smoke OK: duckduckgo answered "<first line>" in Nms` (exit 0) or the named
-failure (exit 1). Machine-readable for CI: `npx tsx src/cli.ts smoke --json`
+failure (exit 1). DuckDuckGo is vendored at `capabilities/duckduckgo/`, so on a
+fresh clone nothing is installed; smoke only touches the install seam if that
+package is genuinely missing, and that seam has **no public registry to install
+from** (see §12) — it will name that instead of quietly succeeding. Machine-readable
+for CI: `npx tsx src/cli.ts smoke --json`
 emits `{ok, site, answer?, ms?, message, installedAnon?, report}` (the `report`
 carries the same `checks[]/packages[]/summary` as `requirements --json`,
 including vault `capturedAt/ageDays/stale`); exit 0 = ok, exit 1 = any named
@@ -454,11 +457,22 @@ this box out of the box — so MCP stdio is the live-proven consumer surface.
 
 ## 12. Community install — `ui2api install <site>` (GOAL 24, 2026-09-24)
 
-The registry that backs install is the public `ui2api-registry` repo, whose
-default branch is **`master`**; every site there is a full capability package.
-Install is one command and needs no analyse/generate:
+**Read this first: no public community registry is published yet.** The default
+the CLI falls back to —
+`https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master` — is a
+placeholder with no repository behind it, so `install --catalog` and
+`install <site>` **without `--registry` fail**, with a named error saying
+exactly that. This is the whole "one-command, no analyse/generate" path, and it
+is one command *once you have a registry*.
+
+A registry is a git repo (default branch `master`, NOT `main`) whose root
+carries `index.json` and whose `packages/<site>/` holds the full capability
+package. Point install at one you run or fork, then install is one command:
 
 ```bash
+# Raw base URL ending in the branch — a GitHub repo page is normalized for you
+export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
+
 # Discover: site | version | trust (reviewed until the operator reviews it)
 npx tsx src/cli.ts install --catalog
 
@@ -477,9 +491,14 @@ curl -s localhost:9797/capability/duckduckgo \
 - Installed packages land in `capabilities/<site-id>/` — the same layout
   `promptd` already serves, so `GET /registry` picks the package up with no
   extra step.
-- `--registry <url>` or `UI2API_REGISTRY_URL` point install at a fork; the raw
-  base must end in the branch (`…/ui2api-registry/master`). A stale `/main` URL
+- `--registry <url>` or `UI2API_REGISTRY_URL` select the registry; the raw base
+  must end in the branch (`…/ui2api-registry/master`). A stale `/main` URL
   fails loudly with the correction hint.
+- **No registry needed on a fresh clone:** every packaged site is already
+  vendored under `capabilities/<site-id>/` (`ls capabilities`), and that is the
+  directory `promptd` serves — so `curl localhost:9797/registry` lists them with
+  no install step. To package a brand-new site from nothing, `analyse` +
+  `generate` is the path that needs no registry either.
 - `trust` = `unreviewed` until a maintainer reviews a package; check it before
   running. Login-bound capabilities still need your real session
   (`docs/UNLOCK.md`).

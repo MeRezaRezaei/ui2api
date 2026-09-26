@@ -120,12 +120,23 @@ identically to every `ui2api …` below.
 Then connect any MCP/ACP client to the generated server and call tools like
 `send_prompt`. Re-run `analyse`/`generate` when the site changes.
 
-**Install a site package from the community registry** — the one-command path with
-no analyse/generate needed. The registry is `ui2api-registry` (default branch
-**`master`**): a catalog of per-site capability packages served to your agents by
-the same daemon that serves built-in sites.
+**Install a site package from a registry** — the one-command path with no
+analyse/generate needed. A registry is a catalog of per-site capability packages
+(`index.json` + `packages/<site>/…` on the `master` branch) served to your agents
+by the same daemon that serves built-in sites.
+
+> **No public registry is published yet.** The registry the CLI defaults to
+> (`https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master`) is a
+> placeholder with no repo behind it, so `ui2api install` **without** `--registry`
+> fails with exactly that named error. Install therefore needs a registry you
+> run or fork, and every command below passes `--registry`. Out of the box you
+> do not need install at all — see the vendored packages right after.
 
 ```bash
+# Your registry: a raw base URL ending in the branch, e.g.
+#   <raw base of your fork>/ui2api-registry/master
+export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
+
 # Discover what's installable: site, version, trust (reviewed / unreviewed)
 ui2api install --catalog
 
@@ -144,12 +155,25 @@ curl -s localhost:9797/capability/duckduckgo \
 Installed packages land in `capabilities/<site-id>/` — the exact layout
 `promptd` already serves, so there is no "install dir vs. serve dir" split and
 `GET /registry` picks the package up automatically. `--registry <url>` (or
-`UI2API_REGISTRY_URL`) point install at a fork; the URL must be a **raw** base
-ending in the branch (`…/ui2api-registry/master`) — a stale `/main` URL fails
-loudly with the corrective hint. Check the package's `trust` (`unreviewed`
-until the operator reviews it) before running it, and note login-bound
-capabilities need your real session (see `docs/UNLOCK.md`), exactly like every
-built-in site.
+`UI2API_REGISTRY_URL`) point install at your registry; the URL must be a **raw**
+base ending in the branch (`…/ui2api-registry/master`) — a GitHub repo page is
+normalized for you, a stale `/main` URL fails loudly with the corrective hint.
+Check the package's `trust` (`unreviewed` until the operator reviews it) before
+running it, and note login-bound capabilities need your real session (see
+`docs/UNLOCK.md`), exactly like every built-in site.
+
+**Already-working alternative (no registry, no install).** Every packaged site is
+vendored in this repo under `capabilities/<site-id>/`, and that is the very
+directory `promptd` serves — so a fresh clone already exposes them:
+
+```bash
+ls capabilities                     # duckduckgo, gemini, kimi, deepseek, youtube, …
+ui2api promptd
+curl -s localhost:9797/registry      # every vendored package, with its honest status
+```
+
+To add a site from scratch, the two-step path needs no registry at all:
+`ui2api analyse <url>` then `ui2api generate <host>`.
 
 **Validate the build against the fixture suite (source clone only)** — the
 published npm package ships no test suite (`test/` is not in the tarball), so
@@ -171,7 +195,9 @@ answer off the page. All in your own browser session.
 # ONE command — the buy-first self-test: OS requirements gate + one REAL
 # anonymous AI-chat round-trip (no sign-in, no API key, no capture). Prints
 # `smoke OK: duckduckgo answered "<answer>" in Nms` (exit 0) or the named
-# failure (exit 1); installs the DuckDuckGo AI Chat package if it is missing.
+# failure (exit 1). DuckDuckGo ships vendored in capabilities/duckduckgo, so
+# nothing is installed; only if that package were absent would smoke try the
+# install seam, which needs UI2API_REGISTRY_URL (no public registry — see above).
 npx tsx src/cli.ts smoke
 
 # Machine-readable verdicts for your CI/setup scripts — same honest gate,

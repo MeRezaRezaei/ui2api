@@ -1,12 +1,19 @@
 // Community registry installer — `ui2api install <site>`
 //
-// Fetches a per-site capability package from the PUBLIC ui2api-registry and
+// Fetches a per-site capability package from a community registry and
 // materializes it into the same packages root the daemon serves from
 // (`capabilities/<site>/` on disk — the layout `findPackageDir()` /
 // `resolvePackagedProfile()` / `buildRegistryPackages()` already read).
 //
-// The registry is a git repo whose default branch is `master` (NOT `main`). Its
-// root carries `index.json` — the installable-site catalog with `trust`
+// GOAL 116 — HONEST DEFAULT: no public community registry is published yet, so
+// `DEFAULT_REGISTRY_URL` below is an INTENTIONAL placeholder that always 404s;
+// install REQUIRES `--registry <url>` / `UI2API_REGISTRY_URL` pointing at a
+// registry the operator runs or forks. The in-repo `capabilities/<site>/`
+// packages are served with no install step at all. See `fetchRegistryIndex()`
+// for the named error that says exactly this instead of guessing at reachability.
+//
+// The registry's layout is a git repo whose default branch is `master` (NOT
+// `main`). Its root carries `index.json` — the installable-site catalog with `trust`
 // (reviewed/unreviewed) and `version` per site — and per-site packages live
 // under `packages/<site>/` in the MODERN shape: metadata.json + manifest.json +
 // profile.json + session.lock.json + CAPABILITIES.md + recipes/<cap>.json
@@ -94,9 +101,18 @@ export async function fetchRegistryIndex(registryBaseUrl: string): Promise<Regis
     return JSON.parse(await fetchText(`${base}/index.json`)) as RegistryIndex;
   } catch (e) {
     const wrongBranch = base.includes(`/main/`) || base.endsWith("/main");
+    // GOAL 116: the DEFAULT base is NOT a reachable registry — no public
+    // community registry is published, so a bare `ui2api install <site>` /
+    // `install --catalog` 404s on the code's own default. Saying "verify the
+    // registry repo is reachable" sent the reader hunting for a repo that does
+    // not exist. Name the REAL cause (nothing is published) and the REAL
+    // remedy (supply your own registry), instead.
+    const isDefault = base === normalizeRegistryBase(DEFAULT_REGISTRY_URL);
     const hint = wrongBranch
       ? ` — the registry default branch is "${DEFAULT_REGISTRY_BRANCH}" (its /main is gone); use e.g. ${DEFAULT_REGISTRY_URL}`
-      : ` — verify the registry repo is reachable and carries index.json on ${DEFAULT_REGISTRY_BRANCH}`;
+      : isDefault
+        ? ` — no public community registry is published yet: the built-in default ${DEFAULT_REGISTRY_URL} has no repo behind it, so it 404s by design. Supply a registry: pass --registry <url> or set UI2API_REGISTRY_URL to a raw base ending in the branch (e.g. <your-fork>/${DEFAULT_REGISTRY_BRANCH}) — or skip install entirely and use the packages already vendored in this repo's capabilities/<site>/ directories`
+        : ` — no registry answered at that URL; --registry <url> / UI2API_REGISTRY_URL must point at a registry that publishes index.json on the ${DEFAULT_REGISTRY_BRANCH} branch`;
     throw new Error(`registry index.json not readable at ${base}/index.json${hint} (${e instanceof Error ? e.message : String(e)})`);
   }
 }
