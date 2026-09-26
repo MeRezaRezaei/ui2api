@@ -308,6 +308,28 @@ blocker listed above — do not invent a green for it.
 - `UI2API_USER_DATA_DIR` / `UI2API_CHROME_PROFILE_PATH` — reuse your real
   Chrome profile (cannot share a profile already locked by running Chrome).
 - `UI2API_ATTACH_PORT=9222` — attach to an already-running Chrome
+
+> **The Chrome point of use is a DEDICATED LINUX USER, not your own browser.**
+> Chrome will not let another process attach to the browser you are personally
+> using, and refuses `--remote-debugging-port` on a live profile. The dedicated
+> user's Chrome works fine — **headless included** — and the only setup step is
+> that its Chrome info exists. See [`docs/CHROME_POINT_OF_USE.md`](./CHROME_POINT_OF_USE.md).
+>
+> ```bash
+> # 1. the profile must exist (this is the whole integration)
+> sudo -u ui2api -H google-chrome --user-data-dir=/home/ui2api/.config/ui2api-chrome
+>
+> # 2. to LOG IN, run that user's Chrome on your display and log in by hand
+> xhost +
+> sudo -u ui2api -H google-chrome --user-data-dir=/home/ui2api/.config/ui2api-chrome
+> #    …log in…  then quit, and:  xhost -
+>
+> # 3. confirm
+> npx tsx src/cli.ts requirements      # -> chrome-owner ui2api: …
+> ```
+>
+> The owner is data, not a hardcode: `UI2API_CHROME_USER=some-svc-acct` for a
+> per-customer service account, `UI2API_CHROME_USER=ci` for CI.
   (`google-chrome --remote-debugging-port=9222`) instead of launching.
 - `UI2API_POOL_MIN` — warm browser pool size for promptd.
 

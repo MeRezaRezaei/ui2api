@@ -1,0 +1,87 @@
+# ui2api CI — GitLab (gitlab.pubg-sell.ir)
+#
+# The long-run suite lives HERE, on the GitLab runner, and NOT on a developer's
+# box. The full unit suite, the build and the integration run are too heavy for a
+# shared machine; local verification is per-file and bounded (see AGENTS.md).
+#
+# The same gate chain as the historical GitHub workflow, expressed for GitLab:
+#   npm ci -> playwright chromium -> npm run build -> check:verbatim*
+#   -> npm test (integration) -> npm run test:unit (full unit suite)
+#
+# The wigolo daemon tier (test/wigolo-engine.test.ts) spawns a local daemon from a
+# repo checkout and drives it over loopback, so it needs ITS OWN pinned upstream
+# and its own chromium revision (1223, distinct from the main suite's).
+
+stages:
+  - build
+  - verify
+
+variables:
+  CI_NODE_VERSION: "24"
+  # The verbatim corpus gates are part of the human-free chain: a change that
+  # leaves .brain/ inconsistent must fail the pipeline, not a person.
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+    - node_modules/
+
+# The wigolo engine tests need a checkout at $WIGOLO_REPO.
+before_script:
+  - apt-get update -qq && apt-get install -y -qq git >/dev/null
+  - node --version
+
+build:
+  stage: build
+  # Pin the LTS image: the wigolo daemon's pinned playwright supports ubuntu-24.04
+  # but not a rolled-forward image — its chromium installer refuses unlisted distros.
+  image: node:24-bookworm
+  timeout: 30 minutes
+  interruptible: true
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/, node_modules/]
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npx playwright install --with-deps chromium
+    # wigolo upstream, pinned to a verified commit, with ITS deps and ITS chromium
+    - git clone --depth 1 https://github.com/KnockOutEZ/wigolo.git "$CI_PROJECT_DIR/wigolo"
+    - cd "$CI_PROJECT_DIR/wigolo" && git checkout d69bf773be06f29fc1d335f8ba35ec88457ac707
+    - cd "$CI_PROJECT_DIR/wigolo" && npm ci && npx playwright install chromium
+    - cd "$CI_PROJECT_DIR" && npm run build
+  artifacts:
+    expire_in: 1 day
+    paths: [wigolo/]
+
+verify:
+  stage: verify
+  image: node:24-bookworm
+  timeout: 30 minutes
+  interruptible: true
+  needs: ["build"]
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/, node_modules/]
+  variables:
+    WIGOLO_REPO: "$CI_PROJECT_DIR/wigolo"
+    UI2API_REGISTRY_LIVE: "1"
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npx playwright install --with-deps chromium
+    # The verbatim-completeness gate (P1..P5) is part of the human-free chain.
+    - npm run check:verbatim
+    - npm run check:verbatim:goals
+    - npm test
+    - npm run test:unit
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: reports/junit.xml
+    paths: [reports/]

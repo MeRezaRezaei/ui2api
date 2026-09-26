@@ -1,3 +1,4 @@
+import { resolveChromeOwner } from "./chrome-owner.js";
 // OS-level requirements readiness check (GOAL 33) — the `requirements`/`doctor`
 // command + runtime checker. Answers "is this package's OS-level environment
 // ready / working / on-hold / not-ready?" BEFORE any browser work, with the
@@ -380,6 +381,28 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
   // (a) node
   const node = deps.nodeVersion;
   checks.push(checkNodeVersion(node));
+
+  // THE CHROME POINT OF USE, as a first-class check (see src/runtime/chrome-owner.ts).
+  // The operator's own interactive browser cannot be driven; the point of use is a
+  // dedicated user's Chrome, and the only required setup is that it exists. Report
+  // it honestly, and report the xhost + login path when it does not.
+  {
+    const owner = resolveChromeOwner();
+    checks.push({
+      id: "chrome-owner",
+      status: owner.missing ? "fail" : "pass",
+      detail: owner.missing ? `${owner.user} (no profile)` : `${owner.user} -> ${owner.profile}`,
+      ...(owner.missing
+        ? {
+            reason:
+              `${owner.missing} ` +
+              `Log in by running that user's Chrome on your display (xhost +, then ` +
+              `sudo -u ${owner.user} -H google-chrome --user-data-dir=<its profile>) — ` +
+              `no need to copy your own profile.`,
+          }
+        : {}),
+    } as any);
+  }
   // (b) chrome binary via the launchBrowser ladder (folded, never duplicated)
   const exec = deps.chromeResolve();
   const chromeVer = exec ? deps.chromeVersion(exec) : null;

@@ -2,6 +2,7 @@ import { chromium, type Browser } from "playwright";
 import { resolve, dirname } from "node:path";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
+import { chromeOwnerProfilePath } from "./chrome-owner.js";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 
@@ -30,7 +31,14 @@ export function usingUserChrome(): boolean {
 // The user's Chrome profile dir, when one was given (mirrors the env that wigolo
 // reads as WIGOLO_CHROME_PROFILE_PATH, so the daemon can reuse the same profile).
 export function userChromeProfile(): string | undefined {
-  return process.env.UI2API_USER_DATA_DIR || process.env.UI2API_CHROME_PROFILE_PATH || undefined;
+  // Explicit wins, always.
+  const explicit = process.env.UI2API_USER_DATA_DIR || process.env.UI2API_CHROME_PROFILE_PATH;
+  if (explicit) return explicit;
+  // THE DEFAULT IS THE DEDICATED CHROME OWNER, not the person at the keyboard.
+  // The interactive browser cannot be driven (Chrome refuses), so the point of
+  // use is a dedicated user's Chrome profile — see src/runtime/chrome-owner.ts
+  // for the full operational story, including the xhost + login path.
+  return chromeOwnerProfilePath();
 }
 
 // Launch args for the user's real Chrome: deliberately NONE beyond a stable

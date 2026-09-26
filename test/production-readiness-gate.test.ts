@@ -233,10 +233,16 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
   t("the CI lane really exists in the repo (5.1 is not a hand-wave)", () => {
     // 5.1 records the full suite as `unverifiable` HERE. That is only honest if
     // the CI lane genuinely exists — otherwise "CI owns it" is an excuse.
-    assert.ok(existsSync(".github/workflows/ci.yml"), "the CI workflow must exist for 5.1 to be an honest deferral");
-    const ci = readFileSync(".github/workflows/ci.yml", "utf8");
-    assert.match(ci, /npm run test:unit|test:unit/, "the CI workflow must actually run the unit suite");
-    assert.match(ci, /timeout-minutes/, "and must carry its own time cap, since this box must not run it");
+    // 5.1 defers to GitLab CI (gitlab.pubg-sell.ir), NOT to this box.
+    assert.ok(existsSync(".gitlab-ci.yml"), "the GitLab CI pipeline must exist for 5.1 to be an honest deferral");
+    const ci = readFileSync(".gitlab-ci.yml", "utf8");
+    assert.match(ci, /npm run test:unit/, "the pipeline must actually run the full unit suite");
+    assert.match(ci, /timeout:\s*30 minutes/, "and must carry its own time cap, since this box must not run it");
+    assert.match(ci, /check:verbatim/, "and must run the verbatim-completeness gates (P1..P5)");
+    assert.ok(
+      /\.github\/workflows\/ci\.yml/.test(READY) === false,
+      "the readiness state must not point at the old GitHub lane — GitLab is the CI",
+    );
     // and the local script must NOT be the thing that runs the whole suite here
     assert.match(PKG.scripts["test:unit"] ?? "", /--test-timeout=\d+/, "the local lane stays timeout-bounded");
   });

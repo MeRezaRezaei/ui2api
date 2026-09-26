@@ -120,6 +120,27 @@ is the ONLY info source, no site knowledge lives in the consumer):
   answer as SSE — honest: ChatDriver reads the page, it does not synthesize
   traffic). Non-chat capabilities stay on `/capability/<site>`.
 
+## THE CHROME POINT OF USE — read this before touching any browser code
+
+**ui2api drives the Chrome of a DEDICATED LINUX USER, not the operator's own browser.**
+
+- The default owner is the **`ui2api`** user (uid 1010, home `/home/ui2api`). Its Chrome profile
+  is `/home/ui2api/.config/ui2api-chrome` (a real `google-chrome` profile also lives beside it).
+- The operator's interactive browser **cannot** be used: Chrome refuses to let another process
+  attach to the browser a person is using, and refuses `--remote-debugging-port` on a live
+  profile. That is a wall, not a bug to engineer around.
+- The dedicated user's Chrome works fine, **headless included**. The only setup step in the whole
+  world is: **that user's Chrome info must exist.** Writing the Chrome info into that user *is*
+  the integration. Nothing else is required.
+- The owner is **data, not a hardcode**: `UI2API_CHROME_USER` names it, so the same build works
+  for `ui2api`, a per-customer service account, or CI.
+- **Logging in without copying anyone's profile:** run that user's Chrome with `xhost +` and log
+  in to it directly. Credentials are then ingested by the normal profile-ingest path exactly as
+  before. Copying a whole Chrome profile between users is the fragile alternative — prefer `xhost +`.
+- Resolver: `src/runtime/chrome-owner.ts` (`resolveChromeOwner`, `chromeOwnerStatus`), consumed by
+  `userChromeProfile()` in `src/runtime/browser.ts` so the launch seam and the docs cannot disagree.
+  `ui2api requirements` reports it as a first-class check.
+
 ## Environment knobs (runtime/browser.ts)
 
 - `UI2API_HEADED=1` — headed browser (needs a display; use Xvfb headlessly).
@@ -155,6 +176,7 @@ trust posture — read them before deploying.
 | `UI2API_AUTH_STATE_PATH` | runtime knob | — | `src/runtime/wigolo.ts:161` |
 | `UI2API_BASE_URL` | base URL for the served API | — | `src/generator/lang-php.ts:544` |
 | `UI2API_CDP_URL` | runtime knob | — | `src/runtime/wigolo.ts:160` |
+| `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Default `ui2api`; its profile is auto-resolved from that user's `~/.config` | `ui2api` | `src/runtime/chrome-owner.ts:60` |
 | `UI2API_CHROME` | runtime knob | — | `src/capabilities/tencent-aistudio.ts:113` |
 | `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:294` |
 | `UI2API_CHROME_PATH` | runtime knob | — | `src/runtime/requirements.ts:320` |
@@ -244,7 +266,8 @@ trust posture — read them before deploying.
     setInputFiles pattern; the site's own JS uploads, nothing synthetic). Honest
     unverified-candidate: all stored gemini sources replay signed-out (Google auth
     browser-bound) — `ok:true` = input accepted, NOT a live upload claim; verify the
-    chip from the user's own signed-in Chrome (UI2API_ATTACH_PORT) before treating
+    chip from a live signed-in Chrome (the dedicated owner's, or UI2API_ATTACH_PORT)
+    before treating
     upload as verified.
 - **Suite gates (2026-09-21, fold #11)**: full suite now measured **418/418**.
   The two wigolo-engine infra gates (chromium warmup on ubuntu26.04-x64) CLOSED by
@@ -301,7 +324,8 @@ trust posture — read them before deploying.
   the vault OR the real Chrome profile copy into fresh ephemeral contexts
   renders anonymous AND trips YouTube's "Sign in to confirm you're not a bot".
   Posting therefore needs the **user's own real Chrome attached**
-  (`UI2API_ATTACH_PORT` / live profile), exactly like `tencent-aistudio`;
+  (the dedicated Chrome owner's live profile, or `UI2API_ATTACH_PORT`), exactly like
+  `tencent-aistudio`;
   never fabricate a post until a real attached session proves the flip.
   **`araprat`** = Aparat (www.aparat.com, Persian video platform; "araprat"
   resolved via web search) — NOT a chat site; the manifest declares 9
