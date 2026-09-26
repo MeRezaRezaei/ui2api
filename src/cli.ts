@@ -4,6 +4,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 import { analyse } from "./analyzer/explore.js";
+import { redactActionMap } from "./runtime/redact.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
@@ -253,7 +254,17 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
     maxTasks: flags.maxTasks,
   });
   mkdirSync(resolve(root, host), { recursive: true });
-  writeFileSync(mapPath(host, root), JSON.stringify(map, null, 2));
+  // GOAL 125: a --login capture records the site's own auth POSTs, and `analyse`
+  // runs right after the interactive login, so the map on disk is the LOGGED-IN
+  // one. Redact before it is written, and say so.
+  const redactedMap = redactActionMap(map);
+  writeFileSync(mapPath(host, root), JSON.stringify(redactedMap.map, null, 2));
+  if (redactedMap.hits.length) {
+    console.log(
+      `[ui2api] redacted ${redactedMap.hits.length} credential field(s) from the action map ` +
+        `before writing: ${[...new Set(redactedMap.hits)].join(", ")}`
+    );
+  }
   console.log(`Analyzed ${host}: ${map.actions.length} actions -> ${mapPath(host, root)}`);
   console.log("Run: ui2api generate " + host + (flags.out ? ` --out ${flags.out}` : ""));
 }

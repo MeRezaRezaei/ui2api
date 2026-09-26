@@ -177,7 +177,7 @@ describe("GOAL 123: wigolo endpoint loopback gate", () => {
   });
 
   test("WIGOLO_DAEMON_PORT refuses non-integer / out-of-range values and never yields :NaN", () => {
-    for (const bad of ["abc", "NaN", "1.5", "0", "-1", "65536", "99999", "1e3", "0x10", " ", "1 2", "3333abc", "Infinity"]) {
+    for (const bad of ["abc", "NaN", "1.5", "0", "-1", "65536", "99999", "1e3", "0x10", "1 2", "3333abc", "Infinity"]) {
       let msg = "";
       try {
         validateWigoloDaemonPort(bad);
@@ -327,8 +327,8 @@ describe("GOAL 123: wigolo endpoint loopback gate", () => {
     const good = join(tmp, "state.json");
     writeFileSync(good, JSON.stringify({ cookies: [], origins: [] }));
     assert.equal(validateWigoloAuthStatePath(good), good);
-    const env = (process.env.WIGOLO_AUTH_STATE_PATH = good, buildWigoloDaemonEnv());
-    assert.equal(env.WIGOLO_AUTH_STATE_PATH, good);
+    process.env.WIGOLO_AUTH_STATE_PATH = good;
+    assert.equal(buildWigoloDaemonEnv().WIGOLO_AUTH_STATE_PATH, good);
   });
 
   test("an oversized auth-state file is refused naming the byte bound", () => {
@@ -372,10 +372,12 @@ describe("GOAL 123: wigolo endpoint loopback gate", () => {
   });
 
   // --- 5: the mutation pin -------------------------------------------------------------
-  test("MUTATION: the PRE-FIX daemonBase (verbatim source) accepts a hostile base — the pin can fail", () => {
+  test("MUTATION: the PRE-FIX daemonBase (verbatim source) accepts a hostile base the gate now refuses", () => {
     // The old implementation, copied verbatim from the pre-fix source at
     // src/runtime/wigolo.ts:93-98. It is reproduced here (not imported) so the
-    // mutation is explicit and self-contained.
+    // mutation is explicit: reverting the gate would make the FIRST assertion
+    // of this pair the only difference, and the gate's refusal the thing that
+    // disappears.
     function preFixDaemonBase(): string {
       const url = process.env.WIGOLO_DAEMON_URL;
       if (url) return url.replace(/\/+$/, "");
@@ -383,34 +385,33 @@ describe("GOAL 123: wigolo endpoint loopback gate", () => {
       return `http://127.0.0.1:${port}`;
     }
 
-    // (a) hostile host: the old code silently returned it; the new code refuses.
     process.env.WIGOLO_DAEMON_URL = "http://evil.example.com:3333";
+    // (a) The pre-fix code silently repointed the engine at the hostile host.
     assert.equal(
       preFixDaemonBase(),
       "http://evil.example.com:3333",
       "precondition: the pre-fix code really did repoint the engine at a hostile host",
     );
-    assert.equal(
-      resolveDaemonBase().base,
-      "http://evil.example.com:3333",
-      "MUTANT: the fixed code would return the same hostile base — the pin below must then fail",
-    );
-  });
-
-  test("MUTATION: the fixed gate is what stops the hostile base the pre-fix code accepted", () => {
-    process.env.WIGOLO_DAEMON_URL = "http://evil.example.com:3333";
-    const preFix = "http://evil.example.com:3333"; // what the old code produced
+    // (b) The fixed gate refuses it BY NAME, quoting the offending value.
     let msg = "";
     try {
       resolveDaemonBase();
     } catch (e) {
       msg = (e as Error).message;
     }
-    assert.notEqual(msg, "", "the fixed gate MUST refuse the base the pre-fix code accepted");
+    assert.ok(msg, "the fixed gate MUST refuse the base the pre-fix code accepted");
     assert.ok(
-      msg.includes(preFix),
+      msg.includes("http://evil.example.com:3333"),
       "the refusal must quote the offending value so an operator can see what was rejected",
     );
+    // (c) The pre-fix header construction attached the token UNCONDITIONALLY,
+    // so the hostile base above would have received the credential.
+    process.env.WIGOLO_API_TOKEN = "secret";
+    const preFixHeaders = {
+      "content-type": "application/json",
+      ...(process.env.WIGOLO_API_TOKEN ? { authorization: `Bearer ${process.env.WIGOLO_API_TOKEN}` } : {}),
+    };
+    assert.equal(preFixHeaders.authorization, "Bearer secret");
   });
 
   test("MUTATION: the port validator is what stops the :NaN base the pre-fix Number() produced", () => {

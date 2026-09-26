@@ -1,3 +1,4 @@
+import { redactActionMap } from "../runtime/redact.js";
 import { validateActionMap } from "../schema.js";
 
 /**
@@ -23,11 +24,33 @@ import { validateActionMap } from "../schema.js";
  *
  * @returns null when the module is publishable, otherwise the named verdict.
  */
+/**
+ * GOAL 125: a captured action map can carry the operator's live session
+ * credentials (a --login capture records the site's own auth POSTs), and
+ * `hub publish` / `PUT /api/packages` shipped it. A shape gate cannot see a
+ * credential, so this is a named CONTENT verdict.
+ */
+function credentialsInActionMap(text: string): string | null {
+  let hits: string[];
+  try {
+    ({ hits } = redactActionMap(JSON.parse(text)));
+  } catch {
+    return null; // not JSON; the existing shape gate owns that verdict
+  }
+  if (hits.length === 0) return null;
+  return `credentials-in-action-map: ${hits.length} credential field(s) would be published (${[
+    ...new Set(hits),
+  ].join(", ")}) — re-run \`ui2api analyse\` so the map is written redacted, or remove the field`;
+}
+
 export function validatePublishedModule(moduleText: string): string | null {
   if (moduleText == null) return "module required — nothing to publish";
   if (typeof moduleText !== "string") return "module must be a string";
   const text = moduleText;
   if (!text.trim()) return "module required — nothing to publish";
+
+  const credVerdict = credentialsInActionMap(text);
+  if (credVerdict) return credVerdict;
 
   let parsed: unknown = null;
   let isJson = false;

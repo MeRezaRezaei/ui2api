@@ -18,3 +18,10 @@ dist/
 
 # Local planning docs (intentionally not published)
 .plans/
+
+# GOAL 125: a captured action map can contain live session credentials
+# (a --login capture records the site's own auth POSTs), and the file is a
+# tracked class by default. Redaction is the real fix; this is the backstop.
+sites/*/action-map.json
+sites/action-map.json
+sites/*/*/action-map.json

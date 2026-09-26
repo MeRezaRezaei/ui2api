@@ -128,8 +128,11 @@ export function isLoopbackHost(rawHost: string): boolean {
 
 const ALLOWED_SCHEMES = new Set(["http", "https", "ws", "wss", "cdp"]);
 
-// [scheme]://host[:port][/path]  OR  bare host[:port]
-const ENDPOINT_RE = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(\[[0-9a-fA-F:.]+\]|[^/:?\s]+)(?::(\d{1,5}))?(?:[/?#].*)?$/;
+// `scheme://` prefix, or the absence of one (bare host[:port] is accepted).
+const SCHEME_RE = /^([a-z][a-z0-9+.-]*):\/\//i;
+
+// [host] or [ipv6] , then an optional :port, then an optional path.
+const ENDPOINT_RE = /^(\[[0-9a-fA-F:.]+\]|[^/:?\s]+)(?::(\d{1,5}))?(?:[/?#].*)?$/;
 
 /**
  * Refuse a configured wigolo endpoint that is not loopback (or not http/https),
@@ -138,25 +141,30 @@ const ENDPOINT_RE = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(\[[0-9a-fA-F:.]+\]|[^/:?\s]+
  * the WIGOLO_API_TOKEN credential — at an arbitrary host.
  */
 export function assertLoopbackEndpoint(raw: string, envVar: string): { host: string; loopback: boolean } {
-  const m = ENDPOINT_RE.exec(raw.trim());
-  if (!m) {
-    throw new Error(
-      `wigolo refused ${envVar}="${raw}": not a host[:port] or URL (expected e.g. http://127.0.0.1:3333)`
-    );
-  }
-  const scheme = (m[1] ?? "").toLowerCase();
+  const value = raw.trim();
+  // Scheme is judged FIRST, so `file:///etc/passwd` is refused for its scheme
+  // rather than mis-reported as a malformed host.
+  const schemeMatch = SCHEME_RE.exec(value);
+  const scheme = (schemeMatch?.[1] ?? "").toLowerCase();
   if (scheme && !ALLOWED_SCHEMES.has(scheme)) {
     throw new Error(
       `wigolo refused ${envVar}="${raw}": scheme "${scheme}:" is not allowed (only ${[...ALLOWED_SCHEMES].join(", ")} over loopback HTTP)`
     );
   }
-  if (m[3] !== undefined) {
-    const p = Number(m[3]);
+  const hostPort = schemeMatch ? value.slice(schemeMatch[0].length) : value;
+  const m = ENDPOINT_RE.exec(hostPort);
+  if (!m) {
+    throw new Error(
+      `wigolo refused ${envVar}="${raw}": not a host[:port] or URL (expected e.g. http://127.0.0.1:3333)`
+    );
+  }
+  if (m[2] !== undefined) {
+    const p = Number(m[2]);
     if (!Number.isInteger(p) || p < 1 || p > 65535) {
-      throw new Error(`wigolo refused ${envVar}="${raw}": port ${m[3]} is not an integer in 1-65535`);
+      throw new Error(`wigolo refused ${envVar}="${raw}": port ${m[2]} is not an integer in 1-65535`);
     }
   }
-  const host = m[2];
+  const host = m[1];
   const loopback = isLoopbackHost(host);
   if (!loopback && !allowRemote()) {
     throw new Error(

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from
 import { dirname, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ActionMap } from "../types.js";
+import { redactActionMap } from "../runtime/redact.js";
 import { validateActionMap } from "../schema.js";
 import { acpServerTemplate } from "./acp-template.js";
 import { skillTemplate, skillLoaderTemplate } from "./skill-template.js";
@@ -61,13 +62,24 @@ export function generate(
     writeFileSync(resolve(serverDir, "skill-loader.mjs"), skillLoaderTemplate());
   }
   const mapSrc = resolve(root, "action-map.json");
+  // GOAL 125: a --login capture records the site's own auth POSTs, and this map
+  // is COPIED into the generated server — so a captured credential would ship
+  // with it. Redact on BOTH the write and the copy, and report what was removed.
+  const { map: redactedMap, hits: redactHits } = redactActionMap(map) as { map: ActionMap; hits: string[] };
+  if (redactHits.length) {
+    console.log(
+      `[ui2api] redacted ${redactHits.length} credential field(s) from the action map: ` +
+        `${[...new Set(redactHits)].join(", ")}`
+    );
+  }
   if (existsSync(mapSrc)) {
     // keep the analyzed map as source of truth; copy into server dir
     copyFileSync(mapSrc, resolve(serverDir, "action-map.json"));
   } else {
-    const generated: ActionMap = { ...map, trusted: false };
-    writeFileSync(mapSrc, JSON.stringify(generated, null, 2));
-    writeFileSync(resolve(serverDir, "action-map.json"), JSON.stringify(generated, null, 2));
+    writeFileSync(mapSrc, JSON.stringify({ ...redactedMap, trusted: false }, null, 2));
   }
+  // the SERVER's copy is always the redacted one, whichever branch ran
+  writeFileSync(resolve(serverDir, "action-map.json"), JSON.stringify(redactedMap, null, 2));
+
   return serverDir;
 }
