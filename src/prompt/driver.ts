@@ -109,6 +109,29 @@ export interface ChatDriverOptions {
   account?: string;
 }
 
+/**
+ * GOAL 114: the readback had NO echo guard. When the answer selector also matches
+ * the USER's own prompt bubble — true for the real builtin profiles `copilot`
+ * (`[data-message-type="text"]`), `huggingchat` (`[data-testid="message"]`) and
+ * the builtin `[class*="message"]` at src/profile/profile.ts:425 — a fresh
+ * element appears at send time, and if the real answer is SHORTER than the
+ * prompt the driver returned the user's own prompt verbatim as
+ * `doneReason:"stable"`. MEASURED through the real reducer before the fix.
+ *
+ * The verdict is deliberately narrow: it fires on a VERBATIM/near-verbatim echo
+ * of the sent text, not on mere shared vocabulary, so a site whose genuine
+ * answer legitimately repeats a phrase from the prompt is still servable.
+ */
+export function isPromptEcho(answer: string, sent: string): boolean {
+  const a = answer.trim();
+  const p = sent.trim();
+  if (!a || !p) return false;
+  if (a === p) return true;
+  // long prompts echoed inside a slightly larger region still count
+  if (p.length >= 40 && (a.includes(p) || p.includes(a))) return true;
+  return false;
+}
+
 export class ChatDriver {
   private browser?: Browser;
   private ownsBrowser: boolean;
@@ -513,6 +536,16 @@ export class ChatDriver {
           (this.profile.newChat
             ? `A newChat reset was requested but did not verifiably clear the conversation — send newChat:true (resets are verified) or check the ${this.profile.newChat} selector.`
             : `This profile has no newChat affordance — send newChat:true or reset the conversation before asking again.`)
+      );
+    }
+    // GOAL 114: refuse a prompt echo BEFORE it can be served as an answer. This
+    // is a NAMED refusal, not a silent truncation and not a `stable` success.
+    if (isPromptEcho(answer, prompt)) {
+      throw new Error(
+        `answer-echo on ${this.profile.id}: the answer region returned the sent prompt verbatim — ` +
+          `the answer selector matches the USER bubble, so nothing was actually read back ` +
+          `(sent ${prompt.trim().length} chars, got back ${answer.length} chars, identical). ` +
+          `Re-tune the profile's answer selector so it excludes the user's own message.`
       );
     }
     // Capability reflection, L2 (in-band): scan the page for restriction
