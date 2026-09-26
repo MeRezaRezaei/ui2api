@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { CAPABILITY_DISPATCH } from "../src/prompt/capability-dispatch.js";
 import { buildRegistryPackages, bareCapabilityId } from "../src/prompt/registry.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 
@@ -138,10 +139,22 @@ for (const site of pkgNames) {
       }
     });
 
-    await t.test("B. API layer — /capability/<site> dispatcher exists in http.ts", () => {
+    // GOAL 140: the per-site literal `req.url === "/capability/<site>"` is GONE.
+    // One table-driven handler replaced 33 of them. The INTENT is unchanged — the
+    // site must have a live API route — but the evidence is now the dispatch
+    // table plus the presence of the single prefix-matching handler, which is a
+    // stronger statement (a site is routable because it is DATA, not because
+    // someone pasted an `if` into a 1,700-line file).
+    await t.test("B. API layer — the site is routable through the dispatch table", () => {
       assert.ok(
-        HTTP_SOURCE.includes(`req.url === "/capability/${site}"`),
-        `src/prompt/http.ts has no /capability/${site} dispatcher — the runner exists but the API surface is not wired`
+        Object.prototype.hasOwnProperty.call(CAPABILITY_DISPATCH, site),
+        `capabilities/${site} has capabilities and a runner, but NO row in capability-dispatch.ts — `
+          + `the API surface cannot route it (the runner exists but the API surface is missing)`
+      );
+      // The one handler all sites share must actually be wired in.
+      assert.ok(
+        HTTP_SOURCE.includes('req.url?.startsWith("/capability/")'),
+        "the table-driven /capability handler is missing from http.ts"
       );
     });
 

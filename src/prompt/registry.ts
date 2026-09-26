@@ -31,6 +31,7 @@
 // advertise it as chat. Consumers treat absence as "no chat" — never
 // materialize a chat provider from a package without `chat.model`.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { isDispatchable } from "./capability-dispatch.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
@@ -84,6 +85,12 @@ export interface RegistryTool {
    * must be able to see the difference rather than trust a fabrication.
    */
   argsDeclared: boolean;
+  /**
+   * GOAL 140: "wired" = the daemon can execute this tool; "declared-only" = the
+   * package declares it but no dispatch route exists, so a call 404s. Never
+   * advertise the second as servable.
+   */
+  dispatch: "wired" | "declared-only";
 }
 
 export interface RegistryChat {
@@ -625,6 +632,13 @@ export function buildRegistryPackages(): RegistryPackage[] {
         // cannot trust, instead of shipping a call that silently sends the
         // wrong fields.
         argsDeclared: declared !== null,
+        // GOAL 140: is this tool actually CALLABLE, or only declared? /registry
+        // is built from the manifest (data) while execution goes through the
+        // dispatch table (also data now, but a separate one) — so a package can
+        // declare a capability the daemon cannot route. Before this field that
+        // was invisible: the tool was advertised and then 404'd at call time.
+        // A consumer building a client keys on this instead of finding out.
+        dispatch: isDispatchable(siteId) ? "wired" : "declared-only",
       };
     });
     // Stored vault accounts for this site, keyed by the packaged profile's host

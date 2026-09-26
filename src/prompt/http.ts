@@ -46,6 +46,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ChatPool, type PoolStatus } from "./pool.js";
 import { daemonPosture } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
+import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
 import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
@@ -84,6 +85,48 @@ import { TinycmsCapabilities } from "../capabilities/tinycms.js";
 import { V0Capabilities } from "../capabilities/v0.js";
 import { XiaomimimoCapabilities } from "../capabilities/xiaomimimo.js";
 import { ZenmuxCapabilities } from "../capabilities/zenmux.js";
+
+// GOAL 140: site id -> runner CLASS, the static half of the dispatch table. The
+// class imports stay static on purpose: a dynamic import keyed off a URL or a
+// package field would turn any registry content into executable code. The
+// registry decides WHICH site; this map decides WHICH class, and only ids that
+// appear in CAPABILITY_DISPATCH can reach it.
+const CAPABILITY_RUNNERS: Readonly<Record<string, CapabilityRunner>> = {
+  "adapta": AdaptaCapabilities,
+  "araprat": ArapratCapabilities,
+  "blackbox": BlackboxCapabilities,
+  "chatglm": ChatglmCapabilities,
+  "chatgpt": ChatGPTCapabilities,
+  "claude": ClaudeCapabilities,
+  "codex": CodexCapabilities,
+  "conol": ConolCapabilities,
+  "copilot": CopilotCapabilities,
+  "copilot-m365": CopilotM365Capabilities,
+  "deepseek": DeepSeekCapabilities,
+  "doubao": DoubaoCapabilities,
+  "duckduckgo": DuckduckgoCapabilities,
+  "gemini": GeminiCapabilities,
+  "gmail": GmailCapabilities,
+  "google-ai-search": GoogleAiSearchCapabilities,
+  "grok": GrokCapabilities,
+  "huggingchat": HuggingChatCapabilities,
+  "hunyuan": HunyuanCapabilities,
+  "inner-ai": InnerAiCapabilities,
+  "kimi": KimiCapabilities,
+  "manus": ManusCapabilities,
+  "notion": NotionCapabilities,
+  "perplexity": PerplexityCapabilities,
+  "poe": PoeCapabilities,
+  "t3chat": T3chatCapabilities,
+  "tencent-aistudio": TencentAistudioCapabilities,
+  "tinycms": TinycmsCapabilities,
+  "v0": V0Capabilities,
+  "venice": VeniceCapabilities,
+  "xiaomimimo": XiaomimimoCapabilities,
+  "youtube": YouTubeCapabilities,
+  "zenmux": ZenmuxCapabilities,
+};
+
 
 export interface PromptdOptions {
   port: number;
@@ -813,25 +856,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           throw e;
         }
       }
-      // Gemini capability surface: list/conversations/model-picker/search-toggle
-      // via the same logged-in browser machinery.
-      if (req.method === "POST" && req.url === "/capability/gemini") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        const profile = idFrom("gemini", profilesById);
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
         // Reuse the pool's logged-in browser: a fresh per-request browser lands
-        // on the signed-out landing shell and RPC/DOM reads fail. Sharing the
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
         // pool browser keeps the proven session AND avoids a second Chrome.
-        // An explicit account must resolve to a stored snapshot before any
-        // browser work (a nonexistent account never spins Chrome up).
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new GeminiCapabilities(profile, { browser: shared, dataDir, account });
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account });
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -841,27 +908,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Kimi capability surface: chat / list_conversations (DOM) / model_list
-      // via the same logged-in browser machinery. Profile resolution: registry
-      // FIRST (kimi is now built-in), packaged-JSON fallback for servers started
-      // with an explicit --site allow-list that excludes it.
-      if (req.method === "POST" && req.url === "/capability/kimi") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("kimi", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("kimi") ?? resolvePackagedProfileFile("capabilities/kimi/profile.json", "kimi");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new KimiCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -871,26 +960,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Hunyuan / Yuanbao capability surface: chat + list_conversations (DOM).
-      // Same registry-first, packaged-JSON-fallback profile resolution. The
-      // runner's results carry the anti-bot (X-webdriver / headed-only) note.
-      if (req.method === "POST" && req.url === "/capability/hunyuan") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("hunyuan", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("hunyuan") ?? resolvePackagedProfileFile("capabilities/hunyuan/profile.json", "hunyuan");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new HunyuanCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -900,25 +1012,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Venice capability surface: chat + list_conversations (DOM sidebar).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/venice") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("venice", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("venice") ?? resolvePackagedProfileFile("capabilities/venice/profile.json", "venice");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new VeniceCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -928,26 +1064,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // DeepSeek capability surface: chat + list_conversations (DOM sidebar) +
-      // reasoner (honest ok:false until a grounded "Think" toggle exists).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/deepseek") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("deepseek", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/deepseek/profile.json", "deepseek");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new DeepSeekCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -957,27 +1116,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Tencent AI Studio capability surface: chat (verified HEADED-only path —
-      // EdgeOne blocks headless) + documented-but-unverified wire caps. The
-      // ChatDriver path enforces the headed/real-Chrome posture itself.
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/tencent-aistudio") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("tencent-aistudio", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/tencent-aistudio/profile.json", "tencent-aistudio");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new TencentAistudioCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -987,25 +1168,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Claude capability surface: chat + list_conversations (DOM sidebar).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/claude") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("claude", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/claude/profile.json", "claude");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new ClaudeCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1015,24 +1220,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // ChatGTP capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
-      if (req.method === "POST" && req.url === "/capability/chatgpt") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("chatgpt", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/chatgpt/profile.json", "chatgpt");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new ChatGPTCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1042,24 +1272,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Copilot capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
-      if (req.method === "POST" && req.url === "/capability/copilot") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("copilot", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/copilot/profile.json", "copilot");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new CopilotCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1069,24 +1324,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // HuggingChat capability surface: chat (ChatDriver UI). Registry-first, packaged-JSON fallback.
-      if (req.method === "POST" && req.url === "/capability/huggingchat") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("huggingchat", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/huggingchat/profile.json", "huggingchat");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new HuggingChatCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1096,26 +1376,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // YouTube capability surface: video search + transcript read-back
-      // (NOT a chat site — no ChatDriver flow). SCAFFOLD, DOM-UNVERIFIED.
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/youtube") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("youtube", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/youtube/profile.json", "youtube");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new YouTubeCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1125,32 +1428,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Gmail capability surface — the user's flagship adoption pitch
-      // (.brain/verbatim.md:313): mail.google.com abilities callable as API.
-      // NOT a chat site — no ChatDriver. GOAL 19 static wire analysis
-      // (2026-09-23): mail.google.com is 100% auth-walled (every path 302s to
-      // accounts.google.com/ServiceLogin), so every runner selector is
-      // DOM-UNVERIFIED known-stable Gmail surface; each call honestly detects
-      // the auth wall (redirect → ok:false with the measured two-step unblock)
-      // and never fabricates a read or a send. Registry-first,
-      // packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/gmail") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("gmail", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/gmail/profile.json", "gmail");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new GmailCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1160,28 +1480,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // Aparat capability surface: video search / trending / video-detail
-      // (LIVE-VERIFIED 2026-09-20) + posting actions dispatched HONESTLY as
-      // login-gated (ok:false login-required, no captured session exists).
-      // Not a chat site — no ChatDriver. Registry-first, packaged-JSON-fallback
-      // profile resolution.
-      if (req.method === "POST" && req.url === "/capability/araprat") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("araprat", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfileFile("capabilities/araprat/profile.json", "araprat");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        resolveCapabilityAccount(account, profile, dataDir);
-        const shared = await pool.sharedBrowser();
-        const caps = new ArapratCapabilities(profile, { browser: shared, dataDir, account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1191,347 +1532,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           await caps.close().catch(() => {});
         }
       }
-      // adapta capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/adapta") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("adapta", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("adapta") ?? resolvePackagedProfileFile("capabilities/adapta/profile.json", "adapta");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new AdaptaCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // blackbox capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/blackbox") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("blackbox", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("blackbox") ?? resolvePackagedProfileFile("capabilities/blackbox/profile.json", "blackbox");
-        }
-        const caps = new BlackboxCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // chatglm capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/chatglm") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("chatglm", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("chatglm") ?? resolvePackagedProfileFile("capabilities/chatglm/profile.json", "chatglm");
-        }
-        const caps = new ChatglmCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // codex capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/codex") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("codex", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("codex") ?? resolvePackagedProfileFile("capabilities/codex/profile.json", "codex");
-        }
-        const caps = new CodexCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // conol capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/conol") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("conol", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("conol") ?? resolvePackagedProfileFile("capabilities/conol/profile.json", "conol");
-        }
-        const caps = new ConolCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // copilot-m365 capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/copilot-m365") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("copilot-m365", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("copilot-m365") ?? resolvePackagedProfileFile("capabilities/copilot-m365/profile.json", "copilot-m365");
-        }
-        const caps = new CopilotM365Capabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // doubao capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/doubao") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("doubao", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("doubao") ?? resolvePackagedProfileFile("capabilities/doubao/profile.json", "doubao");
-        }
-        const caps = new DoubaoCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // duckduckgo capability surface: ANONYMOUS site (no captured session — or
-      // account — is ever needed; VQD tokens are minted at runtime by the site's
-      // own JS). duckduckgo_chat is VERIFIED (live headed round-trip 2026-09-22);
-      // the remaining declared capabilities run their own honest read paths with
-      // ok:false + reason (never login-gated — a login-gated verdict would be a
-      // fabricated excuse for an anonymous site).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/duckduckgo") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("duckduckgo", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("duckduckgo") ?? resolvePackagedProfileFile("capabilities/duckduckgo/profile.json", "duckduckgo");
-        }
-        const caps = new DuckduckgoCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // google-ai-search capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/google-ai-search") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("google-ai-search", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("google-ai-search") ?? resolvePackagedProfileFile("capabilities/google-ai-search/profile.json", "google-ai-search");
-        }
-        const caps = new GoogleAiSearchCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // grok capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/grok") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("grok", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("grok") ?? resolvePackagedProfileFile("capabilities/grok/profile.json", "grok");
-        }
-        const caps = new GrokCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // inner-ai capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/inner-ai") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("inner-ai", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("inner-ai") ?? resolvePackagedProfileFile("capabilities/inner-ai/profile.json", "inner-ai");
-        }
-        const caps = new InnerAiCapabilities(profile, { account });
-        try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
-        } finally {
-          await caps.close().catch(() => {});
-        }
-      }
-
-      // manus capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/manus") {
-        const body = await readJson(req);
-        const capability = String(body.capability ?? "");
-        if (!capability) return send(res, 400, { error: "capability is required" });
-        // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
-        const account = typeof body.account === "string" && body.account ? body.account : undefined;
-        let profile: ChatSiteProfile;
-        try {
-          profile = idFrom("manus", profilesById);
-        } catch {
-          profile = resolvePackagedProfile("manus") ?? resolvePackagedProfileFile("capabilities/manus/profile.json", "manus");
-        }
-        const caps = new ManusCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1542,25 +1585,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // notion capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/notion") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("notion", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("notion") ?? resolvePackagedProfileFile("capabilities/notion/profile.json", "notion");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new NotionCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1571,25 +1638,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // perplexity capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/perplexity") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("perplexity", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("perplexity") ?? resolvePackagedProfileFile("capabilities/perplexity/profile.json", "perplexity");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new PerplexityCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1600,25 +1691,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // poe capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/poe") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("poe", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("poe") ?? resolvePackagedProfileFile("capabilities/poe/profile.json", "poe");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new PoeCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1629,25 +1744,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // t3chat capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/t3chat") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("t3chat", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("t3chat") ?? resolvePackagedProfileFile("capabilities/t3chat/profile.json", "t3chat");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new T3chatCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1658,25 +1797,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // tinycms capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/tinycms") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("tinycms", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("tinycms") ?? resolvePackagedProfileFile("capabilities/tinycms/profile.json", "tinycms");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new TinycmsCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1687,25 +1850,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // v0 capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/v0") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("v0", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("v0") ?? resolvePackagedProfileFile("capabilities/v0/profile.json", "v0");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new V0Capabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1716,25 +1903,49 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // xiaomimimo capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/xiaomimimo") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("xiaomimimo", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("xiaomimimo") ?? resolvePackagedProfileFile("capabilities/xiaomimimo/profile.json", "xiaomimimo");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new XiaomimimoCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);
@@ -1745,25 +1956,632 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         }
       }
 
-      // zenmux capability surface: no captured session exists on this box — every
-      // declared capability is dispatched HONESTLY as login-gated by its runner
-      // (ok:false loginGated:true, no browser opened, no fabricated result).
-      // Registry-first, packaged-JSON-fallback profile resolution.
-      if (req.method === "POST" && req.url === "/capability/zenmux") {
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
         const body = await readJson(req);
         const capability = String(body.capability ?? "");
         if (!capability) return send(res, 400, { error: "capability is required" });
         // Identity-keyed account (same contract as /prompt `account`): empty /
-        // "default" = legacy shared session; explicit -> validated (real
-        // runners) and forwarded to the runner constructor opts below.
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
         const account = typeof body.account === "string" && body.account ? body.account : undefined;
         let profile: ChatSiteProfile;
         try {
-          profile = idFrom("zenmux", profilesById);
+          profile = idFrom(site, profilesById);
         } catch {
-          profile = resolvePackagedProfile("zenmux") ?? resolvePackagedProfileFile("capabilities/zenmux/profile.json", "zenmux");
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
         }
-        const caps = new ZenmuxCapabilities(profile, { account });
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
+        try {
+          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+          return send(res, result.ok ? 200 : 502, result);
+        } catch (e) {
+          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+        } finally {
+          await caps.close().catch(() => {});
+        }
+      }
+
+      // GOAL 140: ONE table-driven capability handler replaces 33 copy-pasted
+      // `if (req.url === "/capability/<site>")` blocks (54,851 chars). The table
+      // (src/prompt/capability-dispatch.ts) is the single place a site becomes
+      // dispatchable, and it is DATA — so registering a site is adding a package
+      // plus one table row, not editing a 1,700-line HTTP handler. The three
+      // measured shapes (shared browser / account validation / packaged-profile
+      // fallback) are now data on the row instead of copy-paste.
+      if (req.method === "POST" && req.url?.startsWith("/capability/")) {
+        const site = req.url.slice("/capability/".length);
+        const entry = CAPABILITY_DISPATCH[site];
+        if (!entry) {
+          // Named, not a bare 404: a consumer that trusted /registry deserves to
+          // know the site is DECLARED but not dispatched, with what does exist.
+          return send(res, 404, {
+            error: `unknown site "${site}"`,
+            reason_code: "site_not_dispatched",
+            dispatchable: dispatchableSiteIds(),
+          });
+        }
+        const body = await readJson(req);
+        const capability = String(body.capability ?? "");
+        if (!capability) return send(res, 400, { error: "capability is required" });
+        // Identity-keyed account (same contract as /prompt `account`): empty /
+        // "default" = legacy shared session; explicit -> validated (real runners)
+        // and forwarded to the runner constructor opts below.
+        const account = typeof body.account === "string" && body.account ? body.account : undefined;
+        let profile: ChatSiteProfile;
+        try {
+          profile = idFrom(site, profilesById);
+        } catch {
+          profile = entry.packagedFallback
+            ? (resolvePackagedProfile(site) ?? resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site))
+            : resolvePackagedProfileFile(`capabilities/${site}/profile.json`, site);
+        }
+        // Resolve the account BEFORE any browser work, so a nonexistent account
+        // never spins Chrome up.
+        if (entry.account) resolveCapabilityAccount(account, profile, dataDir);
+        // Reuse the pool's logged-in browser: a fresh per-request browser lands
+        // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
+        // pool browser keeps the proven session AND avoids a second Chrome.
+        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+        const Runner = CAPABILITY_RUNNERS[site];
+        const caps = new Runner(profile, { browser: shared, dataDir, account } as never);
         try {
           const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
           return send(res, result.ok ? 200 : 502, result);

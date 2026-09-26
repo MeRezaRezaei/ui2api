@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 
+import { CAPABILITY_DISPATCH } from "../src/prompt/capability-dispatch.js";
 import { buildRegistryPackages, resolveDataDir } from "../src/prompt/registry.js";
 import { resolvePackagedProfile, resolveProfile } from "../src/profile/profile.js";
 import { listAccounts, loadAccountSnapshot, slugifyIdentity, resolveStoredAccount } from "../src/runtime/session-store.js";
@@ -247,23 +248,36 @@ test("GOAL8(c): every real /capability/<site> runner validates the account BEFOR
     "claude", "chatgpt", "copilot", "huggingchat", "youtube", "araprat",
   ];
   for (const site of realSites) {
-    const start = HTTP_SOURCE.indexOf(`req.url === "/capability/${site}"`);
-    assert.ok(start >= 0, `${site}: no /capability/${site} dispatcher in http.ts`);
-    const next = HTTP_SOURCE.indexOf(`req.url === "/capability/`, start + 1);
-    const block = HTTP_SOURCE.slice(start, next >= 0 ? next : HTTP_SOURCE.length);
-    const guardIdx = block.indexOf("resolveCapabilityAccount(account, profile, dataDir);");
-    const browserIdx = block.indexOf("await pool.sharedBrowser();");
-    assert.ok(guardIdx >= 0, `${site}: route must call resolveCapabilityAccount before browser work`);
-    assert.ok(browserIdx >= 0, `${site}: route must reach pool.sharedBrowser()`);
-    assert.ok(
-      guardIdx < browserIdx,
-      `${site}: resolveCapabilityAccount must run BEFORE pool.sharedBrowser() — an unknown account throws before any browser opens`
-    );
-    assert.ok(
-      block.includes("{ browser: shared, dataDir, account }"),
-      `${site}: runner ctor must forward the account alongside browser+dataDir`
-    );
+    // GOAL 140: the per-site block is GONE — one table-driven handler replaced 33
+    // of them. The GUARANTEE is unchanged and still checked: the account guard
+    // must run before the pool browser is reached. It is now proven two ways,
+    // which is strictly stronger than the old per-site grep: (a) this site is in
+    // the dispatch table and flagged as a shared-browser site, and (b) the single
+    // handler orders the guard BEFORE sharedBrowser().
+    const entry = CAPABILITY_DISPATCH[site];
+    assert.ok(entry, `${site}: no dispatch row in capability-dispatch.ts`);
+    assert.ok(entry.shared, `${site}: must be a shared-browser site (it was before the table refactor)`);
+    assert.ok(entry.account, `${site}: must validate the account (it did before the table refactor)`);
   }
+  // The ordering itself, in the one handler that now serves all of them.
+  const handlerStart = HTTP_SOURCE.indexOf('req.url?.startsWith("/capability/")');
+  assert.ok(handlerStart >= 0, "the table-driven /capability handler is missing from http.ts");
+  const handler = HTTP_SOURCE.slice(handlerStart, handlerStart + 3000);
+  const guardIdx = handler.indexOf("resolveCapabilityAccount(account, profile, dataDir)");
+  const browserIdx = handler.indexOf("pool.sharedBrowser()");
+  assert.ok(guardIdx >= 0, "the handler must validate the account before browser work");
+  assert.ok(browserIdx >= 0, "the handler must reach pool.sharedBrowser()");
+  assert.ok(
+    guardIdx < browserIdx,
+    "resolveCapabilityAccount must run BEFORE pool.sharedBrowser() — an unknown account throws before Chrome exists"
+  );
+  // The account must still be forwarded to the runner constructor.
+  const ctorIdx = handler.indexOf("new Runner(");
+  assert.ok(ctorIdx > guardIdx, "the runner is constructed after the account is validated");
+  assert.ok(
+    handler.slice(ctorIdx, ctorIdx + 120).includes("account"),
+    "runner ctor must forward the account alongside browser+dataDir"
+  );
   // The server catch maps the guard's throw (and unknown-site) to 400.
   // GOAL 117 rewrote this one-liner into a named `isRequestShape` const (so a
   // NON-matching error answers a generic 500 instead of echoing internals), so
