@@ -64,6 +64,34 @@ function pageMarkdown(out: WigoloFetchOutput): string {
   return cap(out?.markdown ?? "");
 }
 
+// Defence in depth behind the runtime's loopback-only daemon gate
+// (`src/runtime/wigolo.ts`): a daemon answer must describe the site we asked
+// about. A cross-origin `url`/`source_url` means the answer was NOT read off
+// the site — serving it verbatim would be a fabricated result, which this
+// project forbids outright, so it is refused by name instead.
+const WIGOLO_REFUSAL = /wigolo refused /;
+
+function assertAnswerOrigin(answerUrl: unknown, baseUrl: string, label: string): void {
+  if (typeof answerUrl !== "string" || answerUrl === "") return; // daemon reported nothing to compare
+  let expected: string;
+  try {
+    expected = new URL(baseUrl).origin;
+  } catch {
+    return; // baseUrl is not absolute; the runtime gate already vetted the base
+  }
+  let got: string;
+  try {
+    got = new URL(answerUrl).origin;
+  } catch {
+    throw new Error(`SSRF guard: wigolo ${label} url ${answerUrl} is unparseable — refused`);
+  }
+  if (got !== expected) {
+    throw new Error(
+      `SSRF guard: wigolo ${label} url ${got} is cross-origin for ${expected} — refused (a page answer must be read off the site itself, never returned by the daemon)`
+    );
+  }
+}
+
 // Parse a constrained DOM-extract expression ("text <sel>", "attr <sel> <attr>",
 // "json <sel>"). Null when the syntax is not supported.
 function parseExtract(extract: string): { sel: string; kind: string; arg: string | null } | null {
@@ -116,7 +144,12 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
   // the degradation once. Returns { value }.
   async function withBrowserFallback<T>(viaWigolo: () => Promise<T>, viaNative: (page: any) => Promise<T>, op: string): Promise<T> {
     await ensureWigoloDaemon().catch((e) => {
-      logger.warn && logger.warn(`[wigolo-engine] daemon unavailable (${e.message}); ${op} -> native browser`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // A security refusal (non-loopback base, bad forwarded knob) is NOT a
+      // "daemon is flaky" condition: degrading to the native browser would
+      // hide the refusal and keep going. Re-throw it by name instead.
+      if (WIGOLO_REFUSAL.test(msg)) throw e;
+      logger.warn && logger.warn(`[wigolo-engine] daemon unavailable (${msg}); ${op} -> native browser`);
       return;
     });
     try {
@@ -133,8 +166,8 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
 
   // Drive the analyzed page through wigolo's browser engine in ONE call: load
   // the site, apply the recorded interaction, return the resulting page.
-  function domFetch(actions: WigoloAction[], extra: Partial<WigoloFetchInput> = {}): Promise<WigoloFetchOutput> {
-    return wigoloFetch({
+  async function domFetch(actions: WigoloAction[], extra: Partial<WigoloFetchInput> = {}): Promise<WigoloFetchOutput> {
+    const out = await wigoloFetch({
       url: baseUrl,
       render_js: "auto",
       use_auth: useAuth,
@@ -142,6 +175,8 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
       actions,
       ...extra,
     });
+    assertAnswerOrigin(out?.url, baseUrl, "fetch answer");
+    return out;
   }
 
   const ctx: Ui2ApiContext & { tools: Map<string, ToolEntry> } = {
@@ -249,6 +284,7 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
             async () => {
               await ensureWigoloDaemon();
               const out = await wigoloExtract({ url: baseUrl, mode: "selector", css_selector: parsed.sel, execution_mode: "default" });
+              assertAnswerOrigin(out?.source_url, baseUrl, "extract answer");
               if (out && !out.error && typeof out.data === "string" && out.data !== "") return out.data;
               if (out && !out.error && Array.isArray(out.data) && out.data.length) return out.data[0];
               return null;

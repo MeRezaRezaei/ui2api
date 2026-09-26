@@ -183,7 +183,11 @@ export class GmailCapabilities {
         }
       } else {
         for (const h of hosts) {
-          const accounts = listAccounts(this.dataDir, h);
+          // GOAL 124: skip rows the GOAL 89 reconciliation marked unusable —
+          // an anonymous / corrupt / missing first row must not drive the
+          // request (cross-account bleed). No usable row at all still means the
+          // honest anonymous path below, not an error.
+          const accounts = listAccounts(this.dataDir, h).filter((a) => a.usable !== false);
           if (accounts.length > 0) {
             snap = loadAccountSnapshot(this.dataDir, h, accounts[0].identity ?? accounts[0].slug);
             if (snap) break;

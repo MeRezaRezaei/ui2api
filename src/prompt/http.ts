@@ -49,7 +49,7 @@ import { handleOpenAIRoutes } from "./openai.js";
 import { buildRegistryPackages, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
-import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount } from "../runtime/session-store.js";
+import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount } from "../runtime/session-store.js";
 import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
@@ -442,6 +442,13 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
     const stored = listAccounts(dataDir, host);
     throw new Error(`no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`);
   }
+  // GOAL 124: an index ROW is only a claim. The snapshot behind it can be
+  // missing, corrupt-JSON, wrong-shaped (GOAL 59) or anonymous (GOAL 49) — and
+  // the runners' own `loadAccountSnapshot` returns null for all of them, which
+  // used to degrade into an anonymous run that still answered ok:true. Judge it
+  // HERE, on the pre-browser guard, so an unusable account is a 400 before a
+  // single browser is launched. The unknown-account message above is unchanged.
+  assertUsableStoredAccount(dataDir, host, match);
 }
 
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {

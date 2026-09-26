@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { launchBrowser, sessionPath, loadCookies, usingUserChrome, defaultSitesDir } from "../runtime/browser.js";
-import { injectSnapshot, loadSnapshot, loadAccountSnapshot, snapshotPath, listAccounts, resolveStoredAccount } from "../runtime/session-store.js";
+import { injectSnapshot, loadSnapshot, loadAccountSnapshot, loadAccountSnapshotVerdict, snapshotPath, listAccounts, resolveStoredAccount } from "../runtime/session-store.js";
 import { makeDomPrimitives } from "../runtime/dom-primitives.js";
 import { sameOrigin } from "../runtime/ssrf.js";
 import { analyse } from "../analyzer/explore.js";
@@ -62,12 +62,15 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
             `no stored account "${deps.account}" for "${host}" — run \`ui2api profile add-all --known\` or pick one from \`ui2api profiles ${host}\``
           );
         }
-        const snap = loadAccountSnapshot(dataDir, host, acct.slug);
-        if (snap) {
-          await injectSnapshot(ctx, snap);
+        const verdict = loadAccountSnapshotVerdict(dataDir, host, acct.slug);
+        if (verdict.snapshot) {
+          await injectSnapshot(ctx, verdict.snapshot);
         } else {
+          // GOAL 124: name WHY the requested account could not be loaded, never
+          // a bare "no snapshot" that reads as "carry on anonymously".
+          const why = verdict.status === "shape-invalid" ? `shape-invalid: ${verdict.detail ?? "unknown field"}` : verdict.status;
           throw new Error(
-            `vault account "${deps.account}" for "${host}" has no snapshot (${dataDir}/sessions/${host}/${acct.slug})`
+            `vault account "${deps.account}" for "${host}" has no usable snapshot (${why}; ${dataDir}/sessions/${host}/${acct.slug})`
           );
         }
       } else {
@@ -75,7 +78,12 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
         if (!snap) {
           // Fall back to the first stored vault account when no flat snapshot
           // exists (identity-keyed vault is the bulk-import layout of record).
-          const accts = listAccounts(dataDir, host);
+          // GOAL 124: SKIP rows the GOAL 89 reconciliation marked unusable —
+          // picking an anonymous/corrupt/missing row blindly is the
+          // cross-account-bleed hazard (an unusable first row used to drive
+          // the request). This is the UN-requested path, so an empty result
+          // still means an honest anonymous run, not an error.
+          const accts = listAccounts(dataDir, host).filter((a) => a.usable !== false);
           if (accts.length) snap = loadAccountSnapshot(dataDir, host, accts[0].slug);
         }
         if (snap) {
