@@ -25,7 +25,7 @@ import { resolveChromeOwner } from "./chrome-owner.js";
 //   - verdict vocabulary is the verbatim's own: ready / working / on-hold /
 //     not-ready.
 import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { resolveChromeExec, bundledChromiumPath } from "./browser.js";
 import {
@@ -157,6 +157,9 @@ export interface RequirementsDeps {
   /** GOAL 132: the Chrome point of use. A seam like every other probe here —
    *  calling resolveChromeOwner() directly would read the REAL host, which breaks
    *  the module's own "injected seams only" contract. */
+  missingSharedLibraries: (libs: string[]) => string[];
+  fontCount: () => number;
+  hasBinary: (name: string) => boolean;
   chromeOwner?: () => { user: string; profile: string | null; missing: string | null };
   chromeVersion: (exec: string) => string | null;
   bundledChromium: () => string | null;
@@ -385,6 +388,43 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
   // (a) node
   const node = deps.nodeVersion;
   checks.push(checkNodeVersion(node));
+
+  // GOAL 136: the DESKTOP/RENDER dependency set. MEASURED after the operator
+  // installed xrdp + XFCE + lightdm: a headful Chrome is only viable with an X
+  // server, GTK/NSS/GBM/xkb libs, and FONTS — 933 are now present (Noto Sans
+  // resolves). Without fonts a headful browser renders tofu boxes, which is
+  // itself a fingerprint tell, so a missing font set is a real readiness
+  // failure and not a cosmetic one. These are the deps a fresh box needs that
+  // are easy to miss because a headless browser does not need them.
+  {
+    const libs = [
+      "libgtk-3.so.0",
+      "libnss3.so",
+      "libatk-1.0.so.0",
+      "libgbm.so.1",
+      "libasound.so.2",
+      "libxkbcommon.so.0",
+      "libpango-1.0.so.0",
+    ];
+    const missingLibs = (deps.missingSharedLibraries ?? defaultMissingSharedLibraries)(libs);
+    const fonts = (deps.fontCount ?? defaultFontCount)();
+    const has = deps.hasBinary ?? defaultHasBinary;
+    const xvfb = has("Xvfb");
+    const xserver = has("Xvfb") || has("Xorg") || has("X");
+    const ready = missingLibs.length === 0 && fonts > 0 && xserver;
+    const why: string[] = [];
+    if (missingLibs.length) why.push(`missing shared libs: ${missingLibs.join(", ")}`);
+    if (!fonts) why.push("no fonts installed (a headful browser would render tofu boxes — itself a tell)");
+    if (!xserver) why.push("no X server binary (Xvfb/Xorg) — run headless and expect to be challenged");
+    checks.push({
+      id: "display-stack",
+      status: ready ? "pass" : "fail",
+      detail: ready
+        ? `${fonts} fonts, X server present${xvfb ? " + Xvfb" : ""}, all ${libs.length} libs`
+        : why.join("; "),
+      ...(ready ? {} : { reason: `${why.join("; ")} — install the desktop/X11 stack (e.g. xvfb + fonts-noto-core + libgtk-3-0 + libnss3)` }),
+    } as any);
+  }
 
   // THE CHROME POINT OF USE, as a first-class check (see src/runtime/chrome-owner.ts).
   // The operator's own interactive browser cannot be driven; the point of use is a
@@ -657,6 +697,9 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
     copiedProfileProbe: defaultCopiedProfileProbe,
     detectDisplay: detectDisplayInfo,
     chromeResolve: defaultChromeResolve,
+    missingSharedLibraries: defaultMissingSharedLibraries,
+    fontCount: defaultFontCount,
+    hasBinary: defaultHasBinary,
     chromeVersion: defaultChromeVersion,
     bundledChromium: bundledChromiumPath,
     probeAttachPort: defaultProbeAttachPort,
@@ -668,6 +711,43 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
     registryVerified: defaultRegistryVerified,
     ...overrides,
   };
+}
+
+/**
+ * GOAL 136: the desktop/render dependency probes. A headful browser needs an X
+ * server, GTK/NSS/GBM/xkb, and FONTS — and none of them are needed headless, so
+ * they are exactly the deps a fresh box misses. Real implementations, behind
+ * seams, so the gate stays testable.
+ */
+function defaultMissingSharedLibraries(libs: string[]): string[] {
+  let cache: Set<string> | null = null;
+  try {
+    const out = execFileSync("ldconfig", ["-p"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    // ldconfig -p lines look like "libgtk-3.so.0 (libc6,x86-64) => /lib/…":
+    // the SONAME is the FIRST field. Taking the last (a path) made every lib
+    // look missing — a false FAIL that would send an operator installing
+    // packages that are already present.
+    cache = new Set(out.split("\n").map((l) => l.trim().split(/\s+/)[0] ?? "").filter(Boolean));
+  } catch {
+    return libs; // cannot tell -> report them missing rather than claim readiness
+  }
+  return libs.filter((l) => !cache!.has(l));
+}
+
+function defaultFontCount(): number {
+  try {
+    const out = execFileSync("fc-list", [], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+    return out.split("\n").filter(Boolean).length;
+  } catch {
+    return 0; // no fontconfig, or no fonts
+  }
+}
+
+function defaultHasBinary(name: string): boolean {
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    if (dir && existsSync(join(dir, name))) return true;
+  }
+  return false;
 }
 
 /** The full requirements report: global OS checks + per-package verdicts. */

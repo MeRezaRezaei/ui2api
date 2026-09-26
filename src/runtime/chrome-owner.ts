@@ -49,6 +49,14 @@ export interface ChromeOwner {
   home: string | null;
   /** the profile dir we would actually use, or null when none exists yet */
   profile: string | null;
+  /**
+   * MEASURED: the profile dir is 0700 and owned by the chrome user, so a
+   * readiness check run by ANYONE ELSE cannot read it — and used to report
+   * "no profile" i.e. FAIL, even when the daemon is running perfectly. That is a
+   * FALSE NEGATIVE that would send an operator chasing a healthy setup. This
+   * says "exists but you may not inspect it", which is not a failure.
+   */
+  profileExistsButUnreadable: boolean;
   /** true when the process is ALREADY running as the chrome owner */
   runningAsOwner: boolean;
   /** why there is no profile, when there is none — named, never silent */
@@ -78,6 +86,7 @@ export function resolveChromeOwner(): ChromeOwner {
   const home = entry?.home || null;
 
   let profile: string | null = null;
+  let profileExistsButUnreadable = false;
   if (home) {
     const configDir = join(home, ".config");
     for (const cand of PROFILE_CANDIDATES) {
@@ -92,8 +101,15 @@ export function resolveChromeOwner(): ChromeOwner {
             break;
           }
         }
-      } catch {
-        /* unreadable — try the next candidate */
+      } catch (e) {
+        // The dir EXISTS but we may not list it (0700, owned by the chrome
+        // user). That is not "no profile" — record it honestly.
+        if ((e as NodeJS.ErrnoException)?.code === "EACCES") {
+          profileExistsButUnreadable = true;
+          profile = p;
+          break;
+        }
+        /* otherwise: unreadable for another reason — try the next candidate */
       }
     }
   }
@@ -106,6 +122,7 @@ export function resolveChromeOwner(): ChromeOwner {
   }
 
   let missing: string | null = null;
+  if (profileExistsButUnreadable) missing = null; // present, just not ours to read
   if (!entry) missing = `no such user: ${user} (create it, or set ${CHROME_USER_ENV})`;
   else if (!home) missing = `user ${user} has no home directory`;
   else if (!profile)
@@ -115,7 +132,7 @@ export function resolveChromeOwner(): ChromeOwner {
       `That is the only required setup: run Chrome as ${user} once (or via \`su - ${user}\` / \`sudo -u ${user}\`), ` +
       `log in (xhost + if you need to log in from your desktop), and the profile appears.`;
 
-  return { user, home, profile, runningAsOwner, missing };
+  return { user, home, profile, runningAsOwner, missing, profileExistsButUnreadable };
 }
 
 /** The path to hand Chrome as --user-data-dir, when one exists. */
@@ -131,7 +148,8 @@ export function chromeOwnerStatus(): { ready: boolean; line: string } {
   const o = resolveChromeOwner();
   if (o.missing) return { ready: false, line: `chrome-owner ${o.user}: NOT READY — ${o.missing}` };
   const as = o.runningAsOwner ? "running as that user" : `process is not ${o.user}`;
-  return { ready: true, line: `chrome-owner ${o.user}: ${o.profile} (${as})` };
+  const vis = o.profileExistsButUnreadable ? " (present, 0700 — not readable by this user, which is correct)" : "";
+  return { ready: true, line: `chrome-owner ${o.user}: ${o.profile} (${as})${vis}` };
 }
 
 /** Best-effort home for the owner, for callers that need to write into it. */

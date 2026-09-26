@@ -2,7 +2,7 @@ import { chromium, type Browser } from "playwright";
 import { resolve, dirname } from "node:path";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chromeOwnerProfilePath } from "./chrome-owner.js";
+import { resolveChromeOwner } from "./chrome-owner.js";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 
@@ -34,11 +34,21 @@ export function userChromeProfile(): string | undefined {
   // Explicit wins, always.
   const explicit = process.env.UI2API_USER_DATA_DIR || process.env.UI2API_CHROME_PROFILE_PATH;
   if (explicit) return explicit;
-  // THE DEFAULT IS THE DEDICATED CHROME OWNER, not the person at the keyboard.
-  // The interactive browser cannot be driven (Chrome refuses), so the point of
-  // use is a dedicated user's Chrome profile — see src/runtime/chrome-owner.ts
-  // for the full operational story, including the xhost + login path.
-  return chromeOwnerProfilePath();
+  // THE POINT OF USE is a dedicated user's Chrome, not the operator's keyboard
+  // browser (Chrome refuses to attach to one). But handing that profile to a
+  // caller that is NOT the owner was a real flaw: the profile is 0700 and
+  // PROFILE-LOCKED, so any other caller — including every browser test in the
+  // suite — died with `chrome exited early (code 21)`. MEASURED: this silently
+  // coupled the whole test suite to the machine's ambient state.
+  //
+  // So the owner's profile is used when we ARE that user (the real production
+  // case), or when it is named explicitly. Otherwise a managed launch, which is
+  // hermetic. `chrome start` is how the daemon gets it, and it always runs AS
+  // the owner.
+  const owner = resolveChromeOwner();
+  if (owner.runningAsOwner) return owner.profile ?? undefined;
+  if ((process.env.UI2API_CHROME_OWNER_PROFILE ?? "") === "1") return owner.profile ?? undefined;
+  return undefined;
 }
 
 // Launch args for the user's real Chrome: deliberately NONE beyond a stable

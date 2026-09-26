@@ -230,7 +230,7 @@ export async function startChromeDaemon(opts: {
   }
 
   const owner: ChromeOwner = opts.user
-    ? { user: opts.user, home: null, profile: null, runningAsOwner: false, missing: null }
+    ? { user: opts.user, home: null, profile: null, runningAsOwner: false, missing: null, profileExistsButUnreadable: false }
     : resolveChromeOwner();
   const exec = chromeExec();
   if (!exec) return { started: false, state: null, note: "no Chrome executable found" };

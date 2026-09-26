@@ -288,6 +288,7 @@ trust posture — read them before deploying.
 | `UI2API_AUTH_STATE_PATH` | runtime knob | — | `src/runtime/wigolo.ts:161` |
 | `UI2API_BASE_URL` | base URL for the served API | — | `src/generator/lang-php.ts:544` |
 | `UI2API_CDP_URL` | runtime knob | — | `src/runtime/wigolo.ts:160` |
+| `UI2API_CHROME_OWNER_PROFILE` | allow the launch seam to use the chrome owner's profile even when the process is NOT that user | off (the profile is 0700 + locked; a non-owner normally cannot use it) | `src/runtime/browser.ts` |
 | `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Default `ui2api`; its profile is auto-resolved from that user's `~/.config` | `ui2api` | `src/runtime/chrome-owner.ts:60` |
 | `UI2API_CHROME` | runtime knob | — | `src/capabilities/tencent-aistudio.ts:113` |
 | `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:294` |

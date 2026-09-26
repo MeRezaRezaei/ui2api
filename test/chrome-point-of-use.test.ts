@@ -71,19 +71,36 @@ d("the Chrome point of use is a dedicated user, and it is pinned", () => {
     }
   });
 
-  t("the launch seam's default IS the chrome owner", () => {
+  t("the launch seam uses the owner's profile ONLY when it can actually", () => {
     const prevU = process.env.UI2API_USER_DATA_DIR;
     const prevP = process.env.UI2API_CHROME_PROFILE_PATH;
     const prevO = process.env.UI2API_CHROME_USER;
+    const prevF = process.env.UI2API_CHROME_OWNER_PROFILE;
     try {
       delete process.env.UI2API_USER_DATA_DIR;
       delete process.env.UI2API_CHROME_PROFILE_PATH;
+      delete process.env.UI2API_CHROME_OWNER_PROFILE;
       delete process.env.UI2API_CHROME_USER;
       const owner = resolveChromeOwner();
-      if (owner.profile) {
-        assert.equal(userChromeProfile(), owner.profile, "with no explicit env, the owner's profile is the default");
+      // MEASURED FLAW this pin now guards: handing the owner's 0700 PROFILE-LOCKED
+      // profile to a caller that is not the owner dies with
+      // `chrome exited early (code 21)`, and it silently coupled the whole test
+      // suite to the machine's ambient state. So it is used only when we ARE the
+      // owner (the real production case), or when explicitly asked.
+      if (!owner.runningAsOwner) {
+        assert.equal(
+          userChromeProfile(),
+          undefined,
+          "a non-owner must NOT be handed the owner's locked profile",
+        );
       }
-      // an EXPLICIT choice always wins — the owner is a default, not an override
+      // explicit opt-in is the escape hatch, and is honoured
+      process.env.UI2API_CHROME_OWNER_PROFILE = "1";
+      if (owner.profile) {
+        assert.equal(userChromeProfile(), owner.profile, "the explicit opt-in must hand it over");
+      }
+      delete process.env.UI2API_CHROME_OWNER_PROFILE;
+      // an EXPLICIT choice always wins — all of this is a default, not an override
       process.env.UI2API_USER_DATA_DIR = "/tmp/explicit-profile";
       assert.equal(userChromeProfile(), "/tmp/explicit-profile", "explicit must always win");
     } finally {
@@ -91,6 +108,7 @@ d("the Chrome point of use is a dedicated user, and it is pinned", () => {
         ["UI2API_USER_DATA_DIR", prevU],
         ["UI2API_CHROME_PROFILE_PATH", prevP],
         ["UI2API_CHROME_USER", prevO],
+        ["UI2API_CHROME_OWNER_PROFILE", prevF],
       ] as const) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
