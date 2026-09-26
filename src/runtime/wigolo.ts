@@ -368,7 +368,13 @@ async function wigoloRequest<T>(
   // The bearer credential is attached ONLY to a loopback daemon. A remote base
   // is reachable either through the explicit opt-in or through a caller-supplied
   // base that already passed the gate — in neither case does the secret leave.
-  const token = loopback ? daemonToken() : undefined;
+  // The bearer credential does not leave loopback merely because the base was
+  // opted-in: a remote daemon still gets NO token unless the operator names that
+  // SECOND, deliberate choice. One opt-in means "let the traffic out"; it does
+  // not silently also mean "hand over the credential".
+  const tokenLeavesLoopback =
+    loopback || /^(1|true|yes)$/i.test(process.env.UI2API_WIGOLO_ALLOW_REMOTE_TOKEN ?? "");
+  const token = tokenLeavesLoopback ? daemonToken() : undefined;
   try {
     const res = await fetch(`${base}/v1/${tool}`, {
       method: "POST",

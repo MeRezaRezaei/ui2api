@@ -166,6 +166,7 @@ trust posture — read them before deploying.
 | `UI2API_ENGINE` | runtime knob | — | `src/plugin/context.ts:21` |
 | `UI2API_HEADED` | runtime knob | — | `src/prompt/driver.ts:798` |
 | `UI2API_HUB_BIND` | **TRUST** host the hub binds; loopback (`127.0.0.1`) by default because the package inventory is LAN-visible on a wider bind | `127.0.0.1` | `src/hub/server.ts:20` |
+| `UI2API_WIGOLO_ALLOW_REMOTE_TOKEN` | **TRUST** additionally allow `WIGOLO_API_TOKEN` to be sent to a NON-loopback wigolo daemon. Separate from `UI2API_WIGOLO_ALLOW_REMOTE` on purpose: allowing the traffic out is not the same decision as handing over the credential | off | `src/runtime/wigolo.ts` |
 | `UI2API_WIGOLO_ALLOW_REMOTE` | **TRUST** allow the wigolo daemon base to be a NON-loopback host (and a non-loopback CDP endpoint); without it a non-loopback base is refused so `WIGOLO_API_TOKEN` is never sent off-loopback | off | `src/runtime/wigolo.ts` |
 | `UI2API_HUB_AUTHOR` | hub author for publishes | — | `src/cli.ts:477` |
 | `UI2API_HUB_HOST` | hub host | — | `src/cli.ts:1233` |
