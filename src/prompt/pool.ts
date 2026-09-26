@@ -442,6 +442,14 @@ export class ChatPool {
         return { profileId: siteId, driver, busy: false, dedicated };
       } catch (e) {
         lastErr = e;
+        // GOAL 119: this driver already opened a browser CONTEXT and a PAGE
+        // (ChatDriver.start -> getPage -> newContext/newPage/goto). Leaving it
+        // open leaks both, invisibly: the driver was never pushed to
+        // this.workers, so close(), the reaper sweep and the max/spawning
+        // accounting all skip it. If the driver launched its OWN browser
+        // (ownsBrowser, when the shared one was dead) this also orphans a whole
+        // chromium process. Close it before doing anything else.
+        await driver.close().catch(() => undefined);
         const msg = e instanceof Error ? e.message : String(e);
         const blocked = /Access Restricted|Restricted Access|security policy|HTTP 567|web security policy/i.test(msg);
         if (attempt < attempts && blocked) {
@@ -460,7 +468,17 @@ export class ChatPool {
   private async restartBrowser(): Promise<void> {
     if (this.browser) {
       try {
-        await this.browser.close();
+        // GOAL 119: in ATTACH mode this browser is the OPERATOR'S OWN Chrome,
+        // reached over CDP. Closing it kills their real, signed-in browser —
+        // their tabs, their session, their work. We own it only when we launched
+        // it, so only then may we close it. Rotating an attached browser is a
+        // no-op by design; the operator restarts their own Chrome if they want a
+        // fresh instance.
+        if (this.attach) {
+          if (process.env.UI2API_DEBUG === "1") console.error("[ui2api] attach mode: not closing the operator's own browser on restart");
+        } else {
+          await this.browser.close();
+        }
       } catch {
         // already gone
       }
