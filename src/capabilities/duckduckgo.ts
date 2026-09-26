@@ -74,7 +74,7 @@
 // VQD canvas fingerprint challenge inside the page, so driving the UI is the
 // only posture that keeps anonymous chat working (same principle as the
 // signed-in sites: never send a request the page didn't make itself).
-import { launchBrowser } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser } from "../runtime/browser.js";
 import { makeDomPrimitives } from "../runtime/dom-primitives.js";
 import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -103,7 +103,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 /** The side-chat consent wall's agree button (live-verified 2026-09-22). */

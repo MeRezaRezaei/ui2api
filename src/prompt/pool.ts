@@ -4,7 +4,7 @@
 // page in milliseconds instead of spawning + tearing down Chrome per request.
 // Pages beyond `min` are created on demand up to `max`, which scales with the
 // host's free memory. Requests over capacity queue on the next free page.
-import { spawnChromeAndConnect, connectExistingChrome } from "../runtime/browser.js";
+import { resolvedHeadless, spawnChromeAndConnect, connectExistingChrome } from "../runtime/browser.js";
 import { ChatDriver } from "./driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
@@ -273,7 +273,7 @@ export class ChatPool {
     this.browser = undefined;
     const b = this.attach
       ? await connectExistingChrome(Number(process.env.UI2API_ATTACH_PORT))
-      : await spawnChromeAndConnect({ headless: process.env.UI2API_HEADED !== "1" });
+      : await spawnChromeAndConnect({ headless: resolvedHeadless() });
     this.browser = b;
     return b;
   }

@@ -46,7 +46,7 @@
 // HTTP 400 — wrong params/headers, honestly left unmapped). Run
 // `npx tsx src/cli.ts analyse https://www.aparat.com` to map the real
 // search/feed/video endpoints before attempting any read.
-import { launchBrowser, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
@@ -97,7 +97,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 // Page-side extraction of a[href*='/v/'] cards — one evaluate body, no nested

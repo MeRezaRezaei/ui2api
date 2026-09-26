@@ -13,6 +13,11 @@
 export const TOKEN_ENV = "UI2API_PROMPTD_TOKEN";
 
 export type Posture = {
+  /** GOAL 126: the RESOLVED launch mode, not what the env merely requested. */
+  headless: boolean;
+  headful: boolean;
+  /** the operator requested headful and did not get it — never silent */
+  headlessDegraded: boolean;
   auth: "token" | "localhost-only";
   bind: string;
   chromeNoSandbox: boolean;
@@ -53,5 +58,32 @@ export function daemonPosture(env: NodeJS.ProcessEnv = process.env, bind = "127.
   if (attachRootsCount > 0) warnings.push(`${attachRootsCount} attach root(s) readable — file-upload paths are widened`);
   if (attachRootsCount === 0) warnings.push("attach path form refused (no UI2API_ATTACH_ROOTS)");
 
-  return { auth, bind, chromeNoSandbox, singleProcess, attachRootsCount, attachMaxBytes, warnings };
+  // GOAL 126: disclose the RESOLVED headless truth, and name the degraded case.
+  // The operator asked for a headed browser and did not get one is exactly the
+  // state that used to pass unnoticed while the code believed it was a real
+  // user. A posture report that cannot express "you asked for X, you got Y" is
+  // not a posture report.
+  const wantHeadful = env.UI2API_HEADED === "1";
+  const displayAvailable = Boolean(env.DISPLAY || env.WAYLAND_DISPLAY);
+  const headless = !(wantHeadful && displayAvailable);
+  const headlessDegraded = wantHeadful && !displayAvailable;
+  if (headlessDegraded) {
+    warnings.push(
+      "headless-degraded — UI2API_HEADED=1 was requested but no DISPLAY/WAYLAND_DISPLAY is available, " +
+        "so the browser was spawned --headless=new; the real-user posture is NOT in effect"
+    );
+  }
+
+  return {
+    auth,
+    bind,
+    chromeNoSandbox,
+    singleProcess,
+    attachRootsCount,
+    attachMaxBytes,
+    headless,
+    headful: !headless,
+    headlessDegraded,
+    warnings,
+  };
 }

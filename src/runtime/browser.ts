@@ -261,6 +261,53 @@ function displayAvailable(): boolean {
   return Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
 }
 
+/**
+ * GOAL 126: THE resolved headless truth. There were two truths and they
+ * disagreed.
+ *
+ * The launch seam computed the ACTUAL mode as
+ * `!(wantHeadful && displayAvailable())` — so `UI2API_HEADED=1` with no DISPLAY
+ * still spawned `--headless=new`. But ~17 call sites (driver, pool, 14
+ * capability runners) decided "am I a real user?" from the ENV ALONE with
+ * `UI2API_HEADED !== "1"`, which is TRUE in that state. MEASURED:
+ * `{runnerTreatsAsRealUser: true, spawnActualHeadless: true}`.
+ *
+ * That is the worst of both worlds: the real-user branch fires — viewport
+ * inheritance, light-mode asset aborting SKIPPED, GPU/software-rasterizer
+ * hardening flags DROPPED — on a headless-spawned page with no extensions and
+ * no window chrome. A contradictory forgery is a WORSE fingerprint than an
+ * honest headless default, and nothing reported the mismatch.
+ *
+ * One resolver, used by every caller. The env var is a REQUEST for headful, not
+ * a statement of fact.
+ */
+export function resolvedHeadless(overrides: LaunchOpts = {}): boolean {
+  const wantHeadful = !headlessDefaulted(overrides);
+  return !(wantHeadful && displayAvailable());
+}
+
+/** True only when we really are a headful, real-user browser. */
+export function resolvedHeaded(overrides: LaunchOpts = {}): boolean {
+  return !resolvedHeadless(overrides);
+}
+
+/**
+ * The honest named verdict for the degraded case: the operator ASKED for a
+ * headed browser and did not get one. Never silent — this is exactly the state
+ * that used to pass unnoticed.
+ */
+export function headlessDegradedReason(overrides: LaunchOpts = {}): string | null {
+  const wantHeadful = !headlessDefaulted(overrides);
+  if (wantHeadful && !displayAvailable()) {
+    return (
+      "headless-degraded: UI2API_HEADED=1 was requested but no DISPLAY/WAYLAND_DISPLAY is available, " +
+      "so the browser was spawned --headless=new. The real-user posture is NOT in effect. " +
+      "Run under Xvfb (or a real desktop session) for a genuinely headful browser."
+    );
+  }
+  return null;
+}
+
 // Spawn Chrome ourselves on a temp profile with a loopback CDP port, then attach
 // Playwright to it. Returns a Browser whose lifecycle ALSO kills the spawned
 // process group (CDP attach does not own the child).
@@ -278,8 +325,9 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
   const usingRealProfile = Boolean(explicitProfile);
   // Headful only when explicitly requested AND a display exists; otherwise stay
   // headless (a window would pop on the user's desktop).
-  const wantHeadful = !headlessDefaulted(overrides);
-  const headless = !(wantHeadful && displayAvailable());
+  // GOAL 126: the spawn reads the ONE resolver, so it can never disagree with
+  // what the posture code believes.
+  const headless = resolvedHeadless(overrides);
   const args = [
     "--no-first-run",
     "--no-default-browser-check",

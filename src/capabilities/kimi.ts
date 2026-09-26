@@ -64,7 +64,7 @@
 // Anti-bot: TrustDecision (同盾) blackbox (x-msh-shield-data) + VolcanoEngine
 // analytics ride every RPC — driving the site's own UI (ChatDriver) is the only
 // posture that keeps the session alive; the DOM paths below never re-send it.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
@@ -113,7 +113,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class KimiCapabilities {

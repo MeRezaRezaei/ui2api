@@ -27,7 +27,7 @@
 // may still render anonymous — the runner's wall-check catches that too. The
 // reliable seam is the user's OWN real Chrome attached with mail.google.com
 // signed in (UI2API_ATTACH_PORT=9222).
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { sameOrigin } from "../runtime/ssrf.js";
 import {
   injectSnapshot,
@@ -81,7 +81,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 /**

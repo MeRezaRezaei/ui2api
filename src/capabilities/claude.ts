@@ -43,7 +43,7 @@
 //   - Strongest GROUNDED selectors (from bundles): composer .ProseMirror
 //     (b-shared-3/b-shared-15) and answer [data-testid="assistant-message"]
 //     (b-shared-7/b-shared-msg-1/b-shared-common-msg-1).
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -79,7 +79,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class ClaudeCapabilities {

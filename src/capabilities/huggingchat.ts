@@ -49,7 +49,7 @@
 //     reachable signed-out). Exact cookie set is server-set and NOT visible in
 //     client bundles.
 //   - No bot wall: curl + Chrome UA returns HTTP 200 + full bundles.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -93,7 +93,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class HuggingChatCapabilities {

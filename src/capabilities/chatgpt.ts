@@ -49,7 +49,7 @@
 //   - No bot wall: plain curl UA returned the full SSR HTML (572 KB); no
 //     Cloudflare challenge at the static layer. Anti-automation expected once
 //     headless signals appear (Guardian / datadog-session checks).
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -91,7 +91,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class ChatGPTCapabilities {

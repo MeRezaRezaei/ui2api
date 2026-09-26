@@ -72,7 +72,7 @@
 //   CreateConversation, MutateConversation, UpdateChat, DeleteConversation,
 //   BranchConversation, UpdateConversation, ListConversationTurns,
 //   GetConversationTurn.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
@@ -120,7 +120,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 // Normalize a ListConversations payload — [hasMore, totalCount, [conversations]]

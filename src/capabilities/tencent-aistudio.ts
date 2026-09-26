@@ -35,7 +35,7 @@
 //   input[type=file]), and /image /code /tts /podcast /translate routes answer
 //   "Current Page Does Not Exist"; image surface lives on the separate
 //   hy3d.tencent.ai app. Honest ok:false with measured reasons (never fabricated).
-import { launchBrowser, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -71,7 +71,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class TencentAistudioCapabilities {

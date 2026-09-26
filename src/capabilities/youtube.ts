@@ -31,7 +31,7 @@
 // would be fabricated traffic (the core repo rule). The page itself issues
 // every request; we only navigate, click the site's own controls, and read
 // back what renders.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
 import { sameOrigin, assertChannelUrl } from "../runtime/ssrf.js";
 import {
@@ -126,7 +126,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class YouTubeCapabilities {

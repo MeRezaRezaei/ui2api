@@ -39,7 +39,7 @@
 //   as the socket `temporarySessionKey` query param + X-Copilot-TemporarySessionKey
 //   header. Static curl passed with a Chrome UA (full SSR HTML, no HTML-layer
 //   wall), but the live socket handshake outcome is the main open risk.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { ChatDriver } from "../prompt/driver.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
@@ -91,7 +91,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 export class CopilotCapabilities {

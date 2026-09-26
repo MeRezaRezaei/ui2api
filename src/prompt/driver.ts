@@ -4,7 +4,7 @@
 // configured, zero-config fallback otherwise) and the same DOM primitives, so a
 // prompt behaves exactly like a human typing it: paste + Enter runs the site's
 // own JS, and the streamed answer is read off the page's event bus.
-import { launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
+import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { makeDomPrimitives, type DomPrimitives, type AnswerRegionRead } from "../runtime/dom-primitives.js";
 import { injectSnapshot, loadAccountSnapshotVerdict, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
 import { matchRestrictionMarkers, type RestrictionHit } from "../runtime/capability-probe.js";
@@ -842,7 +842,7 @@ function resolveDataDir(): string {
 }
 
 function headlessDefault(): boolean {
-  return process.env.UI2API_HEADED !== "1";
+  return resolvedHeadless();
 }
 
 function lightMode(): boolean {
