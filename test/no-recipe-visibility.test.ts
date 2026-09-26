@@ -59,7 +59,7 @@ export function resolveRecipe(pid: string, entry: CapEntry): string | null {
 /** The machine-readable no-recipe set, per package. */
 export function noRecipeSet(ids?: string[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
-  for (const pid of ids ?? pkgIds()) {
+  for (const pid of (ids ?? pkgIds())) {
     const list = (manifestOf(pid).capabilities ?? []) as CapEntry[];
     const missing = list
       .filter((c): c is CapEntry & { id: string } => !!c && typeof c === "object" && typeof c.id === "string")
