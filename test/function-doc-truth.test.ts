@@ -18,7 +18,7 @@ const docSrc = readFileSync(DOC, "utf8");
  *  its header block — tokens may share a line, so match is unanchored. */
 function census(name: string): number {
   const re = new RegExp(`\\*{0,2}${name}\\*{0,2}\\s*:\\s*(\\d+)`, "m");
-  const m = re.exec(docSrc);
+  const m = re.exec(docSrc, { timeout: 120000 });
   assert.ok(m, `docs/function-api-ui-map.md must declare a "${name}: <int>" census token`);
   return Number(m[1]);
 }
@@ -59,7 +59,7 @@ test("negative: a doc census line that drifts from disk falls RED (scratch fixtu
       // Reuse the same parsing against the scratch fixture: the measurement is
       // the real disk one, so a wrong doc number must assert-fail.
       const scratchSrc = readFileSync(scratch, "utf8");
-      const p = (n: string) => Number(new RegExp(`- \\*{0,2}${n}\\*{0,2}: (\\d+)`).exec(scratchSrc)?.[1] ?? -1);
+      const p = (n: string) => Number(new RegExp(`- \\*{0,2}${n}\\*{0,2}: (\\d+)`).exec(scratchSrc, { timeout: 120000 })?.[1] ?? -1);
       const real = measure();
       assert.equal(p("PACKAGES"), real.packageCount, "scratch PACKAGES");
       assert.equal(p("CAPABILITIES"), real.capabilityTotal, "scratch CAPABILITIES");

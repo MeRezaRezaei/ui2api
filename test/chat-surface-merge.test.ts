@@ -262,11 +262,15 @@ test("GOAL30(a): resolveProfile resolves packaged chat sites by id and still thr
 
 test("GOAL30(a): `ui2api prompt --sites` lists duckduckgo and omits capability-only gmail", async () => {
   const out = await new Promise<string>((resolve, reject) => {
+    // GOAL 102: `spawn` has NO timeout option — a bounded KILL is the only way to
+    // stop a hung child from dropping the whole file-level test.
     const child = spawn(process.execPath, ["--import", "tsx", join(ROOT, "src", "cli.ts"), "prompt", "--sites"], { cwd: ROOT });
+    const killer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 60_000);
+    killer.unref?.();
     let stdout = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (c) => (stdout += c));
-    child.on("close", (code) => (code === 0 ? resolve(stdout) : reject(new Error(`cli exited ${code}`))));
+    child.on("close", (code) => { clearTimeout(killer); return code === 0 ? resolve(stdout) : reject(new Error(`cli exited ${code}`))));
   });
   assert.match(out, /duckduckgo/, "CLI --sites must list the merged duckduckgo");
   assert.doesNotMatch(out, /^gmail\b/m, "CLI --sites must never list capability-only gmail");

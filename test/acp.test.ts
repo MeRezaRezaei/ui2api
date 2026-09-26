@@ -55,10 +55,14 @@ interface RpcClient {
 }
 
 function startAcpServer(acpPath: string, cwd: string): { child: ChildProcess; client: RpcClient } {
+  // GOAL 102: async spawn needs a bounded kill, not a `timeout` option.
   const child = spawn(process.execPath, ["--import", "tsx", acpPath], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  const killer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 60_000);
+  killer.unref?.();
+  child.on("close", () => clearTimeout(killer));
 
   let buffer = "";
   let nextId = 1;

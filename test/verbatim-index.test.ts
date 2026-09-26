@@ -21,7 +21,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERIFIER = join("scripts", "verify-verbatim-index.mjs");
 
 function runVerifier(args: string[]): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, [VERIFIER, ...args], { cwd: ROOT, encoding: "utf8" });
+  const r = spawnSync(process.execPath, [VERIFIER, ...args], { cwd: ROOT, encoding: "utf8" , timeout: 120000 });
   return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
@@ -52,7 +52,7 @@ test("GOAL 78: the gate FAILS LOUD on a drifted corpus — the real verifier bin
       join(dir, ".brain", "verbatim.md"),
       "# scratch corpus\n\n## Index (all verbatim blocks — date · who · one line)\n\n## 2026-08-29\n<!-- 2026-09-25T10:00 -->\n[user] this block has no index row\n",
     );
-    const r = spawnSync(process.execPath, [join(dir, VERIFIER)], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [join(dir, VERIFIER)], { encoding: "utf8" , timeout: 120000 });
     assert.notEqual(r.status, 0, "a corpus with an unindexed block MUST fail the gate");
     const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
     assert.match(out, /FAIL — \d+ problem/);

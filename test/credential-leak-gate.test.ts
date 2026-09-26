@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
  * never secret values.
  */
 
-const git = (...args: string[]): string => execFileSync("git", args, { encoding: "utf8" }).trim();
+const git = (...args: string[]): string => execFileSync("git", args, { encoding: "utf8" , timeout: 120000 }).trim();
 const GITIGNORE = readFileSync(".gitignore", "utf8");
 const TRACKED: string[] = git("ls-files").split("\n").filter(Boolean);
 
@@ -23,7 +23,7 @@ const TRACKED: string[] = git("ls-files").split("\n").filter(Boolean);
  *  by a pattern, not a literal line, so substring matching was a wrong check. */
 export const isIgnored = (p: string): boolean => {
   try {
-    execFileSync("git", ["check-ignore", "-q", p], { stdio: "ignore" });
+    execFileSync("git", ["check-ignore", "-q", p], { stdio: "ignore" , timeout: 120000 });
     return true;
   } catch {
     return false;
@@ -72,7 +72,7 @@ d("GOAL 98: the credential red line is machine-verified", () => {
     const brainTracked = TRACKED.some((f) => f.startsWith(".brain/"));
     let isPrivate = true;
     try {
-      isPrivate = JSON.parse(execFileSync("gh", ["repo", "view", "MeRezaRezaei/ui2api", "--json", "isPrivate"], { encoding: "utf8" })).isPrivate === true;
+      isPrivate = JSON.parse(execFileSync("gh", ["repo", "view", "MeRezaRezaei/ui2api", "--json", "isPrivate"], { encoding: "utf8" , timeout: 120000 })).isPrivate === true;
     } catch {
       // gh unavailable/offline: do not fabricate a verdict — assert the safe branch only
       assert.ok(brainTracked, "if repo visibility cannot be proven, .brain/ must still be tracked (fail safe)");

@@ -37,7 +37,7 @@ function makeCookiesDb(dbPath: string, rows: FixtureRow[]): void {
     encrypted_value BLOB, path TEXT, expires_utc INTEGER,
     is_secure INTEGER, is_httponly INTEGER, samesite INTEGER,
     has_expires INTEGER, source_scheme INTEGER
-  )`);
+  )`, { timeout: 120000 });
   const ins = db.prepare(
     `INSERT INTO cookies (host_key,name,value,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite,has_expires,source_scheme)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`

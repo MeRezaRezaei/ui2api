@@ -491,15 +491,19 @@ test("GOAL29(d): CLI prompt --account with an unknown account exits non-zero wit
   }
   const stored = listAccounts(resolveDataDir(), registryVaultHost("deepseek"));
   const out = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+    // GOAL 102: an async spawn has no `timeout` option — it needs a bounded KILL,
+    // or a hung child never settles and the whole file-level test is dropped.
     const child = spawn(
       process.execPath,
       ["--import", "tsx", join(ROOT, "src", "cli.ts"), "prompt", "hi", "--site", "deepseek", "--account", "no-such-account@example.com"],
       { cwd: ROOT }
     );
+    const killer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 60_000);
+    killer.unref?.();
     let stderr = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (c) => (stderr += c));
-    child.on("close", (code) => resolve({ code, stderr }));
+    child.on("close", (code) => { clearTimeout(killer); resolve({ code, stderr }); });
   });
   assert.notEqual(out.code, 0, "unknown account on CLI prompt must exit non-zero (never silently fall back)");
   assert.ok(out.stderr.includes("no stored account"), out.stderr);

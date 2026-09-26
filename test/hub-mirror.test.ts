@@ -12,11 +12,11 @@ describe("pushToMirror", () => {
     const bare = join(base, "mirror.git");
     const work = join(base, "work");
     try {
-      execFileSync("git", ["init", "--bare", "-b", "main", bare]);
-      execFileSync("git", ["clone", bare, work]);
-      execFileSync("git", ["config", "user.email", "t@t"], { cwd: work });
-      execFileSync("git", ["config", "user.name", "t"], { cwd: work });
-      execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: work });
+      execFileSync("git", ["init", "--bare", "-b", "main", bare], { timeout: 120000 });
+      execFileSync("git", ["clone", bare, work], { timeout: 120000 });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: work , timeout: 120000 });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: work , timeout: 120000 });
+      execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: work , timeout: 120000 });
       pushToMirror(
         { name: "shop.test", version: "1.0.0", manifest: { name: "shop.test", version: "1.0.0" }, module: "export default {}" },
         { repoUrl: bare, workDir: work }
@@ -25,7 +25,7 @@ describe("pushToMirror", () => {
       assert.ok(existsSync(f), "package file written");
       const data = JSON.parse(readFileSync(f, "utf8"));
       assert.equal(data.manifest.name, "shop.test");
-      const ls = execFileSync("git", ["ls-files"], { cwd: work }).toString();
+      const ls = execFileSync("git", ["ls-files"], { cwd: work , timeout: 120000 }).toString();
       assert.ok(ls.includes("shop.test/1.0.0.json"), "file committed");
     } finally {
       rmSync(base, { recursive: true, force: true });

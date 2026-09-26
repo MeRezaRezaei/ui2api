@@ -123,7 +123,7 @@ t("generatePhpMaps emits per-site dirs and honors a site filter", () => {
 t("generated php lints when php is available", () => {
   let phpAvailable = true;
   try {
-    execFileSync("php", ["-v"], { stdio: "ignore" });
+    execFileSync("php", ["-v"], { stdio: "ignore" , timeout: 120000 });
   } catch {
     phpAvailable = false;
   }
@@ -132,7 +132,7 @@ t("generated php lints when php is available", () => {
   try {
     const dir = generatePhpMap(pkg, resolve(out, "deepseek"));
     for (const f of ["Ui2apiClient.php", "DeepseekMap.php"]) {
-      execFileSync("php", ["-l", resolve(dir, "src", f)], { stdio: "pipe" });
+      execFileSync("php", ["-l", resolve(dir, "src", f)], { stdio: "pipe" , timeout: 120000 });
     }
   } finally {
     rmSync(out, { recursive: true, force: true });
@@ -274,7 +274,7 @@ const DAEMON_SHAPES: Record<string, {
 /** Probe for a usable php. Never a silent skip: the reason is reported. */
 function phpGate(): { ok: boolean; version: string; reason: string } {
   try {
-    const out = execFileSync("php", ["-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const out = execFileSync("php", ["-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] , timeout: 120000 });
     return { ok: true, version: out.split("\n")[0]?.trim() ?? "php", reason: "php present — the generated client is EXECUTED, not just linted" };
   } catch (e) {
     return { ok: false, version: "none", reason: `environment-gated: no runnable php (${e instanceof Error ? e.message.split("\n")[0] : String(e)}) — falling back to structural pins over the generated source` };
