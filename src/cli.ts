@@ -1165,6 +1165,35 @@ async function askLine(q: string): Promise<string> {
  * the LIVE page and store it next to the account snapshot in the vault.
  *   ui2api profile capabilities gemini.google.com --account merezarezaei@gmail.com
  */
+/**
+ * GOAL 118: an account reference must resolve EXACTLY on every entry point.
+ *
+ * `profile capabilities --account <X>` used to do a bare
+ * `accounts.find(...) ?? accounts[0]`, so an unmatched `X` silently drove the
+ * FIRST vault account: it probed, wrote `capabilities.json` for the WRONG
+ * account, printed `saved ->`, and exited 0. The daemon already refuses this
+ * exactly (src/prompt/http.ts) — one key space, or the write gate and the read
+ * gate disagree.
+ *
+ * The first-account default remains, but ONLY when no account was requested.
+ */
+export function resolveRequestedAccount(
+  accounts: Array<{ identity: string; slug: string }>,
+  requested: string | undefined,
+  host: string,
+): { identity: string; slug: string } {
+  if (requested) {
+    const match = accounts.find((a) => a.identity === requested || a.slug === requested);
+    if (!match) {
+      throw new Error(
+        `no stored account "${requested}" for "${host}"; available: [${accounts.map((a) => a.slug).join(", ")}]`
+      );
+    }
+    return match;
+  }
+  return accounts[0]!;
+}
+
 async function cmdProfileCapabilities(host: string, flags: Flags): Promise<void> {
   const dataDir = resolve(flags.dataDir ?? process.env.UI2API_DATA_DIR ?? "data");
   const { listProfiles } = await import("./profile/profile.js");
@@ -1177,8 +1206,12 @@ async function cmdProfileCapabilities(host: string, flags: Flags): Promise<void>
   if (accounts.length === 0) {
     throw new Error(`no identity-keyed accounts for ${siteHost} — capture one first (ui2api profile capture ${profile.url} [--assist])`);
   }
-  // Resolve the requested account (email, slug, or the first available).
-  const account = accounts.find((a) => a.identity === flags.account || a.slug === flags.account) ?? accounts[0];
+  // GOAL 118: EXACT resolution, or a named refusal. An unmatched --account must
+  // never silently fall through to the first account and write its fingerprint.
+  const account = resolveRequestedAccount(accounts, flags.account, siteHost);
+  if (!flags.account) {
+    console.log(`[ui2api] no --account given; using the first stored account: ${account.slug}`);
+  }
   const report = await probeAccountCapabilities(profile, account.identity, dataDir);
   const { capabilitiesPath } = await import("./runtime/session-store.js");
   console.log(`[ui2api] capability fingerprint for ${profile.id} / ${account.identity}:`);
