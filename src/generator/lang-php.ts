@@ -25,7 +25,12 @@
 // fabricated traffic, no reverse-engineered wire protocol in the client.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { RegistryPackage, RegistryTool, RegistryToolInputSchema } from "../prompt/registry.js";
+import {
+  bareCapabilityId,
+  type RegistryPackage,
+  type RegistryTool,
+  type RegistryToolInputSchema,
+} from "../prompt/registry.js";
 
 const PHP_DEFAULTS = {
   baseUrl: "http://127.0.0.1:9797",
@@ -557,6 +562,48 @@ return [
 }
 
 function readmeFile(siteId: string, pkg: RegistryPackage): string {
+  // GOAL 141: this README used to promise methods that were never generated.
+  // It emitted `$map->chat(...)`, `$map->listConversations(...)` and
+  // `$map->webSearch(...)` UNCONDITIONALLY — PROVEN live: for the youtube
+  // package (no chat, no list_conversations, no web_search) it documented all
+  // three, so a consumer writing against the docs would call a method that does
+  // not exist and get a fatal "Call to undefined method". Documentation that
+  // invents an API is the same class of defect as a fabricated verdict, so every
+  // example below is now derived from the SAME predicates mapFile() uses.
+  const className = phpClassName(siteId);
+  const methodOf = (id: string) => phpMethodName(siteId, id);
+  const toolByBare = (bare: string) =>
+    pkg.tools.find((t) => bareCapabilityId(siteId, t.id) === bare);
+  // A chat example exists only when the registry both stamps `chat` AND a
+  // chat-shaped tool is present — exactly the condition mapFile() routes on.
+  const chatTool = pkg.tools.find((t) => /_chat$/.test(t.id) || t.id === "chat");
+  const chatMethod = chatTool && pkg.chat ? methodOf(chatTool.id) : null;
+  const convoTool = toolByBare("list_conversations");
+  const searchTool = toolByBare("web_search");
+  const chatBlock = chatMethod
+    ? `
+    # chat (daemon drives the site's own composer in your real session)
+    # -> {content: '...', role: 'assistant', refusal: null,
+    #     ui2api: {site, doneReason: 'stop'|'restricted'|..., chunkCount}, done_reason: '...'}
+    $answer = $map->${chatMethod}('hello', true);
+`
+    : `
+    # This package exposes NO chat model — the registry stamps no chat for
+    # '${siteId}', so the daemon serves it only through /capability. Use the
+    # capabilities listed below.
+`;
+  const otherLines: string[] = [];
+  if (convoTool) otherLines.push(`    $map->${methodOf(convoTool.id)}(20);          # reads the live sidebar`);
+  if (searchTool) otherLines.push(`    $map->${methodOf(searchTool.id)}(true);      # flips the composer's Search toggle`);
+  const otherBlock = otherLines.length
+    ? `\n    # other capabilities\n${otherLines.join("\n")}\n`
+    : "";
+  // `done_reason` is a CHAT concept, so its example only ships with a chat
+  // method; for a chatless package the refusal handling is still documented via
+  // the generic client call that always exists.
+  const refusalExample = chatMethod
+    ? `        $answer = $map->${chatMethod}('hello', true);`
+    : `        $answer = $client->capability('${siteId}', '${pkg.tools[0]?.id ?? "CAPABILITY"}', []);`;
   return `# ui2api/${siteId}-map
 
 ${pkg.description}
@@ -566,24 +613,15 @@ map in the core app (TypeScript) and in any other language (e.g. Laravel) so
 the daemon API is a plain function call everywhere:
 
     $ composer require ui2api/${siteId}-map
-    $ client = new Ui2api\\Map\\${phpClassName(siteId)}\\Ui2apiClient('http://127.0.0.1:9797');
-    $ map = new Ui2api\\Map\\${phpClassName(siteId)}\\${phpClassName(siteId)}Map($client);
-
-    # chat (daemon drives the site's own composer in your real session)
-    # -> {content: '...', role: 'assistant', refusal: null,
-    #     ui2api: {site, doneReason: 'stop'|'restricted'|..., chunkCount}, done_reason: '...'}
-    $answer = $map->chat('hello', true);
-
-    # other capabilities
-    $map->listConversations(20);          # reads the live sidebar
-    $map->webSearch(true);                # flips the composer's Search toggle
-
+    $ client = new Ui2api\\Map\\${className}\\Ui2apiClient('http://127.0.0.1:9797');
+    $ map = new Ui2api\\Map\\${className}\\${className}Map($client);
+${chatBlock}${otherBlock}
 Named refusals (the daemon's own code and message, never a stringified array):
 
-    use Ui2api\\Map\\${phpClassName(siteId)}\\Ui2apiException;
+    use Ui2api\\Map\\${className}\\Ui2apiException;
 
     try {
-        $answer = $map->chat('hello', true);
+${refusalExample}
         if ($answer['done_reason'] === 'restricted') {
             // a tier/limit wall stopped the round trip — NOT an answer
         }
