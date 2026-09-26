@@ -168,6 +168,21 @@ export async function handleOpenAIRoutes(
           "X-Accel-Buffering": "no",
         });
         const chunk = (payload: unknown) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        // GOAL 109: a restriction wall (paywall / limit / login) is NOT an empty
+        // success. The OpenAI protocol has the right vocabulary for it —
+        // finish_reason "content_filter" plus a `refusal` string — so use it
+        // rather than inventing a status. The named hits stay visible.
+        if (result.doneReason === "restricted") {
+          const detail = (result.restrictions ?? []).map((r) => `${r.kind}: ${r.matched}`).join("; ") || "restriction wall detected";
+          chunk({
+            id, object: "chat.completion.chunk", created, model: profile.id,
+            choices: [{ index: 0, delta: { refusal: detail }, finish_reason: "content_filter" }],
+            ui2api: { site: profile.id, doneReason: "restricted", restrictions: result.restrictions ?? [] },
+          });
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
         chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] });
         // replay the completed answer as incremental chunks
         for (let i = 0; i < answer.length; i += 8) {
@@ -186,8 +201,16 @@ export async function handleOpenAIRoutes(
         choices: [
           {
             index: 0,
-            message: { role: "assistant", content: answer, refusal: null },
-            finish_reason: "stop",
+            // GOAL 109: never "stop" + empty content for a restriction wall.
+            message: {
+              role: "assistant",
+              content: answer,
+              refusal:
+                result.doneReason === "restricted"
+                  ? (result.restrictions ?? []).map((r) => `${r.kind}: ${r.matched}`).join("; ") || "restriction wall detected"
+                  : null,
+            },
+            finish_reason: result.doneReason === "restricted" ? "content_filter" : "stop",
             logprobs: null,
           },
         ],

@@ -747,6 +747,18 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           const result = await worker.driver.ask(prompt, { newChat, ...(model ? { model } : {}) });
           await pool.release(worker);
+          // GOAL 109: a restriction wall is NOT an ok:true empty answer. The
+          // named hits must reach the caller, and ok must be false so no client
+          // can mistake a paywall/limit/login wall for a completed prompt.
+          if (result.doneReason === "restricted") {
+            return send(res, 200, {
+              ...result,
+              ok: false,
+              doneReason: "restricted",
+              reason: "restriction wall detected (paywall, plan limit, or login required)",
+              restrictions: result.restrictions ?? [],
+            });
+          }
           return send(res, 200, { ok: true, ...result });
         } catch (e) {
           await pool.release(worker);
