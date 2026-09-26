@@ -84,6 +84,42 @@ function headlessDefault(): boolean {
   return process.env.UI2API_HEADED !== "1";
 }
 
+/**
+ * GOAL 101: the sent-state read-back used to be
+ *   /sent|message sent/i.test(body) || !/Send\b/.test(body)
+ * which is a TAUTOLOGY over real Gmail DOM — Gmail's own nav carries a "Sent"
+ * label, and "the word Send is absent" is satisfied by a blank page, a re-render
+ * and a FAILED send alike. It returned true for every input measured, so
+ * gmail_send could report an irreversible send it never proved.
+ *
+ * An honest predicate must require POSITIVE evidence of a real confirmation and
+ * must never treat absence as success. There is no live-verified Gmail
+ * confirmation selector in this project (Google ships app-bound cookies), so the
+ * only truthful state is a refusal until one is observed — which is exactly what
+ * capabilities/gmail/manifest.json already promises.
+ */
+export function gmailSendConfirmed(opts: {
+  /** Real confirmation text, e.g. a scoped toast/row — NOT the whole page body. */
+  confirmationText?: string;
+  /** True when the compose window is gone AND a send error is visible. */
+  sendFailed?: boolean;
+  /** True when Gmail is not signed in / the page is an error page. */
+  loggedOut?: boolean;
+}): boolean {
+  if (opts.loggedOut) return false;
+  if (opts.sendFailed) return false;
+  const text = (opts.confirmationText ?? "").trim();
+  if (!text) return false;
+  // A real, specific confirmation phrase — never a body-wide /sent/i, which the
+  // nav label alone satisfies.
+  return /^(message sent|sent message|your message was sent)\b/i.test(text);
+}
+
+/** The honest, named refusal used until a live round-trip proves a real send. */
+export const GMAIL_SEND_UNVERIFIED =
+  "gmail_send is login-gated: no live round-trip has ever read a real sent-confirmation off the page " +
+  "(Google app-bound cookies), so a send is NEVER reported as done. Re-verify with a signed-in session before trusting it.";
+
 export class GmailCapabilities {
   private browser?: Browser;
   private ownsBrowser: boolean;
@@ -515,10 +551,21 @@ export class GmailCapabilities {
       // Read back: does the page show a sent-state (row leaves the composer,
       // a sent confirmation appears)?
       await page.waitForTimeout(3500);
-      const sent = await page.evaluate(() => {
-        const t = document.body.innerText ?? "";
-        return /sent|message sent/i.test(t) || !/Send\b/.test(t);
+      // GOAL 101: read back from a SCOPED confirmation element, and treat a
+      // logged-out page or a visible send error as failure. Absence of the word
+      // "Send" is NOT success.
+      const readback = await page.evaluate(() => {
+        const body = document.body.innerText ?? "";
+        const scope: HTMLElement | null =
+          document.querySelector('[role="alert"], [role="status"], .vh-notification, [data-toast]') ??
+          document.querySelector("main");
+        return {
+          confirmationText: (scope?.innerText ?? "").trim(),
+          sendFailed: /send failed|failed to send|draft not sent|message not sent/i.test(body),
+          loggedOut: /sign in|log in|accounts\.google\.com\/ServiceLogin/i.test(body) && !/inbox/i.test(body),
+        };
       });
+      const sent = gmailSendConfirmed(readback);
       return {
         capability: "gmail_send",
         ok: sent,
@@ -527,7 +574,7 @@ export class GmailCapabilities {
         data: { to, subject: subject || undefined, sent },
         loginGated: !sent,
         domUnverified: DOM_UNVERIFIED_NOTE,
-        error: sent ? undefined : "Send clicked but no sent-state read back (never fabricated — re-verify with a real session)",
+        error: sent ? undefined : GMAIL_SEND_UNVERIFIED,
         note: sent ? "composed + sent through gmail's own composer; sent-state read back off the page" : undefined,
       };
     } catch (e) {
