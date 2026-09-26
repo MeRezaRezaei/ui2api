@@ -221,6 +221,12 @@ parallel requests — exactly like the request queue + a browser. Semantics:
   `max(1, min(4, floor(freeGB/2)))`.
 - A busy page is returned to the pool when the request finishes; pages whose
   underlying browser died are discarded and respawned on demand — the *daemon*
+  `GET /requests` serves the daemon's **bounded request ring** (GOAL 87): the last
+  N requests with their outcome (`done` / `refused` / `timeout`) plus the current
+  in-flight count — it is the surface to read when a request seems stuck. It is a
+  RING sized by `UI2API_REQUEST_LOG` (default 20) and carries NO secrets (no
+  cookies, tokens or bodies). Like the rest of the daemon's surface it is
+  unauthenticated on the localhost binding — set `UI2API_TOKEN` if you expose it.
   stays up even when a browser process cycles. `GET /status` shows the pool
   (`warm`: idle/busy pages per site).
 - The daemon is **headless by default**: nothing opens on your desktop, and the
