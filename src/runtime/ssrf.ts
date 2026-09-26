@@ -1,8 +1,16 @@
+/**
+ * True only when `url` is the SAME ORIGIN as `base` — scheme, host and port
+ * (GOAL 99). This function previously compared `host` alone, so a protocol
+ * downgrade (`http://` url against an `https://` base) passed a function whose
+ * name promises same-origin, while `assertChannelUrl` below refused non-https
+ * outright. Origin means scheme + host + port, so all three are compared now.
+ */
 export function sameOrigin(url: string, base: string): boolean {
   try {
     const u = new URL(url, base);
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    return u.host === new URL(base).host;
+    const b = new URL(base);
+    return u.protocol === b.protocol && u.host === b.host;
   } catch { return false; }
 }
 
