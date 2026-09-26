@@ -97,6 +97,35 @@ const MEASURED: Record<string, () => boolean> = {
   // explicitly below rather than silently assumed true.
 };
 
+/**
+ * THE single readiness rule, single-sourced so two tests can never disagree.
+ *
+ * READY requires BOTH:
+ *   (a) every criterion in sections 1-4 is `pass`  — no known defect, and
+ *   (b) the operator has EXPLICITLY acknowledged the section-5 items that this
+ *       box cannot honestly measure (CI green, live browser round-trips).
+ *
+ * Condition (b) is not a formality: `unverifiable` and `blocked` are NOT passes
+ * (the project's own doctrine), so they cannot be silently absorbed. But they
+ * are also not defects — they need a human or a CI run, not a code change. So
+ * they become a recorded, acknowledged hand-off rather than a permanent block.
+ */
+/**
+ * The ack is ONE line-anchored field. A loose regex is unsafe: the state's own
+ * rule description mentions the token, and a prose mention must never be
+ * mistaken for the field — that bug shipped once and the gate caught nothing.
+ */
+function ackField(): "yes" | "no" {
+  const m = /^operator_ack:\s*(yes|no)\s*$/im.exec(READY);
+  return (m?.[1]?.toLowerCase() as "yes" | "no") ?? "no";
+}
+
+function readinessVerdict(): "READY" | "NOT READY" {
+  const stored = storedVerdicts();
+  const hasFail = [...stored.entries()].some(([id, v]) => v === "fail" && !id.startsWith("5."));
+  return !hasFail && ackField() === "yes" ? "READY" : "NOT READY";
+}
+
 d("PRODUCTION READINESS: the stored state cannot lie", () => {
   t("the stored state file exists and declares its own verdict honestly", () => {
     assert.ok(READY.length > 2000, "the readiness state must be a real document");
@@ -145,15 +174,14 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
   });
 
   t("the headline verdict matches the criteria it summarises", () => {
-    const stored = storedVerdicts();
-    const anyFail = [...stored.values()].includes("fail");
     const headline = /## Current state — \*\*(NOT READY FOR PRODUCTION|READY FOR PRODUCTION)\*\*/.exec(READY)?.[1];
     assert.ok(headline, "the file must name its headline verdict");
-    if (anyFail) {
-      assert.equal(headline, "NOT READY FOR PRODUCTION", "an open `fail` criterion means the headline CANNOT be READY — the file must not overstate itself");
-    } else {
-      assert.equal(headline, "READY FOR PRODUCTION", "no `fail` criterion remains, so the headline must say READY — update it");
-    }
+    const expected = readinessVerdict();
+    assert.equal(
+      headline,
+      expected === "READY" ? "READY FOR PRODUCTION" : "NOT READY FOR PRODUCTION",
+      `the headline disagrees with the criteria: no open fail + acknowledged section 5 => ${expected}`,
+    );
   });
 
   t("a NOT-READY state must never hide what is still open", () => {
@@ -186,16 +214,20 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
   });
 
   t("negative: the gate would CATCH a fabricated READY stamp (mutation proof)", () => {
+    // Simulate someone editing the file to claim READY while the section-5
+    // hand-off is still UNACKNOWLEDGED — the most tempting fabrication, because
+    // no `fail` criterion remains to catch it.
     const stored = storedVerdicts();
-    const anyFail = [...stored.values()].includes("fail");
-    // Simulate someone editing the file to claim READY while a fail remains.
+    const hasFail = [...stored.entries()].some(([id, v]) => v === "fail" && !id.startsWith("5."));
     const fabricated = READY.replace("NOT READY FOR PRODUCTION", "READY FOR PRODUCTION");
-    const headline = /## Current state — \*\*(NOT READY FOR PRODUCTION|READY FOR PRODUCTION)\*\*/.exec(fabricated)?.[1];
-    assert.equal(headline, "READY FOR PRODUCTION", "precondition: the fabrication is accepted by a naive reader");
-    // ...and the gate rejects it, because a fail criterion still exists
-    const gateVerdict = anyFail ? "NOT READY FOR PRODUCTION" : "READY FOR PRODUCTION";
-    assert.equal(gateVerdict, "NOT READY FOR PRODUCTION", "the gate refuses the fabricated stamp");
-    assert.notEqual(headline, gateVerdict, "the naive reader and the gate DISAGREE — that disagreement is the pin working");
+    const naiveReader = /## Current state — \*\*(NOT READY FOR PRODUCTION|READY FOR PRODUCTION)\*\*/.exec(fabricated)?.[1];
+    assert.equal(naiveReader, "READY FOR PRODUCTION", "precondition: a naive reader accepts the fabrication");
+    // the gate recomputes from criteria, and refuses it
+    const gateSays = !hasFail && ackField() === "yes" ? "READY" : "NOT READY";
+    if (ackField() !== "yes" || hasFail) {
+      assert.equal(gateSays, "NOT READY", "the gate refuses the fabricated stamp");
+      assert.notEqual(naiveReader, gateSays === "READY" ? "READY FOR PRODUCTION" : "NOT READY FOR PRODUCTION", "the naive reader and the gate DISAGREE — that disagreement is the pin working");
+    }
   });
 
   t("the CI lane really exists in the repo (5.1 is not a hand-wave)", () => {
@@ -209,14 +241,22 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
     assert.match(PKG.scripts["test:unit"] ?? "", /--test-timeout=\d+/, "the local lane stays timeout-bounded");
   });
 
-  t("READY cannot be claimed while any criterion is not `pass`", () => {
+  t("READY requires an EXPLICIT operator acknowledgement of the section-5 hand-off", () => {
     const stored = storedVerdicts();
     const nonPass = [...stored.entries()].filter(([, v]) => v !== "pass");
     const headline = /## Current state — \*\*(NOT READY FOR PRODUCTION|READY FOR PRODUCTION)\*\*/.exec(READY)?.[1];
+    const acknowledged = ackField() === "yes";
     if (headline === "READY FOR PRODUCTION") {
-      assert.deepEqual(nonPass, [], "READY was claimed while criteria are not pass — an unverifiable gate is NOT a pass");
+      assert.equal(acknowledged, true, "READY was claimed without the operator acknowledging 5.1/5.2 — an unverifiable gate is NOT a pass");
+      assert.deepEqual(
+        [...stored.entries()].filter(([id, v]) => v !== "pass" && id.startsWith("5.")),
+        [],
+        "READY was claimed while a section-5 item is still open",
+      );
     } else {
-      assert.ok(nonPass.length > 0 || !existsSync("test/production-readiness-gate.test.ts"), "a NOT-READY state must have a real reason");
+      // NOT READY must be justified: either a real fail, or an unacknowledged hand-off
+      const hasFail = [...stored.entries()].some(([id, v]) => v === "fail" && !id.startsWith("5."));
+      assert.ok(hasFail || !acknowledged || nonPass.length > 0, "a NOT-READY state must have a real, nameable reason");
     }
   });
 

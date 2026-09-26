@@ -5,7 +5,7 @@
 > of truth and command list), then this file. Cold-start order:
 > `AGENTS.md` → `docs/ONBOARDING.md` → `docs/UNLOCK.md` → this file →
 > [`CONTRIBUTING.md`](../CONTRIBUTING.md) (add a site) → the registry landing
-> (`ui2api-registry`'s README, the install catalog).
+> (the install catalog, once a registry is actually published).
 
 ## The core idea
 
@@ -146,9 +146,15 @@ consumers — no site knowledge lives in the caller.
 
 ## The install loop (community → local)
 
-The public package registry is the `ui2api-registry` repo (default branch
-`master`); every site there is a full capability package (manifest / profile /
-recipes / session.lock / CAPABILITIES.md / metadata). Two halves of one loop:
+**Status: no public registry is published yet.** The design is a registry repo
+(default branch `master`) where every site is a full capability package
+(manifest / profile / recipes / session.lock / CAPABILITIES.md / metadata), but
+no such public repo exists today, so `ui2api install --catalog` cannot work
+against it. The working path right now is the packages vendored in this repo's
+`capabilities/<site>/` (already served by `promptd` via `GET /registry`), or
+`analyse` + `generate`. Supply `--registry` / `UI2API_REGISTRY_URL` to install
+from a self-hosted or forked registry. Two halves of one loop, the second still
+to come:
 
 1. **Add a site** (contributor → registry): the complete copy-paste workflow is
    `CONTRIBUTING.md` "Add a site / capability package" — analyze → package

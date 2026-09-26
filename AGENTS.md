@@ -34,7 +34,10 @@ src/
   hub/                   # package hub (mirror, runtime, store, UI)
   registry/              # package install
   plugin/                # MCP plugin serving
-capabilities/            # per-site package: manifest.json, profile.json, recipes/,
+capabilities/            # 33 package dirs (the ones carrying a manifest.json;
+                         #   `hunyuan-yuanbao/` is a deliberately-skipped legacy
+                         #   dir with no manifest, so 34 dirs on disk, 33 packages).
+                         #   Per-site package: manifest.json, profile.json, recipes/,
                          #   session.lock.json, CAPABILITIES.md (+ README.md inventory,
                          #   CAPTURE-RUNBOOK.md, provider-catalog.md)
 data/<host>/.session/    # CAPTURED SESSIONS (gitignored — never commit, never paste)
@@ -298,7 +301,8 @@ trust posture — read them before deploying.
   (`UI2API_ATTACH_PORT` / live profile), exactly like `tencent-aistudio`;
   never fabricate a post until a real attached session proves the flip.
   **`araprat`** = Aparat (www.aparat.com, Persian video platform; "araprat"
-  resolved via web search) — NOT a chat site; ALL THREE capabilities
+  resolved via web search) — NOT a chat site; the manifest declares 9
+  capabilities, of which **3 verified** and 6 honestly login-gated. The 3
   **VERIFIED**: `araprat_search` (`input[name="search"]` → `/search/<q>` grid
   `a[href*='/v/']`, dedupe double-anchored cards; live 'موزیک' → 30 deduped),
   `araprat_trending` (homepage `/home`, 52 `/v/` anchors), `araprat_video_detail`
@@ -337,7 +341,7 @@ trust posture — read them before deploying.
     and its HunyuanDefault chat already serves modelId=hy4-preview-g).
     `google-ai-search` stays BLOCKED on portal v20 (external sign-in required).
   - **Audit fixes shipped**: `test/capability-dispatch.test.ts` RUNNERS now
-    include `youtube` + `araprat` (14 runners, IN-SYNC manifest↔dispatch —
+    include `youtube` + `araprat` (14 dispatch runners, IN-SYNC manifest↔dispatch —
     hard-enforced since GOAL 79 — was 10, these two live-verified runners were
     outside the suite);
     `src/capabilities/araprat.ts` + manifest now dispatch the 6 posting caps
@@ -369,20 +373,33 @@ trust posture — read them before deploying.
   row (global + per-date equality), every row resolves to a real archive marker
   and is its block's own words, rows are chronological, and every T-stamped
   `- verbatim:` citation in `.brain/verbatim-goals.md` resolves. Package +
-  runner sync is enforced by
-  `test/capability-dispatch.test.ts` (28/28) and package shape by
-  `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **961 tests / 58 suites** (959 pass + 1 env skip, measured across the targeted per-goal lane; the FULL suite is CI's lane — see below) — dated fold-log counts
-  (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
-  900/48 → 908/40 → 911/42 → 914/44 mid-fold) are history; this is the
-  current number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
-  RE-CONFIRMED under real load (box load 11.3 with 4-9 sibling-project phpunit
-  processes running — same 914/44, 0 fail, EXIT=0), which is the actual proof
+  runner sync is enforced by `test/capability-dispatch.test.ts` and package
+  shape by `test/validate-packages.test.ts`.
+  **No suite total is claimed here, and that is deliberate (GOAL 110).** The
+  per-file case counts of those two gates are *runtime-only* facts — the
+  files hold 3 and 2 literal `test(`/`it(` calls and generate the rest from
+  `for` loops, so a hand-typed "(28/28)"-style total is unverifiable and can
+  only rot silently (a loop that stops early keeps the file green while the
+  number lies). Get the truth from the run, never from prose:
+  `npm run test:unit` prints the real `# tests` / `# suites` in its last
+  lines, and the FULL suite is CI's lane (`.github/workflows/ci.yml`,
+  ubuntu-24.04, 30-min cap) — see below. What IS machine-derived is pinned:
+  `test/doc-numbers-truth.test.ts` computes the `test:unit` file count from
+  `package.json` and the `N/N` ratios below from the code, and fails if this
+  file disagrees. Dated fold-log counts (418/418 at fold #11, 430/430 at fold
+  #17f, 863/44 at GOALs 83-87, 900/48 → 908/40 → 911/42 → 914/44 mid-fold)
+  are **history, not current totals** — kept as the dated record of what a
+  run actually printed at that fold, and are never to be read as today's
+  number. The 2026-09-25 full-suite run was re-confirmed under real load (box
+  load 11.3 with 4-9 sibling-project phpunit processes running — 0 fail,
+  EXIT=0), which is the actual proof
   that the concurrency bound works rather than a lucky idle run. 10 sleep+
   recheck cycles watching the box: load 26 -> 10 but never fully quiet, because
   those sibling suites cycle on their own; measuring under load is the honest
   answer, and it is green. GOALs 88-90 + 91
   files: attach-gate 26, vault-integrity 9, error-contract 2, lang-php 8.
+  Those four per-file counts are likewise runtime facts, read off that dated
+  run — not live claims.
   The two counted-test warts are CLOSED, not flagged: error-contract and
   lang-php both ran their assertions inside `describe` bodies and reported
   `tests 0` — they DID gate (a throw fails the run) but were invisible to

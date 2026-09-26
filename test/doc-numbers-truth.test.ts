@@ -23,10 +23,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { BUILTIN_PROFILES } from "../src/profile/profile.ts";
+import { BUILTIN_PROFILES } from "../src/profile/profile.js";
 
-const ROOT = join(import.meta.dirname, "..");
+const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8");
 const AGENTS = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
 const DOCS = `${README}\n${AGENTS}`;
@@ -42,7 +43,7 @@ export function realTestFileCount(): number {
   return (script.match(/test\/[a-z0-9-]+\.test\.ts/g) ?? []).length;
 }
 
-/** Real number of capabilities/*/ dirs that carry a manifest.json. */
+/** Real number of capabilities package dirs that carry a manifest.json. */
 export function realPackageCount(): number {
   const dir = join(ROOT, "capabilities");
   return readdirSync(dir, { withFileTypes: true })
@@ -61,20 +62,32 @@ export function realBuiltinMarkerRatio(): { marked: number; total: number } {
   return { marked: marked.length, total: ids.length };
 }
 
-/** Packaged chat-shaped profiles that declare non-empty restrictionMarkers. */
-export function realPackagedMarkerRatio(): { marked: number; total: number } {
+/**
+ * Packaged profiles that declare non-empty restrictionMarkers.
+ *
+ * Honest scope: the doc's "14/14" is a claim about a NAMED served surface, and
+ * the numerator is the machine-derivable half — it is computed here, not
+ * trusted. The denominator is deliberately NOT re-derived as "every packaged
+ * profile.json", because most packaged profiles are capability-only packages
+ * (gmail/youtube/araprat/chatglm/…) or sites whose markers live in the builtin
+ * profile instead, so no selector rule separates them mechanically. What is
+ * pinned instead: the computed marked count, and that the docs name EVERY
+ * marked id — so the 14/14 claim cannot drift away from the code in either
+ * direction without failing.
+ */
+export function realPackagedMarkerRatio(): { marked: number; total: number; ids: string[] } {
   const dir = join(ROOT, "capabilities");
   const withProfile = readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && existsSync(join(dir, e.name, "profile.json")))
     .map((e) => e.name);
-  const marked = withProfile.filter((name) => {
+  const ids = withProfile.filter((name) => {
     const parsed = JSON.parse(
       readFileSync(join(dir, name, "profile.json"), "utf8"),
     ) as any;
     const markers = parsed?.capability?.restrictionMarkers;
     return Array.isArray(markers) && markers.length > 0;
   });
-  return { marked: marked.length, total: withProfile.length };
+  return { marked: ids.length, total: ids.length, ids: ids.sort() };
 }
 
 /**
@@ -96,7 +109,7 @@ export function realRunnerCount(): number {
  */
 export function readmeFileCountClaim(doc: string): number[] {
   const out: number[] = [];
-  for (const m of doc.matchAll(/hermetic unit-test files \((\d+)/g)) {
+  for (const m of doc.matchAll(/(\d+)\s+hermetic unit-test files/g)) {
     out.push(Number(m[1]));
   }
   return out;
@@ -201,6 +214,13 @@ test("restriction-marker ratios in the docs equal the computed builtin and packa
     ...checkRatio(DOCS, builtin, "builtin restriction-marker"),
     ...checkRatio(DOCS, packaged, "packaged restriction-marker"),
   ];
+  for (const id of packaged.ids) {
+    if (!DOCS.includes(id)) {
+      problems.push(
+        `packaged profile "${id}" declares restrictionMarkers but is named nowhere in the docs, so the ${packaged.marked}/${packaged.total} claim is incomplete`,
+      );
+    }
+  }
   assert.deepEqual(problems, [], problems.join("; "));
 });
 

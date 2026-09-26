@@ -35,6 +35,12 @@ const read = (rel: string) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const README = read("README.md");
 const ONBOARDING = read("docs/ONBOARDING.md");
+// GOAL 120: the class must not regrow outside README/ONBOARDING. The GOAL 116
+// agent found three more live false claims (hub/mirror.ts, VISION.md,
+// STEALTH.md); this pin now covers them too.
+const VISION = read("docs/VISION.md");
+const STEALTH = read("docs/STEALTH.md");
+const MIRROR = read("src/hub/mirror.ts");
 const INSTALL_SRC = read("src/registry/install.ts");
 
 /** The registry repo name the code's default points at. */
@@ -63,11 +69,14 @@ export function rawRegistryUrls(doc: string): string[] {
  */
 export function docTruthViolations(doc: string): string[] {
   const out: string[] = [];
-  for (const line of doc.split("\n")) {
-    // A line that asserts the default / the public registry. (A line that only
-    // shows a reader's own fork, or a fill-in example, is not a claim.)
-    const claimsDefault = /\b(default|public)\b/i.test(line);
-    for (const url of rawRegistryUrls(line)) {
+  // A claim is scoped to its PARAGRAPH (blank-line separated), not its line:
+  // prose wraps, and "The registry the CLI defaults to" routinely sits on the
+  // line above the URL it names. A paragraph that asserts the default / the
+  // public registry must name exactly the code's URL; a paragraph that only
+  // shows the reader's own fork is a fill-in, not a claim.
+  for (const para of doc.split(/\n\s*\n/)) {
+    const claimsDefault = /\b(default|public)\b/i.test(para);
+    for (const url of rawRegistryUrls(para)) {
       const parts = /^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(
         `https://${url.replace(/^https?:\/\//, "")}`
       );
@@ -76,13 +85,13 @@ export function docTruthViolations(doc: string): string[] {
       if (isPlaceholder(owner) || isPlaceholder(repo) || isPlaceholder(branch)) continue; // fill-in example
       const expected = `${DEF_OWNER}/${DEF_REPO}/${DEF_BRANCH}`;
       const got = `${owner}/${repo}/${branch}`;
-      if (claimsDefault && got !== expected) {
+      if (got === expected) continue;
+      // Any URL in a paragraph that claims to BE the default/public registry
+      // must be the code's; outside such a paragraph, a URL on THIS repo must
+      // still agree with the code's owner + branch.
+      if (claimsDefault || repo === DEF_REPO) {
         out.push(
           `doc claims the default/public registry is ${got} but the code default is ${expected} (${DEFAULT_REGISTRY_URL})`
-        );
-      } else if (!claimsDefault && repo === DEF_REPO && (owner !== DEF_OWNER || branch !== DEF_BRANCH)) {
-        out.push(
-          `doc claims registry ${got} but the code default is ${expected} (${DEFAULT_REGISTRY_URL})`
         );
       }
     }
@@ -118,6 +127,26 @@ d("GOAL 116 — registry doc/code truth", () => {
 
   t("README.md names no registry repo/branch that the code's default contradicts", () => {
     assert.deepEqual(docTruthViolations(README), []);
+  });
+
+  t("GOAL 120: VISION/STEALTH/mirror make no live claim about an unpublished registry", () => {
+    for (const [name, doc] of [["VISION", VISION], ["STEALTH", STEALTH]] as const) {
+      // several honest phrasings are acceptable; the requirement is that the doc
+      // CARRIES the truth, not that it matches one exact wording
+      assert.match(doc, /no public registry is published|not published|NOT YET PUBLISHED|does not exist/i,
+        `docs/${name}.md must say the registry is not published`);
+    }
+    // the hub mirror must not default to a repo that does not exist
+    assert.ok(!/\?\?\s*"https:\/\/github\.com\/MeRezaRezaei\/ui2api-registry/.test(MIRROR),
+      "src/hub/mirror.ts must not default the mirror target to the unpublished repo");
+    assert.match(MIRROR, /no default community mirror/i, "and must say so by name");
+  });
+
+  t("negative: GOAL 120 — a doc claiming the registry IS live must fail (mutation proof)", () => {
+    const lyingDoc = "The public package registry is the `ui2api-registry` repo (default branch `master`).";
+    const truthy = /no public registry is published|not published|NOT YET PUBLISHED|does not exist/i;
+    assert.ok(!truthy.test(lyingDoc), "precondition: the lying doc does not carry the truth statement");
+    assert.deepEqual(docTruthViolations(lyingDoc), [], "and it introduces no repo/branch literal the code contradicts");
   });
 
   t("docs/ONBOARDING.md names no registry repo/branch that the code's default contradicts", () => {

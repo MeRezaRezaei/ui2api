@@ -180,9 +180,24 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 38 hermetic unit-test files (595+ tests) — no browser needed
+npm run test:unit   # 84 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
+
+The `84` is the real length of the file list in `package.json`'s
+`scripts["test:unit"]`, not a remembered figure — derive it yourself with
+
+```bash
+node -e 'const s=require("./package.json").scripts["test:unit"];console.log((s.match(/test\/[a-z0-9-]+\.test\.ts/g)||[]).length)'
+```
+
+and it is pinned by `test/doc-numbers-truth.test.ts`, so a stale count here
+fails the suite instead of rotting. The per-file test *totals* (how many cases
+each file generates at runtime) are deliberately NOT claimed here: they are
+observable only by running the suite, so a hand-typed total can only rot. Get
+the truth from the run itself — the last two lines of `npm run test:unit` print
+the real `# tests` / `# suites`, and CI (`.github/workflows/ci.yml`) is the lane
+that runs the full suite.
 
 ## MVP — use AI sites for doing prompts
 
