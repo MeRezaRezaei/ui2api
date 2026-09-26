@@ -139,12 +139,33 @@ export class BrowserSession {
           `SSRF guard: replay target ${resolved} is cross-origin to analyzed site ${this.map.url}`
         );
       }
-      const resp = await this.page.request.fetch(resolved, {
-        method: (net.method as any) || "GET",
-        data: net.requestBody,
-        headers: { "content-type": "application/json" },
-      });
-      return await resp.text();
+      // GOAL 105: this used to be `page.request.fetch(...)` — Playwright's
+      // OUT-OF-PAGE APIRequestContext. That is a synthesized request: no page
+      // JS runs, no page-origin window.fetch is used, and the body is the
+      // RECORDED payload with a hardcoded content-type. It is exactly the
+      // fabricated traffic the project forbids, and the old comment claiming it
+      // "carries the page's session cookies" was simply untrue.
+      //
+      // The honest transport is the SITE'S OWN fetch, executed inside the page:
+      // the site's JS runs, the request carries the page's real origin and
+      // cookies, and the site's own interceptors see it. Input still comes from
+      // the recorded recipe, so this is REPLAY, and it is labelled as such —
+      // never dressed up as live traffic.
+      const method = (net.method as string) || "GET";
+      const body = typeof net.requestBody === "string" ? net.requestBody : net.requestBody === undefined ? undefined : JSON.stringify(net.requestBody);
+      const inPage = await this.page.evaluate(
+        async (a: { url: string; method: string; body?: string }) => {
+          const init: RequestInit = { method: a.method, credentials: "include" };
+          if (a.body !== undefined && a.method !== "GET" && a.method !== "HEAD") {
+            init.body = a.body;
+            init.headers = { "content-type": "application/json" };
+          }
+          const r = await window.fetch(a.url, init);
+          return await r.text();
+        },
+        { url: resolved, method, body } as { url: string; method: string; body?: string },
+      );
+      return inPage;
     }
 
     // DOM-interaction actions (button clicks / form submits captured during

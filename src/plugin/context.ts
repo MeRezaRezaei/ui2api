@@ -98,8 +98,18 @@ export function createContext(config: HubConfig, deps: ContextDeps): Ui2ApiConte
       const resolved = req.url.startsWith("http") ? req.url : new URL(req.url, deps.baseUrl).toString();
       if (!sameOrigin(resolved, deps.baseUrl)) throw new Error(`SSRF guard: replay ${resolved} cross-origin`);
       const p = await getPage();
-      const resp = await p.request.fetch(resolved, { method: (req.method as any) || "GET", data: req.body as any, headers: { "content-type": "application/json" } });
-      return await resp.text();
+      // GOAL 105: the SITE'S OWN fetch, run inside the page. `p.request.fetch`
+      // was an out-of-page APIRequestContext — a synthesized request with no
+      // page JS, no page origin and no page cookies.
+      return await p.evaluate(async (a: { url: string; method: string; body?: string }) => {
+        const init: RequestInit = { method: a.method, credentials: "include" };
+        if (a.body !== undefined && a.method !== "GET" && a.method !== "HEAD") {
+          init.body = a.body;
+          init.headers = { "content-type": "application/json" };
+        }
+        const r = await window.fetch(a.url, init);
+        return await r.text();
+      }, { url: resolved, method: (req.method as string) || "GET", body: req.body as string | undefined });
     },
     async call(target, args) {
       const p = await getPage();

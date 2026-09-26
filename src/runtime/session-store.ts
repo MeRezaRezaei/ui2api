@@ -8,7 +8,7 @@
 // logged-in session — chat history persists, no profile dir reuse required, and
 // it works on hosts that kill debug-channel Chrome (Playwright/WebDriver both
 // need one, so profile-dir reuse is impossible there; a file is portable).
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Page, BrowserContext, Cookie } from "playwright";
 import { sanitizeHost } from "./browser.js";
@@ -45,9 +45,42 @@ export function snapshotPath(sitesDir: string, host: string): string {
   return resolve(sitesDir, sanitizeHost(host), ".session", "state.json");
 }
 
+// GOAL 106 — the vault holds DECRYPTED credentials (plaintext cookie values and
+// localStorage tokens). Left to the default umask these land 0644 = world
+// readable, i.e. any local user can lift a live session. Every credential-bearing
+// write therefore goes through these two helpers with an explicit restrictive
+// mode: dirs 0700, files 0600.
+//
+// `writeFileSync`'s `mode` only applies when the file is CREATED — a pre-existing
+// 0644 file from an older build keeps its bits on a plain rewrite. So we write
+// and then chmod: the mode is enforced, not merely requested.
+const VAULT_DIR_MODE = 0o700;
+const VAULT_FILE_MODE = 0o600;
+
+/** mkdir -p a vault directory, and enforce 0700 even if it already existed. */
+function mkdirVaultDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: VAULT_DIR_MODE });
+  try {
+    chmodSync(dir, VAULT_DIR_MODE);
+  } catch {
+    // best effort — a chmod refusal (foreign FS, perms) must not fail the write;
+    // the file below is still written 0600, which is the load-bearing bit.
+  }
+}
+
+/** Write credential-bearing JSON, 0600, mode-enforced for existing files too. */
+function writeVaultFile(path: string, data: string): void {
+  mkdirVaultDir(dirname(path));
+  writeFileSync(path, data, { mode: VAULT_FILE_MODE });
+  try {
+    chmodSync(path, VAULT_FILE_MODE);
+  } catch {
+    // best effort — see mkdirVaultDir
+  }
+}
+
 export function saveSnapshot(path: string, snap: ProfileSnapshot): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(snap, null, 2));
+  writeVaultFile(path, JSON.stringify(snap, null, 2));
 }
 
 // Never throws; returns null for missing/corrupt files.
@@ -545,8 +578,7 @@ export function saveAccountSnapshot(
   // into accounts.json (it would go stale on the next re-capture, and the read
   // seam reconciles every row again anyway).
   const existing = listAccounts(sitesDir, host).filter((a) => a.slug !== slug).map(toIndexRow);
-  mkdirSync(dirname(accountsIndexPath(sitesDir, host)), { recursive: true });
-  writeFileSync(accountsIndexPath(sitesDir, host), JSON.stringify({ accounts: [...existing, account] }, null, 2));
+  writeVaultFile(accountsIndexPath(sitesDir, host), JSON.stringify({ accounts: [...existing, account] }, null, 2));
   return account;
 }
 
@@ -610,9 +642,7 @@ export function saveCapabilities(
   slug: string,
   report: unknown
 ): void {
-  const dir = accountDir(sitesDir, host, slug);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(capabilitiesPath(sitesDir, host, slug), JSON.stringify(report, null, 2));
+  writeVaultFile(capabilitiesPath(sitesDir, host, slug), JSON.stringify(report, null, 2));
 }
 
 /** Load the account's stored capability fingerprint. Never throws. */
