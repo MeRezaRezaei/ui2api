@@ -13,7 +13,7 @@
 // (there is NO action-map.json anymore). This installer consumes that exact
 // shape so install can never drift back to the dead metadata+action-map pair.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validManifestCapability } from "../prompt/registry.js";
 import { validatePackagedProfileShape, type ChatSiteProfile } from "../profile/profile.js";
@@ -107,6 +107,51 @@ export async function fetchRegistryIndex(registryBaseUrl: string): Promise<Regis
  * CAPABILITIES.md + manifest-referenced recipes) and validates the result
  * before writing. Returns where the package landed + its catalog metadata.
  */
+/**
+ * GOAL 113: a package's file keys come from its OWN manifest (`recipe` strings),
+ * so a hostile or compromised registry can name `../../.gitignore` or an absolute
+ * path. PROVEN before this fix: with the package dir at
+ * `/tmp/tv/root/capabilities/evil`, the key `../../../PWNED.txt` wrote
+ * `/tmp/tv/PWNED.txt` and the key `/tmp/tv/ABS.txt` wrote that absolute path —
+ * both outside the package dir, because `resolve()` collapses `..`, an absolute
+ * key wins outright, and the recursive `mkdirSync` creates any parent.
+ *
+ * An install may only ever write INSIDE its own package directory. This is
+ * containment by `resolve()` + a separator-terminated prefix test, not a naive
+ * string match, so a legitimate `recipes/<cap>.json` still installs while
+ * `..`, an absolute path, a backslash or a NUL is refused LOUDLY.
+ */
+export function assertPackageRelPath(file: string, dir: string): string {
+  const why =
+    file.length === 0
+      ? "empty path"
+      : file.includes("\u0000")
+        ? "contains a NUL byte"
+        : file.includes("\\")
+          ? "contains a backslash"
+          : file.startsWith("/") || /^[A-Za-z]:[\\/]/.test(file)
+            ? "is an absolute path"
+            : file.split(/[\\/]+/).includes("..")
+              ? "contains a '..' segment"
+              : null;
+  if (why) {
+    // Name BOTH the offending key and where it WOULD have landed: a refusal a
+    // reader cannot audit is half a fix.
+    throw new Error(
+      `refusing package file path ${JSON.stringify(file)} (${why}) — it would resolve to ` +
+        `${resolve(dir, file)}, outside the package directory ${resolve(dir)}`
+    );
+  }
+  const out = resolve(dir, file);
+  const root = resolve(dir) + sep;
+  if (out !== resolve(dir) && !out.startsWith(root)) {
+    throw new Error(
+      `refusing package file path ${JSON.stringify(file)} — it resolves to ${out}, outside the package directory ${resolve(dir)}`
+    );
+  }
+  return out;
+}
+
 export async function installPackage(
   host: string,
   registryBaseUrl: string,
@@ -158,6 +203,9 @@ export async function installPackage(
     )
   );
   for (const recipe of recipePaths) {
+    // GOAL 113: validate the manifest-declared path BEFORE any network request,
+    // so a traversal ref is refused without a fetch ever being attempted.
+    assertPackageRelPath(recipe, resolve(packagesRoot, host));
     const res = await fetch(`${pkgBase}/${recipe}`);
     if (res.ok) {
       textByFile[recipe] = await res.text();
@@ -210,11 +258,11 @@ export async function installPackage(
   }
 
   const dir = resolve(packagesRoot, host);
-  for (const [file, text] of Object.entries(textByFile)) {
-    const out = resolve(dir, file);
-    mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, text);
-  }
+  // GOAL 113: validate EVERY key before writing ANY file, so a single bad path
+  // cannot leave a half-written package behind.
+  const targets = Object.keys(textByFile).map((file) => [file, assertPackageRelPath(file, dir)] as const);
+  for (const [, out] of targets) mkdirSync(dirname(out), { recursive: true });
+  for (const [i, [, out]] of targets.entries()) writeFileSync(out, textByFile[Object.keys(textByFile)[i]!]!);
 
   return {
     dir,
