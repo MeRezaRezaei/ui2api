@@ -92,6 +92,34 @@ will refuse anyway. When it adopts, `status` prints the port to attach to, which
 is what `UI2API_ATTACH_PORT` uses. When no daemon is live, the pool falls back to
 spawning per request, so nothing breaks if the daemon is down.
 
+## Provision it (a new box needs one command)
+
+```bash
+sudo ./scripts/ops/provision-ui2api-user.sh
+```
+
+It is **idempotent** and safe to re-run. It creates the dedicated user, seeds the
+Chrome profile directory (`~/.config/ui2api-chrome/Default`, mode 0700, owned by
+that user) **without ever touching a live profile**, and registers two systemd
+services so everything survives a reboot:
+
+| unit | what it is |
+| --- | --- |
+| `ui2api-chrome.service` | the ONE persistent Chrome, CDP on `127.0.0.1:9222` |
+| `ui2api-api.service` | `promptd` — the HTTP API other programs call |
+
+Both run **as the `ui2api` user**, never as the operator. The API unit attaches
+to the persistent Chrome (`UI2API_ATTACH_PORT=9222`), so it never spawns a
+browser per request.
+
+```bash
+systemctl status ui2api-chrome ui2api-api
+curl -s http://127.0.0.1:9797/health          # the API other programs call
+npx tsx src/cli.ts chrome status              # the browser side
+```
+
+Use `--no-systemd` to provision the user and profile without registering units.
+
 ## How to check it
 
 ```bash

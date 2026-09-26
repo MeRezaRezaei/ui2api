@@ -190,6 +190,11 @@ The project lives on **GitHub AND GitLab**, and both are **private**.
 - **Logging in without copying anyone's profile:** run that user's Chrome with `xhost +` and log
   in to it directly. Credentials are then ingested by the normal profile-ingest path exactly as
   before. Copying a whole Chrome profile between users is the fragile alternative — prefer `xhost +`.
+- **Provisioned by code, not by hand:** `sudo ./scripts/ops/provision-ui2api-user.sh`
+  creates the user, seeds the profile (never touching a live one) and registers
+  `ui2api-chrome.service` (the one persistent Chrome) + `ui2api-api.service`
+  (`promptd`, the HTTP API other programs call) with systemd, both running AS the
+  chrome user. Idempotent; `--no-systemd` skips the units.
 - Resolver: `src/runtime/chrome-owner.ts` (`resolveChromeOwner`, `chromeOwnerStatus`), consumed by
   `userChromeProfile()` in `src/runtime/browser.ts` so the launch seam and the docs cannot disagree.
   `ui2api requirements` reports it as a first-class check.
