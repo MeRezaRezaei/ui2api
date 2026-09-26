@@ -372,7 +372,7 @@ trust posture — read them before deploying.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **939 tests / 51 suites** (938 pass + 1 env skip) — dated fold-log counts
+  **945 tests / 54 suites** (943 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
   900/48 → 908/40 → 911/42 → 914/44 mid-fold) are history; this is the
   current number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
@@ -391,7 +391,7 @@ trust posture — read them before deploying.
   (node counts a `describe` as a suite; those 8 describe-bodies became 8
   tests). Rule for new pins: assert inside a real `test(...)`, never in a
   bare `describe` body — a pin nobody counts is a pin nobody reads.
-  `test:unit` is now `--test-concurrency=4`: unbounded 57-way parallelism let
+  `test:unit` is now `--test-concurrency=4 --test-timeout=120000`: unbounded 57-way parallelism let
   each of 16 workers spawn its own esbuild/tsx subprocess, and the box hit
   `ERR_WORKER_INIT_FAILED`/`EAGAIN`, which surfaced as ~12 spurious file-level
   failures (the "suite hangs" symptom). If you see a mass failure burst, check

@@ -270,7 +270,7 @@ test("GOAL30(a): `ui2api prompt --sites` lists duckduckgo and omits capability-o
     let stdout = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (c) => (stdout += c));
-    child.on("close", (code) => { clearTimeout(killer); return code === 0 ? resolve(stdout) : reject(new Error(`cli exited ${code}`))));
+    child.on("close", (code) => { clearTimeout(killer); return code === 0 ? resolve(stdout) : reject(new Error(`cli exited ${code}`))});
   });
   assert.match(out, /duckduckgo/, "CLI --sites must list the merged duckduckgo");
   assert.doesNotMatch(out, /^gmail\b/m, "CLI --sites must never list capability-only gmail");
