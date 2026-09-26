@@ -517,6 +517,26 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const capMatch = /^\/capability\/([^/?#]+)$/.exec(req.url);
         if (capMatch) {
           const site = decodeURIComponent(capMatch[1]);
+          // GOAL 111: the operator's allow-list must bind EVERY surface. These
+          // 32 routes used to step around `profilesById` via a `catch` that
+          // re-resolved a PACKAGED profile from disk, so a `promptd --site
+          // gemini` daemon still dispatched a runner — launching a browser and
+          // replaying a captured session — for every installed site. That
+          // contradicted the documented posture ("answers ONLY the profiles
+          // handed to it at startup").
+          //
+          // Only an EXPLICIT allow-list narrows the surface. A default daemon
+          // (no opts.profiles) keeps serving every declared capability exactly
+          // as before, because `profilesById` there is just the chat set and
+          // capability sites are legitimately wider.
+          if (opts.profiles && !profilesById[site]) {
+            const allowed = Object.keys(profilesById);
+            return send(res, 400, {
+              error:
+                `"${site}" is not in this daemon's configured allow-list [${allowed.join(", ")}] — ` +
+                `this daemon was started with an explicit site list, so it serves only those sites`,
+            });
+          }
           const pkg = registryPackageFor(site);
           if (pkg) {
             const body = await readJson(req);

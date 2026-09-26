@@ -67,6 +67,49 @@ export interface YouTubeCapabilityResult {
   note?: string;
 }
 
+// GOAL 112: `youtube_playlist_add` is a MUTATING capability, so its `ok` must
+// be a POST-CONDITION — proof the add committed — never a pre-condition (a
+// menu rendering playlist choices proves only that a menu opened; it says
+// nothing about the video being added anywhere). The runner cannot perform
+// that post-condition today: committing needs a logged-in session AND an
+// explicit playlist choice, and no choice is made on the caller's behalf
+// (picking "the first playlist" would be a guess, and the wrong guess silently
+// files someone's video into a stranger's list). So the honest verdict is
+// ok:false with this NAMED reason, which matches the recipe's shipped
+// `"ok": false` and its "ok=false until a logged-in session round-trip proves
+// it" step note. The menu count is kept as DIAGNOSTIC detail only.
+export const YOUTUBE_PLAYLIST_ADD_UNVERIFIED =
+  "save-menu-opened-but-nothing-committed: the site's own Save menu rendered the account's playlist " +
+  "choices, but no playlist choice was ever committed — the video was NOT added to any playlist " +
+  "(committing needs a logged-in session round-trip with an explicit playlist choice, which this " +
+  "runner does not fabricate); ok=false until that round-trip exists";
+
+/** Evidence a future committed-path would have to collect to earn ok:true. */
+export interface YouTubePlaylistAddEvidence {
+  /** How many playlist entries the Save menu listed. DIAGNOSTIC ONLY. */
+  playlistChoices?: number;
+  /**
+   * The playlist the video was actually observed in AFTER the choice, read
+   * back out of the account's own playlist view (or the menu's own
+   * saved-checkmark state). Absent/undefined = no post-condition was read.
+   */
+  committedPlaylistId?: string | null;
+  /** The video id the runner was asked to add (guards a stale/mismatched read). */
+  videoId?: string;
+}
+
+/**
+ * The ONLY way `youtube_playlist_add` may report ok:true: a read-back naming
+ * the playlist that now contains the video. A menu that merely rendered
+ * choices is explicitly NOT a post-condition and can never flip this to true.
+ */
+export function youtubePlaylistAddCommitted(ev: YouTubePlaylistAddEvidence): boolean {
+  const committed = typeof ev.committedPlaylistId === "string" ? ev.committedPlaylistId.trim() : "";
+  if (committed.length === 0) return false; // menu-open / pre-existing state is not proof
+  if (typeof ev.videoId === "string" && ev.videoId.trim().length === 0) return false;
+  return true;
+}
+
 const SCAFFOLD_NOTE =
   "scaffold-dom-unverified: selectors are unverified candidates (no live round-trip performed); " +
   "re-tune against a real browser on first capture";
@@ -520,6 +563,17 @@ export class YouTubeCapabilities {
   // --- youtube_playlist_add: add the video to a playlist via the site's own
   // Save menu (three-dot → "Save to playlist"). Requires login; anonymous gets
   // a sign-in prompt in the menu.
+  //
+  // GOAL 112: this is a MUTATING capability, so `ok` is a POST-CONDITION or
+  // it is nothing. The old verdict was `ok: opened > 0` — a pre-condition
+  // (the Save MENU rendered playlist choices), which told a consumer "added"
+  // for an add that was never committed, and contradicted this package's own
+  // recipe ("ok": false, "ok=false until a logged-in session round-trip
+  // proves it"). Now: the menu is opened and counted as DIAGNOSTIC detail,
+  // and the verdict is `ok:false` + a named reason, because no playlist choice
+  // is committed on the caller's behalf (guessing "the first playlist" is a
+  // wrong irreversible write, not a verification). Same posture as its
+  // siblings: a real state flip / a real read-back — or an honest refusal.
   private async playlistAdd(args: Record<string, unknown>): Promise<YouTubeCapabilityResult> {
     const videoId = String(args.videoId ?? "").trim();
     if (!videoId) return this.fail("youtube_playlist_add", "videoId is required");
@@ -534,20 +588,31 @@ export class YouTubeCapabilities {
       await save.waitFor({ state: "visible", timeout: 20000 });
       await save.click();
       await page.waitForTimeout(1200);
-      // Pick the first playlist entry (the site's own menu item) if the menu
-      // opened with a creation form, else confirm the default choice.
-      const opened = await page.evaluate(() => {
+      // DIAGNOSTIC ONLY: how many playlist entries the menu listed. This is a
+      // PRE-condition of an add (the menu opened), never proof one happened.
+      const playlistChoices = await page.evaluate(() => {
         const items = Array.from(document.querySelectorAll("ytd-add-to-playlist-renderer yt-formatted-string[has-link], yt-add-to-playlist-renderer .playlist-creator-menu-item"));
         return items.length;
       });
+      // POST-CONDITION: was the video observed inside a playlist after a
+      // committed choice? Nothing was chosen, so there is nothing to read back.
+      const committed = youtubePlaylistAddCommitted({ playlistChoices, videoId });
+      const menuText = playlistChoices === 0
+        ? "Save menu did not list any playlist entries (anonymous session or DOM rotated)"
+        : `Save menu listed ${playlistChoices} playlist choice(s)`;
       return {
         capability: "youtube_playlist_add",
-        ok: opened > 0,
+        ok: committed,
         method: "dom.save-playlist-menu",
-        data: { videoId, playlistChoices: opened },
+        data: {
+          videoId,
+          playlistChoices,
+          committedPlaylistId: null,
+          recipeOk: false,
+        },
         scaffold: "scaffold-dom-unverified: Save affordance selector is a candidate (no live round-trip yet); the menu is expected to list the account's playlists",
-        error: opened === 0 ? "Save menu did not list any playlist entries (anonymous session or DOM rotated)" : undefined,
-        note: opened > 0 ? "the site's own Save menu rendered the account's playlist choices (no add committed — menu demands a choice)" : undefined,
+        error: committed ? undefined : `${menuText}; ${YOUTUBE_PLAYLIST_ADD_UNVERIFIED}`,
+        note: `${menuText} — diagnostic detail only; no playlist choice was made, so no add is claimed (matches recipes/youtube_playlist_add.json "ok": false)`,
       };
     } catch (e) {
       return this.fail("youtube_playlist_add", e);
