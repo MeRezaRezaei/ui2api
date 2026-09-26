@@ -134,6 +134,70 @@ Bench rule: **every browser launch must go through `launchBrowser()`** in
 `src/runtime/browser.ts` (single seam for headless/headed/chrome/attach
 resolution + stealth posture). Never `launch()` a browser ad-hoc.
 
+### Environment knobs — the full `UI2API_*` surface (GOAL 94)
+
+Every knob the code reads, machine-pinned against the shipped docs (a knob added
+to the code without a doc row fails the suite). Purpose and default are as read at
+the source site named in the last column. Rows marked **TRUST** weaken the daemon's
+trust posture — read them before deploying.
+
+| knob | purpose | default | read at |
+| --- | --- | --- | --- |
+| `UI2API_ACCOUNT` | runtime knob | — | `src/generator/acp-template.ts:16` |
+| `UI2API_AI_PROFILE` | override the AI site profile | — | `src/profile/profile.ts:15` |
+| `UI2API_AI_SITE` | runtime knob | — | `src/plugins/ai-web.ts:7` |
+| `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate) | 20 MiB | `src/runtime/file-attach.ts:54` |
+| `UI2API_ATTACH_PORT` | **TRUST** runtime knob | — | `src/prompt/http.ts:675` |
+| `UI2API_ATTACH_ROOTS` | **TRUST** dirs a file-upload path may be read from (GOAL 88 gate) | none = path form refused | `src/capabilities/duckduckgo.ts:588` |
+| `UI2API_AUTH_STATE_PATH` | runtime knob | — | `src/runtime/wigolo.ts:161` |
+| `UI2API_BASE_URL` | base URL for the served API | — | `src/generator/lang-php.ts:544` |
+| `UI2API_CDP_URL` | runtime knob | — | `src/runtime/wigolo.ts:160` |
+| `UI2API_CHROME` | runtime knob | — | `src/capabilities/tencent-aistudio.ts:113` |
+| `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:294` |
+| `UI2API_CHROME_PATH` | runtime knob | — | `src/runtime/requirements.ts:320` |
+| `UI2API_CHROME_PROFILE_PATH` | runtime knob | — | `src/runtime/profile-ingest.ts:446` |
+| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:329` |
+| `UI2API_DATA_DIR` | runtime knob | — | `src/prompt/driver.ts:794` |
+| `UI2API_DATA_DIR_OVERRIDE` | override the data/sessions dir | — | `src/prompt/driver.ts:794` |
+| `UI2API_DEBUG` | debug logging | off | `src/prompt/driver.ts:344` |
+| `UI2API_ENGINE` | runtime knob | — | `src/plugin/context.ts:21` |
+| `UI2API_HEADED` | runtime knob | — | `src/prompt/driver.ts:798` |
+| `UI2API_HUB_AUTHOR` | hub author for publishes | — | `src/cli.ts:477` |
+| `UI2API_HUB_HOST` | hub host | — | `src/cli.ts:1233` |
+| `UI2API_HUB_TOKEN` | runtime knob | — | `src/cli.ts:486` |
+| `UI2API_HUB_URL` | hub endpoint | — | `src/cli.ts:485` |
+| `UI2API_HUB_USE` | use the hosted hub | — | `src/cli.ts:478` |
+| `UI2API_INGEST_LEVELDB` | session ingest level | — | `src/runtime/profile-ingest.ts:382` |
+| `UI2API_LIGHT` | lightweight mode | off | `src/prompt/driver.ts:802` |
+| `UI2API_LLM_BASE_URL` | runtime knob | — | `src/mapper/llm.ts:10` |
+| `UI2API_LLM_KEY` | runtime knob | — | `src/mapper/llm.ts:5` |
+| `UI2API_LLM_MODEL` | runtime knob | — | `src/mapper/llm.ts:14` |
+| `UI2API_LLM_PROVIDER` | runtime knob | — | `src/mapper/llm.ts:5` |
+| `UI2API_OS_USER` | OS user for session paths | — | `scripts/ops/launch-ui2api-chrome.sh:8` |
+| `UI2API_POOL_MAX` | runtime knob | — | `src/prompt/http.ts:43` |
+| `UI2API_POOL_MAX_WAITERS` | warm-pool queue cap | — | `src/prompt/pool.ts:38` |
+| `UI2API_POOL_MIN` | runtime knob | — | `src/prompt/pool.ts:213` |
+| `UI2API_POOL_WAITER_TIMEOUT_MS` | how long a queued request waits | — | `src/prompt/pool.ts:39` |
+| `UI2API_PROMPTD_PORT` | promptd port | — | `src/cli.ts:587` |
+| `UI2API_PROMPTD_TOKEN` | runtime knob | — | `src/prompt/http.ts:42` |
+| `UI2API_REAPER_INTERVAL_MS` | idle-page reaper interval | — | `src/prompt/http.ts:105` |
+| `UI2API_REGISTRY_REPO` | registry repo to install from | — | `src/hub/mirror.ts:23` |
+| `UI2API_REGISTRY_URL` | runtime knob | — | `src/prompt/smoke.ts:137` |
+| `UI2API_REQUEST_LOG` | enable the bounded in-memory request log | — | `src/prompt/http.ts:138` |
+| `UI2API_REQUEST_TIMEOUT_MS` | runtime knob | — | `src/prompt/http.ts:98` |
+| `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:102` |
+| `UI2API_SINGLE_PROCESS` | **TRUST** run single-process | — | `src/runtime/browser.ts:64` |
+| `UI2API_TIMEOUT` | runtime knob | — | `src/generator/lang-php.ts:550` |
+| `UI2API_TOKEN` | **TRUST** bearer token gating the daemon (unset = localhost-only) | unset = localhost-only | `src/generator/lang-php.ts:547` |
+| `UI2API_TRUST` | trust posture (what the daemon will attach/replay) | — | `src/generator/generate.ts:33` |
+| `UI2API_USER` | runtime knob | — | `src/runtime/xhost-capture.ts:107` |
+| `UI2API_USER_DATA_DIR` | **TRUST** runtime knob | — | `src/capabilities/hunyuan.ts:106` |
+| `UI2API_VERIFY_SITE` | verify a site | — | `scripts/live-verify-js-exec.ts:10` |
+| `UI2API_VERSION` | emit version and exit | — | `src/registry/package.ts:8` |
+| `UI2API_WIGOLO_` | runtime knob | — | `src/runtime/wigolo.ts:157` |
+| `UI2API_WIGOLO_AUTOSTART` | runtime knob | — | `src/runtime/wigolo.ts:140` |
+| `UI2API_WIGOLO_USE_AUTH` | runtime knob | — | `src/plugin/wigolo-context.ts:97` |
+
 ## Site status (2026-09-19)
 
 - **Default chat set** (`defaultChatProfiles()`, `src/prompt/registry.ts`,
