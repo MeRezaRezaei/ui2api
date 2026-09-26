@@ -322,6 +322,12 @@ it, fails the suite), so it cannot silently rot.
 `Ui2apiException` for all of them, carrying `errorCode` / `errorMessage` /
 `status`, so a PHP consumer branches on the same codes.
 
+- `ui2api proof` (alias `live-proof`) runs a LIVE end-to-end proof: it drives a
+  chat site with a random arithmetic prompt and verifies the answer — an honest
+  capability check, NOT a claim that any site is verified.
+- `ui2api smoke` is the ONE command that runs the requirements gate and then the
+  anonymous duckduckgo round-trip end to end.
+
 ## How it works
 
 ```

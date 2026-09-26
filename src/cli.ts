@@ -51,6 +51,9 @@ export const HELP_LINES: readonly string[] = [
   "  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)",
   "  ui2api prompt --sites                (list the configured AI chat websites)",
   "  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready) [--json = the same report as a machine-readable object, honoring the <site> scope]",
+  "  ui2api proof                        (`ui2api live-proof` = same — live end-to-end proof: drive a chat site with a random arithmetic prompt and verify the answer; --site NAME --data-dir DIR)",
+  "  ui2api doctor                       (alias: requirements — OS-level readiness gate per package, with the named reason)",
+  "  ui2api langgen                      (generate a language client (e.g. PHP) for a site map)",
   "  ui2api smoke                        (ONE command: requirements gate + ensure the anonymous duckduckgo package (installs it via the registry if missing) + ONE real anonymous chat round-trip through the ChatDriver — prints `smoke OK: …` with a real read-off-page answer (exit 0) or the NAMED failure (exit 1)) [--json = {ok, site, answer?, ms?, message, installedAnon?, report}]",
 ];
 

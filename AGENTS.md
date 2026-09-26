@@ -372,10 +372,10 @@ trust posture — read them before deploying.
   runner sync is enforced by
   `test/capability-dispatch.test.ts` (28/28) and package shape by
   `test/validate-packages.test.ts` (298/298). Standing suite measurement:
-  **914 tests / 44 suites** (913 pass + 1 env skip) — dated fold-log counts
+  **921 tests / 46 suites** (920 pass + 1 env skip) — dated fold-log counts
   (418/418 at fold #11, 430/430 at fold #17f, 863/44 at GOALs 83-87,
-  900/48 → 908/40 → 911/42 mid-fold) are history; this is the current
-  number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
+  900/48 → 908/40 → 911/42 → 914/44 mid-fold) are history; this is the
+  current number, genuinely re-measured 2026-09-25 (`npm run test:unit`, EXIT=0) and
   RE-CONFIRMED under real load (box load 11.3 with 4-9 sibling-project phpunit
   processes running — same 914/44, 0 fail, EXIT=0), which is the actual proof
   that the concurrency bound works rather than a lucky idle run. 10 sleep+
