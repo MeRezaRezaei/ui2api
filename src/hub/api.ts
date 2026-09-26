@@ -46,7 +46,16 @@ export function createHubRouter(store: RegistryStore, opts: { token: string; reg
       if (err) return json(res, 400, { error: err });
       const modErr = validatePublishedModule(module);
       if (modErr) return json(res, 400, { error: modErr });
-      store.save(manifest.name, manifest.version, manifest, module);
+      // GOAL 121: a store refusal is a NAMED 4xx, never an unhandled rejection.
+      // A traversal name used to throw straight out of the async router with no
+      // try/catch, which killed the hub process — and if the target had been the
+      // index itself, the store stayed poisoned across restarts.
+      try {
+        store.save(manifest.name, manifest.version, manifest, module);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        return json(res, 400, { error: message, code: "invalid_package_target" });
+      }
       return json(res, 200, { ok: true });
     }
 

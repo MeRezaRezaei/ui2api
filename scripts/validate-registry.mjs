@@ -115,6 +115,29 @@ export function validatePackage(pkgDir) {
 
 // ————————————————————— hub publish path (manifest + module) —————————————————————
 
+/**
+ * GOAL 121: `name` and `version` are ATTACKER-SUPPLIED on a publish (they are
+ * in the PUT body) and become the store's write path. Gate them at the EARLIEST
+ * seam so a traversal never reaches the filesystem, and so this validator and
+ * the store agree on one rule.
+ */
+function validatePublishTarget(manifest) {
+  for (const field of ["name", "version"]) {
+    const v = manifest?.[field];
+    if (typeof v !== "string" || v.length === 0) {
+      return `manifest.${field} must be a non-empty string (got ${JSON.stringify(v)})`;
+    }
+    if (v === "." || v === "..") return `manifest.${field} ${JSON.stringify(v)} is a directory reference, not a name`;
+    if (v.includes("/") || v.includes("\\") || v.includes("\u0000")) {
+      return `manifest.${field} ${JSON.stringify(v)} must be a single path segment (no separators, no NUL)`;
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(v)) {
+      return `manifest.${field} ${JSON.stringify(v)} may only contain letters, digits, dot, underscore and dash`;
+    }
+  }
+  return null;
+}
+
 export function validateManifest(manifest, moduleText) {
   if (!manifest || typeof manifest !== "object") return "manifest must be an object";
   const errors = [];

@@ -83,23 +83,65 @@ export function saveSnapshot(path: string, snap: ProfileSnapshot): void {
   writeVaultFile(path, JSON.stringify(snap, null, 2));
 }
 
-// Never throws; returns null for missing/corrupt files.
-export function loadSnapshot(path: string): ProfileSnapshot | null {
+// GOAL 124 — a REFUSED snapshot must not silently collapse into "no session".
+//
+// `loadSnapshot` below returns a bare `null` for THREE genuinely different
+// outcomes: the file is absent, the file exists but is unreadable (corrupt
+// JSON / permissions / a half-written capture), and the file parses but is
+// wrong-SHAPED (GOAL 59). Every consumer reads that single `null` as "no
+// session, carry on anonymously" — so a REQUESTED-but-refused account degrades
+// into an anonymous run that still answers `ok: true`. The reason was computed
+// and thrown away.
+//
+// `loadSnapshotVerdict` is the ADDITIVE sibling that keeps it: the same load,
+// but it returns the NAMED verdict. `loadSnapshot` is now a thin projection of
+// it, so every existing call site keeps its exact `ProfileSnapshot | null`
+// contract (nothing outside this file was changed), while the seams that must
+// be able to REFUSE honestly migrate to the verdict deliberately.
+export type SnapshotLoadStatus = "ok" | "absent" | "unreadable" | "shape-invalid";
+
+export interface SnapshotLoadVerdict {
+  /** The NAMED outcome. Never collapsed into a single "null". */
+  status: SnapshotLoadStatus;
+  /** The snapshot, ONLY when `status === "ok"`; null otherwise. */
+  snapshot: ProfileSnapshot | null;
+  /** The specific field message behind a `shape-invalid` refusal. */
+  detail?: string;
+}
+
+const SNAPSHOT_UNREADABLE_DETAIL = "not valid JSON (corrupt file, partial write, or unreadable permissions)";
+
+/** The load seam, with its verdict. Never throws. */
+export function loadSnapshotVerdict(path: string): SnapshotLoadVerdict {
+  let raw: unknown;
   try {
-    if (!existsSync(path)) return null;
-    const raw = JSON.parse(readFileSync(path, "utf8")) as ProfileSnapshot;
-    if (!raw || raw.version !== 1 || !raw.host) return null;
-    // GOAL 59: read-side truth gate — refuse a wrong-shaped stored snapshot
-    // (hand-edited / stale build) at the load seam instead of letting it
-    // crash injectSnapshot's `(snap.cookies ?? []).filter(...)` mid-runner or
-    // silently replaying garbage cookies into addCookies. Same null-return
-    // contract as corrupt JSON; validateSnapshotShape names the field for
-    // tests/callers that want the reason.
-    if (validateSnapshotShape(raw) !== null) return null;
-    return raw;
+    if (!existsSync(path)) return { status: "absent", snapshot: null };
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    return null;
+    return { status: "unreadable", snapshot: null, detail: SNAPSHOT_UNREADABLE_DETAIL };
   }
+  // GOAL 59: read-side truth gate — refuse a wrong-shaped stored snapshot
+  // (hand-edited / stale build) at the load seam instead of letting it crash
+  // injectSnapshot's `(snap.cookies ?? []).filter(...)` mid-runner or silently
+  // replaying garbage cookies into addCookies. The field message that used to
+  // be discarded is now the verdict's `detail`.
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { status: "shape-invalid", snapshot: null, detail: "snapshot must be an object" };
+  }
+  const s = raw as Record<string, unknown>;
+  if (s.version !== 1) return { status: "shape-invalid", snapshot: null, detail: "version must be 1" };
+  if (typeof s.host !== "string" || s.host.trim() === "") {
+    return { status: "shape-invalid", snapshot: null, detail: "host must be a non-empty string" };
+  }
+  const shape = validateSnapshotShape(s);
+  if (shape !== null) return { status: "shape-invalid", snapshot: null, detail: shape };
+  return { status: "ok", snapshot: s as unknown as ProfileSnapshot };
+}
+
+// Never throws; returns null for missing/corrupt/wrong-shaped files. The
+// NAMED reason is available from the sibling `loadSnapshotVerdict`.
+export function loadSnapshot(path: string): ProfileSnapshot | null {
+  return loadSnapshotVerdict(path).snapshot;
 }
 
 /**
