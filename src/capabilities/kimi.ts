@@ -101,6 +101,13 @@ const KIMI_ATTACH_ACCEPT = [
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ].join(",");
 
+/**
+ * GOAL 115: how long the composer's file input is given to render its
+ * attachment chip before the upload is called unconfirmed. Named so the
+ * refusal message can say the real wait the runner performed.
+ */
+const KIMI_FILE_UPLOAD_CHIP_WAIT_MS = 3600;
+
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
 }
@@ -406,12 +413,30 @@ export class KimiCapabilities {
         ) as HTMLElement | null;
         return chip ? (chip.innerText || "").trim().slice(0, 60) : null;
       });
+      // GOAL 115: the verdict is the CHIP READ-BACK, not "we handed the bytes to
+      // setInputFiles". This used to be a literal ok:true, so a payload the site
+      // silently refused (still uploading, filtered mime, signed-out shell) read
+      // as a success to any consumer. A rendered attachment chip is the
+      // post-condition; its absence is a NAMED refusal.
+      if (!attached) {
+        return {
+          capability: "kimi_file_upload",
+          ok: false,
+          method: "dom.input.setFiles",
+          data: { file: payload.name, attached: null },
+          error:
+            `no attachment chip rendered after setInputFiles (measured: the composer's file-preview/file-item/attachment element is absent ${KIMI_FILE_UPLOAD_CHIP_WAIT_MS}ms after the change event) — the site accepted the input but never confirmed the attachment; nothing was uploaded by this call`,
+        };
+      }
       return {
         capability: "kimi_file_upload",
         ok: true,
         method: "dom.input.setFiles",
-        data: { file: payload.name, attached },
-        note: "the site's own JS performs the multipart POST to notilo.kimi.com/apiv2-files/file/upload (FileService.Upload) + GetFileParseProgress tracking",
+        data: { file: payload.name, attached, verified: false },
+        note:
+          "the site's own JS performs the multipart POST to notilo.kimi.com/apiv2-files/file/upload (FileService.Upload) + GetFileParseProgress tracking. " +
+          "HONESTY (GOAL 115): ok:true here means the attachment chip was READ BACK off the page — an accepted INPUT plus the site's own confirmation chip. " +
+          "It is NOT a live round-trip claim: the model's answer actually carrying the file is unproven, so verified:false stands.",
       };
     } catch (e) {
       return this.fail("kimi_file_upload", e);

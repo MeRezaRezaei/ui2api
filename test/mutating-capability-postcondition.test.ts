@@ -155,33 +155,26 @@ const TABLE: Classification[] = [
   { id: "chatglm_conversation_crud", file: "chatglm.ts", where: "case:chatglm_conversation_crud", class: "refusal", proof: "loginGatedResult" },
   { id: "tencent_aistudio_file_upload", file: "tencent-aistudio.ts", where: "case:tencent_aistudio_file_upload", class: "refusal", proof: "measured honest ok:false — no input[type=file] in the live composer" },
   { id: "duckduckgo_file_upload", file: "duckduckgo.ts", where: "fileUpload", class: "postcondition", proof: "attachment chip read-back after setInputFiles" },
+  // --- GOAL 115: the two file_upload caps that returned a LITERAL ok:true and
+  // the one toggle that echoed the REQUESTED state. All three now derive ok
+  // from a read-back taken AFTER the mutating action. ---
+  { id: "kimi_file_upload", file: "kimi.ts", where: "fileUpload", class: "postcondition", proof: "attachment chip read-back after setInputFiles gates ok (absent chip -> named ok:false) — GOAL 115" },
+  { id: "gemini_file_upload", file: "gemini.ts", where: "fileUpload", class: "postcondition", proof: "attachment chip read-back after setInputFiles gates ok (absent chip -> named ok:false) — GOAL 115" },
+  { id: "gemini_search_toggle", file: "gemini.ts", where: "searchToggle", class: "postcondition", proof: "toggle's own aria/class state is RE-READ after the click; an unreadable or un-flipped state is a named ok:false — GOAL 115" },
 ];
 
 /**
- * Same defect family as GOAL 112, in files this change may NOT edit. Pinned
- * VISIBLY with the reason, so they cannot quietly grow and so a NEW
- * unproven-ok mutating cap fails this file loudly instead of shipping.
+ * Out-of-scope defects in files this change may not edit.
+ *
+ * EMPTY as of GOAL 115: the last three entries (kimi_file_upload,
+ * gemini_file_upload, gemini_search_toggle) were the unconditional-`ok:true`
+ * family, and all three are now fixed in src/capabilities/{kimi,gemini}.ts and
+ * classified in TABLE above. The list is kept (not deleted) as a live tripwire:
+ * a newly-discovered unproven-ok mutating cap is added here with its reason and
+ * pins that it is REAL, and the test below asserts an entry carries a literal
+ * `ok: true` verdict so a stale entry fails loudly.
  */
-const KNOWN_DEFECTS: Array<{ id: string; file: string; where: string; why: string }> = [
-  {
-    id: "kimi_file_upload",
-    file: "kimi.ts",
-    where: "fileUpload",
-    why: "returns a literal ok:true unconditionally; the attachment chip read-back lands in `data.attached` and never gates the verdict (out of scope for GOAL 112 — src/capabilities/kimi.ts)",
-  },
-  {
-    id: "gemini_file_upload",
-    file: "gemini.ts",
-    where: "fileUpload",
-    why: "returns a literal ok:true unconditionally; the chip read-back lands in `data.attached` (with an honesty disclaimer, but the verdict itself is not gated) (out of scope for GOAL 112 — src/capabilities/gemini.ts)",
-  },
-  {
-    id: "gemini_search_toggle",
-    file: "gemini.ts",
-    where: "searchToggle",
-    why: "the post-click evidence is the REQUESTED state (`now: wantOn`), not a re-read of the toggle — the click is never verified. Same family as GOAL 112, honestly a defect, out of scope here (src/capabilities/gemini.ts)",
-  },
-];
+const KNOWN_DEFECTS: Array<{ id: string; file: string; where: string; why: string }> = [];
 
 function regionFor(c: { file: string; where: string }): string {
   const src = readIfPresent(`${RUNNER_DIR}/${c.file}`);
@@ -277,11 +270,14 @@ describe("GOAL 112: every mutating capability is judged by a post-condition", ()
     assert.deepEqual(offenders, [], `mutating caps refusing without a named reason:\n${offenders.join("\n")}`);
   });
 
-  test("the known-defect list is exactly the out-of-scope unconditional-ok caps, and is still real", () => {
+  test("the known-defect list is empty after GOAL 115, and any future entry must be a REAL literal ok:true", () => {
+    // The three unconditional-ok caps GOAL 115 named are fixed and classified in
+    // TABLE. An empty list is the honest end state — a NEW defect is added here
+    // with a reason, and the pin below proves the entry is real, not a guess.
     assert.deepEqual(
-      KNOWN_DEFECTS.map((d) => d.id).sort(),
-      ["gemini_file_upload", "gemini_search_toggle", "kimi_file_upload"],
-      "the known-defect list changed: fix a cap and drop it here, or add a newly-discovered defect and say why",
+      KNOWN_DEFECTS.map((d) => d.id),
+      [],
+      `the known-defect list changed: fix a cap and drop it here, or add a newly-discovered defect and say why (now: ${KNOWN_DEFECTS.map((d) => d.id).join(", ") || "empty"})`,
     );
     for (const d of KNOWN_DEFECTS) {
       const region = stripComments(regionFor(d));
@@ -348,5 +344,127 @@ describe("GOAL 112: youtube_playlist_add's own verdict (the fixed one)", () => {
     assert.ok(PRECONDITION_BOOL.test(`ok: Boolean(playlistChoices.length)`), "the boolean-count shape is refused as well");
     // and the honest shape passes
     assert.ok(!PRECONDITION_VERDICT.test(stripComments(methodRegion(readIfPresent(`${RUNNER_DIR}/youtube.ts`), "playlistAdd"))));
+  });
+});
+
+/**
+ * GOAL 115 — the same post-condition gate applied to the three caps whose
+ * verdict was NOT derived from anything the page said:
+ *   - kimi_file_upload      → literal `ok: true` (chip read-back only in data)
+ *   - gemini_file_upload    → literal `ok: true` (an honesty STRING, but an
+ *                             ungated verdict)
+ *   - gemini_search_toggle  → `now: wantOn`, the REQUESTED state echoed back
+ * The gate below is structural, so a re-introduced ungated `ok: true` (or a
+ * restored `now: wantOn`) fails this file rather than shipping.
+ */
+
+/** Names bound to a read OFF THE PAGE inside the region. */
+function pageReadNames(region: string): string[] {
+  return [...region.matchAll(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+(?:page\.)?evaluate\(/g)].map((m) => m[1]);
+}
+
+/**
+ * A verdict is ungated when a bare `ok: true` is reachable with NO
+ * `if (!<something read off the page>) { … ok: false }` refusal in front of it.
+ * The refusal must be keyed on a page-read variable, so a DIFFERENT refusal
+ * (e.g. an unrelated payload-guard) cannot stand in as the evidence gate.
+ */
+function ungatedOkTrue(region: string): boolean {
+  const literalCount = (region.match(/ok\s*:\s*true/g) ?? []).length;
+  if (literalCount === 0) return true; // no bare ok:true at all — nothing ungated
+  const readNames = pageReadNames(region);
+  const gates = readNames.filter((name) =>
+    new RegExp(`if\\s*\\(\\s*!\\s*${name}\\s*\\)\\s*\\{[\\s\\S]{0,600}?ok\\s*:\\s*false`).test(region),
+  );
+  return gates.length === 0;
+}
+
+/** A toggle that only ever reports the REQUESTED state, never a post-click read. */
+function echoesRequestedState(region: string): boolean {
+  return /now\s*:\s*wantOn/.test(region) || /enabled\s*:\s*enable\b/.test(region);
+}
+
+/** For a toggle: the post-click read must sit AFTER the click in the region. */
+function toggleRereadsAfterClick(region: string): boolean {
+  const lastAction = Math.max(...ACTION_CALLS.map((a) => region.lastIndexOf(a)));
+  if (lastAction < 0) return false;
+  const after = region.slice(lastAction);
+  return READ_CALLS.some((r) => after.includes(r)) && /after\s*\./.test(after);
+}
+
+const KIMI_UPLOAD = { id: "kimi_file_upload", file: "kimi.ts", where: "fileUpload" };
+const GEMINI_UPLOAD = { id: "gemini_file_upload", file: "gemini.ts", where: "fileUpload" };
+const GEMINI_TOGGLE = { id: "gemini_search_toggle", file: "gemini.ts", where: "searchToggle" };
+
+describe("GOAL 115: kimi/gemini upload + toggle verdicts are read-backs, not literals", () => {
+  test("kimi_file_upload's ok is gated by the attachment chip read-back", () => {
+    const region = stripComments(regionFor(KIMI_UPLOAD));
+    assert.ok(region.length > 0, "kimi fileUpload region must be readable by the gate");
+    assert.ok(!ungatedOkTrue(region), "kimi_file_upload's ok:true must sit behind an absence-gate on the chip read-back");
+    assert.match(region, /if\s*\(\s*!\s*attached\s*\)/, "the chip read-back must gate the verdict");
+    assert.match(region, /ok\s*:\s*false[\s\S]{0,400}?no attachment chip rendered/, "an absent chip must be a NAMED refusal");
+    assert.match(region, /verified\s*:\s*false/, "an accepted INPUT is not a live round-trip — the honesty marker stays");
+    const readback = region.lastIndexOf("attached");
+    const verdict = region.lastIndexOf("ok:");
+    assert.ok(readback > 0 && verdict > 0, "the chip is read before the verdict");
+  });
+
+  test("gemini_file_upload's ok is gated by the attachment chip read-back", () => {
+    const region = stripComments(regionFor(GEMINI_UPLOAD));
+    assert.ok(region.length > 0, "gemini fileUpload region must be readable by the gate");
+    assert.ok(!ungatedOkTrue(region), "gemini_file_upload's ok:true must sit behind an absence-gate on the chip read-back");
+    assert.match(region, /if\s*\(\s*!\s*attached\s*\)/, "the chip read-back must gate the verdict");
+    assert.match(region, /ok\s*:\s*false[\s\S]{0,400}?no attachment chip rendered/, "an absent chip must be a NAMED refusal");
+    assert.match(region, /honesty/, "the accepted-input-vs-round-trip distinction must survive");
+    assert.match(region, /NOT a live round-trip claim/, "and must still refuse the live-upload claim");
+  });
+
+  test("gemini_search_toggle RE-READS the toggle after the click instead of echoing the request", () => {
+    const region = stripComments(regionFor(GEMINI_TOGGLE));
+    assert.ok(region.length > 0, "gemini searchToggle region must be readable by the gate");
+    assert.ok(!echoesRequestedState(region), "the verdict must not be the requested state (`now: wantOn`)");
+    assert.ok(toggleRereadsAfterClick(region), "a post-click read of the toggle's own state must follow the click");
+    assert.match(region, /after\s*\.\s*on\s*!==\s*enable/, "the verdict must compare the RE-READ state against the request");
+    assert.match(region, /ok\s*:\s*false[\s\S]{0,600}?could not be RE-READ afterwards/, "an unreadable post-click state is a named ok:false");
+    assert.match(region, /ok\s*:\s*false[\s\S]{0,900}?did not reach the requested state/, "a click the page ignored is a named ok:false");
+    assert.match(region, /readToggle/, "the state must be read from the page, not assumed");
+  });
+
+  test("MUTATION: the pre-fix shapes (literal ok:true, `now: wantOn`) FAIL this gate", () => {
+    // the exact kimi/gemini fileUpload verdict GOAL 115 removed, reproduced verbatim
+    const literalUpload = `
+      await fileInput.setInputFiles(payload);
+      const attached = await page.evaluate(() => readChip());
+      return { capability: "kimi_file_upload", ok: true, method: "dom.input.setFiles", data: { file: payload.name, attached } };
+    `;
+    assert.ok(ungatedOkTrue(stripComments(literalUpload)), "MUTATION: a bare ok:true beside an ungated chip read-back must be refused");
+
+    // the exact gemini_search_toggle evidence GOAL 115 removed
+    const requestedStateOnly = `
+      const currentlyOn = readState();
+      if (currentlyOn !== wantOn) el.click();
+      return { ok: true, clicked: true, now: wantOn, source: "composer-standalone" };
+    `;
+    assert.ok(echoesRequestedState(stripComments(requestedStateOnly)), "MUTATION: echoing the requested state must be refused");
+    assert.ok(!toggleRereadsAfterClick(stripComments(requestedStateOnly)), "MUTATION: no post-click re-read means no post-condition");
+
+    // and the same rules applied to MUTATIONS OF THE REAL FILES
+    const kimiSrc = readIfPresent(`${RUNNER_DIR}/kimi.ts`);
+    const kimiUngated = kimiSrc.replace("if (!attached)", "if (false) /* mutated: gate removed */");
+    assert.notEqual(kimiUngated, kimiSrc, "the mutation must actually apply to kimi.ts");
+    assert.ok(ungatedOkTrue(stripComments(methodRegion(kimiUngated, "fileUpload"))), "MUTATION: removing the chip gate in kimi.ts must fail the gate");
+
+    const geminiSrc = readIfPresent(`${RUNNER_DIR}/gemini.ts`);
+    const geminiEcho = geminiSrc.replace("after.on !== enable", "false /* mutated: assume success */");
+    assert.notEqual(geminiEcho, geminiSrc, "the mutation must actually apply to gemini.ts");
+    const mutatedToggle = stripComments(methodRegion(geminiEcho, "searchToggle"));
+    assert.ok(!/after\s*\.\s*on\s*!==\s*enable/.test(mutatedToggle), "MUTATION: assuming the flip after the click must fail the gate");
+    assert.ok(toggleRereadsAfterClick(stripComments(methodRegion(geminiSrc, "searchToggle"))), "the unmutated toggle DOES re-read after the click");
+
+    // and the honest shapes pass
+    assert.ok(!ungatedOkTrue(stripComments(methodRegion(kimiSrc, "fileUpload"))), "the real kimi.ts gates its ok");
+    assert.ok(!ungatedOkTrue(stripComments(methodRegion(geminiSrc, "fileUpload"))), "the real gemini.ts gates its ok");
+    assert.ok(!echoesRequestedState(stripComments(methodRegion(geminiSrc, "searchToggle"))), "the real gemini.ts does not echo the request");
+    assert.ok(toggleRereadsAfterClick(stripComments(methodRegion(geminiSrc, "searchToggle"))), "the real gemini.ts re-reads after the click");
   });
 });

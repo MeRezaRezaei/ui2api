@@ -108,6 +108,13 @@ const GEMINI_ATTACH_ACCEPT = [
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ].join(",");
 
+/**
+ * GOAL 115: how long the composer's file input is given to render its
+ * attachment chip before the attach is called unconfirmed. Named so the
+ * refusal can report the real wait the runner performed.
+ */
+const GEMINI_FILE_UPLOAD_CHIP_WAIT_MS = 2000;
+
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
 }
@@ -401,27 +408,76 @@ export class GeminiCapabilities {
     await waitForDomain(page, 4000);
     try {
       const enable = args.enable !== false;
-      // Pass 1: standalone composer switch (aria-label / role / text).
-      let toggled = await page.evaluate((wantOn: boolean) => {
-        // Word-boundary match: "Deep research" must NOT register as a "search"
-        // toggle (measured 2026-09-23: the tools panel exposes a stateful
-        // menuitemcheckbox "Deep research" whose label contains the substring
-        // "search" — a naive includes() would fabricate ok:true on it).
+      // GOAL 115: the verdict must be a RE-READ of the toggle, never the
+      // REQUESTED state. This runner used to return `now: wantOn` — the state
+      // the caller asked for — so a click that the page ignored (menu item
+      // re-rendered, sources entry write blocked on a signed-out session, the
+      // found element was not the real switch) still answered ok:true. Here the
+      // on/off state is read BEFORE, the click is driven only if the read state
+      // disagrees with the request, and the state is read AGAIN afterwards.
+      //
+      // Word-boundary match: "Deep research" must NOT register as a "search"
+      // toggle (measured 2026-09-23: the tools panel exposes a stateful
+      // menuitemcheckbox "Deep research" whose label contains the substring
+      // "search" — a naive includes() would fabricate ok:true on it).
+      type ToggleState = { on: boolean; label: string; role: string | null; checked: string | null } | null;
+      const readState = () => {
         const labels = ["web access", "use google search", "google search", "search on the web", "ground with google search"];
         const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']")).find((b) => {
           const t = ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").toLowerCase();
           return labels.some((l) => t.includes(l)) || (/\bsearch\b/i.test(t) && !/research/i.test(t));
-        });
+        }) as HTMLElement | null;
         if (!btn) return null;
-        const el = btn as HTMLElement;
-        const currentlyOn = el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" || el.className.includes("active") || el.className.includes("checked");
-        const matched = { label: (el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 60), tag: el.tagName, role: el.getAttribute("role"), checked: el.getAttribute("aria-checked") };
-        if (currentlyOn !== wantOn) {
-          el.click();
-          return { ok: true, clicked: true, now: wantOn, source: "composer-standalone", matched };
-        }
-        return { ok: true, clicked: false, now: wantOn, source: "composer-standalone", matched };
-      }, enable);
+        const cls = (btn.className as string).toString();
+        return {
+          on: btn.getAttribute("aria-checked") === "true" || btn.getAttribute("aria-pressed") === "true" || cls.includes("active") || cls.includes("checked"),
+          label: (btn.innerText || btn.getAttribute("aria-label") || "").trim().slice(0, 60),
+          role: btn.getAttribute("role"),
+          checked: btn.getAttribute("aria-checked"),
+        };
+      };
+      const readToggle = (): Promise<ToggleState> => page.evaluate(readState);
+      // Click the element the read-back actually named (exact label first, so a
+      // second similarly-labelled element cannot absorb the click), then let the
+      // page settle before the post-click read.
+      const clickToggle = async (label: string): Promise<boolean> => {
+        const clicked = await page
+          .evaluate((want: string) => {
+            const labels = ["web access", "use google search", "google search", "search on the web", "ground with google search"];
+            const all = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']"));
+            const text = (b: Element) => ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").trim();
+            const btn =
+              all.find((b) => text(b) === want) ??
+              all.find((b) => {
+                const t = text(b).toLowerCase();
+                return labels.some((l) => t.includes(l)) || (/\bsearch\b/i.test(t) && !/research/i.test(t));
+              });
+            if (!btn) return false;
+            (btn as HTMLElement).click();
+            return true;
+          }, label)
+          .catch(() => false);
+        if (clicked) await page.waitForTimeout(900);
+        return clicked;
+      };
+      type ToggleAttempt = {
+        source: string;
+        clicked: boolean;
+        before: { on: boolean; label: string; role: string | null; checked: string | null };
+        after: { on: boolean; label: string; role: string | null; checked: string | null } | null;
+      };
+      const attempt = async (source: string, known?: ToggleState): Promise<ToggleAttempt | null> => {
+        const before = known ?? (await readToggle());
+        if (!before) return null;
+        const clicked = before.on !== enable ? await clickToggle(before.label) : false;
+        // THE POST-CONDITION: read the toggle's own state off the page AFTER the
+        // click. Everything below is judged on `after`, never on `enable`.
+        const after: ToggleState = await page.evaluate(readState);
+        return { source, clicked, before, after };
+      };
+
+      // Pass 1: standalone composer switch (aria-label / role / text).
+      let toggled = await attempt("composer-standalone");
       // Pass 2: the "Upload & tools" panel — on signed-in sessions the sources/
       // extensions list (otAQ7b: Search=1) exposes a "Search" menuitemcheckbox
       // that rides the StreamGenerate tools field.
@@ -432,22 +488,10 @@ export class GeminiCapabilities {
           .click({ timeout: 5000 })
           .catch(() => {});
         await page.waitForTimeout(1200);
-        toggled = await page.evaluate((wantOn: boolean) => {
-          const labels = ["google search", "web access", "search on the web", "use google search", "ground with google search"];
-          const btn = Array.from(document.querySelectorAll("button, [role='switch'], [role='checkbox'], [role='menuitemcheckbox']")).find((b) => {
-            const t = ((b as HTMLElement).innerText || (b as HTMLElement).getAttribute("aria-label") || "").toLowerCase();
-            return labels.some((l) => t.includes(l)) || (/\bsearch\b/i.test(t) && !/research/i.test(t));
-          });
-          if (!btn) return null;
-          const el = btn as HTMLElement;
-          const currentlyOn = el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" || el.className.includes("active") || el.className.includes("checked");
-          const matched = { label: (el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 60), tag: el.tagName, role: el.getAttribute("role"), checked: el.getAttribute("aria-checked") };
-          if (currentlyOn !== wantOn) {
-            el.click();
-            return { ok: true, clicked: true, now: wantOn, source: "tools-sources-list", matched };
-          }
-          return { ok: true, clicked: false, now: wantOn, source: "tools-sources-list", matched };
-        }, enable);
+        // read the freshly-opened panel's toggle state off the page (a read taken
+        // AFTER the panel click, used as this pass's `before`)
+        const panelState: ToggleState = await page.evaluate(readState);
+        toggled = await attempt("tools-sources-list", panelState);
         await page.keyboard.press("Escape").catch(() => {});
       }
       if (!toggled) {
@@ -460,7 +504,39 @@ export class GeminiCapabilities {
             "feature unavailable to this session (measured live 2026-09-23): replaying every stored gemini source renders SIGNED-OUT (Google auth cookies are browser-bound/app-bound — same phenomenon as youtube posting), and Gemini's 'Google Search' grounding is a signed-in-only composer sources/extensions entry (otAQ7b Search=1) surfaced as a menuitemcheckbox riding the StreamGenerate tools field. Drive it from the user's own signed-in Chrome (UI2API_ATTACH_PORT) to flip the real toggle.",
         };
       }
-      return { capability: "gemini_search_toggle", ok: Boolean(toggled?.ok), data: toggled, method: "dom.composer-toggle" };
+      if (!toggled.after) {
+        return {
+          capability: "gemini_search_toggle",
+          ok: false,
+          method: "dom.composer-toggle",
+          data: toggled,
+          error:
+            `the ${toggled.source} search toggle was clicked (${toggled.before.label || "unlabelled"}) but could not be RE-READ afterwards — the element disappeared or the panel re-rendered mid-click, so the click is unverified; nothing is claimed`,
+        };
+      }
+      if (toggled.after.on !== enable) {
+        return {
+          capability: "gemini_search_toggle",
+          ok: false,
+          method: "dom.composer-toggle",
+          data: toggled,
+          error:
+            `the ${toggled.source} search toggle did not reach the requested state after ${toggled.clicked ? "the click" : "no click (it already reported on)"}: wanted enable=${enable}, re-read on=${toggled.after.on} (label "${toggled.after.label || "unlabelled"}", aria-checked=${toggled.after.checked ?? "absent"}, role=${toggled.after.role ?? "absent"}) — the page ignored the click, so it is NOT claimed`,
+        };
+      }
+      return {
+        capability: "gemini_search_toggle",
+        ok: true,
+        data: {
+          source: toggled.source,
+          clicked: toggled.clicked,
+          enabled: toggled.after.on,
+          before: toggled.before,
+          after: toggled.after,
+          note: "verdict is the POST-CLICK RE-READ of the toggle's own selected/aria state (GOAL 115), not the requested state",
+        },
+        method: "dom.composer-toggle",
+      };
     } catch (e) {
       return this.fail("gemini_search_toggle", e);
     } finally {
@@ -527,6 +603,21 @@ export class GeminiCapabilities {
         ) as HTMLElement | null;
         return chip ? (chip.innerText || (chip.getAttribute("aria-label") ?? "") || chip.className.split(" ").slice(0, 2).join(" ")).trim().slice(0, 60) : null;
       });
+      // GOAL 115: gate the verdict on the CHIP READ-BACK. This used to be a
+      // literal ok:true — the `honesty` string below described the weakness in
+      // prose while the VERDICT itself stayed ungated, so a consumer reading
+      // only `ok` saw a success for an attach that was never confirmed on the
+      // page. An absent chip is now a NAMED ok:false.
+      if (!attached) {
+        return {
+          capability: "gemini_file_upload",
+          ok: false,
+          method: "dom.input.setFiles",
+          data: { file: payload.name, attached: null, verified: false },
+          error:
+            `no attachment chip rendered after setInputFiles (waited ${GEMINI_FILE_UPLOAD_CHIP_WAIT_MS}ms; the composer's attachment/file-chip/file-preview/upload element is absent) — the composer accepted the input but the page never confirmed the attachment, so nothing was uploaded by this call`,
+        };
+      }
       return {
         capability: "gemini_file_upload",
         ok: true,
@@ -535,7 +626,7 @@ export class GeminiCapabilities {
           file: payload.name,
           attached,
           verified: false,
-          honesty: "ok:true = input accepted, NOT a live round-trip claim — verify against a signed-in Chrome (UI2API_ATTACH_PORT) before treating upload as verified",
+          honesty: "ok:true = input accepted AND the attachment chip was read back off the page, NOT a live round-trip claim — verify against a signed-in Chrome (UI2API_ATTACH_PORT) before treating upload as verified",
         },
       };
     } catch (e) {
