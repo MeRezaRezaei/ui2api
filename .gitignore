@@ -19,6 +19,19 @@ sites/*/server/
 sites/server/
 
 # Dependencies / build
+# Secrets — the credential red line.
+#
+# CRITICAL, found by CI (pipeline 193) and NOT by me: `.env` was NEVER ignored by
+# this repository. It only appeared ignored on the operator's box because of a
+# PERSONAL `~/.gitignore_global` — so the protection was an accident of one
+# machine, and a clean runner (CI, a fresh clone, any contributor) had NO
+# protection at all. A repo whose own ignore file does not exclude `.env` cannot
+# honestly claim the red line is machine-verified: `test/credential-red-line`
+# measures with `git check-ignore`, and it passed locally for the wrong reason.
+.env
+.env.*
+!.env.example
+
 node_modules/
 dist/
 *.log

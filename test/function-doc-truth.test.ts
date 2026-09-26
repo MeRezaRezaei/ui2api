@@ -70,12 +70,20 @@ test("negative: a doc census line that drifts from disk falls RED (scratch fixtu
   }
 });
 
-test("doc route count is cross-checked by the closure test source (33 dispatchers, HARD drift gate)", () => {
-  // The doc's ROUTES number must equal the number of `/capability/<id>`
-  // dispatchers in http.ts — the same count the closure test walks.
+test("doc route count is cross-checked by the dispatch seam (HARD drift gate)", () => {
+  // GOAL 140 collapsed the 33 per-site dispatchers into ONE table-driven handler
+  // driven by CAPABILITY_DISPATCH, so the doc's ROUTES number is now measured
+  // from the SEAM (the single `/capability/` prefix route) and the table must
+  // still cover every package that declares capabilities — otherwise a site
+  // could be advertised and unroutable, which is the defect this replaced.
   const httpSrc = readFileSync(new URL("../src/prompt/http.ts", import.meta.url), "utf8");
-  const dispatchers = [...httpSrc.matchAll(/req\.url === "\/capability\//g)].length;
+  const dispatchers = [...httpSrc.matchAll(/req\.url\?\.startsWith\("\/capability\/"\)/g)].length;
+  assert.equal(dispatchers, 1, "there must be exactly ONE /capability handler");
   assert.equal(census("ROUTES"), dispatchers);
+  // The table is the real per-site inventory, and it must stay complete.
+  const table = readFileSync(new URL("../src/prompt/capability-dispatch.ts", import.meta.url), "utf8");
+  const rows = [...table.matchAll(/^  "[a-z0-9-]+": \{ runner:/gm)].length;
+  assert.equal(census("SITES_DISPATCHED") ?? rows, rows);
   // And the doc must not claim in-sync dispatch without the hard gate being on.
   const dispatchTest = readFileSync(new URL("../test/capability-dispatch.test.ts", import.meta.url), "utf8");
   assert.match(dispatchTest, /HARD_FAIL_ON_DRIFT\s*=\s*true/, "doc cites a hard drift gate; the gate must actually be hard");

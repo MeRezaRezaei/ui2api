@@ -17,7 +17,13 @@ cannot rot silently.
 - **REAL_RUNNERS: 14** — **REAL_CAPS: 85** (live-or-scaffold runner switches)
 - **GATED: 19** — **GATED_CAPS: 76** (login-gated-by-design, honest
   `{ok:false, loginGated:true}` with no browser)
-- **ROUTES: 33** (`POST /capability/<site>` dispatchers in `src/prompt/http.ts`)
+- **ROUTES: 1** (`POST /capability/<site>` — ONE table-driven handler in
+  `src/prompt/http.ts`; the 33 per-site dispatchers it replaced are now the
+  data table `CAPABILITY_DISPATCH` in `src/prompt/capability-dispatch.ts`, one
+  row per site. GOAL 140.)
+- **SITES_DISPATCHED: 33** (rows in `CAPABILITY_DISPATCH`,
+  `src/prompt/capability-dispatch.ts` — the per-site inventory the single
+  handler serves)
 - **CHAT_PROFILES: 23** (`defaultChatProfiles()`, src/prompt/registry.ts:347 —
   the `GET /sites` list under `src/prompt/http.ts:253`)
 

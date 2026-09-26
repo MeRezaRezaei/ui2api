@@ -949,7 +949,22 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       // 400 for request-shape/identity errors the caller can correct: unknown
       // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
-      const isRequestShape = e instanceof Error && /unknown site |no stored account |is installed and serves chat|unknown capability /.test(e.message);
+      // MEASURED BUG (CI pipeline 193, pre-existing — reproduced at HEAD in a
+      // pristine worktree before I touched it): this guard matched
+      // `is installed and serves chat`, a wording that NO LONGER EXISTS. The
+      // message idFrom throws is `"<id>" is installed and serves POST /capability/<id>`,
+      // so the guard never fired and a caller who asked a capability-only site on
+      // /prompt got a 500 "internal error" — the actionable "try /capability/<id>"
+      // guidance was swallowed and replaced by a generic fault. A client cannot
+      // correct itself from "internal error". One regex, one wording, kept
+      // together below so the guard and the code cannot drift apart again.
+      const SHAPE_MESSAGES = [
+        { re: /unknown site /, code: "unknown_site" },
+        { re: /no stored account /, code: "no_stored_account" },
+        { re: /is installed and serves POST \/capability/, code: "not_chat" },
+        { re: /unknown capability /, code: "unknown_capability" },
+      ] as const;
+      const isRequestShape = e instanceof Error && SHAPE_MESSAGES.some((m) => m.re.test(e.message));
       // GOAL 143: a request-shape refusal now carries a MACHINE code beside its
       // named message, like every other refusal the daemon sends. Measured: this
       // branch sent a bare `error: "<string>"`, so a client could only recover the
@@ -957,12 +972,14 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       // did exactly that (lang-php.ts codeFor()). Reword the message and every
       // generated client silently degrades to `http_<status>`. The message is kept
       // verbatim (the caller can correct it); the code is what code should be.
-      const shapeCode = isRequestShape && e instanceof Error
-        ? /^unknown site /.test(e.message) ? "unknown_site"
-          : /^no stored account /.test(e.message) ? "no_stored_account"
-          : /^is installed and serves chat/.test(e.message) ? "not_chat"
-          : /^unknown capability /.test(e.message) ? "unknown_capability"
-          : "bad_request"
+      // Substring, not `^`-anchored: MEASURED BUG in my first cut — the
+      // not-a-chat message is `"<id>" is installed and serves POST /capability/<id>`,
+      // which STARTS WITH THE SITE ID IN QUOTES, so `/^is installed/` could never
+      // match and `not_chat` was unreachable. The `^` forms below would have had
+      // the same fate for any reworded prefix. The codes are what clients branch
+      // on, so they must not depend on where the sentence starts.
+      const shapeCode = isRequestShape
+        ? SHAPE_MESSAGES.find((m) => m.re.test(msg))?.code ?? "bad_request"
         : null;
       // GOAL 117: a request-shape error keeps its NAMED message (the caller can
       // correct it); anything else is an internal fault and must NOT echo the

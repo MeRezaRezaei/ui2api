@@ -322,19 +322,38 @@ test("GOAL30(b): a REAL default daemon serves duckduckgo on /sites + /v1/models 
         body: JSON.stringify({ site: "youtube", prompt: "hi" }),
       });
       assert.equal(youtube.status, 400, "youtube is not a chat model — must 400 (no browser launched)");
-      const youtubeBody = (await youtube.json()) as { error?: string };
+      // GOAL 143: this assertion read `error` as a STRING, which contradicted the
+      // shipped contract — README.md states `POST /prompt` answers the SAME
+      // `{"error": {"code", "message"}}` shape as /capability. The daemon now
+      // honours that, so the test reads the documented shape. The guarantee it
+      // exists to make is UNCHANGED and still asserted: the 400 must point the
+      // caller at /capability/youtube, and it must now carry a stable code too.
+      const youtubeBody = (await youtube.json()) as {
+        error?: { code?: string; message?: string } | string;
+      };
+      const structured =
+        typeof youtubeBody.error === "object" && youtubeBody.error !== null ? youtubeBody.error : null;
+      const message = structured?.message ?? (typeof youtubeBody.error === "string" ? youtubeBody.error : "");
       assert.ok(
-        /is installed and serves POST \/capability\/youtube/.test(youtubeBody.error ?? ""),
-        `youtube 400 must point at /capability/youtube: ${youtubeBody.error}`
+        /is installed and serves POST \/capability\/youtube/.test(message),
+        `youtube 400 must point at /capability/youtube: ${message}`
       );
+      assert.equal(structured?.code, "not_chat", "the not-a-chat refusal must carry its stable code");
       const nonsense = await fetch(`${base}/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ site: "no-such-site-xyz", prompt: "hi" }),
       });
       assert.equal(nonsense.status, 400);
-      const nonsenseBody = (await nonsense.json()) as { error?: string };
-      assert.ok(/unknown site "no-such-site-xyz"/.test(nonsenseBody.error ?? ""), `nonsense 400 must stay plain unknown-site: ${nonsenseBody.error}`);
+      // Same documented `{code, message}` shape as the youtube case above.
+      const nonsenseBody = (await nonsense.json()) as {
+        error?: { code?: string; message?: string } | string;
+      };
+      const nonsenseErr =
+        typeof nonsenseBody.error === "object" && nonsenseBody.error !== null ? nonsenseBody.error : null;
+      const nonsenseMsg =
+        nonsenseErr?.message ?? (typeof nonsenseBody.error === "string" ? nonsenseBody.error : "");
+      assert.ok(/unknown site "no-such-site-xyz"/.test(nonsenseMsg), `nonsense 400 must stay plain unknown-site: ${nonsenseBody.error}`);
 
       // GET /v1/models includes duckduckgo as a model.
       const modelsRes = await fetch(`${base}/v1/models`);

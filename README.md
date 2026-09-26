@@ -180,7 +180,7 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 84 hermetic unit-test files — no browser needed
+npm run test:unit   # 99 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
@@ -365,6 +365,9 @@ it, fails the suite), so it cannot silently rot.
 | 503 | `pool_saturated` | every warm browser slot is busy | retry with backoff, or raise `UI2API_POOL_MIN` |
 | 503 | `pool_queue_timeout` | the request waited in the pool queue longer than the queue deadline | retry later; sustained means the pool is undersized |
 | 503 | `pool_closed` | the pool is closed (daemon shutting down) | not retryable on this instance; fail over or restart |
+| 400 | `unknown_capability` | the `capability` is not in that site's manifest; the response lists the real ones | read the `available: [...]` list in the message and use one of those ids |
+| 400 | `no_stored_account` | the requested `account` slug/identity is not in the vault for that host | use one of the slugs the message lists, or omit `account` for the shared session |
+| 404 | `site_not_dispatched` | the site id is not in the daemon's dispatch table (it is not installed, or not routable) | the response carries a `dispatchable: [...]` list — pick one of those |
 | 504 | `request_timeout` | the browser work outlived the daemon's aggregate deadline | raise `UI2API_REQUEST_TIMEOUT_MS`, then retry |
 
 `POST /capability/<site>` and `POST /prompt` answer the same
