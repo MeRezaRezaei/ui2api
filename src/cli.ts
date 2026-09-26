@@ -70,6 +70,9 @@ interface Flags {
   use?: string;
   registry?: string;
   dataDir?: string;
+  /** GOAL 131: `ui2api chrome start --headed` / `stop --force` */
+  headed?: boolean;
+  force?: boolean;
   port?: number;
   poolMin?: number;
   poolMax?: number;
@@ -110,6 +113,9 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--use") f.use = argv[++i];
     if (argv[i] === "--registry") f.registry = argv[++i];
     if (argv[i] === "--data-dir") f.dataDir = argv[++i];
+    // GOAL 131: the chrome daemon's own flags
+    if (argv[i] === "--headed") f.headed = true;
+    if (argv[i] === "--force") f.force = true;
     if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
     if (argv[i] === "--acp") f.acp = true;
     if (argv[i] === "--mirror") f.mirror = true;
@@ -894,6 +900,40 @@ async function cmdProfileList(host: string, flags: Flags): Promise<void> {
 // (filtered packages + scoped summary — the SAME filtering the human path
 // prints, just serialized).
 
+/**
+ * GOAL 131: the persistent Chrome daemon. "We should not fire Chrome each time"
+ * — the operator's rule. One long-lived Chrome owned by the dedicated `ui2api`
+ * user, started once, and every request ATTACHES to it over CDP.
+ *
+ *   ui2api chrome start    # idempotent: already-running is reported, not respawned
+ *   ui2api chrome status
+ *   ui2api chrome stop     # refuses to kill a Chrome we did not start
+ */
+async function cmdChrome(action: string, flags: Flags): Promise<void> {
+  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  const { startChromeDaemon, stopChromeDaemon, chromeDaemonStatus, resolveAttachPort } = await import(
+    "./runtime/chrome-daemon.js"
+  );
+  if (action === "start") {
+    const r = await startChromeDaemon({ dataDir, headless: flags.headed ? false : undefined });
+    console.log(`[ui2api] ${r.note}`);
+    if (r.started) console.log(`[ui2api] attach with: UI2API_ATTACH_PORT=${r.state?.port} (auto-detected when live)`);
+    if (!r.started && !r.state) process.exitCode = 1;
+    return;
+  }
+  if (action === "stop") {
+    const r = stopChromeDaemon({ dataDir, force: flags.force });
+    console.log(`[ui2api] ${r.note}`);
+    if (!r.stopped) process.exitCode = 1;
+    return;
+  }
+  const st = await chromeDaemonStatus(dataDir);
+  const port = await resolveAttachPort(dataDir);
+  console.log(`[ui2api] ${st.note}`);
+  console.log(`[ui2api] attach port: ${port ?? "(none — a browser would be spawned per request)"}`);
+  if (!st.running) process.exitCode = 1;
+}
+
 async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void> {
   const { checkRequirements, scopeRequirementsReport } = await import("./runtime/requirements.js");
   const report = await checkRequirements({
@@ -1351,6 +1391,8 @@ async function main(): Promise<void> {
       return cmdPrompt(promptTextArg(process.argv.slice(2)), flags);
     case "promptd":
       return cmdPromptd(flags);
+    case "chrome":
+      return cmdChrome((arg ?? "status") as "start" | "status" | "stop", flags);
     case "requirements":
     case "doctor":
       // GOAL 43: <site> is read flag-aware from the WHOLE argv — so

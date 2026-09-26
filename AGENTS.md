@@ -120,6 +120,41 @@ is the ONLY info source, no site knowledge lives in the consumer):
   answer as SSE — honest: ChatDriver reads the page, it does not synthesize
   traffic). Non-chat capabilities stay on `/capability/<site>`.
 
+## THE PERSISTENT CHROME DAEMON — do not fire Chrome per request
+
+**"We should not fire the Chrome each time. Run a user daemon from the `ui2api`
+user, and after that Playwright works with it."** — the operator's rule, and it
+is what the code now does.
+
+- One long-lived Chrome, owned by the dedicated `ui2api` user, exposing a CDP
+  port. Every request **ATTACHES** to it; nothing spawns a browser per call.
+- Chrome is expensive to start (seconds) and holds the anti-bot warm state that
+  makes a session look real. A freshly-spawned Chrome has been observed dying
+  shortly after boot here while a long-lived one survives indefinitely.
+- **It is already proven, not theorised**: during the first live round-trip the
+  launched Chrome stayed alive holding the profile, the second launch was refused
+  by Chrome's one-instance-per-profile rule, and attaching to the live one
+  worked. The daemon makes that deliberate instead of accidental.
+
+```bash
+sudo -u ui2api -H npx tsx src/cli.ts chrome start    # idempotent
+sudo -u ui2api -H npx tsx src/cli.ts chrome status
+sudo -u ui2api -H npx tsx src/cli.ts chrome stop     # refuses to kill a Chrome we did not start
+```
+
+- **Idempotent, and it ADOPTS.** `start` never fires a second Chrome: if the
+  port is live it reports that, and if a Chrome for the owner is running on
+  *another* port it adopts that one and reports the port to attach to. MEASURED:
+  a live Chrome on 127.0.0.1:38073 (pid 2003645) was adopted with nothing
+  spawned. (Checking only our own port was not enough — that is how the first
+  attempt wrongly concluded "nothing is running" and got refused with
+  `Failed to create ... ProcessSingleton`.)
+- The daemon **never kills a browser it did not start** (same rule as GOAL 119's
+  attach-mode fix): `stop` refuses unless the recorded daemon is ours.
+- Code: `src/runtime/chrome-daemon.ts` (`startChromeDaemon`, `chromeDaemonStatus`,
+  `findOwnerChrome`, `resolveAttachPort`, `stopChromeDaemon`); the launch seam
+  prefers the live daemon via `UI2API_ATTACH_PORT` (see `launchBrowser`).
+
 ## GIT WIRING — both remotes, and the privacy gate
 
 The project lives on **GitHub AND GitLab**, and both are **private**.
@@ -189,6 +224,8 @@ trust posture — read them before deploying.
 | `UI2API_AI_PROFILE` | override the AI site profile | — | `src/profile/profile.ts:15` |
 | `UI2API_AI_SITE` | runtime knob | — | `src/plugins/ai-web.ts:7` |
 | `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate) | 20 MiB | `src/runtime/file-attach.ts:54` |
+| `UI2API_DAEMON_PORT` | the persistent Chrome daemon's CDP port (the target `chrome start` opens and `chrome status` reports) | `9222` | `src/runtime/chrome-daemon.ts:36` |
+| `UI2API_CHROME_DAEMON_STATE` | where the daemon records its `{port,pid,user,profile}` state (0600) | `<data>/chrome-daemon.json` | `src/runtime/chrome-daemon.ts:37` |
 | `UI2API_ATTACH_PORT` | **TRUST** runtime knob | — | `src/prompt/http.ts:675` |
 | `UI2API_ATTACH_ROOTS` | **TRUST** dirs a file-upload path may be read from (GOAL 88 gate) | none = path form refused | `src/capabilities/duckduckgo.ts:588` |
 | `UI2API_AUTH_STATE_PATH` | runtime knob | — | `src/runtime/wigolo.ts:161` |

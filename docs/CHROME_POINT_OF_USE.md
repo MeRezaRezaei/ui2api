@@ -75,6 +75,23 @@ If a site needs a login, there are two ways. **Prefer the first.**
 Either way the credentials end up in the vault, and the daemon can use them from then
 on.
 
+## Do not fire Chrome per request
+
+Chrome is started **once** and reused. Run the daemon as the owner; every
+request attaches to it over CDP.
+
+```bash
+sudo -u ui2api -H npx tsx src/cli.ts chrome start     # idempotent — never spawns twice
+sudo -u ui2api -H npx tsx src/cli.ts chrome status
+sudo -u ui2api -H npx tsx src/cli.ts chrome stop      # refuses to kill a Chrome we did not start
+```
+
+`start` **adopts** a Chrome for the owner that is already running on any port,
+rather than firing a second one — Chrome permits one instance per profile and
+will refuse anyway. When it adopts, `status` prints the port to attach to, which
+is what `UI2API_ATTACH_PORT` uses. When no daemon is live, the pool falls back to
+spawning per request, so nothing breaks if the daemon is down.
+
 ## How to check it
 
 ```bash
