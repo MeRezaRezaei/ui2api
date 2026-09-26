@@ -193,6 +193,12 @@ function resourceMax(): number {
 export class ChatPool {
   private browser?: Browser;
   private workers: PoolWorker[] = [];
+  // GOAL 103: slots RESERVED by an in-flight spawn. `workers.length` alone
+  // undercounts: spawn() awaits a browser + driver start, so concurrent acquires
+  // all saw the same pre-spawn length and every one of them spawned — measured
+  // 2 live pages at max=1, which also bypassed the maxWaiters bound entirely
+  // because the over-capacity branch sits after the spawn branch.
+  private spawning = 0;
   private waiters: PoolWaiter[] = [];
   private readonly min: number;
   private readonly max: number;
@@ -319,12 +325,19 @@ export class ChatPool {
       this.markBusy(existing);
       return Promise.resolve(existing);
     }
-    if (this.workers.length < this.max) {
-      return this.spawn(siteId).then((w) => {
-        this.workers.push(w);
-        this.markBusy(w);
-        return w;
-      });
+    // Atomic ceiling: the reservation is taken BEFORE the await and released in
+    // `finally`, so a failed spawn cannot leak a slot and deadlock the pool.
+    if (this.workers.length + this.spawning < this.max) {
+      this.spawning++;
+      return this.spawn(siteId)
+        .then((w) => {
+          this.workers.push(w);
+          this.markBusy(w);
+          return w;
+        })
+        .finally(() => {
+          this.spawning--;
+        });
     }
     // Over capacity: wait for the next free page — but only inside the two
     // bounds. GOAL 83.
