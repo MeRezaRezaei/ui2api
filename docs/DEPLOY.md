@@ -112,7 +112,7 @@ users or touch a Chrome profile. Steps 2 and 3 are what CI re-runs automatically
 ```bash
 sudo ./scripts/ops/deploy.sh                    # install + restart + health-check
 sudo ./scripts/ops/deploy.sh --no-restart       # stage the code, leave the service alone
-sudo -u ui2api ui2api chrome status             # where the browser is
+sudo -u ui2api -H ui2api chrome status        # where the browser is
 curl -s http://127.0.0.1:9797/health            # is the API alive
 sudo journalctl -u ui2api-api -n 50 --no-pager  # when it is not
 ```

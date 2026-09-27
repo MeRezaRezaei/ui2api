@@ -26,7 +26,12 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TARGET_DIR="${UI2API_DEPLOY_DIR:-/opt/ui2api}"
+# ROUND N+99: this used to read a UI2API_DEPLOY_DIR knob. Removed: the unit
+# already pins WorkingDirectory and the ExecStart path, so nothing at runtime needed
+# it, and `--target` is how you point the script somewhere else. A knob that shipped
+# code reads and no documented row explains is a knob nobody can reason about --
+# the env-knob table gate caught it on pipeline 299.
+TARGET_DIR="/opt/ui2api"
 CHROME_USER="${UI2API_CHROME_USER:-ui2api}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
 DO_RESTART=1

@@ -30,7 +30,6 @@ Group=me
 WorkingDirectory=/opt/ui2api
 Environment=HOME=/home/me
 # The DEPLOYED tree, not a git checkout. Written only by scripts/ops/deploy.sh.
-Environment=UI2API_DEPLOY_DIR=/opt/ui2api
 # THE VAULT. The captured sessions live in the operator's checkout and are real
 # login state; a deploy must never move or overwrite them, so the service is
 # pointed at them explicitly instead of inheriting a default relative to its own
