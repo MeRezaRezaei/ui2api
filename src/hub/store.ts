@@ -1,5 +1,16 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
+// The segment gate is OWNED by src/registry/safe-segment.ts and re-exported
+// here, unchanged, so this module's public API and its existing importer
+// (test/hub-store-containment.test.ts) keep working while the install seam
+// (src/registry/install.ts) shares the SAME definition. Two seams turn an
+// identifier into a filesystem path; two copies of the rule is exactly how they
+// drift apart — the install seam had no copy of it at all, and a registry index
+// key of "../PWNED" wrote a package outside the install root. Cycle check, not
+// assumed: safe-segment.ts's only import is `node:path`, so its relative-import
+// closure is itself alone and this edge cannot close a loop.
+import { assertSafePackageSegment } from "../registry/safe-segment.js";
+export { assertSafePackageSegment };
 
 export interface PackageVersion { file: string; manifest: Record<string, unknown>; module?: string; trust: "reviewed" | "unreviewed"; }
 export interface RegistryIndex { packages: Record<string, { versions: Record<string, PackageVersion>; latest: string }>; }
@@ -16,24 +27,9 @@ export interface RegistryIndex { packages: Record<string, { versions: Record<str
  * never had one.
  *
  * A publish target is not user input, it is an identifier: one safe segment.
+ * The gate now lives in `src/registry/safe-segment.ts` and is re-exported above
+ * — see the import note for why it moved and why that is not a cycle.
  */
-export function assertSafePackageSegment(field: string, value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`invalid package ${field}: must be a non-empty string (got ${JSON.stringify(value)})`);
-  }
-  if (value === "." || value === "..") {
-    throw new Error(`invalid package ${field}: ${JSON.stringify(value)} is a directory reference, not a name`);
-  }
-  if (value.includes("/") || value.includes("\\") || value.includes("\u0000")) {
-    throw new Error(
-      `invalid package ${field}: ${JSON.stringify(value)} must be a single path segment (no separators, no NUL)`
-    );
-  }
-  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
-    throw new Error(`invalid package ${field}: ${JSON.stringify(value)} may only contain letters, digits, dot, underscore and dash`);
-  }
-  return value;
-}
 
 /** The index must be an INDEX. A valid-JSON non-index is served back today. */
 function isRegistryIndexShape(v: unknown): v is RegistryIndex {
@@ -85,8 +81,17 @@ export class RegistryStore {
     if (!i.packages[safeName].latest) i.packages[safeName].latest = safeVersion;
     this.writeIndex(i);
   }
-  setTrust(name: string, version: string, trust: "reviewed" | "unreviewed"): void {
+  /**
+   * Returns WHETHER the review actually landed. This used to return void and
+   * no-op silently on a missing package, so the router above answered
+   * `200 {"ok":true,"trust":"reviewed"}` for a review of something that was
+   * never published — a success reported for a mutation that did not happen.
+   * The boolean is the truth the route needs; the write itself is unchanged.
+   */
+  setTrust(name: string, version: string, trust: "reviewed" | "unreviewed"): boolean {
     const i = this.readIndex(); const p = i.packages[name]?.versions[version];
-    if (p) { p.trust = trust; this.writeIndex(i); }
+    if (!p) return false;
+    p.trust = trust; this.writeIndex(i);
+    return true;
   }
 }

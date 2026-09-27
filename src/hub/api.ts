@@ -70,7 +70,20 @@ export function createHubRouter(store: RegistryStore, opts: { token: string; reg
       if (!okToken) return json(res, 401, { error: "unauthorized" });
       const parts = url.pathname.split("/").filter(Boolean);
       const name = parts[2]; const version = parts[3];
-      store.setTrust(name, version, "reviewed");
+      // A review that did not happen must never be reported as one. This route
+      // is the ONLY thing in the hub that mutates `trust`, and it used to
+      // answer `200 {"ok":true,"trust":"reviewed"}` unconditionally:
+      // `setTrust` silently no-ops when `packages[name].versions[version]` is
+      // absent, and `parts[2]`/`parts[3]` were read with no length check, so
+      // `POST /api/packages/review` (no name, no version) and a review of a
+      // package that was never published both returned that same success. An
+      // operator reading it would record a review that does not exist — the
+      // fabrication this repo's core red line forbids, on a mutation route.
+      // Well-formed requests are unchanged: the target exists -> 200, as before.
+      if (!name || !version) return json(res, 404, { error: "no route" });
+      if (!store.setTrust(name, version, "reviewed")) {
+        return json(res, 404, { error: `no published package "${name}@${version}" to review` });
+      }
       return json(res, 200, { ok: true, trust: "reviewed" });
     }
 

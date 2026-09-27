@@ -24,6 +24,7 @@ import { resolve, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validManifestCapability } from "../prompt/registry.js";
 import { validatePackagedProfileShape, type ChatSiteProfile } from "../profile/profile.js";
+import { assertSafePackageSegment } from "./safe-segment.js";
 
 /** The public registry's default branch (git default, reflected in the raw URL). */
 export const DEFAULT_REGISTRY_BRANCH = "master";
@@ -97,8 +98,9 @@ export function normalizeRegistryBase(input: string): string {
  */
 export async function fetchRegistryIndex(registryBaseUrl: string): Promise<RegistryIndex> {
   const base = normalizeRegistryBase(registryBaseUrl);
+  let parsed: unknown;
   try {
-    return JSON.parse(await fetchText(`${base}/index.json`)) as RegistryIndex;
+    parsed = JSON.parse(await fetchText(`${base}/index.json`));
   } catch (e) {
     const wrongBranch = base.includes(`/main/`) || base.endsWith("/main");
     // GOAL 116: the DEFAULT base is NOT a reachable registry — no public
@@ -115,6 +117,20 @@ export async function fetchRegistryIndex(registryBaseUrl: string): Promise<Regis
         : ` — no registry answered at that URL; --registry <url> / UI2API_REGISTRY_URL must point at a registry that publishes index.json on the ${DEFAULT_REGISTRY_BRANCH} branch`;
     throw new Error(`registry index.json not readable at ${base}/index.json${hint} (${e instanceof Error ? e.message : String(e)})`);
   }
+  // The catalog must be a CATALOG. `JSON.parse` alone is not a shape gate: a
+  // registry answering `null` made `Object.keys(index)` throw a bare TypeError
+  // with no named verdict, and an array/string parsed fine and was then read as
+  // a catalog of numbered entries. This mirrors `isRegistryIndexShape` on the
+  // hub's own index (`src/hub/store.ts`) — the same predicate, so the two read
+  // seams cannot disagree about what an index IS. A plain object is unchanged.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      `registry index.json at ${base}/index.json is not a ui2api registry catalog (expected a JSON object of ` +
+        `<siteId>: {name,url,version,trust}, got ${Array.isArray(parsed) ? "an array" : parsed === null ? "null" : typeof parsed}) — ` +
+        `refusing to read a catalog out of it`
+    );
+  }
+  return parsed as RegistryIndex;
 }
 
 /**
@@ -173,10 +189,24 @@ export async function installPackage(
   registryBaseUrl: string,
   packagesRoot: string
 ): Promise<InstallResult> {
+  // GOAL 113 follow-up: the containment gate above guards the FILE KEYS
+  // against a package, but its ANCHOR is `resolve(packagesRoot, host)` — so an
+  // unvalidated `host` moves the anchor itself and every file then passes
+  // containment by construction. `host` is a registry index KEY (and the CLI's
+  // site argument), so a hostile or compromised registry chooses it: an index
+  // key of `"../PWNED"` made this function return ok and write
+  // `metadata.json` + `manifest.json` to `<packagesRoot>/../PWNED` — outside the
+  // install root, which in the default no-`--out` case is the REPO ROOT. The
+  // fix is the same one the hub's write seam got in GOAL 121, and the SAME
+  // function: `assertSafePackageSegment` (src/registry/safe-segment.ts), the
+  // single definition both `resolve()`-into-a-path seams now share. Measured
+  // behaviour-identical for every real site id — all 34 `capabilities/*` ids
+  // and all 68 corpus names already pass it.
+  assertSafePackageSegment("site", host);
   const base = normalizeRegistryBase(registryBaseUrl);
   const index = await fetchRegistryIndex(base);
   const entry = index[host];
-  if (!entry) {
+  if (!entry || typeof entry !== "object") {
     const available = Object.keys(index)
       .sort()
       .map((s) => `${s}@${index[s].version ?? "?"} (${index[s].trust ?? "?"})`)
@@ -211,11 +241,26 @@ export async function installPackage(
   }
   // Recipes referenced by the manifest (`recipes/<cap>.json`) — the modern
   // layout's execution detail, replacing the dead action-map.json.
+  //
+  // An EMPTY `recipe` is NOT a path, it is a capability whose behaviour lives
+  // in the manifest itself (a live DOM toggle, described inline). The serve
+  // seam already reads it that way: `src/prompt/registry.ts` contains no
+  // occurrence of `recipe` at all and serves `capabilities/deepseek` today,
+  // whose manifest declares `"recipe": ""` for `deepseek_web_search` — and
+  // `capabilities/deepseek/recipes/` holds only `deepseek_chat.json`, because
+  // the toggle genuinely has no recipe FILE. Passing "" through to
+  // `assertPackageRelPath` therefore refused a real, shipped package with
+  // `refusing package file path "" (empty path)`: `ui2api install deepseek`
+  // was UNINSTALLABLE, and `validManifestCapability` (which requires only
+  // `id`) waved the empty string through both gates before it could. So the
+  // filter drops the empty string HERE, which is what brings the install seam
+  // into agreement with the serve seam. A NON-empty recipe is untouched, and
+  // still goes through `assertPackageRelPath` + the JSON gate below.
   const recipePaths = Array.from(
     new Set(
       (Array.isArray(manifest.capabilities) ? manifest.capabilities : [])
         .map((c) => c?.recipe)
-        .filter((r): r is string => typeof r === "string")
+        .filter((r): r is string => typeof r === "string" && r.length > 0)
     )
   );
   for (const recipe of recipePaths) {
@@ -275,10 +320,14 @@ export async function installPackage(
 
   const dir = resolve(packagesRoot, host);
   // GOAL 113: validate EVERY key before writing ANY file, so a single bad path
-  // cannot leave a half-written package behind.
+  // cannot leave a half-written package behind. The key is carried ALONG in
+  // `targets` and used again for the read at write time: re-deriving it by
+  // index (`Object.keys(textByFile)[i]`) was a second, independent derivation
+  // of the same list, which is exactly the shape that lets two surfaces of one
+  // value drift apart silently.
   const targets = Object.keys(textByFile).map((file) => [file, assertPackageRelPath(file, dir)] as const);
   for (const [, out] of targets) mkdirSync(dirname(out), { recursive: true });
-  for (const [i, [, out]] of targets.entries()) writeFileSync(out, textByFile[Object.keys(textByFile)[i]!]!);
+  for (const [file, out] of targets) writeFileSync(out, textByFile[file]!);
 
   return {
     dir,
