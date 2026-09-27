@@ -90,6 +90,18 @@ function makeDeps(overrides: Partial<RequirementsDeps> = {}): RequirementsDeps {
     // `hasBinary: () => false` reproduces CI's exact diff.
     hasBinary: () => true,
     displayUsable: () => ({ name: ":20", declared: true, usable: true }),
+    // GOAL 147: the SAME hole, the other two seams in the display-stack block.
+    // requirements.ts:410-411 still guards `missingSharedLibraries` / `fontCount`
+    // with `?? default…`, so a fixture that omits them silently reads the REAL
+    // `ldconfig -p` + `fc-list` of whatever host runs the suite. This box reports
+    // 933 fonts and has the libs, so the check passed here; a bare CI runner has
+    // no fonts and pipeline 199 then reported `on-hold: 4, ready: 0` where these
+    // tests assert `ready: 2, working: 1`. GOAL 146 injected 2 of the 4 seams in
+    // that block and missed these 2. The checks stayed honest about the runner;
+    // the TEST was reading a real host. The `deps-seam-coverage` gate below now
+    // fails LOUD if a future seam is added and this fixture forgets it.
+    missingSharedLibraries: () => [],
+    fontCount: () => 933,
     ...overrides,
   };
 }
@@ -656,6 +668,91 @@ test("default deps keep real implementations (no-op on construction; never launc
   assert.equal(deps.dataDir, "/tmp/req-default-test");
   assert.equal(typeof deps.chromeVersion, "function");
   assert.equal(deps.nodeVersion, process.versions.node);
+});
+
+// --- GOAL 147: the display-stack block reads FOUR seams, and a fixture that
+// injects fewer of them than the code has `?? default…` guards for is a test
+// that quietly asserts against the HOST. These two prove the block really reads
+// the injected font/lib seams (not a local fontconfig) and that flipping them
+// reproduces CI 199's verdict shape.
+
+test("GOAL 147: display-stack reads the INJECTED font/lib seams — zero fonts → fail with the tofu named, not the host's fontconfig", async () => {
+  await withCleanEnv(async () => {
+    const { checks } = await runOsChecks(makeDeps({ fontCount: () => 0 }));
+    const c = checks.find((x) => x.id === "display-stack")!;
+    assert.equal(c.status, "fail");
+    assert.match(c.detail ?? "", /no fonts installed/);
+    assert.match(c.detail ?? "", /tofu boxes/);
+    assert.match(c.reason ?? "", /install the desktop\/X11 stack/);
+  });
+});
+
+test("GOAL 147: display-stack reads the INJECTED missing-shared-libs seam — a reported miss → fail naming the libs, never the host's ldconfig", async () => {
+  await withCleanEnv(async () => {
+    const { checks } = await runOsChecks(makeDeps({ missingSharedLibraries: () => ["libgtk-3.so.0", "libnss3.so"] }));
+    const c = checks.find((x) => x.id === "display-stack")!;
+    assert.equal(c.status, "fail");
+    assert.match(c.detail ?? "", /missing shared libs: libgtk-3\.so\.0, libnss3\.so/);
+    assert.match(c.reason ?? "", /fonts-noto-core/);
+  });
+});
+
+test("GOAL 147: with both seams failing, checkRequirements' summary takes CI 199's shape — on-hold appears (the fixture, not the runner, decides)", async () => {
+  await withCleanEnv(async () => {
+    const world = () => [
+      pkg({}),
+      pkg({ id: "deepseek", url: "https://chat.deepseek.com", host: "chat.deepseek.com", siteStatus: "verified" }),
+      pkg({ id: "claude", url: "https://claude.ai/new", host: "claude.ai" }),
+    ];
+    const accounts = (_d: string, h: string) =>
+      h === "gemini.google.com" || h === "chat.deepseek.com"
+        ? [{ slug: "me", identity: "me@x.test", host: h, source: "import" as const, capturedAt: "2026-09-01T00:00:00.000Z" }]
+        : [];
+    const ok = await checkRequirements({
+      deps: makeDeps({
+        listAccounts: accounts,
+        packages: world,
+        registryVerified: (id) =>
+          id === "deepseek" ? { since: "2026-09-19", evidence: "proof PASS 11462", via: "session-locked vault replay" } : false,
+      }),
+    });
+    assert.deepEqual(ok.summary, { ready: 1, working: 1, "on-hold": 0, "not-ready": 1 });
+
+    const broken = await checkRequirements({
+      deps: makeDeps({ listAccounts: accounts, packages: world, fontCount: () => 0, missingSharedLibraries: () => ["libnss3.so"] }),
+    });
+    // The SAME fixture, only the two seams flipped: every package drops to
+    // on-hold and ready/working go to 0 — pipeline 199's exact diff shape.
+    assert.deepEqual(broken.summary, { ready: 0, working: 0, "on-hold": 3, "not-ready": 0 });
+    assert.ok(broken.packages.find((p) => p.id === "gemini")!.reasons.some((r) => r.includes("no fonts installed")));
+  });
+});
+
+// --- GOAL 147 durable gate: tsconfig excludes test/, so a fixture that forgets a
+// required seam is a RUNTIME hole with zero type error (exactly how GOAL 146 and
+// this fix both shipped). This compares the fixture's keys against the one
+// complete deps object the module exports — a seam nobody injects is not a seam.
+
+// The one seam the interface declares that defaultRequirementsDeps does NOT
+// fill: `chromeOwner` falls back to resolveChromeOwner() inline (requirements.ts
+// :460), exactly like the two seams GOAL 147 fixed. It is part of the required
+// set for coverage purposes.
+const INLINE_FALLBACK_SEAMS = ["chromeOwner"];
+
+test("GOAL 147: deps-seam-coverage — makeDeps injects EVERY seam the module declares (no un-injected host read can recur)", () => {
+  const required = [...Object.keys(defaultRequirementsDeps({ dataDir: "/tmp/req-seam-gate" })), ...INLINE_FALLBACK_SEAMS].sort();
+  const provided = Object.keys(makeDeps()).sort();
+  const missing = required.filter((k) => !provided.includes(k));
+  assert.deepEqual(missing, [], `deps seam coverage: the fixture never injects ${JSON.stringify(missing)} — those fall through to the real host probe (\`?? default…\` in requirements.ts). Inject them in makeDeps.`);
+  assert.deepEqual(provided.filter((k) => !required.includes(k)), [], "the fixture carries a key the module no longer declares — a typo'd seam that is silently inert");
+});
+
+test("GOAL 147: the seam-coverage gate is itself falsifiable — a key removed from the fixture is named LOUD (a gate that cannot fail is not a gate)", () => {
+  const required = [...Object.keys(defaultRequirementsDeps({ dataDir: "/tmp/req-seam-gate" })), ...INLINE_FALLBACK_SEAMS].sort();
+  const gapped = Object.fromEntries(Object.entries(makeDeps()).filter(([k]) => k !== "fontCount"));
+  const missing = required.filter((k) => !(k in gapped));
+  assert.deepEqual(missing, ["fontCount"]);
+  assert.ok(missing.length > 0, "with the seam gone the gate reports exactly it — never an empty pass");
 });
 
 // --- GOAL 42: the scoped report the --json payload serializes (doctor <site>) ---
