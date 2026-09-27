@@ -44,12 +44,17 @@ interface FixtureRow {
 
 function makeCookiesDb(dbPath: string, rows: FixtureRow[]): void {
   const db = new DatabaseSync(dbPath);
+  // No `{ timeout }` here: `DatabaseSync.exec` takes ONE argument and node 24.20
+  // silently ignores a second (measured under an EXCLUSIVE lock — `exec` with
+  // `{timeout:1500}` returned in 0ms while `PRAGMA busy_timeout = 1500` blocked
+  // 1502ms), so passing one only pretended to bound the call. `PRAGMA
+  // busy_timeout` is the real mechanism if a busy timeout is ever wanted here.
   db.exec(`CREATE TABLE cookies (
     host_key TEXT NOT NULL, name TEXT NOT NULL, value TEXT,
     encrypted_value BLOB, path TEXT, expires_utc INTEGER,
     is_secure INTEGER, is_httponly INTEGER, samesite INTEGER,
     has_expires INTEGER, source_scheme INTEGER
-  )`, { timeout: 120000 });
+  )`);
   const ins = db.prepare(
     `INSERT INTO cookies (host_key,name,value,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite,has_expires,source_scheme)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`
