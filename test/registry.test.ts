@@ -137,13 +137,21 @@ describe("prompt registry", () => {
     }
   });
 
-  it("refuses chat claims for exactly the /v1-unservable packages (GOAL 34 named 10)", () => {
+  it("refuses chat claims for exactly the /v1-unservable packages (GOAL 34 named 10, GOAL 147 added 1)", () => {
     const packages = buildRegistryPackages();
     const surfaceIds = new Set(defaultChatSurface().map((e) => e.id));
     const refused = listInstalledPackageIds().filter((id) => !surfaceIds.has(id)).sort();
-    // The 10 ids GOAL 34 names (derived above from the gate for the general
-    // rule; this literal pin forces a conscious test+docs update the day any
-    // of them becomes driveable via url/selectors + a live round-trip).
+    // The 11 ids named here (derived above from the gate for the general rule;
+    // this literal pin forces a conscious test+docs update the day any of them
+    // becomes driveable via url/selectors + a live round-trip).
+    //
+    // GOAL 147: `google-ai-search` joined this list because the BUILTIN loop of
+    // defaultChatSurface() used to admit the whole catalog unconditionally,
+    // skipping the isDriveableChatProfile gate the packaged loop already ran.
+    // Its profile is composer-less (isChatShapedProfile: not a chat shape), its
+    // manifest declares no `*_chat` capability, and its runner is a
+    // loginGated short-circuit with no chat implementation — so /v1/models was
+    // advertising a chat model with no chat tool behind it.
     assert.deepEqual(refused, [
       "adapta",
       "araprat",
@@ -151,6 +159,7 @@ describe("prompt registry", () => {
       "conol",
       "doubao",
       "gmail",
+      "google-ai-search",
       "tinycms",
       "xiaomimimo",
       "youtube",

@@ -47,7 +47,9 @@ import { handleOpenAIRoutes } from "../src/prompt/openai.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CAPABILITIES_DIR = join(ROOT, "capabilities");
-const BUILTIN_IDS = listProfiles().map((p) => p.id);
+const BUILTIN_PROFILES = listProfiles();
+const BUILTIN_IDS = BUILTIN_PROFILES.map((p) => p.id);
+const BUILTIN_BY_ID = new Map(BUILTIN_PROFILES.map((p) => [p.id, p]));
 
 /** Independently enumerate the installed chat-shaped packages straight off disk
  *  (the fixture): every capabilities/<id>/profile.json that passes the GOAL 30
@@ -136,9 +138,30 @@ test("GOAL30(a): defaultChatProfiles() = builtin catalog + every installed chat-
   const ids = set.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length, "default chat set must not contain duplicate ids");
 
-  for (const builtin of BUILTIN_IDS) {
-    assert.ok(ids.includes(builtin), `builtin "${builtin}" must stay in the default chat set`);
+  // GOAL 147: this loop used to run over the whole BUILTIN catalog, which
+  // asserted "catalog membership == chat claim" — the exact bug that let
+  // `google-ai-search` (composer-less, no `*_chat` capability, loginGated
+  // runner) be stamped chat. The catalog is the set of profiles that EXIST;
+  // the chat set is the subset that is DRIVEABLE. So the pin is restated over
+  // the driveable builtins, which is the property actually worth keeping: a
+  // driveable builtin can never be silently dropped from the chat surface.
+  for (const builtin of BUILTIN_IDS.filter((id) => isDriveableChatProfile(BUILTIN_BY_ID.get(id)!))) {
+    assert.ok(ids.includes(builtin), `driveable builtin "${builtin}" must stay in the default chat set`);
   }
+
+  // …and the exclusion is a POSITIVE, pinned fact rather than an untested
+  // accident: a builtin that is NOT driveable is in the catalog and NOT in the
+  // chat set. If someone re-admits it, this fails loudly.
+  for (const id of BUILTIN_IDS.filter((bid) => !isDriveableChatProfile(BUILTIN_BY_ID.get(bid)!))) {
+    assert.ok(
+      !ids.includes(id),
+      `non-driveable builtin "${id}" must NOT be in the default chat set — it is in the catalog but not chat-shaped`,
+    );
+  }
+  assert.ok(
+    BUILTIN_IDS.includes("google-ai-search") && !ids.includes("google-ai-search"),
+    "google-ai-search: present in the builtin catalog, absent from the chat surface (composer-less profile, no *_chat capability, loginGated runner — not a chat model)",
+  );
 
   // Fixture-anchored: whatever chat-shaped package the in-repo capabilities/
   // dir ships today must be reachable through the default set (= the surface
@@ -162,7 +185,17 @@ test("GOAL30(a): defaultChatProfiles() = builtin catalog + every installed chat-
   // posts builtin-first, so every builtin id is untouched by the package pass).
   // Shapes that repeat a builtin id are already counted in BUILTIN_IDS.
   const nonBuiltinShapes = driveables.filter((s) => !BUILTIN_IDS.includes(s.id));
-  assert.equal(set.length, BUILTIN_IDS.length + nonBuiltinShapes.length, "set = builtins + driveable non-excluded non-builtin chat shapes, no more, no less");
+  // GOAL 147: the count is over the DRIVEABLE builtins, not the whole catalog.
+  // The old arithmetic compared the chat set to `BUILTIN_IDS.length`, which only
+  // balanced while catalog membership and chat membership were the same set —
+  // the bug. Both sides are now the driveable count, so the identity is exact
+  // and it fails if a driveable builtin is ever dropped.
+  const driveableBuiltins = BUILTIN_IDS.filter((id) => isDriveableChatProfile(BUILTIN_BY_ID.get(id)!));
+  assert.equal(
+    set.length,
+    driveableBuiltins.length + nonBuiltinShapes.length,
+    "set = driveable builtins + driveable non-excluded non-builtin chat shapes, no more, no less",
+  );
 });
 
 test("GOAL30(a): capability-only packages (gmail/youtube/araprat/chatglm/tinycms) are NOT chat shapes and never merge", () => {

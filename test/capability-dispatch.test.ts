@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolvePackagedProfileFile } from "../src/profile/profile.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
+import { defaultChatSurface } from "../src/prompt/registry.js";
 import { KimiCapabilities } from "../src/capabilities/kimi.js";
 import { HunyuanCapabilities } from "../src/capabilities/hunyuan.js";
 import { VeniceCapabilities } from "../src/capabilities/venice.js";
@@ -301,6 +302,88 @@ test("drift gate: a deliberately drifted scratch manifest/runner pair FAILS the 
       () => assert.deepEqual(dispatch, manifestIds),
       "the gate's own deep-equal must report a manifest-proposes-but-runner-does-not-dispatch drift",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── 4. GOAL 141: a chat-stamped package MUST declare a `*_chat` capability ─
+//
+// The consumer map is data-driven: /registry emits one tool per
+// `manifest.capabilities[].id` and, separately, a `chat.model` for every id on
+// the daemon's chat surface (GOAL 34). The goal log recorded the case where
+// those two halves disagree: `google-ai-search` was stamped chat while its
+// manifest declared only `google_ai_mode_search` — so a consumer
+// materializing from the map got a chat model with NO chat tool, and /v1
+// advertised a chat surface the package cannot serve.
+//
+// The pin is derived, not hardcoded: the chat-stamped set is whatever
+// `defaultChatSurface()` (registry.ts) actually returns — the SAME gate that
+// stamps /sites, /v1/models, /registry `chat.model` and promptd's
+// profilesById allow-list. So the list cannot rot as packages come and go, and
+// this fails the moment a chat-stamped id's manifest stops declaring a
+// `<site>_chat` tool.
+function chatStampRequiresChatCapability(chatStampedIds: string[], capabilitiesDir: string): void {
+  const offenders: string[] = [];
+  for (const id of chatStampedIds) {
+    const manifestPath = join(capabilitiesDir, id, "manifest.json");
+    let caps: string[] = [];
+    try {
+      const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as { capabilities?: unknown };
+      caps = Array.isArray(parsed.capabilities)
+        ? parsed.capabilities
+            .map((c) => (typeof c === "object" && c !== null ? (c as { id?: unknown }).id : undefined))
+            .filter((c): c is string => typeof c === "string" && c.trim() !== "")
+        : [];
+    } catch {
+      offenders.push(`${id} (no readable capabilities/${id}/manifest.json)`);
+      continue;
+    }
+    if (!caps.some((c) => c.endsWith("_chat"))) {
+      offenders.push(`${id} (declares [${caps.join(", ") || "none"}] — no <site>_chat tool)`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `chat-stamped packages must declare a *_chat capability so the generated map is not chat-modelless: ${offenders.join("; ")}`,
+  );
+}
+
+test("GOAL141: every chat-stamped package declares a *_chat capability (no chat model without a chat tool)", () => {
+  // Fixture guard — derived from the REAL gate, so an empty/collapsed surface
+  // must not make this pin vacuously green.
+  const surface = defaultChatSurface();
+  const ids = surface.map((e) => e.id);
+  assert.ok(surface.length >= 1, "expected a non-empty default chat surface to check");
+  assert.ok(ids.includes("gemini"), "control: gemini is a chat-stamped id");
+  chatStampRequiresChatCapability(ids, u("../capabilities"));
+});
+
+test("GOAL141: the chat-stamp gate is proven to FAIL on a chat-stamped id whose manifest declares no *_chat", () => {
+  // The exact predicate the pin above asserts, driven against a SCRATCH
+  // package that reproduces the recorded gap (a chat-stamped id whose manifest
+  // declares only a non-chat capability). Real packages are never mutated — a
+  // gate nobody has seen fail is the exact claim class this repo forbids.
+  const dir = mkdtempSync(join(tmpdir(), "caps-chatstamp-gate-"));
+  try {
+    const pkg = join(dir, "scratch-stamped");
+    mkdirSync(pkg, { recursive: true });
+  writeFileSync(
+    join(pkg, "manifest.json"),
+    JSON.stringify({ id: "scratch-stamped", capabilities: [{ id: "scratch_stamped_search" }] }),
+  );
+  assert.throws(
+    () => chatStampRequiresChatCapability(["scratch-stamped"], dir),
+    /chat-stamped packages must declare a \*_chat capability/,
+    "the gate must report a chat-stamped id whose manifest declares no *_chat tool",
+  );
+  // Control: the same predicate is green once the manifest declares one.
+  writeFileSync(
+    join(pkg, "manifest.json"),
+    JSON.stringify({ id: "scratch-stamped", capabilities: [{ id: "scratch_stamped_chat" }, { id: "scratch_stamped_search" }] }),
+  );
+  chatStampRequiresChatCapability(["scratch-stamped"], dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

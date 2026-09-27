@@ -443,6 +443,19 @@ export interface ChatSurfaceEntry {
  * `ui2api prompt --sites` all reflect. Rules:
  *   - a builtin id is authoritative for that id (packaged overrides never
  *     shadow the builtin profile);
+ *   - GOAL 147: a BUILTIN id is gated by the SAME `isDriveableChatProfile`
+ *     truth-gate the packaged loop below already ran. The builtin loop used to
+ *     admit the whole catalog unconditionally, so a builtin that is NOT
+ *     chat-shaped (composer-less urlTemplate surface `google-ai-search`, whose
+ *     manifest declares no `*_chat` capability and whose runner implements
+ *     none) was stamped chat: /v1/models advertised a chat model with no chat
+ *     tool in the map, and /registry emitted `chat.model` for a package the
+ *     daemon cannot serve as chat. Catalog membership is not a chat claim —
+ *     authority is about WHICH profile serves an id, never about WHETHER it
+ *     is chat. An excluded builtin keeps every other surface exactly as before
+ *     (its package stays fully served on /registry + /capability/<id>, and an
+ *     explicit `--site google-ai-search` still resolves, because an explicit
+ *     profiles list stays authoritative);
  *   - a package only joins when `isDriveableChatProfile` — chat-shaped
  *     (composer + answer + url, GOAL 30) AND every composer/answer entry is a
  *     PARSEABLE CSS selector (GOAL 32: prose entries like t3chat's former
@@ -460,6 +473,7 @@ export function defaultChatSurface(): ChatSurfaceEntry[] {
   const entries: ChatSurfaceEntry[] = [];
   const byId = new Map<string, ChatSiteProfile>();
   for (const p of listProfiles()) {
+    if (!isDriveableChatProfile(p)) continue; // GOAL 147 — same gate as the packaged loop below
     byId.set(p.id, p);
     entries.push({ id: p.id, profile: p, status: "builtin", packaged: false });
   }
