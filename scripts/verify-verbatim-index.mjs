@@ -34,6 +34,21 @@ const G = join(root, ".brain", "verbatim-goals.md");
 const GOALS = process.argv.includes("--goals");
 
 // fold #15 machine-noise markers — the archive's own filter. No row for these.
+//
+// Unlike COMPRESSED above, this list is NOT a defect exemption: it is the
+// archive's own specification of which blocks are machine output, so it is
+// deliberately NOT liveness-gated (a noise string that matches nothing today is
+// still the right rule for tomorrow's archive) and it is deliberately NOT given a
+// size budget (a legitimate new machine-output shape must be addable).
+//
+// What IS bounded is the blast radius. `isNoise` below is PREFIX-based, so a real
+// user block that happened to BEGIN with one of these strings would be dropped from
+// the completeness count with no row, no problem, and no signal — a silently
+// understated total. test/scripts-compressed-budget.test.ts pins the four machine
+// CLASSES this filter is allowed to catch (a `<…>` tool tag, the two goal-plugin
+// echoes, the continuation auto-echo) against the real archive, so a human sentence
+// caught by the filter FAILS LOUD. The residual risk it cannot remove — a user who
+// literally opens a block with the words "New active goal:" — is stated there.
 const NOISE = [
   "<pty_exited>",
   "<SUBAGENT-STOP>",
@@ -45,11 +60,32 @@ const NOISE = [
 
 // Known hand-compressed one-lines (NOT their blocks' first words) — honest
 // allow-list, named per row so a future compressed row fails LOUD until added.
+//
+// This list is a data-quality EXEMPTION over the P3 own-words check, and every
+// entry weakens exactly that check. It is also the one suppression in this file
+// that could grow without limit, so it carries a size budget and a per-entry
+// neededness probe, both owned by test/scripts-compressed-budget.test.ts:
+//
+//   * BUDGET: the set may not exceed COMPRESSED_BUDGET entries (measured 1 on
+//     2026-09-27). The budget is the current value, not a round number above it,
+//     so the list cannot grow by one "harmless" entry.
+//   * NEEDEDNESS: each entry must still suppress a REAL P3 violation. The probe
+//     neutralises one entry at a time in a copy of THIS file, re-runs it against
+//     the real archive, and requires a new P3 problem naming a row that entry
+//     covers. An entry that suppresses nothing FAILS LOUD, because a suppression
+//     that suppresses nothing is debt with a comment on it.
+//
+// Raising the budget, or adding an entry that is not needed, is a DELIBERATE act
+// that the gate will name. Nothing here is a suggestion the gate can route around.
+const COMPRESSED_BUDGET = 1; // measured size on 2026-09-27 after the 3 obsolete entries were removed; the ceiling, not a target
+// 3 of the original 4 entries were proved OBSOLETE and removed, not tolerated:
+// with each neutralised, P3's own-words ratio is 75%, 92% and 100% against a 70%
+// threshold, so the rows they excused now pass on their own words. The gate proved
+// it end-to-end (neutralise the entry, re-run the real verifier, diff the problems),
+// because P3's ratio depends on the row->block pairing walk and a second
+// reimplementation of that walk could disagree with the gate and rot unnoticed.
 const COMPRESSED = new Set([
   "2026-09-24T00:00",
-  "2026-09-24T01:00",
-  "2026-09-22T11:00:intent-mapped",
-  "2026-09-23T11:00:intent-mapped",
 ]);
 
 const text = readFileSync(V, "utf8");
@@ -95,6 +131,10 @@ const isNoise = (b) => {
   return NOISE.some((n) => first.startsWith(n)) || t === NOISE[4];
 };
 
+// noise-class-probe: anchor — the exclusion seam the NOISE false-positive probe in
+// test/scripts-compressed-budget.test.ts instruments (it re-derives the excluded set
+// through THIS expression, not through a second copy of the rule). If this line
+// moves, that probe fails LOUD rather than silently measuring nothing.
 const userBlocks = blocks.filter((b) => !isNoise(b));
 
 // --- helpers ---
@@ -106,6 +146,20 @@ const byDate = (arr) => {
 };
 
 const problems = [];
+
+// --- P6: the COMPRESSED allow-list stays inside its budget ---
+// The set is a data-quality exemption over P3, so its size is a live liability:
+// every entry weakens the own-words proof. The budget is the MEASURED size, so
+// the list cannot grow by one entry that "looks harmless". Shrinking is always
+// allowed (a fixed violation should drop its exemption); growing is not.
+if (COMPRESSED.size > COMPRESSED_BUDGET) {
+  problems.push(
+    `P6 COMPRESSED allow-list has grown past its budget: ${COMPRESSED.size} entries ` +
+      `> COMPRESSED_BUDGET ${COMPRESSED_BUDGET} — each entry is an exemption from the P3 own-words check, ` +
+      `so a fifth one is a fifth hole. Fix the row's one-line to be its block's own words instead; ` +
+      `if a row genuinely cannot be, raise the budget DELIBERATELY and say why.`,
+  );
+}
 const rowDateSet = new Set(rows.map((r) => r.date));
 
 // --- P1: block -> row (global + per-date counts equal) ---

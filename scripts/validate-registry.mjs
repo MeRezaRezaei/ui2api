@@ -11,8 +11,26 @@ import { resolve, join } from "node:path";
 //   profile.json      (optional) selectors / login requirements
 //   recipes/*.json    (optional) per-capability recipes
 //   CAPABILITIES.md   (optional) human doc
-//   ANALYSIS.md       (optional) raw analysis notes
+//   ANALYSIS.md       (optional) raw analysis notes — SPEC ONLY, see below
 //   session.lock.json (optional) session requirement description
+//
+// This block describes the registry FORMAT, which `packages/` does not implement
+// yet (that directory does not exist), so it is not a description of what any
+// current package contains. `validatePackage` below enforces only metadata.json,
+// manifest.json and the recipe files a capability references; every other line
+// above is documentation, and documentation is not enforcement.
+//
+// `ANALYSIS.md` is the sharpest case: as of 2026-09-27 no package under
+// capabilities/ ships one (0 of the 33 that carry a manifest.json), nothing in
+// this repo writes one, and nothing reads one. It is KEPT anyway, deliberately,
+// because it is a claim about the format rather than about the tree, and a reader
+// implementing or publishing a registry repo would lose it if this line were
+// deleted. The honest reading of its absence from the tree is therefore NOT "the
+// format does not have this file" — it is "no registry repo exists yet to ship
+// one". Deleting the line would quietly convert a format spec into a description
+// of an empty directory, which is the fabrication this comment exists to prevent.
+// If the format is ever formally retired, delete the line in the same commit that
+// retires the format — never as a lint cleanup.
 //
 // Two entry points:
 //   validatePackage(dir)              -> { ok, errors } for a package dir
