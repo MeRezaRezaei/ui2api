@@ -18,6 +18,7 @@ import {
   resolveStoredAccount,
   listAccounts,
   loadAccountSnapshot,
+  validateSnapshotShape,
 } from "../src/runtime/session-store.js";
 import { importSiteSnapshot } from "../src/runtime/profile-scan.js";
 import { captureProfileFromLiveChrome } from "../src/runtime/xhost-capture.js";
@@ -75,6 +76,15 @@ function makeProfile(root: string, opts: { email?: string; rows: FixtureRow[] })
 }
 
 // --- snapshotHasAuth truth table ---
+//
+// `localStorage` entries are `[key, value]` TUPLES, because that is the shape
+// every production writer emits (live capture pushes `[k, v]`, session-store.ts:232;
+// the Chrome LevelDB ingest returns `Array<[string,string]>`, profile-ingest.ts:403)
+// and the shape the vault READ gate enforces — `validateSnapshotShape` refuses
+// anything else with "localStorage[i] must be a [string, string] tuple". A fixture
+// using `{key, value}` objects was asserting the gate against a payload production
+// can never write or read back, so it proved the length check and nothing about
+// the real format. The next test pins that format so it cannot drift back.
 
 test("snapshotHasAuth: cookies-only, localStorage-only, both -> true; neither -> false", () => {
   assert.equal(
@@ -83,18 +93,35 @@ test("snapshotHasAuth: cookies-only, localStorage-only, both -> true; neither ->
     "cookies-only must be auth"
   );
   assert.equal(
-    snapshotHasAuth({ cookies: [], localStorage: [{ key: "userToken", value: "tok" }] }),
+    snapshotHasAuth({ cookies: [], localStorage: [["userToken", "tok"]] }),
     true,
     "localStorage-only must be auth"
   );
   assert.equal(
     snapshotHasAuth({
       cookies: [{ name: "SID", value: "x", domain: ".google.com", path: "/" }],
-      localStorage: [{ key: "userToken", value: "tok" }],
+      localStorage: [["userToken", "tok"]],
     }),
     true
   );
   assert.equal(snapshotHasAuth({ cookies: [], localStorage: [] }), false, "fully empty must NOT be auth");
+});
+
+test("the localStorage fixture format IS the production format — tuples pass the vault read gate, {key,value} objects are refused", () => {
+  // The tuple form this file's fixtures use must be exactly what a real capture
+  // writes, or the truth-table above is judging a fiction.
+  const tupleForm = { version: 1, host: "chat.deepseek.com", origin: "https://chat.deepseek.com", capturedAt: "2026-09-19T00:00:00.000Z", cookies: [], localStorage: [["userToken", "tok"]], sessionStorage: [], indexedDB: [] };
+  assert.equal(validateSnapshotShape(tupleForm), null, "a real captured snapshot (tuples) passes validateSnapshotShape");
+
+  // And the shape the fixture USED to carry is not a variant production tolerates:
+  // it is refused by name. If someone "fixes" a type error by reverting to objects,
+  // this pin says why that is a fiction, not a simplification.
+  const objectForm = { ...tupleForm, localStorage: [{ key: "userToken", value: "tok" }] };
+  assert.equal(
+    validateSnapshotShape(objectForm),
+    "localStorage[0] must be a [string, string] tuple",
+    "{key,value} objects are REFUSED — such a snapshot could never be read back from the vault"
+  );
 });
 
 // --- importSiteSnapshot write refusal ---

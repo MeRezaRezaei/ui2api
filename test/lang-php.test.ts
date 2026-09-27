@@ -17,6 +17,16 @@ const pkg: RegistryPackage = {
   site: "chat.deepseek.com",
   authRequired: true,
   status: "active",
+  // Mirrors capabilities/deepseek/metadata.json's REAL `verified` record — the
+  // package IS live-verified, so the fixture must not claim `false` and must not
+  // invent a proof pointer either. This generator emits nothing from it, so it is
+  // present for shape-truth, not to move an assertion.
+  verified: {
+    since: "2026-09-19",
+    evidence: "live chat + coT + web search round-trip via session-locked vault replay, proof PASS deepseek 11462 (2026-09-19)",
+    via: "session-locked vault replay (localStorage userToken Bearer + AWS WAF/PoW page path)",
+    scope: "chat, deepseek_reasoner + deepseek_web_search composer toggles, conversation list",
+  },
   chat: { model: "deepseek", streaming: true },
   tools: [
     {
@@ -24,6 +34,20 @@ const pkg: RegistryPackage = {
       id: "deepseek_chat",
       description: "Chat on DeepSeek's own composer",
       method: "ui-path",
+      // The four map-contract fields buildRegistry() derives for EVERY tool
+      // (src/prompt/registry.ts:640-655). The fixture carries the same values a
+      // real `capabilities/deepseek` package yields:
+      //   workType           = method === "js-function" ? … : "ui-path"  -> "ui-path"
+      //   reloadAfterSuccess = hardcoded true in the builder
+      //   argsDeclared       = the deepseek manifest DOES declare an inputSchema
+      //                         for this capability, so the schema below is a
+      //                         DECLARED contract, not a GOAL 139 guess
+      //   dispatch           = isDispatchable("deepseek") is truthy (the site is
+      //                         in the dispatch table), so it is really callable
+      workType: "ui-path",
+      reloadAfterSuccess: true,
+      argsDeclared: true,
+      dispatch: "wired",
       inputSchema: {
         type: "object",
         properties: {
@@ -38,6 +62,13 @@ const pkg: RegistryPackage = {
       id: "deepseek_web_search",
       description: "Toggle the Search switch",
       method: "ui-path",
+      // Same derivation as the chat tool above (registry.ts:640-655): ui-path
+      // work, hardcoded reload, and `argsDeclared: true` because the deepseek
+      // manifest declares an (empty) inputSchema for this capability.
+      workType: "ui-path",
+      reloadAfterSuccess: true,
+      argsDeclared: true,
+      dispatch: "wired",
       inputSchema: {
         type: "object",
         properties: { state: { type: "boolean", description: "Desired toggle state" } },
@@ -49,6 +80,10 @@ const pkg: RegistryPackage = {
       id: "deepseek_list_conversations",
       description: "List sidebar conversations",
       method: "ui-path",
+      workType: "ui-path",
+      reloadAfterSuccess: true,
+      argsDeclared: true,
+      dispatch: "wired",
       inputSchema: {
         type: "object",
         properties: { limit: { type: "number", description: "Max entries" } },

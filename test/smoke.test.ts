@@ -60,6 +60,13 @@ const ANON = (): ChatSiteProfile => ({
   composer: ["textarea"],
   send: { kind: "keyEnter" },
   answer: ['[id*="assistant-message"]'],
+  // The REAL packaged duckduckgo profile's answer-readback timings
+  // (capabilities/duckduckgo/profile.json) — 45s to capture, 2s of stability
+  // before the answer is considered settled. Not 0: a 0 capture window would
+  // be a profile no real site carries, and this fixture stands in for that
+  // package.
+  captureMs: 45000,
+  stableMs: 2000,
 });
 
 const INSTALLED: InstallResult = {
