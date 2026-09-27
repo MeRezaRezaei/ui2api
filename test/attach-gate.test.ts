@@ -369,11 +369,18 @@ test("the sniffer reads the REAL bytes only, and returns null for anything unkno
 // settle FAST (no browser) with the named refusal. A future edit that routes a
 // runner back to a raw setInputFiles(path) fails BOTH.
 
-const UPLOAD_RUNNERS: Array<{ id: string; capability: string; file: string; make: (p: never) => { run: (c: string, a?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }> } }> = [
-  { id: "duckduckgo", capability: "duckduckgo_file_upload", file: "duckduckgo.ts", make: (p) => new DuckduckgoCapabilities(p) },
-  { id: "gemini", capability: "gemini_file_upload", file: "gemini.ts", make: (p) => new GeminiCapabilities(p) },
-  { id: "kimi", capability: "kimi_file_upload", file: "kimi.ts", make: (p) => new KimiCapabilities(p) },
-  { id: "youtube", capability: "youtube_upload", file: "youtube.ts", make: (p) => new YouTubeCapabilities(p) },
+// The runner constructors resolve `opts.dataDir ?? resolveDataDir()` and
+// `opts.headless ?? headlessDefault()` — the latter reads the REAL environment
+// (UI2API_HEADED / DISPLAY, src/runtime/browser.ts). These tests must not launch
+// a browser at all, so `make` REQUIRES explicit opts: the fixture's own temp dir
+// (never the operator's data/sessions vault) and headless:true.
+type UploadRunnerOptions = { dataDir: string; headless: boolean };
+
+const UPLOAD_RUNNERS: Array<{ id: string; capability: string; file: string; make: (p: never, o: UploadRunnerOptions) => { run: (c: string, a?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }> } }> = [
+  { id: "duckduckgo", capability: "duckduckgo_file_upload", file: "duckduckgo.ts", make: (p, o) => new DuckduckgoCapabilities(p, o) },
+  { id: "gemini", capability: "gemini_file_upload", file: "gemini.ts", make: (p, o) => new GeminiCapabilities(p, o) },
+  { id: "kimi", capability: "kimi_file_upload", file: "kimi.ts", make: (p, o) => new KimiCapabilities(p, o) },
+  { id: "youtube", capability: "youtube_upload", file: "youtube.ts", make: (p, o) => new YouTubeCapabilities(p, o) },
 ];
 
 for (const runner of UPLOAD_RUNNERS) {
@@ -397,13 +404,27 @@ for (const runner of UPLOAD_RUNNERS) {
       const keyPath = join(dir, ".ssh", "id_rsa");
       writeFileSync(keyPath, PRIVATE_KEY_BODY, { mode: 0o600 });
       const profile = resolvePackagedProfileFile(join(PACKAGES_DIR, runner.id, "profile.json"));
-      const caps = runner.make(profile as never);
+      const caps = runner.make(profile as never, { dataDir: dir, headless: true });
       const outcome = await settleWithinMs(
         caps.run(runner.capability, { file: { path: keyPath, name: "a.png", mimeType: "image/png" } }),
         GUARD_SETTLE_TIMEOUT_MS,
       );
       assert.equal(outcome.kind, "settled", `${runner.id} did not settle in ${GUARD_SETTLE_TIMEOUT_MS}ms — it opened a browser before gating`);
       if (outcome.kind !== "settled") return;
+      // Hermeticity proof: the runner's session root is the FIXTURE's temp dir,
+      // not resolveDataDir() (the real operator vault) — the gate refuses the
+      // payload before it could ever read a session from the real machine.
+      const runnerState = caps as unknown as { dataDir?: string; headless?: boolean };
+      assert.equal(
+        runnerState.dataDir,
+        dir,
+        `${runner.id}: the runner must resolve its dataDir from the FIXTURE opts, not resolveDataDir() (the real vault)`,
+      );
+      assert.equal(
+        runnerState.headless,
+        true,
+        `${runner.id}: the fixture pins headless:true — the runner must never inherit UI2API_HEADED / DISPLAY from the developer box`,
+      );
       assert.equal(outcome.value.ok, false, `${runner.id} must refuse the exfiltration payload`);
       const err = String(outcome.value.error ?? "");
       assert.match(err, /attach_(secret_path|roots_unconfigured|path_outside_roots)/, `${runner.id} must answer with a NAMED gate refusal, got: ${err}`);

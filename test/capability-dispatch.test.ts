@@ -56,12 +56,22 @@ const HARD_FAIL_ON_DRIFT = true;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// Every capability runner's constructor resolves `opts.dataDir ?? resolveDataDir()`
+// and `opts.headless ?? headlessDefault()`, and the latter reads the REAL
+// environment (UI2API_HEADED / DISPLAY — src/runtime/browser.ts). A fixture that
+// constructs a runner with ZERO opts therefore inherits the developer's machine
+// state, exactly like the `deps.missingSharedLibraries` omission that reddened
+// pipeline 199. `make` therefore REQUIRES explicit opts: the fixture decides, and
+// `headless: true` states the real contract of these tests (no browser is ever
+// launched, because the dispatch guard refuses before openPage()).
+interface RunnerOptions { dataDir: string; headless: boolean; }
+
 interface RunnerDef {
   id: string;
   profilePath: string;
   manifestPath: string;
   sourcePath: string;
-  make(profile: ChatSiteProfile): { run(capability: string, args?: Record<string, unknown>): Promise<unknown> };
+  make(profile: ChatSiteProfile, opts: RunnerOptions): { run(capability: string, args?: Record<string, unknown>): Promise<unknown> };
 }
 
 function u(rel: string): string {
@@ -74,98 +84,98 @@ const RUNNERS: RunnerDef[] = [
     profilePath: u("../capabilities/kimi/profile.json"),
     manifestPath: u("../capabilities/kimi/manifest.json"),
     sourcePath: u("../src/capabilities/kimi.ts"),
-    make: (p) => new KimiCapabilities(p),
+    make: (p, o) => new KimiCapabilities(p, o),
   },
   {
     id: "hunyuan",
     profilePath: u("../capabilities/hunyuan/profile.json"),
     manifestPath: u("../capabilities/hunyuan/manifest.json"),
     sourcePath: u("../src/capabilities/hunyuan.ts"),
-    make: (p) => new HunyuanCapabilities(p),
+    make: (p, o) => new HunyuanCapabilities(p, o),
   },
   {
     id: "venice",
     profilePath: u("../capabilities/venice/profile.json"),
     manifestPath: u("../capabilities/venice/manifest.json"),
     sourcePath: u("../src/capabilities/venice.ts"),
-    make: (p) => new VeniceCapabilities(p),
+    make: (p, o) => new VeniceCapabilities(p, o),
   },
   {
     id: "deepseek",
     profilePath: u("../capabilities/deepseek/profile.json"),
     manifestPath: u("../capabilities/deepseek/manifest.json"),
     sourcePath: u("../src/capabilities/deepseek.ts"),
-    make: (p) => new DeepSeekCapabilities(p),
+    make: (p, o) => new DeepSeekCapabilities(p, o),
   },
   {
     id: "tencent-aistudio",
     profilePath: u("../capabilities/tencent-aistudio/profile.json"),
     manifestPath: u("../capabilities/tencent-aistudio/manifest.json"),
     sourcePath: u("../src/capabilities/tencent-aistudio.ts"),
-    make: (p) => new TencentAistudioCapabilities(p),
+    make: (p, o) => new TencentAistudioCapabilities(p, o),
   },
   {
     id: "claude",
     profilePath: u("../capabilities/claude/profile.json"),
     manifestPath: u("../capabilities/claude/manifest.json"),
     sourcePath: u("../src/capabilities/claude.ts"),
-    make: (p) => new ClaudeCapabilities(p),
+    make: (p, o) => new ClaudeCapabilities(p, o),
   },
   {
     id: "chatgpt",
     profilePath: u("../capabilities/chatgpt/profile.json"),
     manifestPath: u("../capabilities/chatgpt/manifest.json"),
     sourcePath: u("../src/capabilities/chatgpt.ts"),
-    make: (p) => new ChatGPTCapabilities(p),
+    make: (p, o) => new ChatGPTCapabilities(p, o),
   },
   {
     id: "gemini",
     profilePath: u("../capabilities/gemini/profile.json"),
     manifestPath: u("../capabilities/gemini/manifest.json"),
     sourcePath: u("../src/capabilities/gemini.ts"),
-    make: (p) => new GeminiCapabilities(p),
+    make: (p, o) => new GeminiCapabilities(p, o),
   },
   {
     id: "huggingchat",
     profilePath: u("../capabilities/huggingchat/profile.json"),
     manifestPath: u("../capabilities/huggingchat/manifest.json"),
     sourcePath: u("../src/capabilities/huggingchat.ts"),
-    make: (p) => new HuggingChatCapabilities(p),
+    make: (p, o) => new HuggingChatCapabilities(p, o),
   },
   {
     id: "copilot",
     profilePath: u("../capabilities/copilot/profile.json"),
     manifestPath: u("../capabilities/copilot/manifest.json"),
     sourcePath: u("../src/capabilities/copilot.ts"),
-    make: (p) => new CopilotCapabilities(p),
+    make: (p, o) => new CopilotCapabilities(p, o),
   },
   {
     id: "youtube",
     profilePath: u("../capabilities/youtube/profile.json"),
     manifestPath: u("../capabilities/youtube/manifest.json"),
     sourcePath: u("../src/capabilities/youtube.ts"),
-    make: (p) => new YouTubeCapabilities(p),
+    make: (p, o) => new YouTubeCapabilities(p, o),
   },
   {
     id: "araprat",
     profilePath: u("../capabilities/araprat/profile.json"),
     manifestPath: u("../capabilities/araprat/manifest.json"),
     sourcePath: u("../src/capabilities/araprat.ts"),
-    make: (p) => new ArapratCapabilities(p),
+    make: (p, o) => new ArapratCapabilities(p, o),
   },
   {
     id: "gmail",
     profilePath: u("../capabilities/gmail/profile.json"),
     manifestPath: u("../capabilities/gmail/manifest.json"),
     sourcePath: u("../src/capabilities/gmail.ts"),
-    make: (p) => new GmailCapabilities(p),
+    make: (p, o) => new GmailCapabilities(p, o),
   },
   {
     id: "duckduckgo",
     profilePath: u("../capabilities/duckduckgo/profile.json"),
     manifestPath: u("../capabilities/duckduckgo/manifest.json"),
     sourcePath: u("../src/capabilities/duckduckgo.ts"),
-    make: (p) => new DuckduckgoCapabilities(p),
+    make: (p, o) => new DuckduckgoCapabilities(p, o),
   },
 ];
 
@@ -205,31 +215,50 @@ function extractManifestIds(manifestPath: string): string[] {
 
 for (const def of RUNNERS) {
   test(`${def.id}: run("${UNKNOWN_CAPABILITY}") → ok:false WITHOUT touching a browser`, async () => {
-    // Packaged capability profiles resolve through the PERMISSIVE packaged
-    // seam (the same loader http.ts's /capability fallback uses) — capability-
-    // only packages may carry empty composer/answer; the strict GOAL-47
-    // override gate applies only to the user's `--profile FILE` tuning seam.
-    const profile = resolvePackagedProfileFile(def.profilePath);
-    assert.equal(profile.id, def.id, "fixture resolved correctly via resolvePackagedProfileFile");
-    assert.ok(profile.url.startsWith("https://"), "profile has a valid https url");
-    assert.ok(Array.isArray(profile.composer), "profile has a composer array");
+    // Hermetic fixture dir: the runner's dataDir is the fixture's, never
+    // resolveDataDir() (the real operator vault under data/sessions/).
+    const dir = mkdtempSync(join(tmpdir(), `caps-dispatch-${def.id}-`));
+    try {
+      // Packaged capability profiles resolve through the PERMISSITE packaged
+      // seam (the same loader http.ts's /capability fallback uses) — capability-
+      // only packages may carry empty composer/answer; the strict GOAL-47
+      // override gate applies only to the user's `--profile FILE` tuning seam.
+      const profile = resolvePackagedProfileFile(def.profilePath);
+      assert.equal(profile.id, def.id, "fixture resolved correctly via resolvePackagedProfileFile");
+      assert.ok(profile.url.startsWith("https://"), "profile has a valid https url");
+      assert.ok(Array.isArray(profile.composer), "profile has a composer array");
 
-    const runner = def.make(profile);
-    const outcome = await settleWithinMs(runner.run(UNKNOWN_CAPABILITY), GUARD_SETTLE_TIMEOUT_MS);
-    assert.notEqual(outcome.kind, "timeout",
-      `${def.id}: run(unknown) did not settle in ${GUARD_SETTLE_TIMEOUT_MS}ms — it likely tried to open a page`);
+      // Explicit opts: dataDir is the fixture's, and headless:true is the honest
+      // statement of the contract (these tests must NEVER launch a browser) —
+      // instead of inheriting UI2API_HEADED / DISPLAY from the developer box.
+      const runner = def.make(profile, { dataDir: dir, headless: true });
+      const outcome = await settleWithinMs(runner.run(UNKNOWN_CAPABILITY), GUARD_SETTLE_TIMEOUT_MS);
+      assert.notEqual(outcome.kind, "timeout",
+        `${def.id}: run(unknown) did not settle in ${GUARD_SETTLE_TIMEOUT_MS}ms — it likely tried to open a page`);
 
-    assert.equal(outcome.kind, "settled",
-      `${def.id}: run(unknown) rejected with ${outcome.kind === "error" ? String(outcome.error) : "unknown"} — expected a settled {ok:false} result, not a rejection or timeout`);
+      assert.equal(outcome.kind, "settled",
+        `${def.id}: run(unknown) rejected with ${outcome.kind === "error" ? String(outcome.error) : "unknown"} — expected a settled {ok:false} result, not a rejection or timeout`);
 
-    const r = (outcome as { kind: "settled"; value: unknown }).value as { ok: boolean; capability: string; data: unknown; error?: string };
-    assert.equal(r.ok, false, `${def.id}: expected ok:false for unknown capability`);
-    assert.equal(r.capability, UNKNOWN_CAPABILITY, `${def.id}: capability echoes back in result`);
-    assert.equal(r.data, undefined, `${def.id}: data is undefined for unknown capability`);
+      const r = (outcome as { kind: "settled"; value: unknown }).value as { ok: boolean; capability: string; data: unknown; error?: string };
+      assert.equal(r.ok, false, `${def.id}: expected ok:false for unknown capability`);
+      assert.equal(r.capability, UNKNOWN_CAPABILITY, `${def.id}: capability echoes back in result`);
+      assert.equal(r.data, undefined, `${def.id}: data is undefined for unknown capability`);
 
-    const err = String(r.error ?? "");
-    assert.ok(err.includes("unknown"), `${def.id}: error contains "unknown", got: ${err}`);
-    assert.ok(err.includes(def.id), `${def.id}: error names the runner (confirms correct default branch), got: ${err}`);
+      const err = String(r.error ?? "");
+      assert.ok(err.includes("unknown"), `${def.id}: error contains "unknown", got: ${err}`);
+      assert.ok(err.includes(def.id), `${def.id}: error names the runner (confirms correct default branch), got: ${err}`);
+
+      // Hermeticity proof (not a smoke test): the refusal is instant AND the
+      // runner's session root is the fixture's temp dir, so nothing here can
+      // depend on — or write into — the operator's real data/sessions vault.
+      const runnerState = runner as unknown as { dataDir?: string; headless?: boolean };
+      assert.equal(runnerState.dataDir, dir,
+        `${def.id}: the runner must resolve its dataDir from the FIXTURE opts, not resolveDataDir() (the real vault)`);
+      assert.equal(runnerState.headless, true,
+        `${def.id}: the fixture pins headless:true — the runner must never inherit UI2API_HEADED / DISPLAY from the developer box`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 }
 

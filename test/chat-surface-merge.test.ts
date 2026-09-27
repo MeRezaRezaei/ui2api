@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -314,10 +315,18 @@ test("GOAL30(a): `ui2api prompt --sites` lists duckduckgo and omits capability-o
 test("GOAL30(b): a REAL default daemon serves duckduckgo on /sites + /v1/models and 404s unknown models", async (t) => {
   const prevAttach = process.env.UI2API_ATTACH_PORT;
   process.env.UI2API_ATTACH_PORT = "1"; // boot-warm connect-refused fast; no browser is ever spawned
+  // HERMETIC vault, NOT the repo's `data/`. `data/sessions/` is the operator's
+  // real, gitignored captured vault: a test that reads it is exactly the class
+  // that reddened CI for test/session-lock-honesty.test.ts (a captured session
+  // that exists on the author's box and does not exist in a clean checkout).
+  // An empty temp dir is also the honest default: with no stored session the
+  // daemon must still serve the chat SURFACE (ids, statuses, models) — which is
+  // what this test actually claims.
+  const dataDir = mkdtempSync(join(tmpdir(), "u2a-chat-surface-"));
   try {
     // Deliberately NO profiles argument: the DEFAULT path must merge installed
     // chat-shaped packages by itself (the GOAL 30 change).
-    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: "data" });
+    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir });
     const base = `http://127.0.0.1:${svc.port}`;
     try {
       // GET /sites lists the merged chat-shaped package.
@@ -402,6 +411,11 @@ test("GOAL30(b): a REAL default daemon serves duckduckgo on /sites + /v1/models 
       const acc = (await accRes.json()) as { site: string; accounts: unknown[] };
       assert.equal(acc.site, "duckduckgo");
       assert.ok(Array.isArray(acc.accounts));
+      // …and against the HERMETIC vault it must be EMPTY: this is the pin that
+      // would have caught the real-vault coupling, and it keeps the previous
+      // line from being vacuous (an array literal asserts only the shape).
+      assert.deepEqual(acc.accounts, [],
+        "/accounts must read the FIXTURE vault only — a non-empty list here means the daemon was handed the real data/ sessions dir");
 
       // Unknown model still 404s on the real daemon.
       const unknown = await fetch(`${base}/v1/chat/completions`, {
@@ -429,6 +443,7 @@ test("GOAL30(b): a REAL default daemon serves duckduckgo on /sites + /v1/models 
   } finally {
     if (prevAttach === undefined) delete process.env.UI2API_ATTACH_PORT;
     else process.env.UI2API_ATTACH_PORT = prevAttach;
+    rmSync(dataDir, { recursive: true, force: true });
   }
   t.diagnostic("real daemon exercised read-only chat surfaces (no browser launched)");
 });
