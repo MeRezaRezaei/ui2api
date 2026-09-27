@@ -5,17 +5,52 @@ import type { ActionMap } from "../types.js";
 import { validateActionMap } from "../schema.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const UI2API_VERSION = JSON.parse(readFileSync(resolve(SRC_DIR, "package.json"), "utf8")).version;
+const PKG_JSON = JSON.parse(readFileSync(resolve(SRC_DIR, "package.json"), "utf8")) as { version: string };
 
-export interface PackageMeta {
-  host: string;
-  name: string;
-  author: string;
-  authorizedUse: string;
-  license: string;
-  ui2api: string;
-  trust: "reviewed" | "unreviewed";
-}
+/**
+ * This build's own version — the value `buildPackage` stamps into every
+ * metadata.json as `ui2api`, and therefore the value a published manifest
+ * carries in its `ui2api` field (cmdHubPublish spreads the metadata straight
+ * into the manifest body). Exported because it is a FACT about this build,
+ * not a sample: any surface that shows an operator which `ui2api` to declare
+ * must print THIS, never a literal that rots at the next release.
+ */
+export const UI2API_VERSION: string = PKG_JSON.version;
+
+/**
+ * The published-metadata field set, as a RUNTIME tuple.
+ *
+ * This is the single source of the object every publish surface talks about:
+ * `buildPackage` writes exactly these fields, the hub's publish gate
+ * (`src/hub/publish-contract.ts`) derives its required set from them, and the
+ * hub UI's publish template derives its keys from that. It used to exist three
+ * times by hand — as this interface, as `REQUIRED_MANIFEST` in
+ * `src/hub/api.ts`, and as the pre-filled manifest JSON in `src/hub/ui.ts` —
+ * with nothing tying them together, which is the silent-rot class this repo
+ * keeps finding: add a field here and two of the three copies go quiet.
+ *
+ * The interface below is now a MAPPED TYPE over this tuple, so a key added to
+ * `buildPackage`'s literal without being added here is a COMPILE error, not a
+ * silent divergence. The tuple is the truth; the type follows it.
+ */
+export const PACKAGE_META_FIELDS = [
+  "host",
+  "name",
+  "author",
+  "authorizedUse",
+  "license",
+  "ui2api",
+  "trust",
+] as const;
+
+export type PackageMetaField = (typeof PACKAGE_META_FIELDS)[number];
+
+/**
+ * Derived from PACKAGE_META_FIELDS, so the type and the runtime tuple cannot
+ * disagree. `trust` is narrowed to the registry's own two-state contract; every
+ * other field is a string.
+ */
+export type PackageMeta = { [K in PackageMetaField]: K extends "trust" ? "reviewed" | "unreviewed" : string };
 
 /**
  * LEGACY DEAD-ARTIFACT package writer (GOAL 66, 2026-09-25).

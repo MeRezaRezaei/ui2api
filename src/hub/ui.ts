@@ -1,4 +1,5 @@
 import { RegistryStore } from "./store.js";
+import { publishTemplateJson } from "./publish-contract.js";
 
 export function renderHubHtml(store: RegistryStore, opts: { registryUrl: string }): string {
   const pkgs = store.list();
@@ -11,7 +12,7 @@ export function renderHubHtml(store: RegistryStore, opts: { registryUrl: string 
 <section><h2>Publish (operator)</h2>
 <p class="hint">Publishes via <code>PUT /api/packages</code> using the operator token.</p>
 <form id="pub"><label>token <input id="tok" type="password"></label><br>
-<label>manifest JSON <textarea id="manifest">{ "name":"", "version":"1.0.0", "author":"", "authorizedUse":"own authorized use", "license":"MIT", "ui2api":"0.1.0" }</textarea></label><br>
+<label>manifest JSON <textarea id="manifest">${publishTemplateJson()}</textarea></label><br>
 <label>module <textarea id="module">export default { name:"", setup(c){} };</textarea></label><br>
 <button type="button" onclick="publish()">Publish</button></form><pre id="out"></pre></section>
 <script>

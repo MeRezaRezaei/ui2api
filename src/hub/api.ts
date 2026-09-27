@@ -2,9 +2,15 @@ import { RegistryStore } from "./store.js";
 import { validateManifest } from "../../scripts/validate-registry.mjs";
 import { validatePublishedModule } from "./module-gate.js";
 import { renderHubHtml } from "./ui.js";
+import { PUBLISH_REQUIRED_FIELDS } from "./publish-contract.js";
 import { IncomingMessage, ServerResponse } from "node:http";
 
-const REQUIRED_MANIFEST = ["name", "version", "author", "authorizedUse", "license", "ui2api"];
+// DERIVED, not hand-typed (src/hub/publish-contract.ts): the field set a publish
+// body must carry is the WRITER's field set (buildPackage's PackageMeta) less the
+// two the store owns (host, trust) plus the one cmdHubPublish synthesises
+// (version). This used to be a six-name literal with nothing tying it to the
+// writer or to the UI template that documents the same object.
+const REQUIRED_MANIFEST = PUBLISH_REQUIRED_FIELDS;
 
 export function createHubRouter(store: RegistryStore, opts: { token: string; registryUrl: string }) {
   return async (req: IncomingMessage, res: ServerResponse) => {
