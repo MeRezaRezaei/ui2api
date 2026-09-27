@@ -19,6 +19,26 @@
 // D. is the MUTATION proof: the same predicates are run against a synthetic doc
 //    carrying a deliberately WRONG number, and must report it as a failure. A
 //    pin that cannot fail is not a pin.
+//
+// SCOPE, and the fix for the scope's last remaining hole: the rules in THIS file
+// read `README.md` + `AGENTS.md`, and that is a hand-maintained pair — which is
+// why the same rot this file removed from AGENTS.md was free in `docs/AUDIT.md`,
+// where two forbidden counts sit right now. The corpus is no longer a pair: the
+// forbidden-count rule now runs over `markdownSurfaces()`, a `readdirSync` walk
+// of every markdown surface the project ships, and it runs in TWO TIERS so a
+// genuinely historical count is not caught by accident. That work lives in
+// `test/doc-unverifiable-counts.test.ts` (the rule, the tiers, and the
+// dated-vs-current argument) and `test/doc-allow-list-liveness.test.ts` (an
+// allow-list entry that suppresses nothing). The derivations both of them share
+// are in `test/helpers/doc-scan.ts`, kept out of a `.test.ts` so importing a
+// predicate does not register a second copy of somebody's tests.
+//
+// The tests below keep the two-file scope ON PURPOSE: they are the ratio/count
+// claims AGENTS.md and README.md make, and pointing them at every derived
+// surface would change which file a failure is attributed to. Two tests here assert the
+// containment property that makes the split safe: the old corpus is a SUBSET of
+// the derived one, and the derived rule really does catch a document this file
+// never read.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -26,6 +46,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BUILTIN_PROFILES } from "../src/profile/profile.js";
+import {
+  TIER1_COUNT_RULES,
+  markdownSurfaces,
+  scanUnverifiableCounts,
+} from "./helpers/doc-scan.js";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -363,4 +388,64 @@ test("MUTATION: a wrong package count and a wrong runner count both fail", () =>
     ...checkRunnerCount(mutated, runners),
   ];
   assert.equal(problems.length, 2, `both pins must fire; got ${JSON.stringify(problems)}`);
+});
+
+// ------------------------------------------------------ corpus containment ---
+
+test("the doc corpus this file reads is a SUBSET of the derived one, and the derived one is strictly larger", () => {
+  // The two-file scope above is kept for attribution, not because it is the right
+  // corpus. This is the test that says so mechanically: if the derived walk ever
+  // stopped seeing README.md or AGENTS.md, the split would have become a silent
+  // coverage LOSS rather than a deliberate narrowing.
+  const derived = new Set(markdownSurfaces());
+  for (const f of ["README.md", "AGENTS.md"]) {
+    assert.ok(derived.has(f), `the derived doc surface no longer includes ${f} — the narrow scope is now a coverage hole, not a narrowing`);
+  }
+  assert.ok(
+    derived.size > 2,
+    `the derived doc surface has ${derived.size} files; the two-file scope is no longer a subset of anything larger, so "the extended rule covers more" is not being measured`,
+  );
+  // And the surfaces that motivated the extension, named: the forbidden-total rule
+  // used to be free in each of these.
+  for (const f of ["docs/AUDIT.md", "docs/function-api-ui-map.md", "capabilities/README.md"]) {
+    assert.ok(
+      derived.has(f),
+      `non-vacuity: the derived doc surface does not include ${f}, the surface whose stale count motivated extending the rule past AGENTS.md`,
+    );
+  }
+});
+
+test("MUTATION: a document THIS file never reads, carrying a forbidden total, is caught by the derived rule", () => {
+  // The extension proven, not asserted. `docs/AUDIT.md` is not in `DOCS`, so every
+  // pin in this file is blind to it; the derived rule must not be. If this ever
+  // passes because the synthetic text happens to be clean, the test is lying —
+  // hence the explicit `assert.ok(findForbidden(...))` precondition in the middle.
+  const injected = "## Suite\n\n`npm run test:unit` measured **961 tests / 58 suites** today.\n";
+  assert.ok(
+    findForbidden(injected).length > 0,
+    "precondition: the synthetic doc really does carry a forbidden shape",
+  );
+  const scan = scanUnverifiableCounts({
+    files: ["docs/AUDIT.md"],
+    overrides: { "docs/AUDIT.md": injected },
+  });
+  assert.ok(
+    scan.tier1.some((h) => h.rule === "suite-total"),
+    `the derived rule must report a suite total in a doc surface this file never reads: ${JSON.stringify(scan.tier1)}`,
+  );
+  // The per-file ratio this file hardcoded two basenames for is now caught by
+  // SHAPE, so the next test file is covered without editing a list.
+  const perFile = "Enforced by `test/some-future-gate.test.ts` (28/28).\n";
+  const derivedPerFile = scanUnverifiableCounts({
+    files: ["docs/AUDIT.md"],
+    overrides: { "docs/AUDIT.md": perFile },
+  });
+  assert.ok(
+    derivedPerFile.tier1.some((h) => h.rule === "per-file-ratio"),
+    `the generalized per-file ratio rule must fire for a file name no list mentions: ${JSON.stringify(derivedPerFile.tier1)}`,
+  );
+  assert.ok(
+    TIER1_COUNT_RULES.some((r) => r.id === "per-file-ratio"),
+    "precondition: the generalized per-file ratio rule exists",
+  );
 });

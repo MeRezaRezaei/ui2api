@@ -313,34 +313,18 @@ const ALL_DOC_TEXT = docFiles().map((f) => readFileSync(join(ROOT, f), "utf8")).
  * edit). Each is a real, verified finding, not a suppression of a noisy pattern.
  */
 export const ALLOWED_DOC_PATHS: { path: string; reason: string }[] = [
-  {
-    path: "src/generator/generate.js",
-    reason:
-      "docs/ENGINE.md's `Runtime path` column cites the COMPILED extension; the shipped source is src/generator/generate.ts. Verified drift, reported not hidden: the same table cites src/analyzer/explore.ts with .ts, so the column is not a consistent .js convention.",
-  },
-  {
-    path: "src/hub/serve.js",
-    reason:
-      "docs/ENGINE.md cites the compiled extension; the shipped source is src/hub/serve.ts. Verified drift (dist/hub/serve.js is build output, not a path a maintainer edits).",
-  },
-  {
-    path: "src/registry/package.js",
-    reason:
-      "docs/ENGINE.md cites the compiled extension; the shipped source is src/registry/package.ts. Verified drift.",
-  },
-  {
-    path: "src/prompt/trust.ts",
-    reason:
-      "docs/AUDIT.md:56 names a file that does not exist anywhere in the tree. The trust gate is src/prompt/http.ts + src/runtime/ssrf.ts (AGENTS.md:565). Verified drift.",
-  },
+  // EMPTY, deliberately, and the budget below is 0. All four entries are DEAD: the docs that
+  // named them no longer do — `src/generator/generate.js` (docs now say dist/generator/generate.js),
+  // `src/hub/serve.js` and `src/registry/package.js` (named nowhere), and `src/prompt/trust.ts`
+  // (CHANGELOG.md:134 records the phantom reference as removed). A suppression that suppresses
+  // nothing is not coverage, it is debt with a comment on it.
 ];
-
 /**
  * The hole this file tolerates, bounded. A growing allow-list is a gate being
  * switched off one entry at a time, so exceeding the budget fails rather than
  * passing quietly. Raise it only together with a named reason above.
  */
-export const DOC_PATH_ALLOW_BUDGET = 4;
+export const DOC_PATH_ALLOW_BUDGET = 0;
 
 // ================================================================ rules ======
 
@@ -399,7 +383,7 @@ t("every repo path a doc NAMES in a command-shaped region exists on disk", (ctx:
   // Each exemption must still be a live defect. An entry that no longer matches
   // anything is an allow-list entry rotting in place, so it is named; and the
   // budget is enforced, so the hole cannot quietly grow.
-  const obsolete = ALLOWED_DOC_PATHS.filter((a) => pathExists(a.path)).map((a) => a.path);
+  const obsolete = ALLOWED_DOC_PATHS.filter((a) => !docsMentionPath(a.path)).map((a) => a.path);
   assert.ok(
     ALLOWED_DOC_PATHS.length <= DOC_PATH_ALLOW_BUDGET,
     `allow-list grew past its budget: ${ALLOWED_DOC_PATHS.length} > ${DOC_PATH_ALLOW_BUDGET}`,
