@@ -374,7 +374,24 @@ At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path
   **Do not trust this number — derive it** (it has already moved 25 → 23 → 22
   as gates tightened): `npx tsx src/cli.ts prompt --sites`, or
   `curl -s http://127.0.0.1:9797/v1/models | jq -r '.data[].id'`, both print the
-  live surface. **GOAL 147 dropped `google-ai-search` (23 → 22):** its profile is
+  live surface. **The 10/12 builtin-vs-packaged split must ALSO be derived, never
+  hand-typed** — hand-typing it is exactly how an older revision of this file came
+  to claim "11 builtins":
+  ```bash
+  npx tsx -e '
+    import { defaultChatProfiles } from "./src/prompt/registry.ts";
+    import { BUILTIN_PROFILES } from "./src/profile/profile.ts";
+    const chat = defaultChatProfiles().map(p => p.id), keys = Object.keys(BUILTIN_PROFILES);
+    console.log(chat.length, "= builtin", chat.filter(i => keys.includes(i)).length,
+      "+ packaged", chat.filter(i => !keys.includes(i)).length);
+    console.log("BUILTIN_PROFILES:", keys.length, "| not surfaced:", keys.filter(k => !chat.includes(k)).join(" "));
+  '
+  # 22 = builtin 10 + packaged 12
+  # BUILTIN_PROFILES: 11 | not surfaced: google-ai-search
+  ```
+  The split is **10 + 12, not 11 + 11**: `BUILTIN_PROFILES` holds 11 keys but only
+  10 are surfaced as chat models. **GOAL 147 dropped `google-ai-search`
+  (23 → 22):** its profile is
   composer-less, its manifest declares no `*_chat` capability, and its runner is
   a `loginGatedResult(...)` short-circuit — it was advertised as a chat model
   with no chat tool behind it. It is NOT removed: it stays fully served as a
@@ -532,7 +549,10 @@ At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path
   400), never arbitrary URLs; optionally bearer-token gated via
   `UI2API_PROMPTD_TOKEN` (no token set = localhost-only posture, README's
   "optionally bearer-token gated").
-- **Verification before claiming done**: `npx tsc --noEmit`, `npm run build`,
+- **Verification before claiming done**: `npm ci` (the lockfile install both CI
+  configs run as their first step — `.github/workflows/ci.yml`,
+  `.gitlab-ci.yml`; a missing/rotten `node_modules` otherwise explains a local
+  failure CI never sees), `npx tsc --noEmit`, `npm run build`,
   **`npm run typecheck`** (GOAL 147 — the TEST tree, `tsconfig.test.json`, which
   `npm run build` does not compile; both CI configs run it, so omitting it here is
   how a pipeline step gets "removed" by accident), `npm test`, `npm run test:unit`,

@@ -120,6 +120,34 @@ vitest into the npx cache, which then reports `No test suite found in file`
 for every suite. Use:
 
 ```bash
-npm test          # the actual suite
-npx tsc --noEmit  # the actual typecheck
+npm test              # the actual suite (integration, needs a browser)
+npm run test:unit     # the hermetic unit suite (no browser)
+npm run typecheck     # THE typecheck — see below; it is not `npx tsc --noEmit`
 ```
+
+### There are TWO typechecks, and only one of them sees `test/`
+
+`npx tsc --noEmit` and `npm run typecheck` are **not** the same gate, and
+before this was written down people reached for the wrong one:
+
+| command | config it reads | compiles | sees `test/`? |
+|---|---|---|---|
+| `npx tsc --noEmit` | `tsconfig.json` | `src/**/*.ts` | **NO** — `"exclude": ["node_modules","dist","test"]` |
+| `npm run build` | `tsconfig.json` | `src/**/*.ts` (and emits to `dist/`) | **NO** — same exclude |
+| `npm run typecheck` | `tsconfig.test.json` | `src/**/*.ts` + `test/**/*.ts` + `scripts/**/*.ts` | **YES** — `"noEmit": true` |
+
+`npm run typecheck` is the one both CI configs run (`.github/workflows/ci.yml`,
+`.gitlab-ci.yml`, after `npm ci` → `npm run build`), and it is the only command
+that compiles the test tree at all.
+
+**Why the distinction is not pedantry:** until `tsconfig.test.json` existed,
+*nothing* ever compiled `test/**` — neither `npm run build` (excludes it) nor
+the bare `tsc` invocation people ran by hand. A test fixture could therefore
+omit four fields its interface declared `REQUIRED` and both pipelines stayed
+green, because a type error in a file nothing compiled cannot fail anything.
+`npm run typecheck` is the gate that closes that hole; treat it as part of the
+chain, not an optional extra.
+
+> If you want to reproduce what a gate sees, read the two configs rather than
+> trusting this table — it is a claim about them:
+> `node -e 'for (const f of ["tsconfig.json","tsconfig.test.json"]) console.log(f, JSON.stringify(require("./"+f).include))'`

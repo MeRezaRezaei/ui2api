@@ -199,7 +199,7 @@ npm run test:unit   # 106 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
-The `84` is the real length of the file list in `package.json`'s
+The `106` is the real length of the file list in `package.json`'s
 `scripts["test:unit"]`, not a remembered figure — derive it yourself with
 
 ```bash
@@ -213,6 +213,21 @@ observable only by running the suite, so a hand-typed total can only rot. Get
 the truth from the run itself — the last two lines of `npm run test:unit` print
 the real `# tests` / `# suites`, and CI (`.github/workflows/ci.yml`) is the lane
 that runs the full suite.
+
+**Types are a separate gate, and `npx tsc --noEmit` is not it.** `npm run build`
+compiles `src/` only — `tsconfig.json` sets `"exclude": [... "test"]` — so
+neither it nor a bare `tsc` invocation ever looks at the test tree. The command
+that does is:
+
+```bash
+npm run typecheck   # tsc -p tsconfig.test.json — src/ + test/ + scripts/
+```
+
+It is wired into **both** CI configs (`.github/workflows/ci.yml`,
+`.gitlab-ci.yml`), and before it existed a test fixture could omit fields its own
+interface declared required while both pipelines stayed green. See
+[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for the two-config
+breakdown.
 
 ## MVP — use AI sites for doing prompts
 
@@ -376,7 +391,7 @@ it, fails the suite), so it cannot silently rot.
 | status | `code` | when you get it | what to do |
 | --- | --- | --- | --- |
 | 400 | `invalid_json` | the request body is not a JSON **object** (`null`, an array, a bare string/number) | send a JSON object; a caller mistake is never a 500 |
-| 413 | `payload_too_large` | the request body exceeds 1 MB — the upload is refused and the stream destroyed | split the request; the server stops reading immediately |
+| 413 | `payload_too_large` | the request body exceeds 1 MB (10⁶ bytes, `MAX_BODY_BYTES` in `src/prompt/http.ts`) — the upload is refused and the stream destroyed | split the request; the server stops reading immediately |
 | 500 | `internal_error` | a genuine internal fault | retry later; the message is deliberately generic so no internal text, path or hostname leaks |
 | 404 | `not_found` | unknown endpoint, or a model id `GET /v1/models` does not list (a refused/dormant package) | list `GET /v1/models`; do not retry — the id is not servable |
 | 404 | `unknown_model` | the `model` is not a servable chat id (capability-only, dormant, or url-less package) | list `GET /v1/models`; do not retry — the id carries no chat surface |
