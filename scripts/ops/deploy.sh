@@ -26,11 +26,12 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# ROUND N+99: this used to read a UI2API_DEPLOY_DIR knob. Removed: the unit
-# already pins WorkingDirectory and the ExecStart path, so nothing at runtime needed
-# it, and `--target` is how you point the script somewhere else. A knob that shipped
-# code reads and no documented row explains is a knob nobody can reason about --
-# the env-knob table gate caught it on pipeline 299.
+# ROUND N+99: this target used to be overridable by an environment knob. Removed.
+# The unit already pins WorkingDirectory and the ExecStart path, so nothing at
+# runtime needed it, and `--target` is how you point the script somewhere else.
+# The env-knob table gate caught it on pipeline 299 -- and then caught the FIX too,
+# because that gate scans file TEXT, so even a comment naming the old knob reads as
+# "shipped code reads this". The name is not repeated here for that reason.
 TARGET_DIR="/opt/ui2api"
 CHROME_USER="${UI2API_CHROME_USER:-ui2api}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
