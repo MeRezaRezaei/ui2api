@@ -8,8 +8,8 @@
 // logged-in session — chat history persists, no profile dir reuse required, and
 // it works on hosts that kill debug-channel Chrome (Playwright/WebDriver both
 // need one, so profile-dir reuse is impossible there; a file is portable).
-import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync, lstatSync, readdirSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
 import type { Page, BrowserContext, Cookie } from "playwright";
 import { sanitizeHost } from "./browser.js";
 
@@ -66,6 +66,106 @@ function mkdirVaultDir(dir: string): void {
     // best effort — a chmod refusal (foreign FS, perms) must not fail the write;
     // the file below is still written 0600, which is the load-bearing bit.
   }
+}
+
+// A legacy `data/sessions` tree is full of 0644 files and 0755 dirs, which any
+// local user can read: a lifted live session. There is no non-destructive way to
+// retrofit modes onto those trees, and a destructive re-capture has already
+// overwritten captured credentials with empty ones on this box — so the only safe
+// repair is a CHMOD-ONLY pass. It never opens a file for writing, never
+// re-serializes, never moves or deletes; it only ever REMOVES permission bits.
+
+export interface VaultTightenChange {
+  path: string;
+  kind: "file" | "dir";
+  oldMode: number;
+  newMode: number;
+}
+
+export interface VaultTightenResult {
+  root: string;
+  changes: VaultTightenChange[];
+  /** already at or tighter than the vault mode — left untouched. */
+  unchanged: number;
+  /** symlinks skipped (never followed, never chmodded). */
+  skippedSymlinks: string[];
+  /** entries that could not be read/chmodded, with the reason. */
+  errors: Array<{ path: string; error: string }>;
+}
+
+/**
+ * Remove every permission bit the vault does not need: files keep only the
+ * owner's rw (0600), dirs the owner's rwx (0700). Anything already tighter (or
+ * with fewer bits set) is left alone — this pass can only tighten.
+ */
+export function tightenVaultModes(root: string): VaultTightenResult {
+  const result: VaultTightenResult = { root, changes: [], unchanged: 0, skippedSymlinks: [], errors: [] };
+
+  const apply = (path: string, want: number, kind: "file" | "dir"): void => {
+    let st: import("node:fs").Stats;
+    try {
+      // lstat, never stat: a symlink's OWN mode is meaningless (0777) and
+      // chmod would follow it out of the vault. Chrome's dangling Singleton*
+      // links live under data/ for exactly this reason.
+      st = lstatSync(path);
+    } catch (e) {
+      result.errors.push({ path, error: (e as Error).message });
+      return;
+    }
+    if (st.isSymbolicLink()) {
+      result.skippedSymlinks.push(path);
+      return;
+    }
+    if (st.isDirectory() !== (kind === "dir")) return;
+
+    const oldMode = st.mode & 0o7777;
+    // tighten only: (mode & ~want) === 0 means nothing to remove.
+    if ((oldMode & ~want) === 0) {
+      result.unchanged++;
+      return;
+    }
+    try {
+      chmodSync(path, oldMode & want);
+    } catch (e) {
+      result.errors.push({ path, error: (e as Error).message });
+      return;
+    }
+    result.changes.push({ path, kind, oldMode, newMode: oldMode & want });
+  };
+
+  const walk = (dir: string): void => {
+    apply(dir, VAULT_DIR_MODE, "dir");
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch (e) {
+      result.errors.push({ path: dir, error: (e as Error).message });
+      return;
+    }
+    for (const name of names) {
+      const child = join(dir, name);
+      let st: import("node:fs").Stats;
+      try {
+        st = lstatSync(child);
+      } catch (e) {
+        result.errors.push({ path: child, error: (e as Error).message });
+        continue;
+      }
+      if (st.isSymbolicLink()) {
+        result.skippedSymlinks.push(child);
+        continue;
+      }
+      if (st.isDirectory()) walk(child);
+      else if (st.isFile()) apply(child, VAULT_FILE_MODE, "file");
+    }
+  };
+
+  if (!existsSync(root)) {
+    result.errors.push({ path: root, error: "root does not exist" });
+    return result;
+  }
+  walk(root);
+  return result;
 }
 
 /** Write credential-bearing JSON, 0600, mode-enforced for existing files too. */
