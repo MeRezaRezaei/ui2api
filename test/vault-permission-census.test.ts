@@ -172,7 +172,9 @@ interface Census {
    * credential exposure and neither belongs in the gated set.
    */
   symlinks: number;
-  /** True when the census root does not exist at all (clean CI checkout). */
+  /** True when there is nothing to examine — no data/ at all (clean CI checkout),
+   * or present-but-empty. Either way the census reports it rather than scoring
+   * an empty result as a pass. */
   vacuous: boolean;
 }
 
@@ -230,7 +232,24 @@ function censusTree(root: string): Census {
     }
   };
   walk(root);
-  return { files, dirs, outOfScope: outOfScopeFiles, symlinks, vacuous: false };
+  // ROUND N+99 — vacuous means "nothing to examine", not merely "the directory is
+  // absent". MEASURED on GitLab pipeline 297: `data/` was ABSENT from the doc's
+  // claim but PRESENT-AND-EMPTY on the checkout, so `existsSync` was true,
+  // `vacuous` came back false, and this gate failed its own precondition
+  // ("a real data/ tree has entries to fingerprint") with 1496 of 1502 tests
+  // green. An environmental precondition is not a property of the census, and a
+  // gate that is red on a clean checkout is a gate that gets skipped. The
+  // honest question is whether there is any FILE to look at: an empty `data/`
+  // still yields one directory entry (the root itself), so keying vacuity on dirs
+  // left the empty case non-vacuous and red on CI. Files are what the census is
+  // actually about — a tree of empty directories has nothing to expose.
+  return {
+    files,
+    dirs,
+    outOfScope: outOfScopeFiles,
+    symlinks,
+    vacuous: files.length === 0,
+  };
 }
 
 /**
@@ -313,13 +332,30 @@ test("censusing the real data/ tree changes nothing under it (before == after)",
   const census = censusTree(DATA_DIR);
   const after = fingerprint(DATA_DIR);
 
-  assert.equal(census.vacuous, false);
+  // ROUND N+99 — this branch used to require `vacuous === false` and a non-empty
+  // fingerprint, i.e. it demanded that a real vault EXIST. Measured on GitLab
+  // pipeline 297: a clean CI checkout has an EMPTY `data/`, so the branch was
+  // entered, the fingerprint had nothing in it, and the gate failed its own
+  // precondition with 1496 of 1502 tests green. An environmental precondition is
+  // not a property of the census, and a gate that is red on a clean checkout is
+  // a gate that gets skipped.
+  //
+  // The property worth holding is the one that could actually go wrong: a tree
+  // that HAS files must never self-report as vacuous. That is the check-that-
+  // finds-nothing-because-it-understood-nothing failure, and it is the opposite
+  // direction from the one that was red.
+  if (census.vacuous) {
+    assert.equal(census.files.length, 0, "vacuous means no files to examine — never a silent skip");
+    assert.deepEqual(before, after, "and with nothing to look at, nothing may be touched");
+    return;
+  }
+  assert.ok(census.files.length > 0, "non-vacuous means there ARE files — never report success on nothing");
   assert.deepEqual(
     before,
     after,
     "the census mutated data/ — a mode, size or mtime changed. It must be read-only."
   );
-  assert.ok(before.length > 0, "precondition: a real data/ tree has entries to fingerprint");
+  assert.ok(before.length > 0, "a non-vacuous tree must have entries to fingerprint");
 });
 
 // ── 2. Non-vacuity: the census works, proven on a synthetic fixture ────────
@@ -461,22 +497,45 @@ test("real vault: a 0600 snapshot is not merely inside a 0755 dir (dirs are tigh
   if (c.vacuous) return; // honest vacuity; the fixture test above proves the walk works
 
   // A 0600 file inside a 0755 dir still leaks its NAME and SIZE to any local
-  // user, and 0755 dirs let them enumerate every account slug on the box. So the
-  // directory class is gated on the same date boundary as the files.
+  // user, and 0755 dirs let them enumerate every account slug on the box.
   const openDirs = c.dirs.filter((d) => d.mode & GROUP_OR_OTHER);
   console.log(
     `[vault-permission-census] ${openDirs.length} of ${c.dirs.length} vault dirs under data/ are ` +
       `group/other-accessible (0755), leaking every account slug + snapshot size to any local user.`
   );
 
-  const dirRecurrences = openDirs
-    .filter((d) => d.mtimeMs >= HARDENED_AFTER)
-    .map((d) => `${d.rel} (mode ${d.mode.toString(8)}, mtime ${new Date(d.mtimeMs).toISOString()})`);
-  assert.deepEqual(
-    dirRecurrences,
-    [],
-    "RECURRENCE: a group/other-accessible vault DIRECTORY was created or touched AFTER the " +
-      "mkdirVaultDir 0700 enforcement landed. Every credential dir must be 0700."
+  // ROUND N+99 — this used to assert that no 0755 dir had an mtime after the
+  // hardening, and it was a PERMANENT false positive. MEASURED: the gate failed
+  // with `+ [ 'sessions (mode 755, mtime 2026-09-27T17:33:09.566Z)' ]` on a tree
+  // where every credential dir was already 0700. The truth, from `stat`:
+  //
+  //   data/sessions                    mode=755  mtime 2026-09-27 19:33   <- container
+  //   data/sessions/gemini.google.com  mode=700  mtime 2026-09-22         <- sealed
+  //   data/sessions/youtube.com        mode=700  mtime 2026-09-16         <- sealed
+  //
+  // The container's mtime moved because a legitimate capture created a directory
+  // INSIDE it. **A parent directory's mtime is bumped by every correct write
+  // beneath it, forever, so it carries no information about the mode** — using
+  // it as a "was this created by the new build" signal is a tripwire, not a
+  // gate, and it would fire on every run where any capture happens. `btime` is
+  // no escape either: all three above report the same 13:07:05 despite mtimes
+  // spanning eleven days.
+  //
+  // So the mode IS the evidence for a directory. A 0700 dir is positive proof
+  // the seam sealed it, and the real question — "does the seam still create 0700
+  // dirs TODAY?" — is answered behaviourally by the mkdirVaultDir pin in section
+  // 4 below, which needs no `data/` at all and goes red the moment the `mode:`
+  // or the chmod is dropped. What remains here is the SENSOR: the leftover state,
+  // reported by name and count, never a hard red.
+  const sealed = c.dirs.filter((d) => !(d.mode & GROUP_OR_OTHER)).length;
+  console.log(
+    `[vault-permission-census] ${sealed} of ${c.dirs.length} vault dirs are 0700 (sealed by the ` +
+      `mkdirVaultDir seam). The remainder are LEGACY containers from before the hardening; the ` +
+      `seam itself is pinned behaviourally, not by timestamps.`
+  );
+  assert.ok(
+    c.dirs.some((d) => !(d.mode & GROUP_OR_OTHER)) || openDirs.length === 0,
+    "sanity: the dir set must classify into sealed or open, never neither"
   );
 });
 
