@@ -98,7 +98,19 @@ export interface VaultTightenResult {
  * owner's rw (0600), dirs the owner's rwx (0700). Anything already tighter (or
  * with fewer bits set) is left alone — this pass can only tighten.
  */
-export function tightenVaultModes(root: string): VaultTightenResult {
+export function tightenVaultModes(root: string, opts: { dryRun?: boolean } = {}): VaultTightenResult {
+  // ROUND N+101 — the dry run was LYING, and it is worth recording exactly how.
+  // The CLI printed "(not applied)" while calling this with no dry-run
+  // parameter at all, so a DRY RUN STILL chmodded. Measured on a disposable tree:
+  // a file at 0644 came back 0600 after a run whose entire output said it had not
+  // been touched. The output was cosmetic; the mutation was real.
+  //
+  // That is the worst shape a security command can have — an operator who runs it
+  // to SEE what would change has instead performed the change, and the report it
+  // prints afterwards is untrustworthy in the one direction that matters. So the
+  // dry run is a parameter HERE, at the seam that owns the syscall, not a string
+  // the caller chooses to print.
+  const dryRun = opts.dryRun === true;
   const result: VaultTightenResult = { root, changes: [], unchanged: 0, skippedSymlinks: [], errors: [] };
 
   const apply = (path: string, want: number, kind: "file" | "dir"): void => {
@@ -122,6 +134,10 @@ export function tightenVaultModes(root: string): VaultTightenResult {
     // tighten only: (mode & ~want) === 0 means nothing to remove.
     if ((oldMode & ~want) === 0) {
       result.unchanged++;
+      return;
+    }
+    if (dryRun) {
+      result.changes.push({ path, kind, oldMode, newMode: oldMode & want });
       return;
     }
     try {

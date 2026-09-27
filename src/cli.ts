@@ -8,7 +8,7 @@ import { redactActionMap } from "./runtime/redact.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, userChromeProfile } from "./runtime/browser.js";
-import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth } from "./runtime/session-store.js";
+import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth, tightenVaultModes } from "./runtime/session-store.js";
 import { buildPackage, packageCommandRefusal } from "./registry/package.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
@@ -85,6 +85,7 @@ interface Flags {
   engine?: string;
   site?: string;
   profile?: string;
+  apply?: boolean;
   json?: boolean;
   newChat?: boolean;
   timeoutMs?: number;
@@ -1090,6 +1091,67 @@ async function cmdChrome(action: string, flags: Flags): Promise<void> {
   if (!st.running) process.exitCode = 1;
 }
 
+// ROUND N+101 — `ui2api vault tighten`: the non-destructive half of the vault
+// remediation, and the reason it is safe to run at all.
+//
+// The readiness file told the operator to "rotate the credentials and tighten the
+// modes". Rotation is DESTRUCTIVE, and when a re-capture was actually run on this
+// box it overwrote two captured sessions with empty ones. Tightening the modes
+// is the half that is safe: the credentials are already world-readable, so
+// removing the group/other bits stops FURTHER exposure even though it cannot undo
+// the past. `tightenVaultModes` already existed and was already gated; this is
+// the operator-facing door onto it.
+//
+// TWO DEFAULTS, BOTH DELIBERATE:
+//
+//   - **A DRY RUN IS THE DEFAULT.** Nothing is tightened without an explicit
+//     `--apply`. This command touches the credential store of a real account, and
+//     the failure mode of a convenience default here is a surprise mutation of
+//     the one thing that is hard to get back.
+//   - **`--json` is available because the operator may want to diff two runs**,
+//     and because a security action you cannot read back is one you cannot audit.
+//
+// A `--root` flag exists so the SAME code path can be exercised against a
+// disposable tree, which is what the gate's non-vacuity proofs rely on.
+async function cmdVault(sub: string | undefined, flags: Flags): Promise<void> {
+  if (sub !== "tighten") {
+    console.error(`[ui2api] vault: unknown subcommand ${JSON.stringify(sub ?? "")} — try: ui2api vault tighten [--dry-run|--apply] [--json] [--root DIR]`);
+    process.exitCode = 2;
+    return;
+  }
+  const root = flags.root ?? resolveDataDir();
+  const apply = flags.apply === true;
+  const res = tightenVaultModes(root, { dryRun: !apply });
+
+  if (flags.json) {
+    console.log(
+      JSON.stringify(
+        { mode: apply ? "apply" : "dry-run", root: res.root, changed: res.changes.length, unchanged: res.unchanged, skippedSymlinks: res.skippedSymlinks.length, errors: res.errors.length, changes: res.changes, errors_detail: res.errors },
+        null,
+        2
+      )
+    );
+  } else {
+    console.log(`[ui2api] vault tighten — ${apply ? "APPLY" : "DRY RUN (pass --apply to tighten)"}`);
+    console.log(`[ui2api] root: ${res.root}`);
+    for (const c of res.changes) {
+      const from = c.oldMode.toString(8).padStart(4, "0");
+      const to = c.newMode.toString(8).padStart(4, "0");
+      console.log(`[ui2api]   ${c.kind.padEnd(4)} ${c.path}  ${from} -> ${to}${apply ? "" : "   (not applied)"}`);
+    }
+    console.log(
+      `[ui2api] ${res.changes.length} entr${res.changes.length === 1 ? "y" : "ies"} would change, ` +
+        `${res.unchanged} already tight, ${res.skippedSymlinks.length} symlink(s) skipped, ` +
+        `${res.errors.length} error(s)`
+    );
+    if (!apply && res.changes.length > 0) console.log("[ui2api] dry run — nothing was modified. Re-run with --apply to tighten.");
+  }
+
+  // A partially-failed security pass must not read as a clean one. Nonzero on any
+  // error, in BOTH modes, so a scripted caller cannot mistake either for success.
+  if (res.errors.length > 0) process.exitCode = 1;
+}
+
 async function cmdRequirements(siteOrEmpty: string, flags: Flags): Promise<void> {
   const { checkRequirements, scopeRequirementsReport } = await import("./runtime/requirements.js");
   const report = await checkRequirements({
@@ -1547,6 +1609,8 @@ async function main(): Promise<void> {
       return cmdPrompt(promptTextArg(process.argv.slice(2)), flags);
     case "promptd":
       return cmdPromptd(flags);
+    case "vault":
+      return cmdVault(arg, flags);
     case "chrome":
       return cmdChrome((arg ?? "status") as "start" | "status" | "stop", flags);
     case "requirements":

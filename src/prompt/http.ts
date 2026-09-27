@@ -1039,6 +1039,20 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       // GOAL 117: a request-shape error keeps its NAMED message (the caller can
       // correct it); anything else is an internal fault and must NOT echo the
       // internal text to the client.
+      // ROUND N+101 — an internal fault used to be DISCARDED here: not logged,
+      // not echoed, not traced. Measured while chasing a real one — a kimi prompt
+      // returned 500 `internal_error` while the daemon's journal showed nothing but
+      // its startup line, so the cause was unreachable and the request was
+      // undiagnosable in production.
+      //
+      // Not echoing the message to the CLIENT is right — it can carry absolute
+      // paths, hostnames or library internals. Throwing it away entirely is not:
+      // that decision is about the wire, not about the operator's own log. So the
+      // fault is logged with its stack, and the client still gets a bare 500.
+      // Redacting a secret and erasing the evidence are different acts.
+      if (!isRequestShape && !(e instanceof HttpClientError)) {
+        console.error("[ui2api] internal request fault:", e);
+      }
       send(res, isRequestShape ? 400 : 500, shapeCode
         ? { error: { code: shapeCode, message: e instanceof Error ? e.message : String(e) } }
         : { error: { code: "internal_error", message: "internal error" } });
