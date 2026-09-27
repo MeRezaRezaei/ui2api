@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { userInfo, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pbkdf2Sync, randomBytes, createCipheriv } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -235,18 +235,43 @@ test("renderCheckboxList produces checkbox-format output with [KNOWN] markers", 
   assert.ok(text.includes("1 profile, 3 cookies"));
 });
 
-test("findAllChromeProfilesOnOs includes extraRoots in results", () => {
+test("findAllChromeProfilesOnOs includes extraRoots in results, labelled by the owner the scan derives", () => {
   const dir = mkdtempSync(join(tmpdir(), "u2a-scan-find-"));
+  const realHome = process.env.HOME;
   try {
     const root = join(dir, "profile");
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, "Local State"), JSON.stringify({ os_crypt: {} }));
     mkdirSync(join(root, "Default"), { recursive: true });
+
+    // The `user` label comes from profile-scan's owningUser(root), whose
+    // documented inputs are the PATH and $HOME — and whose LAST resort is
+    // os.userInfo(). This test pins the first two and FORBIDS reaching the
+    // last: os.userInfo() THROWS where the running uid has no passwd entry
+    // (bare containers, some CI images), so the old `assert.equal(found.user,
+    // userInfo().username)` was a latent landmine — and comparing the code's
+    // output to the box's own passwd database proved nothing about the code
+    // that a fixture could not.
+    //   * a fixture under /home/<u> is labelled <u> by the path prefix, and
+    //   * any other fixture with $HOME=/root is labelled "root" (owningUser
+    //     returns on the $HOME branch BEFORE the os.userInfo() fallback).
+    // Both expectations are derived only from inputs this test controls, so
+    // the verdict is a fact about the fixture, not about the runner.
+    const homeSeg = /^\/home\/([^/]+)/.exec(dir)?.[1] ?? null;
+    if (!homeSeg) process.env.HOME = "/root";
+    const expectedUser = homeSeg ?? "root";
+
     const result = findAllChromeProfilesOnOs({ extraRoots: [root] });
     const found = result.profiles.find((p) => p.root === root);
     assert.ok(found, `fixture root ${root} not found in profiles`);
-    assert.equal(found!.user, userInfo().username);
+    assert.equal(
+      found!.user,
+      expectedUser,
+      `owningUser must derive "${expectedUser}" from the fixture path/$HOME, got ${found!.user}`,
+    );
   } finally {
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
     rmSync(dir, { recursive: true, force: true });
   }
 });

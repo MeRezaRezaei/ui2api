@@ -15,7 +15,7 @@
 // wait here is raced against a short wall-clock guard and FAILS (rather than
 // hanging) when the promise stays pending.
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,8 +63,17 @@ function liveDriver(): unknown {
 
 // A pool that is already AT capacity with one busy page, so acquire() parks
 // instead of spawning — no browser is ever launched in these tests.
+//
+// dataDir is a REAL temp directory, never the relative "data" this used to
+// pass: a relative dataDir resolves against cwd into the operator's gitignored
+// data/sessions/… vault, so the pool was one `profiles` entry away from
+// replaying a real captured session — inert only because of what happened to
+// be true downstream, and a hard 404 (empty vault) on a clean CI checkout.
+const VAULT = mkdtempSync(join(tmpdir(), "u2a-pool-"));
+after(() => rmSync(VAULT, { recursive: true, force: true }));
+
 function saturatedPool(opts: Partial<PoolOptions>, driver: unknown = deadDriver()): { pool: ChatPool; worker: PoolWorker } {
-  const pool = new ChatPool({ profiles: [], dataDir: "data", ...opts } as PoolOptions);
+  const pool = new ChatPool({ profiles: [], dataDir: VAULT, ...opts } as PoolOptions);
   const worker = { profileId: "gemini", driver, busy: true } as unknown as PoolWorker;
   (pool as unknown as { workers: PoolWorker[] }).workers = [worker];
   return { pool, worker };

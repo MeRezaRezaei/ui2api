@@ -25,9 +25,10 @@ import {
  *   - the default-URL failure names the real cause (nothing is published) and
  *     the real remedy (`--registry` / `UI2API_REGISTRY_URL`).
  *
- * The reachability probe is OPTIONAL: no network -> skipped, never failed, so
- * this file can never be flaky. If the registry ever DOES get published, the
- * probe skips with a "revisit this pin" message instead of asserting a lie.
+ * The "is the registry published YET?" half is NOT a unit assertion: it is a
+ * fact about the world, so it is a documented one-line curl (in the last
+ * describe) rather than a fetch inside `test:unit` — no third party's uptime
+ * can decide a verdict here, and no slow network can burn the file timeout.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -229,30 +230,37 @@ d("GOAL 116 — the default-registry failure names the real cause and remedy", (
   });
 });
 
-d("GOAL 116 — optional reachability probe (skips cleanly offline; never flaky)", () => {
-  t("the default registry repo is still unpublished (or the probe skips)", async (tt) => {
-    let res: Response;
-    try {
-      res = await fetch(`https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}`, {
-        headers: { "user-agent": "ui2api-registry-doc-truth" },
-      });
-    } catch {
-      // No network at all: the doc/code pin above is hermetic, so skip — never fail.
-      tt.skip("no network available for the optional registry-reachability probe");
-      return;
-    }
-    if (res.status === 404) {
-      // The honest state this fix is written for.
-      assert.ok(statesUnpublished(README), "while the repo is 404, the docs must say it is not published");
-      assert.ok(statesUnpublished(ONBOARDING), "while the repo is 404, ONBOARDING must say it is not published");
-      return;
-    }
-    if (!res.ok) {
-      tt.skip(`registry reachability probe inconclusive (HTTP ${res.status}) — not a failure`);
-      return;
-    }
-    // 200 = the registry now EXISTS. The doc/code pin must be revisited, but
-    // this assertion never claims it is missing.
-    tt.skip(`public registry ${DEF_OWNER}/${DEF_REPO} now exists (HTTP 200) — revisit the doc-truth pins`);
+d("GOAL 116 — the not-published claim is pinned to the 404 it is written for (hermetic: no third party's uptime)", () => {
+  t("while the default registry answers 404, both docs say so — driven by a STUBBED 404, never by api.github.com", async () => {
+    // The probe this replaces fetched `https://api.github.com/repos/…` and
+    // tt.skip()'d on any failure. A unit test must not depend on a third
+    // party's uptime, and a slow one could burn the whole 120 s FILE timeout
+    // (one hung file takes the suite's signal with it — the GOAL 102 class).
+    //
+    // What it was really proving is a CONDITIONAL: WHILE the default registry
+    // answers 404, the docs must say it is not published. A conditional is
+    // testable with no network at all — drive the 404 in through the same
+    // `withStubbedFetch` stub the failure-message pins use, and assert both
+    // halves. The live half ("has the repo been published YET?") is a fact
+    // about the world, not about this code, so it is run ON DEMAND instead:
+    //
+    //   curl -s -o /dev/null -w '%{http_code}\n' \
+    //     "https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}"
+    //
+    // 404 = still unpublished, the pins above stand. 200 = the registry now
+    // exists and these doc-truth pins MUST be revisited.
+    const err = await withStubbedFetch(() =>
+      fetchRegistryIndex(DEFAULT_REGISTRY_URL).then(
+        () => assert.fail("a 404 on the code's own default URL must reject, never resolve"),
+        (e: Error) => e,
+      ),
+    );
+    assert.match(
+      err.message,
+      /no public community registry is published/i,
+      "precondition: the code's own 404 on its default URL is what 'not published' means",
+    );
+    assert.ok(statesUnpublished(README), "while the default registry is 404, README must say it is not published");
+    assert.ok(statesUnpublished(ONBOARDING), "while the default registry is 404, ONBOARDING must say it is not published");
   });
 });

@@ -20,7 +20,7 @@
 // number that looks right — so every liveness assertion here is made against a
 // handle whose state is under the test's control.
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,8 +45,17 @@ function opaqueHandle(): unknown {
 
 // A pool that never spawned a browser (profiles:[] ⇒ no browser is launched) —
 // the state a real freshly-started daemon is in.
+//
+// dataDir is a REAL temp directory, never the relative "data" this used to
+// pass: a relative dataDir resolves against cwd into the operator's gitignored
+// data/sessions/… vault, so the pool was one `profiles` entry away from
+// replaying a real captured session — inert only because of what happened to
+// be true downstream, and an empty-vault 404 on a clean CI checkout.
+const VAULT = mkdtempSync(join(tmpdir(), "u2a-status-pool-"));
+after(() => rmSync(VAULT, { recursive: true, force: true }));
+
 function emptyPool(opts: Partial<PoolOptions> = {}): ChatPool {
-  return new ChatPool({ profiles: [], dataDir: "data", max: 1, ...opts } as PoolOptions);
+  return new ChatPool({ profiles: [], dataDir: VAULT, max: 1, ...opts } as PoolOptions);
 }
 
 function setBrowser(pool: ChatPool, handle: unknown): void {
@@ -255,7 +264,7 @@ test("GOAL87: a reaper interval of 0 is an honest opt-out (no timer, and /status
 // ── (3) queue + busy visibility ──────────────────────────────────────────────
 
 test("GOAL87: /status exposes the GOAL 83 queue fields AND measured per-worker busy detail", async () => {
-  const pool = new ChatPool({ profiles: [], dataDir: "data", max: 1, maxWaiters: 3, waiterTimeoutMs: 0 } as PoolOptions);
+  const pool = new ChatPool({ profiles: [], dataDir: VAULT, max: 1, maxWaiters: 3, waiterTimeoutMs: 0 } as PoolOptions);
   const worker = { profileId: "gemini", driver: liveDriver(), busy: false } as unknown as PoolWorker;
   insertWorker(pool, worker);
   try {

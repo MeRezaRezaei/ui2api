@@ -48,11 +48,46 @@ const pkg: RegistryPackage = {
       reloadAfterSuccess: true,
       argsDeclared: true,
       dispatch: "wired",
+      // The arg schema is the DERIVED contract, not hand-written: it is
+      // `node --import tsx scripts/derive-capability-args.ts --json` output for
+      // deepseek_chat ("derived from chat()"), and it is byte-identical to
+      // capabilities/deepseek/manifest.json's declaration. Measured:
+      //   deepseek_chat | {newChat:bool, prompt:string, timeoutMs:number}
+      //                 required:["prompt"]
+      // because src/capabilities/deepseek.ts:181/189/190 reads exactly
+      // args.prompt, args.newChat, args.timeoutMs.
+      //
+      // It USED to say `new_chat`, which no runner reads. That was not a
+      // harmless typo: the generator's chat call site hardcodes the variable
+      // `$newChat` (lang-php.ts:466), while `schemaParamsFor` (lang-php.ts:84)
+      // names the PHP parameter after the schema key VERBATIM. A `new_chat`
+      // schema therefore produced
+      //     public function chat(string $prompt, bool $new_chat = null) {
+      //         return $this->client->chat(..., $newChat ?? false);   // <-- $newChat
+      //     }                                                          //     UNDECLARED
+      // and PHP's `??` folds an undefined variable to `false` with no warning
+      // — so the parameter was a SILENT dead no-op: a consumer asking for a
+      // fresh conversation kept the old one. That is precisely the failure
+      // GOAL 139 killed at the registry; this fixture reintroduced it one layer
+      // down, in generated code, and nothing caught it because the generator
+      // has no pin on this (see the two GOAL 139 pins at the bottom of this
+      // file, which now make the class red on sight).
+      //
+      // NOTE this is NOT a snake_case PHP translation of `newChat`. There is no
+      // such translation anywhere in the generator: both `schemaParamsFor` and
+      // `bodyForParams` pass the key through unchanged. The client's
+      // `chat(..., bool $newChat = false)` and its wire key `'new_chat' =>`
+      // (lang-php.ts:334/340) are a DIFFERENT surface — the OpenAI
+      // `/v1/chat/completions` extension field, which really is `new_chat` and
+      // is read at src/prompt/openai.ts:150 (`body.new_chat`). Two surfaces,
+      // two names, and the Map's job is to bridge them by using the capability
+      // name the RUNNER reads.
       inputSchema: {
         type: "object",
         properties: {
-          prompt: { type: "string", description: "The prompt to send" },
-          new_chat: { type: "boolean", description: "Start a fresh conversation" },
+          prompt: { type: "string", description: "read by the runner as args.prompt" },
+          newChat: { type: "boolean", description: "read by the runner as args.newChat" },
+          timeoutMs: { type: "number", description: "read by the runner as args.timeoutMs" },
         },
         required: ["prompt"],
       },
@@ -86,7 +121,18 @@ const pkg: RegistryPackage = {
       dispatch: "wired",
       inputSchema: {
         type: "object",
-        properties: { limit: { type: "number", description: "Max entries" } },
+        // Same derivation, same correction. This said `limit`, which NO runner
+        // reads: src/capabilities/deepseek.ts:224 reads `args.query`, the
+        // derivation says `query`, and capabilities/deepseek/manifest.json
+        // declares `query`. Three independent sources, one answer.
+        //
+        // It mattered more here than a name: a non-chat tool's args go out
+        // VERBATIM through `bodyForParams` (lang-php.ts:94), so the generated
+        // PHP was POSTing `{"limit": 10}` to
+        // /capability/deepseek/deepseek_list_conversations while the runner
+        // read `args.query` — the filter was silently always-empty. The
+        // GOAL 139 pin below is what found this one.
+        properties: { query: { type: "string", description: "read by the runner as args.query" } },
         required: [],
       },
     },
@@ -124,9 +170,27 @@ t("generatePhpMap emits a valid composer package with one method per capability"
     assert.ok(composer.autoload["psr-4"]["Ui2api\\Map\\Deepseek\\"] === "src/", "psr-4 namespace");
     const mapSrc = readFileSync(resolve(dir, "src", "DeepseekMap.php"), "utf8");
     assert.ok(mapSrc.includes("public function chat(string $prompt"), "chat param 1");
-    assert.ok(mapSrc.includes("bool $new_chat = null"), "chat param 2");
+    // CONTENT CHANGE (deliberate, not a rename to taste): this used to pin
+    // `bool $new_chat = null`. It is now `bool $newChat = null` because the
+    // schema arg the runner reads is `newChat`, and the generator emits the PHP
+    // parameter name verbatim from that key. The old pin CERTIFIED the dead
+    // parameter: with `$new_chat` declared, the body's hardcoded `$newChat ??`
+    // referenced a variable that did not exist and PHP folded it to `false`.
+    // Nothing is weakened — the assertion still requires a typed, defaulted
+    // `bool` parameter, and it now requires it to be the one the call site uses
+    // (the "no undeclared variable" pin below enforces that second half).
+    assert.ok(mapSrc.includes("bool $newChat = null"), "chat param 2 — the name the chat call site actually reads");
+    // The derived contract carries timeoutMs too (deepseek.ts:190), so the
+    // generated Map exposes it rather than dropping a real arg on the floor.
+    assert.ok(mapSrc.includes("int|float $timeoutMs = null"), "chat param 3 — timeoutMs is a real runner read");
     assert.ok(mapSrc.includes("public function webSearch(bool $state = null"), "toggle signature");
-    assert.ok(mapSrc.includes("public function listConversations(int|float $limit = null"), "read signature");
+    // CONTENT CHANGE (same class, same justification): was
+    // `public function listConversations(int|float $limit = null`. Now
+    // `string $query = null`, because `limit` was an arg no runner reads
+    // (deepseek.ts:224 reads args.query) and it was being POSTED verbatim. The
+    // assertion is not weakened — it still pins a typed, defaulted parameter,
+    // and the new name is the one that actually reaches the runner.
+    assert.ok(mapSrc.includes("public function listConversations(string $query = null"), "read signature");
     // Chat routes through the OpenAI surface; toggles/reads route through /capability.
     assert.ok(mapSrc.includes("$this->client->chat('deepseek'"));
     assert.ok(mapSrc.includes("$this->client->capability('deepseek', 'deepseek_web_search'"));
@@ -462,4 +526,84 @@ t("GOAL 90: structural pins over the generated source (never a vacuous pass)", (
     rmSync(out, { recursive: true, force: true });
   }
   console.error(`[GOAL 90] ${gate.reason}`);
+});
+
+// ---------------------------------------------------------------------------
+// GOAL 139 (generator layer) — the FIXTURE is a hand-written RegistryPackage,
+// and a hand-written contract is exactly the thing GOAL 139 set out to kill.
+//
+// `test/registry-args-drift.test.ts` closes the drift hole for the REAL
+// packages: it re-derives every `capabilities/<site>/manifest.json` schema from
+// the runner and fails on a mismatch. But a test fixture is not a package — it
+// lives in a .ts file, no gate read it, and so it kept `new_chat` after GOAL 139
+// fixed the manifest, then generated PHP whose declared parameter was never
+// used. The gate was not wrong; the fixture was simply outside it.
+//
+// These two pins close that hole for THIS file, and neither re-implements the
+// derivation (the repo rule: a second copy of the extractor would be free to
+// drift from the first). Both read the RUNNER and the GENERATED OUTPUT, so they
+// hold for any fixture edit — including one that adds a tool nobody reads.
+
+// (1) Every arg the fixture advertises is a name the runner actually reads.
+//     `args.<name>` must occur in src/capabilities/<site>.ts.
+//     This is deliberately the runner SOURCE and not
+//     `scripts/derive-capability-args.ts` output: the extractor reads one
+//     method's own body, so a runner that DELEGATES (deepseek's webSearch ->
+//     flipToggle, where `args.state` is read at deepseek.ts:314) comes back as
+//     `{}` from the script but is genuinely reachable. Grepping the runner file
+//     follows the delegation, so this pin cannot call a live arg unreachable —
+//     and it still fails hard on `new_chat`, which appears nowhere.
+t("GOAL 139: every arg this fixture advertises is a name the runner really reads (args.<name>)", () => {
+  const runnerPath = resolve(import.meta.dirname, "..", "src", "capabilities", `${pkg.id}.ts`);
+  assert.ok(existsSync(runnerPath), `the runner under test exists (${runnerPath}) — no pin against a file that is not there`);
+  const runner = readFileSync(runnerPath, "utf8");
+  let checked = 0;
+  for (const tool of pkg.tools) {
+    for (const key of Object.keys(tool.inputSchema.properties ?? {})) {
+      checked++;
+      assert.ok(
+        runner.includes(`args.${key}`),
+        `${pkg.id}/${tool.id}: the fixture advertises arg "${key}", but the runner never reads args.${key} — ` +
+          `a consumer sending it gets it silently ignored (the GOAL 139 new_chat failure)`
+      );
+    }
+  }
+  // Never vacuous: a fixture that stopped declaring args would pass by saying
+  // nothing, so the number of checked names is itself asserted.
+  assert.ok(checked >= 5, `the pin actually checked args (got ${checked}) — a vacuous pass is a lie`);
+});
+
+// (2) The generated Map must never reference a variable it did not declare.
+//     This is the language-level consequence of (1) and it needs no knowledge of
+//     any particular arg: PHP folds `$undefined ?? false` to `false` with no
+//     warning and no error, so a mismatched call site does not fail loudly —
+//     it silently drops the caller's argument. That is precisely how
+//     `new_chat` survived every other gate here: `php -l` is happy, the client
+//     executes, and the request still goes out — just without the flag.
+t("GOAL 139: no generated Map method references an undeclared variable (dead params fail LOUD here)", () => {
+  const out = mkTmp();
+  try {
+    const dir = generatePhpMap(pkg, resolve(out, "deepseek"));
+    const mapSrc = readFileSync(resolve(dir, "src", "DeepseekMap.php"), "utf8");
+    // Doc comments are stripped first: a description containing `$foo` is prose,
+    // not a variable reference.
+    const code = mapSrc.replace(/\/\*[\s\S]*?\*\//g, "");
+    const methods = [...code.matchAll(/public function (\w+)\(([^)]*)\)[^{]*\{([\s\S]*?)\n    \}/g)];
+    assert.ok(methods.length === pkg.tools.length + 1, `every capability produced a method (got ${methods.length}, tools ${pkg.tools.length} + __construct)`);
+    for (const [, name, rawParams, body] of methods) {
+      const declared = new Set([...rawParams.matchAll(/\$([A-Za-z_]\w*)/g)].map((m) => m[1]!));
+      const used = new Set(
+        [...body.matchAll(/\$([A-Za-z_]\w*)/g)].map((m) => m[1]!).filter((v) => v !== "this")
+      );
+      for (const v of used) {
+        assert.ok(
+          declared.has(v),
+          `${name}() references $${v}, which it does not declare — PHP would silently fold ` +
+            `$${v} ?? … to a default, so the caller's argument is dropped with no error`
+        );
+      }
+    }
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

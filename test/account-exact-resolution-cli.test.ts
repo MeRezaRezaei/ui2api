@@ -1,7 +1,17 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, statSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveRequestedAccount } from "../src/cli.js";
+import {
+  capabilitiesPath,
+  listAccounts,
+  saveAccountSnapshot,
+  saveCapabilities,
+  slugifyIdentity,
+  type ProfileSnapshot,
+} from "../src/runtime/session-store.js";
 
 /**
  * GOAL 118: `ui2api profile capabilities <site> --account <X>` resolved the
@@ -30,6 +40,54 @@ const ACCOUNTS = [
   { identity: "osbulk", slug: "osbulk" },
   { identity: "merezarezaei@gmail.com", slug: "merezarezaei-at-gmail-com" },
 ];
+
+/** The account whose stored fingerprint the GOAL 118 bug overwrote. It is the
+ *  FIRST row of the vault, so the pre-fix `?? accounts[0]` fallback selected
+ *  exactly this file — which is what makes "the refusal wrote nothing" a real
+ *  assertion and not a formality. */
+const VICTIM_IDENTITY = "osbulk";
+const OTHER_IDENTITY = "merezarezaei@gmail.com";
+
+function fakeSnapshot(identity: string): ProfileSnapshot {
+  return {
+    version: 1,
+    host: HOST,
+    origin: `https://${HOST}`,
+    capturedAt: "2026-09-27T00:00:00.000Z",
+    // A non-anonymous session (the GOAL 49 write gate refuses zero-cookie,
+    // zero-localStorage snapshots), so both rows are USABLE accounts.
+    cookies: [{ name: "SID", value: `fixture-${slugifyIdentity(identity)}`, domain: HOST, path: "/", expires: -1 }],
+    localStorage: [["fixture", identity]],
+    sessionStorage: [],
+    indexedDB: [],
+  };
+}
+
+/**
+ * A vault THIS TEST OWNS: two real accounts (written through the runtime's own
+ * write seam, so `listAccounts` returns exactly what it would return for a
+ * real capture) plus one real stored `capabilities.json` — the artifact the
+ * defect overwrote for the wrong account.
+ *
+ * The previous version of this pin read the OPERATOR'S vault through a
+ * RELATIVE literal, `data/sessions/gemini.google.com/osbulk/capabilities.json`.
+ * `data/` is gitignored, so on a clean CI checkout that file does not exist —
+ * the test took its "skipped" branch and asserted `assert.ok(true)`, i.e. it
+ * silently degraded into a green pin that measured nothing. Worse, on a box
+ * where the operator HAD captured an `osbulk` account it read (and mtime-
+ * compared) real credentials' directory. The honest form is a vault the test
+ * creates, so the assertion is about the CODE and holds identically on any box.
+ */
+function tempVault(): { dir: string; sitesDir: string; victim: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "u2a-acct-vault-"));
+  const sitesDir = join(dir, "vault");
+  saveAccountSnapshot(sitesDir, HOST, VICTIM_IDENTITY, fakeSnapshot(VICTIM_IDENTITY), { source: "import" });
+  saveAccountSnapshot(sitesDir, HOST, OTHER_IDENTITY, fakeSnapshot(OTHER_IDENTITY), { source: "import" });
+  const victim = capabilitiesPath(sitesDir, HOST, slugifyIdentity(VICTIM_IDENTITY));
+  // A real fingerprint, written through the real write seam.
+  saveCapabilities(sitesDir, HOST, slugifyIdentity(VICTIM_IDENTITY), { probedAt: "2026-09-27T00:00:00.000Z", marker: "the-real-stored-fingerprint" });
+  return { dir, sitesDir, victim, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
 
 d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () => {
   t("an exact identity hit resolves", () => {
@@ -91,25 +149,60 @@ d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () =
     assert.throws(() => resolveRequestedAccount(ACCOUNTS, "nobody@example.com", HOST));
   });
 
-  t("MEASURED: the real command refuses with exit 1 and writes NOTHING", () => {
-    // the artifact the old bug overwrote for the wrong account
-    const p = "data/sessions/gemini.google.com/osbulk/capabilities.json";
-    if (!existsSync(p)) {
-      // nothing to compare against on a box with no vault; the unit pins above
-      // still hold, and this must not silently pass as if it had measured.
-      assert.ok(true, "skipped: no vault artifact on this box to compare mtimes");
-      return;
-    }
-    const before = statSync(p).mtimeMs;
-    assert.equal(before, before, "mtime captured pre-condition");
-    // the guard: a refusal must not have touched the file
-    let msg = "";
+  t("MEASURED (hermetic vault): an unknown --account is refused by name AND leaves the other account's stored fingerprint byte- and mtime-identical", () => {
+    const { sitesDir, victim, cleanup } = tempVault();
     try {
-      resolveRequestedAccount(ACCOUNTS, "nobody@example.com", HOST);
-    } catch (e) {
-      msg = (e as Error).message;
+      // The vault this test just built is a REAL, populated vault: both rows are
+      // usable accounts, so the refusal below is the ACCOUNT resolution
+      // refusing — not the earlier "no identity-keyed accounts" bail-out. If
+      // this read an operator vault instead, that branch would fire whenever
+      // the box had no capture, which is exactly the silent-skip this replaces.
+      const stored = listAccounts(sitesDir, HOST);
+      assert.equal(stored.length, 2, "the fixture vault must hold both accounts, or the refusal below proves nothing");
+      for (const row of stored) {
+        assert.equal(row.usable, true, `fixture account ${row.slug} must be usable: ${row.reason ?? ""}`);
+      }
+
+      // The pin is NOT vacuous: the victim file is the one the pre-fix fallback
+      // would have written (it is the FIRST row), and it is stamped with a
+      // known past mtime, so ANY rewrite moves it to "now" and the comparison
+      // below can fail. The two lines this replaces were `assert.ok(true,
+      // "skipped…")` and `assert.equal(before, before)` — neither of which can
+      // fail, which is why they are gone rather than kept.
+      assert.equal(
+        resolveRequestedAccount(stored, undefined, HOST).slug,
+        slugifyIdentity(VICTIM_IDENTITY),
+        "precondition: the account the pre-fix fallback chose IS the victim whose fingerprint is at risk",
+      );
+      const SENTINEL = new Date("2020-01-02T03:04:05.000Z");
+      utimesSync(victim, SENTINEL, SENTINEL);
+      const before = statSync(victim).mtimeMs;
+      assert.equal(before, SENTINEL.getTime(), "precondition: the sentinel mtime was really applied to the stored fingerprint");
+      const bytes = readFileSync(victim, "utf8");
+
+      // The guard: an unmatched account is refused, naming itself and the
+      // alternatives — and the refusal is a THROW, so no write path is reached.
+      let msg = "";
+      try {
+        resolveRequestedAccount(stored, "nobody@example.com", HOST);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      assert.match(msg, /no stored account "nobody@example\.com" for "gemini\.google\.com"/, "the refusal must fire and name both sides");
+      assert.match(msg, new RegExp(slugifyIdentity(VICTIM_IDENTITY)), "and must name the account that was NOT silently used");
+
+      assert.equal(statSync(victim).mtimeMs, before, "a refused account must not rewrite another account's fingerprint");
+      assert.equal(readFileSync(victim, "utf8"), bytes, "...and must not touch its bytes either (mtime alone can miss a same-ms write)");
+
+      // The complement, so the pin cannot pass by refusing EVERYTHING: the
+      // account that IS stored still resolves, to itself.
+      assert.equal(
+        resolveRequestedAccount(stored, slugifyIdentity(OTHER_IDENTITY), HOST).identity,
+        OTHER_IDENTITY,
+        "a stored account must still resolve — the guard is exactness, not a blanket refusal",
+      );
+    } finally {
+      cleanup();
     }
-    assert.match(msg, /no stored account/, "the refusal must fire");
-    assert.equal(statSync(p).mtimeMs, before, "a refused account must not rewrite another account's fingerprint");
   });
 });
