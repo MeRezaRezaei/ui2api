@@ -53,7 +53,7 @@ box. No open first-release blockers (all previously-noted gaps are closed).
 | Guard | Status |
 |---|---|
 | Origin pinning / SSRF (`src/runtime/ssrf.ts`) — serve only configured sites | **PASS** |
-| Trust gate (`src/prompt/trust.ts`, http.ts) — configured profiles only | **PASS** |
+| Trust gate (`src/prompt/http.ts` — the `profilesById` configured-allow-list on `/capability/<site>`, and `idFrom()` on `POST /prompt`) — configured profiles only | **PASS** |
 | Bearer-token gate `UI2API_PROMPTD_TOKEN` (http.ts) | **PASS** |
 | `data/` (credentials) gitignored — never commit .session/vault | **PASS** (`.gitignore` line 3) |
 | Every browser launch via `launchBrowser()` (`src/runtime/browser.ts`) | **PASS** |

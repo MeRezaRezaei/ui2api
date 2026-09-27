@@ -188,25 +188,20 @@ const CAPS = capabilityDirCounts();
  * line number). Each is a measured defect, reported rather than suppressed.
  */
 export const ALLOWED_UNDOCUMENTED_KNOBS: { knob: string; reason: string }[] = [
-  {
-    knob: "UI2API_XVFB_DISPLAY",
-    reason:
-      "read at scripts/ops/provision-ui2api-user.sh:27 (`XVFB_DISPLAY=\"${UI2API_XVFB_DISPLAY:-99}\"`) and named in no doc at all. AGENTS.md's own UI2API_OS_USER row proves the table is meant to cover scripts/ops/*.sh, so this is a hole in the table, not a deliberate omission. test/env-knob-truth.test.ts cannot see it: that scan accepts only .ts/.mjs/.js.",
-  },
+  // EMPTY, and that is the point. It held exactly one entry: UI2API_XVFB_DISPLAY, read by
+  // shipped code at scripts/ops/provision-ui2api-user.sh:27 and named in no doc at all. The
+  // row now EXISTS, so the entry is deleted rather than tolerated, and the budget below is 0
+  // — meaning the next undocumented knob is a hard failure, not a fourth exception.
 ];
-
 /** Rows whose cited file does not contain the cited knob, exempt by CONTENT. */
 export const ALLOWED_WRONG_FILE_CITES: { knob: string; cite: string; reason: string }[] = [
-  {
-    knob: "UI2API_HEADED",
-    cite: "src/prompt/driver.ts",
-    reason:
-      "AGENTS.md's table row cites src/prompt/driver.ts, which contains no occurrence of the knob. The real read site is src/prompt/posture.ts:66 (`env.UI2API_HEADED === \"1\"`); src/runtime/chrome-daemon.ts:252 and src/runtime/requirements.ts:505 read it too. Verified drift.",
-  },
+  // Kept as an array (unexcusedWrongFileCites reads it) but EMPTY. It held one entry:
+  // UI2API_HEADED cited src/prompt/driver.ts, which contains no occurrence of the knob; the
+  // real read site is src/prompt/posture.ts:66. The cell is corrected and the budget is 0, so a
+  // wrong-FILE cite — the one class of this column a reader can actually act on — now fails.
 ];
-
-const UNDOC_BUDGET = 1;
-const CITE_BUDGET = 1;
+const UNDOC_BUDGET = 0;   // was 1 (UI2API_XVFB_DISPLAY, now documented)
+const CITE_BUDGET = 0;    // was 1 (UI2API_HEADED, now citing its real read site)
 
 // ================================================================ rules ======
 

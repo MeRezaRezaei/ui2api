@@ -5,7 +5,8 @@
 > of truth and command list), then this file. Cold-start order:
 > `AGENTS.md` → `docs/ONBOARDING.md` → `docs/UNLOCK.md` → this file →
 > [`CONTRIBUTING.md`](../CONTRIBUTING.md) (add a site) → the registry landing
-> (the install catalog, once a registry is actually published).
+> (the install catalog — the public `MeRezaRezaei/ui2api-registry` repo,
+> published; see "The install loop" below).
 
 ## The core idea
 
@@ -153,15 +154,30 @@ consumers — no site knowledge lives in the caller.
 
 ## The install loop (community → local)
 
-**Status: no public registry is published yet.** The design is a registry repo
-(default branch `master`) where every site is a full capability package
-(manifest / profile / recipes / session.lock / CAPABILITIES.md / metadata), but
-no such public repo exists today, so `ui2api install --catalog` cannot work
-against it. The working path right now is the packages vendored in this repo's
-`capabilities/<site>/` (already served by `promptd` via `GET /registry`), or
-`analyse` + `generate`. Supply `--registry` / `UI2API_REGISTRY_URL` to install
-from a self-hosted or forked registry. Two halves of one loop, the second still
-to come:
+**Status: the public registry IS published, and the CLI defaults to it** (measured
+2026-09-27). The registry is a public repo (`MeRezaRezaei/ui2api-registry`,
+default branch `master`, `private: false`, last pushed 2026-09-24) whose
+`index.json` served HTTP 200 with **33** entries, and `ui2api install --catalog`
+/ `ui2api install <site>` work against it with no `--registry` and no
+`UI2API_REGISTRY_URL`. Every site there is a full capability package (manifest /
+profile / recipes / session.lock / CAPABILITIES.md / metadata) — mostly
+`trust: unreviewed` (4 `reviewed`), so treat a package as unvetted until a
+maintainer says otherwise. The equivalent local path is the packages vendored in
+this repo's `capabilities/<site>/` (already served by `promptd` via
+`GET /registry`), or `analyse` + `generate`; `--registry` /
+`UI2API_REGISTRY_URL` selects a self-hosted or forked registry instead of the
+default.
+
+Re-derive the registry facts above rather than trusting this paragraph — they are
+facts about a third-party repo and they rot like any other:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master/index.json   # 200
+npx tsx src/cli.ts install --catalog   # live catalog: site | version | trust
+```
+
+Both halves of the loop now exist:
 
 1. **Add a site** (contributor → registry): the complete copy-paste workflow is
    `CONTRIBUTING.md` "Add a site / capability package" — analyze → package

@@ -580,8 +580,8 @@ export const GATE_CHAIN: readonly { step: string; doc: string | null; builtin?: 
   { step: "npm ci", doc: null, builtin: true },
   { step: "npm run build", doc: "npm run build" },
   // FINDING: wired in BOTH configs by GOAL 147, but AGENTS.md names only
-  // `npx tsc --noEmit` — `npm run typecheck` is documented nowhere in the repo.
-  { step: "npm run typecheck", doc: null },
+  // `npx tsc --noEmit`; `npm run typecheck` is the TEST-tree typecheck both CI configs run.
+  { step: "npm run typecheck", doc: "npm run typecheck" },
   { step: "npm run check:verbatim", doc: "npm run check:verbatim" },
   { step: "npm run check:verbatim:goals", doc: "npm run check:verbatim:goals" },
   { step: "npm test", doc: "npm test", builtin: true },

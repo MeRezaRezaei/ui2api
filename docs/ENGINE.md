@@ -30,10 +30,18 @@ surfaces.
 | Command | Runtime path |
 |---|---|
 | `analyse` | `src/analyzer/explore.ts` — fetch the site, hook fetch/XHR/WS, record real calls into an action map (`--login` = interactive host login first; see `cli.ts` `cmdAnalyse`). |
-| `generate` | `src/generator/generate.js` — action map → generated MCP/ACP server under `sites/<host>/server/` (`--acp`, protocolVersion 2025-03-26). |
-| `serve` | `src/hub/serve.js` — run a generated server (stdlib or ACP); `--trust` gate for untrusted maps. |
+| `generate` | `src/generator/generate.ts` — action map → generated MCP/ACP server under `sites/<host>/server/` (`--acp`, protocolVersion 2025-03-26). |
+| `serve` | `src/hub/serve.ts` — run a generated server (stdlib or ACP); `--trust` gate for untrusted maps. |
 | `remap` / `langgen` | re-analyse with a deprecation diff; PHP map generation. |
-| `hub` / `hub run` / `hub publish` | local package hub + registered-plugin serving (`src/hub/*`, `src/registry/package.js`). |
+| `hub` / `hub run` / `hub publish` | local package hub + registered-plugin serving (`src/hub/*`, `src/registry/package.ts`). |
+
+The `Runtime path` column names the **shipped source**, so it is always `.ts` —
+the file you open is `src/generator/generate.ts`, not the build output
+`dist/generator/generate.js`. That is not a slip: an `import … from "./x.js"`
+specifier inside a code block is a *different* thing and stays `.js`, because
+`tsconfig.json` sets `module`/`moduleResolution: NodeNext` and all 265 relative
+imports in `src/` use the emitted extension. Prose cites `.ts`, import
+specifiers `.js`; check with `ls` before "fixing" either one.
 
 ### The JS-function-indexed `call` mode (still live)
 

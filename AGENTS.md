@@ -275,69 +275,87 @@ to the code without a doc row fails the suite). Purpose and default are as read 
 the source site named in the last column. Rows marked **TRUST** weaken the daemon's
 trust posture — read them before deploying.
 
+**The `read at` column is "where to look FIRST", not the only place.** A knob read in
+several places cites its most authoritative site (usually the launch seam, the daemon
+gate, or the export that names it) and the purpose column says how many sites there
+are, so you are never left believing a second reader does not exist. A knob read
+INDIRECTLY through an exported name constant (`export const X_ENV = "UI2API_Y"`, read
+back as `process.env[X_ENV]`) cites the **name** line and the purpose column names the
+read line — that is the only place the literal appears. **What is pinned hard is the
+FILE**: the cited file must exist and actually contain the knob, which is the defect class
+a reader can act on. Line-exactness is re-measured as a **disclosed count that must not
+regress**, not a `line ===` gate: while this table was being corrected, an unrelated edit
+to `src/prompt/http.ts` moved three of its cited lines in under ten minutes with no change
+to any knob. A pin that fires on that teaches the next maintainer to skip the file, which
+is the failure mode AGENTS.md itself warns about. `test/ci-contract-knob-cites.test.ts`
+holds both halves — the file pin is fatal, the drift count is measured and disclosed.
+At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path cells,
+0 rows for a knob nothing reads, and every knob read in `src/`+`scripts/` has a row.**
+
 | knob | purpose | default | read at |
 | --- | --- | --- | --- |
-| `UI2API_ACCOUNT` | runtime knob | — | `src/generator/acp-template.ts:16` |
-| `UI2API_AI_PROFILE` | override the AI site profile | — | `src/profile/profile.ts:15` |
-| `UI2API_AI_SITE` | runtime knob | — | `src/plugins/ai-web.ts:7` |
-| `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate) | 20 MiB | `src/runtime/file-attach.ts:54` |
-| `UI2API_DAEMON_PORT` | the persistent Chrome daemon's CDP port (the target `chrome start` opens and `chrome status` reports) | `9222` | `src/runtime/chrome-daemon.ts:36` |
-| `UI2API_CHROME_DAEMON_STATE` | where the daemon records its `{port,pid,user,profile}` state (0600) | `<data>/chrome-daemon.json` | `src/runtime/chrome-daemon.ts:37` |
-| `UI2API_ATTACH_PORT` | **TRUST** runtime knob | — | `src/prompt/http.ts:675` |
-| `UI2API_ATTACH_ROOTS` | **TRUST** dirs a file-upload path may be read from (GOAL 88 gate) | none = path form refused | `src/capabilities/duckduckgo.ts:588` |
-| `UI2API_AUTH_STATE_PATH` | runtime knob | — | `src/runtime/wigolo.ts:161` |
-| `UI2API_BASE_URL` | base URL for the served API | — | `src/generator/lang-php.ts:544` |
-| `UI2API_CDP_URL` | runtime knob | — | `src/runtime/wigolo.ts:160` |
-| `UI2API_CHROME_OWNER_PROFILE` | allow the launch seam to use the chrome owner's profile even when the process is NOT that user | off (the profile is 0700 + locked; a non-owner normally cannot use it) | `src/runtime/browser.ts` |
-| `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Default `ui2api`; its profile is auto-resolved from that user's `~/.config` | `ui2api` | `src/runtime/chrome-owner.ts:60` |
-| `UI2API_CHROME` | runtime knob | — | `src/capabilities/tencent-aistudio.ts:113` |
-| `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:294` |
-| `UI2API_CHROME_PATH` | runtime knob | — | `src/runtime/requirements.ts:320` |
-| `UI2API_CHROME_PROFILE_PATH` | runtime knob | — | `src/runtime/profile-ingest.ts:446` |
-| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:329` |
-| `UI2API_DATA_DIR` | runtime knob | — | `src/prompt/driver.ts:794` |
-| `UI2API_DATA_DIR_OVERRIDE` | override the data/sessions dir | — | `src/prompt/driver.ts:794` |
-| `UI2API_DEBUG` | debug logging | off | `src/prompt/driver.ts:344` |
-| `UI2API_ENGINE` | runtime knob | — | `src/plugin/context.ts:21` |
-| `UI2API_HEADED` | runtime knob | — | `src/prompt/driver.ts:798` |
-| `UI2API_HUB_BIND` | **TRUST** host the hub binds; loopback (`127.0.0.1`) by default because the package inventory is LAN-visible on a wider bind | `127.0.0.1` | `src/hub/server.ts:20` |
-| `UI2API_WIGOLO_ALLOW_REMOTE_TOKEN` | **TRUST** additionally allow `WIGOLO_API_TOKEN` to be sent to a NON-loopback wigolo daemon. Separate from `UI2API_WIGOLO_ALLOW_REMOTE` on purpose: allowing the traffic out is not the same decision as handing over the credential | off | `src/runtime/wigolo.ts` |
-| `UI2API_WIGOLO_ALLOW_REMOTE` | **TRUST** allow the wigolo daemon base to be a NON-loopback host (and a non-loopback CDP endpoint); without it a non-loopback base is refused so `WIGOLO_API_TOKEN` is never sent off-loopback | off | `src/runtime/wigolo.ts` |
-| `UI2API_HUB_AUTHOR` | hub author for publishes | — | `src/cli.ts:477` |
-| `UI2API_HUB_HOST` | hub host | — | `src/cli.ts:1233` |
-| `UI2API_HUB_TOKEN` | runtime knob | — | `src/cli.ts:486` |
-| `UI2API_HUB_URL` | hub endpoint | — | `src/cli.ts:485` |
-| `UI2API_HUB_USE` | use the hosted hub | — | `src/cli.ts:478` |
-| `UI2API_INGEST_LEVELDB` | session ingest level | — | `src/runtime/profile-ingest.ts:382` |
-| `UI2API_LIGHT` | lightweight mode | off | `src/prompt/driver.ts:802` |
-| `UI2API_LLM_BASE_URL` | runtime knob | — | `src/mapper/llm.ts:10` |
-| `UI2API_LLM_KEY` | runtime knob | — | `src/mapper/llm.ts:5` |
-| `UI2API_LLM_MODEL` | runtime knob | — | `src/mapper/llm.ts:14` |
-| `UI2API_LLM_PROVIDER` | runtime knob | — | `src/mapper/llm.ts:5` |
+| `UI2API_ACCOUNT` | runtime knob (generated ACP/MCP servers pick the vault account) | — | `src/generator/acp-template.ts:59` |
+| `UI2API_AI_PROFILE` | **DEAD — nothing reads it.** The header once named this as the override knob; the working one is `UI2API_AI_SITE` (GOAL 63). Listed so a reader who meets the name in git history is told it does nothing; the cite below is the comment that records its death | — | `src/profile/profile.ts:15` |
+| `UI2API_AI_SITE` | the working override knob: a builtin site id OR a `*.json` profile path | — | `src/profile/profile.ts:462` |
+| `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate); the name const, the real read is `file-attach.ts:227`-style via `[ATTACH_MAX_BYTES_ENV]` | 20 MiB | `src/runtime/file-attach.ts:54` |
+| `UI2API_DAEMON_PORT` | the persistent Chrome daemon's CDP port (the target `chrome start` opens and `chrome status` reports); name const, read at `chrome-daemon.ts:119`/`:226` | `9222` | `src/runtime/chrome-daemon.ts:29` |
+| `UI2API_CHROME_DAEMON_STATE` | where the daemon records its `{port,pid,user,profile}` state (0600); name const, read at `chrome-daemon.ts:53` | `<data>/chrome-daemon.json` | `src/runtime/chrome-daemon.ts:30` |
+| `UI2API_ATTACH_PORT` | **TRUST** attach to an already-running Chrome instead of launching one; 12 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:165` |
+| `UI2API_ATTACH_ROOTS` | **TRUST** dirs a file-upload path may be read from (GOAL 88 gate); name const, real read at `file-attach.ts:227` | none = path form refused | `src/runtime/file-attach.ts:52` |
+| `UI2API_AUTH_STATE_PATH` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:268` |
+| `UI2API_BASE_URL` | base URL for the served API (emitted into the generated PHP client) | — | `src/generator/lang-php.ts:586` |
+| `UI2API_CDP_URL` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:267` |
+| `UI2API_CHROME_OWNER_PROFILE` | allow the launch seam to use the chrome owner's profile even when the process is NOT that user | off (the profile is 0700 + locked; a non-owner normally cannot use it) | `src/runtime/browser.ts:62` |
+| `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Its profile is auto-resolved from that user's `~/.config`. Name const, real read at `chrome-owner.ts:79` | `ui2api` | `src/runtime/chrome-owner.ts:35` |
+| `UI2API_CHROME` | use real Chrome rather than bundled Chromium | — | `src/runtime/browser.ts:89` |
+| `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:377` |
+| `UI2API_CHROME_PATH` | explicit Chrome/Chromium executable path; 9 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:90` |
+| `UI2API_CHROME_PROFILE_PATH` | alias of `UI2API_USER_DATA_DIR`; 5 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:35` |
+| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:409` |
+| `UI2API_DATA_DIR` | the sessions/vault dir; 30 read sites, this is the driver's `resolveDataDir()` | — | `src/prompt/driver.ts:841` |
+| `UI2API_DATA_DIR_OVERRIDE` | override the data/sessions dir (read after `UI2API_DATA_DIR` at every `resolveDataDir()`) | — | `src/prompt/driver.ts:841` |
+| `UI2API_DEBUG` | debug logging; 5 read sites across the driver/daemon/pool | off | `src/prompt/driver.ts:381` |
+| `UI2API_ENGINE` | plugin engine (`native` or another); `--engine` overwrites it | `native` | `src/plugin/context.ts:21` |
+| `UI2API_HEADED` | headed browser; 4 read sites, this is the posture report's resolver (`posture.ts`), and it is what `launchBrowser` falls back through | — | `src/prompt/posture.ts:66` |
+| `UI2API_HUB_BIND` | **TRUST** host the hub binds; loopback (`127.0.0.1`) by default because the package inventory is LAN-visible on a wider bind | `127.0.0.1` | `src/hub/server.ts:19` |
+| `UI2API_WIGOLO_ALLOW_REMOTE_TOKEN` | **TRUST** additionally allow `WIGOLO_API_TOKEN` to be sent to a NON-loopback wigolo daemon. Separate from `UI2API_WIGOLO_ALLOW_REMOTE` on purpose: allowing the traffic out is not the same decision as handing over the credential | off | `src/runtime/wigolo.ts:376` |
+| `UI2API_WIGOLO_ALLOW_REMOTE` | **TRUST** allow the wigolo daemon base to be a NON-loopback host (and a non-loopback CDP endpoint); without it a non-loopback base is refused so `WIGOLO_API_TOKEN` is never sent off-loopback. Name const, real read at `wigolo.ts:115` | off | `src/runtime/wigolo.ts:109` |
+| `UI2API_HUB_AUTHOR` | hub author for publishes | — | `src/cli.ts:498` |
+| `UI2API_HUB_HOST` | hub host | — | `src/cli.ts:1321` |
+| `UI2API_HUB_TOKEN` | runtime knob (publish + hub run) | — | `src/cli.ts:507` |
+| `UI2API_HUB_URL` | hub endpoint | — | `src/cli.ts:506` |
+| `UI2API_HUB_USE` | use the hosted hub | — | `src/cli.ts:499` |
+| `UI2API_INGEST_LEVELDB` | session ingest level; `=0` skips localStorage entirely | — | `src/runtime/profile-ingest.ts:409` |
+| `UI2API_LIGHT` | lightweight mode (off when `=0`) | on | `src/prompt/driver.ts:849` |
+| `UI2API_LLM_BASE_URL` | runtime knob (optional `--llm` mapper LLM) | — | `src/mapper/llm.ts:12` |
+| `UI2API_LLM_KEY` | runtime knob (optional `--llm` mapper LLM) | — | `src/mapper/llm.ts:9` |
+| `UI2API_LLM_MODEL` | runtime knob (optional `--llm` mapper LLM) | — | `src/mapper/llm.ts:14` |
+| `UI2API_LLM_PROVIDER` | runtime knob (optional `--llm` mapper LLM) | — | `src/mapper/llm.ts:8` |
 | `UI2API_OS_USER` | OS user for session paths | — | `scripts/ops/launch-ui2api-chrome.sh:8` |
-| `UI2API_POOL_MAX` | runtime knob | — | `src/prompt/http.ts:43` |
-| `UI2API_POOL_MAX_WAITERS` | warm-pool queue cap | — | `src/prompt/pool.ts:38` |
-| `UI2API_POOL_MIN` | runtime knob | — | `src/prompt/pool.ts:213` |
-| `UI2API_POOL_WAITER_TIMEOUT_MS` | how long a queued request waits | — | `src/prompt/pool.ts:39` |
-| `UI2API_PROMPTD_PORT` | promptd port | — | `src/cli.ts:587` |
-| `UI2API_PROMPTD_TOKEN` | runtime knob | — | `src/prompt/http.ts:42` |
-| `UI2API_REAPER_INTERVAL_MS` | idle-page reaper interval | — | `src/prompt/http.ts:105` |
-| `UI2API_REGISTRY_REPO` | registry repo to install from | — | `src/hub/mirror.ts:23` |
-| `UI2API_REGISTRY_URL` | runtime knob | — | `src/prompt/smoke.ts:137` |
-| `UI2API_REQUEST_LOG` | enable the bounded in-memory request log | — | `src/prompt/http.ts:138` |
-| `UI2API_REQUEST_TIMEOUT_MS` | runtime knob | — | `src/prompt/http.ts:98` |
-| `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:102` |
-| `UI2API_SINGLE_PROCESS` | **TRUST** run single-process | — | `src/runtime/browser.ts:64` |
-| `UI2API_TIMEOUT` | runtime knob | — | `src/generator/lang-php.ts:550` |
-| `UI2API_TOKEN` | **TRUST** bearer token gating the daemon (unset = localhost-only) | unset = localhost-only | `src/generator/lang-php.ts:547` |
-| `UI2API_TRUST` | trust posture (what the daemon will attach/replay) | — | `src/generator/generate.ts:33` |
-| `UI2API_USER` | runtime knob | — | `src/runtime/xhost-capture.ts:107` |
-| `UI2API_USER_DATA_DIR` | **TRUST** runtime knob | — | `src/capabilities/hunyuan.ts:106` |
-| `UI2API_VERIFY_SITE` | verify a site | — | `scripts/live-verify-js-exec.ts:10` |
-| `UI2API_VERSION` | emit version and exit | — | `src/registry/package.ts:8` |
-| `UI2API_WIGOLO_` | runtime knob | — | `src/runtime/wigolo.ts:157` |
-| `UI2API_WIGOLO_AUTOSTART` | runtime knob | — | `src/runtime/wigolo.ts:140` |
-| `UI2API_WIGOLO_USE_AUTH` | runtime knob | — | `src/plugin/wigolo-context.ts:97` |
+| `UI2API_POOL_MAX` | warm-pool page cap | — | `src/prompt/pool.ts:210` |
+| `UI2API_POOL_MAX_WAITERS` | warm-pool queue cap | — | `src/prompt/pool.ts:246` |
+| `UI2API_POOL_MIN` | warm-pool size (promptd) | — | `src/prompt/pool.ts:242` |
+| `UI2API_POOL_WAITER_TIMEOUT_MS` | how long a queued request waits | — | `src/prompt/pool.ts:247` |
+| `UI2API_PROMPTD_PORT` | promptd port | — | `src/cli.ts:608` |
+| `UI2API_PROMPTD_TOKEN` | bearer token gating the daemon; 3 read sites, this is the server's own gate | — | `src/prompt/http.ts:531` |
+| `UI2API_REAPER_INTERVAL_MS` | idle-page reaper interval (`0` disables it) | — | `src/prompt/pool.ts:248` |
+| `UI2API_REGISTRY_REPO` | registry repo to install from | — | `src/hub/mirror.ts:28` |
+| `UI2API_REGISTRY_URL` | runtime knob; 4 read sites, this is the smoke path's resolver | — | `src/prompt/smoke.ts:137` |
+| `UI2API_REQUEST_LOG` | enable the bounded in-memory request log (a ring, hard-capped) | — | `src/prompt/http.ts:210` |
+| `UI2API_REQUEST_TIMEOUT_MS` | aggregate daemon deadline for one request | — | `src/prompt/http.ts:325` |
+| `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:1108` |
+| `UI2API_SINGLE_PROCESS` | **TRUST** run single-process (no pool isolation) | — | `src/runtime/browser.ts:96` |
+| `UI2API_TIMEOUT` | runtime knob (one round trip, in the generated PHP client) | — | `src/generator/lang-php.ts:592` |
+| `UI2API_TOKEN` | **TRUST** bearer token gating the daemon (unset = localhost-only) | unset = localhost-only | `src/generator/lang-php.ts:589` |
+| `UI2API_TRUST` | trust posture (what the daemon will attach/replay) | — | `src/generator/generate.ts:41` |
+| `UI2API_USER` | runtime knob (`xhost` capture user) | — | `src/runtime/xhost-capture.ts:109` |
+| `UI2API_USER_DATA_DIR` | **TRUST** reuse the user's real Chrome profile; 6 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:35` |
+| `UI2API_VERIFY_SITE` | verify a site | — | `scripts/live-verify-js-exec.ts:164` |
+| `UI2API_VERSION` | **NOT AN ENV KNOB — a local `const` in the packager that reads `package.json`.** Listed because the name reads like a knob; there is no `UI2API_VERSION` environment variable | — | `src/registry/package.ts:8` |
+| `UI2API_WIGOLO_` | family prefix; every member has its own row below | — | `src/runtime/wigolo.ts:109` |
+| `UI2API_WIGOLO_AUTOSTART` | runtime knob (`=0` refuses to autostart the wigolo daemon) | — | `src/runtime/wigolo.ts:320` |
+| `UI2API_WIGOLO_USE_AUTH` | runtime knob (`=0` drops the wigolo auth requirement) | — | `src/plugin/wigolo-context.ts:125` |
+| `UI2API_XVFB_DISPLAY` | the virtual-display number provisioning starts `Xvfb` on, and the `DISPLAY` both generated systemd units run under. **A display is what makes `UI2API_HEADED=1` true** — see "HEADLESS IS WHAT GETS US BLOCKED" above | `99` | `scripts/ops/provision-ui2api-user.sh:27` |
 
 ## Site status (2026-09-19)
 
@@ -515,7 +533,10 @@ trust posture — read them before deploying.
   `UI2API_PROMPTD_TOKEN` (no token set = localhost-only posture, README's
   "optionally bearer-token gated").
 - **Verification before claiming done**: `npx tsc --noEmit`, `npm run build`,
-  `npm test`, `npm run test:unit`, plus the verbatim-corpus completeness gate
+  **`npm run typecheck`** (GOAL 147 — the TEST tree, `tsconfig.test.json`, which
+  `npm run build` does not compile; both CI configs run it, so omitting it here is
+  how a pipeline step gets "removed" by accident), `npm test`, `npm run test:unit`,
+  plus the verbatim-corpus completeness gate
   `npm run check:verbatim` (+ `npm run check:verbatim:goals` for the goals-index
   citations) — the standing P1..P5 verifier (`scripts/verify-verbatim-index.mjs`,
   GOAL 74/75) must pass on every flip: every user block has exactly its Index

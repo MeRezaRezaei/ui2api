@@ -125,17 +125,32 @@ analyse/generate needed. A registry is a catalog of per-site capability packages
 (`index.json` + `packages/<site>/…` on the `master` branch) served to your agents
 by the same daemon that serves built-in sites.
 
-> **No public registry is published yet.** The registry the CLI defaults to
-> (`https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master`) is a
-> placeholder with no repo behind it, so `ui2api install` **without** `--registry`
-> fails with exactly that named error. Install therefore needs a registry you
-> run or fork, and every command below passes `--registry`. Out of the box you
-> do not need install at all — see the vendored packages right after.
+> **The default registry is live and public** (measured 2026-09-27). The CLI
+> defaults to `https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master`
+> — the `master` branch of the public `MeRezaRezaei/ui2api-registry` repo
+> (`private: false`, last pushed 2026-09-24, 33 catalog entries) — so
+> `ui2api install` works with **no** `--registry` and no env var. Nothing below
+> sets either.
+>
+> **Re-derive it, do not trust this paragraph** — it is a fact about the world and
+> world-facts rot. One command says whether the default still answers:
+>
+> ```bash
+> curl -s -o /dev/null -w '%{http_code}\n' \
+>   https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master/index.json   # 200
+> ui2api install --catalog        # prints the live catalog: site | version | trust
+> ```
+>
+> If that 404s, the registry moved or is gone; then you need a registry you run
+> or fork and the override below. You still do not need install at all — the same
+> packages ship vendored in this repo, right after.
 
 ```bash
-# Your registry: a raw base URL ending in the branch, e.g.
-#   <raw base of your fork>/ui2api-registry/master
-export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
+# OPTIONAL override — only if you want a registry OTHER than the public default.
+# A raw base URL ending in the branch, e.g. <raw base of your fork>/ui2api-registry/master.
+# A GitHub repo page (https://github.com/<owner>/<repo>) is normalized for you.
+# export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
+# …or per command: ui2api install duckduckgo --registry <url>
 
 # Discover what's installable: site, version, trust (reviewed / unreviewed)
 ui2api install --catalog
@@ -212,7 +227,7 @@ answer off the page. All in your own browser session.
 # `smoke OK: duckduckgo answered "<answer>" in Nms` (exit 0) or the named
 # failure (exit 1). DuckDuckGo ships vendored in capabilities/duckduckgo, so
 # nothing is installed; only if that package were absent would smoke try the
-# install seam, which needs UI2API_REGISTRY_URL (no public registry — see above).
+# install seam, which reaches the public registry on its default URL (see above).
 npx tsx src/cli.ts smoke
 
 # Machine-readable verdicts for your CI/setup scripts — same honest gate,

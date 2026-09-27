@@ -56,8 +56,9 @@ does ONE real anonymous chat round-trip through the ChatDriver and prints
 `smoke OK: duckduckgo answered "<first line>" in Nms` (exit 0) or the named
 failure (exit 1). DuckDuckGo is vendored at `capabilities/duckduckgo/`, so on a
 fresh clone nothing is installed; smoke only touches the install seam if that
-package is genuinely missing, and that seam has **no public registry to install
-from** (see §12) — it will name that instead of quietly succeeding. Machine-readable
+package is genuinely missing, and that seam installs from the **public registry
+on its own default URL** (measured 2026-09-27; see §12 — it needs no
+`--registry`). Machine-readable
 for CI: `npx tsx src/cli.ts smoke --json`
 emits `{ok, site, answer?, ms?, message, installedAnon?, report}` (the `report`
 carries the same `checks[]/packages[]/summary` as `requirements --json`,
@@ -489,21 +490,34 @@ this box out of the box — so MCP stdio is the live-proven consumer surface.
 
 ## 12. Community install — `ui2api install <site>` (GOAL 24, 2026-09-24)
 
-**Read this first: no public community registry is published yet.** The default
-the CLI falls back to —
-`https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master` — is a
-placeholder with no repository behind it, so `install --catalog` and
-`install <site>` **without `--registry` fail**, with a named error saying
-exactly that. This is the whole "one-command, no analyse/generate" path, and it
-is one command *once you have a registry*.
+**Read this first: the public community registry IS published and the CLI
+defaults to it** (measured 2026-09-27). The default the CLI falls back to —
+`https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master` — is the
+`master` branch of the **public** repo `MeRezaRezaei/ui2api-registry`
+(`private: false`, last pushed 2026-09-24, **33** catalog entries), and it
+serves `index.json` (HTTP 200). So `install --catalog` and `install <site>`
+work **with no `--registry` and no `UI2API_REGISTRY_URL`**. This is the whole
+"one-command, no analyse/generate" path, and it is one command out of the box.
+
+Re-derive that instead of trusting the paragraph — it is a fact about a
+third-party repo, and third-party facts rot:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://raw.githubusercontent.com/MeRezaRezaei/ui2api-registry/master/index.json   # 200
+npx tsx src/cli.ts install --catalog   # prints the live catalog + its entry count
+```
 
 A registry is a git repo (default branch `master`, NOT `main`) whose root
 carries `index.json` and whose `packages/<site>/` holds the full capability
-package. Point install at one you run or fork, then install is one command:
+package. `--registry` / `UI2API_REGISTRY_URL` is then only the OVERRIDE, for a
+registry you run or fork:
 
 ```bash
-# Raw base URL ending in the branch — a GitHub repo page is normalized for you
-export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
+# OPTIONAL override — a raw base URL ending in the branch. A GitHub repo page
+# (https://github.com/<owner>/<repo>) is normalized for you. Not needed for the
+# public default above.
+# export UI2API_REGISTRY_URL='https://raw.githubusercontent.com/<you>/ui2api-registry/master'
 
 # Discover: site | version | trust (reviewed until the operator reviews it)
 npx tsx src/cli.ts install --catalog
@@ -523,7 +537,8 @@ curl -s localhost:9797/capability/duckduckgo \
 - Installed packages land in `capabilities/<site-id>/` — the same layout
   `promptd` already serves, so `GET /registry` picks the package up with no
   extra step.
-- `--registry <url>` or `UI2API_REGISTRY_URL` select the registry; the raw base
+- `--registry <url>` or `UI2API_REGISTRY_URL` OVERRIDE the registry; with
+  neither set, install uses the public default above. An override's raw base
   must end in the branch (`…/ui2api-registry/master`). A stale `/main` URL
   fails loudly with the correction hint.
 - **No registry needed on a fresh clone:** every packaged site is already
