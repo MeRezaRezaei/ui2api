@@ -3,6 +3,49 @@
 This file tells AI agents (Claude Code, Codex, Cursor, opencode, …) what this
 project is and how to work in it. Read it before touching anything.
 
+## ⛔ OPERATING DOCTRINE — three absolute laws (2026-09-27)
+
+This Operating doctrine block is the enforcement stub for three laws from the
+operator, in force before anything else in this file. They are not style, not
+preference, not "when it makes sense". Where this file or a project skill
+suggests otherwise, the doctrine wins.
+
+**LAW 1 — nested parallel subagents are MANDATORY whenever the work is
+parallel-shaped.** This file carries NO nested-subagent material, so the law is
+stated here IN FULL: independent pieces go out as parallel SIBLING subagents in
+ONE message; every dispatched child is TOLD it may nest further (depth ≤ 5);
+collision analysis happens BEFORE dispatch, and only a real write-write collision
+on the same file region or a real read-after-write dependency may keep a piece
+inline in your own context; a 429 / crash / network error NEVER shrinks the next
+wave — it goes out at full width again. Serial execution on a parallel-shaped
+task is a FAILURE, not a safe default. Finish a multi-part task with one agent
+and you under-executed — say so and re-dispatch wider.
+
+**LAW 2 — long-running work goes to GitLab CI, never a blocking terminal.** This
+refines and OVERRIDES the CI and full-suite material in `## GIT WIRING` and
+`## Conventions & red lines` below — read those for the mechanics, this for the
+rule. Fire-and-forget is FORCED: trigger the pipeline with `glab`
+(`/usr/bin/glab`; `export GITLAB_HOST=gitlab.pubg-sell.ir` when needed), dispatch
+a watcher on the pipeline id, then CONTINUE with the next task — waiting,
+polling or pausing on a pipeline is forbidden. Evidence stays honest: a pipeline
+id proves a job was CREATED, not that it passed, so report
+`CI running (run N) — watcher pending`, never "tests pass"; GitLab
+`.gitlab-ci.yml` is the long-running lane and the GitHub workflow is a redundant
+lane. No CI channel at all → the suite runs locally, BOUNDED behind a timeout,
+never an open-ended wait.
+
+**LAW 3 — every command carries a real timeout.** Wrap anything that can hang:
+`timeout -k 5 <secs> <cmd>`, sized to the real expected duration, not a round
+number that hides a hang. Exit 124 is a NAMED failure you report — never a
+silent retry loop, never "raised until it passes". This binds YOUR commands AND
+every dispatched subagent's, and it refines the `--test-timeout` /
+bounded-subprocess material in `## Conventions & red lines` (~line 601) and the
+port-22 hang note in `## GIT WIRING` (~line 217).
+
+**Full source of truth — go read it, and it OVERRIDES anything in this repo
+that suggests otherwise:**
+`/home/me/Documents/projects/goal-driven-parallel-agents/multi-parallel-nested-subagent-goal-driven-development/references/operating-doctrine.md`
+
 ## What this repo is
 
 `ui2api` turns **any website into an API driven by the user's own browser

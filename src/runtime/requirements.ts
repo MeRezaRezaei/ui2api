@@ -143,7 +143,20 @@ export function scopeRequirementsReport(report: RequirementsReport, siteId: stri
 }
 
 /** Injectable seams — every default is a thin real implementation; tests
- *  override each one so no real binary/network/filesystem is touched. */
+ *  override each one so no real binary/network/filesystem is touched.
+ *
+ *  THE INVARIANT, and why it is a rule about TYPES rather than about
+ *  discipline: a seam is declared REQUIRED unless its default cannot be
+ *  supplied by `defaultRequirementsDeps`, and a REQUIRED seam is read
+ *  UNGUARDED at its use site. The `?? default…` fallbacks that used to sit on
+ *  required seams were the original pipeline-199 defect: they made an omitted
+ *  field look intentional, so a fixture could inject 2 of the 4 display-stack
+ *  probes and silently read the REAL `ldconfig -p` / `fc-list` / `xdpyinfo` of
+ *  whatever box ran the suite — green on the author's desktop, red on a bare CI
+ *  runner. With the guards gone, the omission is a COMPILE error instead of a
+ *  host read. The seam-honesty gate in test/requirements-seam-honesty.test.ts
+ *  parses this interface and the use sites and fails if a guarded required seam
+ *  is ever reintroduced. */
 export interface RequirementsDeps {
   dataDir: string;
   nodeVersion: string;
@@ -160,7 +173,25 @@ export interface RequirementsDeps {
   missingSharedLibraries: (libs: string[]) => string[];
   fontCount: () => number;
   hasBinary: (name: string) => boolean;
-  displayUsable?: () => { name: string; declared: boolean; usable: boolean };
+  displayUsable: () => { name: string; declared: boolean; usable: boolean };
+  /** THE ONE DOCUMENTED INLINE FALLBACK, and it is load-bearing rather than a
+   *  courtesy: `defaultRequirementsDeps` deliberately does NOT supply it, so
+   *  `(deps.chromeOwner ?? resolveChromeOwner)()` is the only thing that can
+   *  produce a value at all. The fallback is honest because the resolver is the
+   *  honest default for THIS check — the question `ui2api requirements` exists
+   *  to answer is "who owns the Chrome on THIS machine", and no production
+   *  caller wants a fabricated owner.
+   *
+   *  What it costs, stated plainly: it is the one path by which a caller that
+   *  omits this field reads the real host (the dedicated user's profile). It is
+   *  optional HERE, in the signature, rather than papered over — so the type
+   *  never lies about whether a caller has to supply it — and a fixture that
+   *  omits it is named by the GOAL 147 seam-coverage gate in
+   *  test/requirements.test.ts, which pins that every derived seam is injected.
+   *  It was briefly a candidate for being made required like the others; that
+   *  would delete the last `??` from this file, and it is declined precisely
+   *  because the guard is the field's only wiring — a `??` that can never fire
+   *  is the defect; a `??` that is the implementation is not. */
   chromeOwner?: () => { user: string; profile: string | null; missing: string | null };
   chromeVersion: (exec: string) => string | null;
   bundledChromium: () => string | null;
@@ -407,9 +438,18 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
       "libxkbcommon.so.0",
       "libpango-1.0.so.0",
     ];
-    const missingLibs = (deps.missingSharedLibraries ?? defaultMissingSharedLibraries)(libs);
-    const fonts = (deps.fontCount ?? defaultFontCount)();
-    const has = deps.hasBinary ?? defaultHasBinary;
+    // READ UNGUARDED, on purpose: these three, and deps.displayUsable() below,
+    // are REQUIRED seams that defaultRequirementsDeps always supplies, so a
+    // `??` here could never fire in production — it would exist only to let an
+    // incomplete fixture fall through to the real `ldconfig -p` / `fc-list` /
+    // `xdpyinfo`, which is exactly how pipeline 199 read the author's box and
+    // failed on a bare CI runner. Omitting one is a compile error now, never a
+    // host read. The GOAL 149 host-independence gate watches `test/`; the
+    // seam-honesty gate in test/requirements-seam-honesty.test.ts watches these
+    // use sites, so the guard cannot come back.
+    const missingLibs = deps.missingSharedLibraries(libs);
+    const fonts = deps.fontCount();
+    const has = deps.hasBinary;
     const xvfb = has("Xvfb");
     const xserver = has("Xvfb") || has("Xorg") || has("X");
     const ready = missingLibs.length === 0 && fonts > 0 && xserver;
@@ -432,7 +472,7 @@ export async function runOsChecks(deps: RequirementsDeps): Promise<{ node: strin
     // Chrome exited with "Missing X server or $DISPLAY". The whole point of use
     // then fails with an error that names Chrome, not the dead display. So we
     // CONNECT to the display rather than trusting a socket's existence.
-    const display = (deps.displayUsable ?? defaultDisplayUsable)();
+    const display = deps.displayUsable();
     if (display.declared && !display.usable) {
       checks.push({
         id: "display-usable",
