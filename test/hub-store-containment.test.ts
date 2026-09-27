@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { readFileSync } from "node:fs";
 import { RegistryStore, assertSafePackageSegment } from "../src/hub/store.js";
 
 /**
@@ -167,10 +166,25 @@ d("GOAL 122: the hub is loopback-only unless explicitly opted in", () => {
     assert.match(src, /server\.listen\(opts\.port, host,/, "listen() must receive the host, not bind every interface");
   });
 
-  t("negative: the OLD shape bound everything (mutation proof)", () => {
-    // the old call had no host argument at all
-    const oldListen = (port: number) => `server.listen(${port}, () => {})`;
-    assert.ok(!/, \s*host,/.test(oldListen), "precondition: the old call passed no host, so Node bound :: (all interfaces)");
-    assert.match("server.listen(opts.port, host,", /server\.listen\(opts\.port, host,/, "the new call passes the resolved host");
+  t("negative: the host-argument pin has real discriminating power (mutation proof)", () => {
+    // This used to be `assert.ok(!/, \s*host,/.test(oldListen))` over a locally
+    // declared arrow FUNCTION. `RegExp.prototype.test` coerces its argument, so
+    // that asserted against the arrow's own SOURCE TEXT — a tautology about a
+    // literal defined two lines above, proving nothing about either the old or
+    // the current production call. Worse, it "passed" for the wrong reason: a
+    // containment pin that cannot fail is the assert.ok(true) disease.
+    //
+    // The real question is whether the pin ABOVE can tell a host-passing call
+    // from a host-less one. So mutate the ACTUAL source back to the pre-GOAL-122
+    // shape and require the pin to go red.
+    const pin = /server\.listen\(opts\.port, host,/;
+    const src = readFileSync("src/hub/server.ts", "utf8");
+    assert.ok(pin.test(src), "precondition: the real source passes the host to listen()");
+    const mutated = src.replace("server.listen(opts.port, host,", "server.listen(opts.port,");
+    assert.notEqual(mutated, src, "precondition: the host-less mutation actually applied to the real source");
+    assert.ok(
+      !pin.test(mutated),
+      "a host-less server.listen(opts.port) MUST NOT satisfy the containment pin — otherwise the pin is vacuous",
+    );
   });
 });

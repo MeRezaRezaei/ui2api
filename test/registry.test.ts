@@ -253,7 +253,19 @@ describe("prompt registry", () => {
   });
 
   it("GOAL61(b): the pre-filter map CRASHES on a malformed entry; the filtered map skips it", () => {
-    const malicious = [null, { method: "ui-path" }, { id: "chat", description: "ok" }];
+    // Typed `unknown[]` on purpose: these are the SHAPE OF THE INPUT the guard
+    // exists for — capability entries parsed out of a manifest on disk, i.e.
+    // untrusted values of unknown type, which is exactly what the production
+    // signature accepts (`c: unknown`). Declaring the literal as its inferred
+    // union (`null | {method} | {id}`) instead MISREPRESENTS the fixture: a
+    // hostile entry is not statically known to be an object, and TS then cannot
+    // apply the `x is ManifestCapability & {id: string}` predicate to the union,
+    // silently falls back to the non-narrowing `filter` overload, and leaves
+    // `c` possibly-null in the consumer. That is a property of the FIXTURE's
+    // declaration, not of the guard: the guard is a real type predicate and it
+    // narrows `unknown` correctly (src/prompt/registry.ts:633 filters a
+    // `ManifestCapability[]` the same way).
+    const malicious: unknown[] = [null, { method: "ui-path" }, { id: "chat", description: "ok" }];
     // The unguarded mapping today's registry used BEFORE GOAL 61:
     const bare = (siteId: string, capabilityId: string): string =>
       capabilityId.startsWith(`${siteId}_`) ? capabilityId.slice(siteId.length + 1) : capabilityId;
