@@ -16,12 +16,64 @@ import type { IngestResult } from "./profile-ingest.js";
 
 // --- Constants ---
 
+/**
+ * Config subpaths under every home directory that may hold a Chrome profile.
+ *
+ * `.config/ui2api-chrome` is the one this project CREATES for itself
+ * (`scripts/ops/provision-ui2api-user.sh`) and the one `chrome-owner.ts` ranks
+ * FIRST in `PROFILE_CANDIDATES` — the profile the daemon actually drives. The
+ * OS-wide scanner did not walk it, so the operator's real point-of-use sign-ins
+ * were invisible to `profile scan` / `profile add-all`. It was masked only by an
+ * accident: `/home/ui2api/.config/google-chrome` also happens to exist, so the
+ * scan found *a* profile for that user and nothing looked wrong.
+ *
+ * MEASURED on this box, as the owning user (`sudo -u ui2api` — as anyone else
+ * the 0700 profile is EACCES and is reported as skipped, which is the honest
+ * answer): `google-chrome` holds 3 known chat hosts, `ui2api-chrome` holds 2,
+ * and those 2 — `gemini.google.com` and `copilot.microsoft.com` — were visible
+ * to NOBODY. The bulk-login command the docs lead with silently skipped them.
+ *
+ * WHY WIDING THE SCAN IS SAFE HERE (the caution that made this undecided):
+ * the scanner is careful about CONTENT and was only ever blind about PATHS.
+ *   - `scanProfilesForSites` copies ONLY `Default/Network/Cookies` (+wal/shm) to
+ *     a 0700 mkdtemp dir and reads `SELECT host_key, COUNT(*)` — it never reads
+ *     a cookie name, value, or encrypted_value, and the copy is removed in a
+ *     `finally` (`withCopyCookiesForReading`).
+ *   - `importSiteSnapshot` → `ingestProfile` is already hardened for the
+ *     credential class: 0700 mkdtemp, 0600 chmod on both the cookie DB and the
+ *     `Local State` os_crypt key, target-host filtering, and a `finally` sweep
+ *     (`copyProfileForReading`, whose header calls the copies "decrypted-
+ *     credential material").
+ *   - The added profile is the SAME DATA CLASS as one already scanned
+ *     (`google-chrome`, owned by the same user, holding the same kind of site
+ *     cookies). Nothing new is readable that was not already readable.
+ *   - It is ui2api's OWN profile, created by this project's provisioning — not a
+ *     third party's.
+ *   - Reading a profile a running Chrome holds open is precisely what
+ *     `copyCookiesForReading` exists for (Chrome locks the live DB).
+ * The residual risk is not "a credential gets scanned" — it is that a snapshot
+ * captured from the point-of-use profile lands in the vault under the detected
+ * identity. That is the documented purpose of `profile add-all`, the vault is
+ * 0600 and gitignored, and the same is already true of `google-chrome`.
+ *
+ * WHAT WOULD HAVE MADE IT UNSAFE: a profile whose contents the scan dumps
+ * wholesale, or one outside a home directory the operator does not own. Neither
+ * applies. The list is walked per-home-directory only, and `isProfileRoot`
+ * requires a real profile (`Local State` + a `Default`/`Profile N`), so a stray
+ * directory is not picked up.
+ *
+ * `test/posture-scan-truth.test.ts` fails LOUD if `chrome-owner.ts` ever ranks a
+ * profile dir this list does not walk — the drift is made impossible to repeat
+ * silently rather than fixed once and forgotten.
+ */
 const CANDIDATE_SUBPATHS = [
   ".config/google-chrome",
   ".config/chromium",
   ".config/google-chrome-beta",
   ".config/Chromium",
   ".config/Google/Chrome",
+  // This project's own point-of-use profile (chrome-owner.ts ranks it first).
+  ".config/ui2api-chrome",
 ] as const;
 
 /**

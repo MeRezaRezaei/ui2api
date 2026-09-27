@@ -7,7 +7,7 @@ import { analyse } from "./analyzer/explore.js";
 import { redactActionMap } from "./runtime/redact.js";
 import { generate } from "./generator/generate.js";
 import { validateActionMap } from "./schema.js";
-import { sessionPath, saveCookies, buildLaunchOptions, usingUserChrome } from "./runtime/browser.js";
+import { sessionPath, saveCookies, buildLaunchOptions, userChromeProfile } from "./runtime/browser.js";
 import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth } from "./runtime/session-store.js";
 import { buildPackage, packageCommandRefusal } from "./registry/package.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
@@ -22,6 +22,7 @@ import { resolveProfile, resolveProfileWithOverride, defaultSiteId } from "./pro
 import { defaultChatProfiles, chatSurfaceStatus } from "./prompt/registry.js";
 import { ChatDriver } from "./prompt/driver.js";
 import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
+import { TOKEN_ENV } from "./prompt/posture.js";
 
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
@@ -248,7 +249,7 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
   // what makes later runs behave like the user's real logged-in session.
   if (flags.login) {
     const host = new URL(url).host;
-    const session = await doInteractiveLogin(url, host);
+    const session = await doInteractiveLogin(url, host, dirname(snapshotPath(root, host)));
     saveCookies(sessionPath(root, host), session.cookies);
     saveSnapshot(snapshotPath(root, host), session.snapshot);
     console.log(`Saved session snapshot -> ${snapshotPath(root, host)}`);
@@ -276,21 +277,105 @@ async function cmdAnalyse(url: string, flags: Flags): Promise<void> {
   console.log("Run: ui2api generate " + host + (flags.out ? ` --out ${flags.out}` : ""));
 }
 
-// Launch a HEADED browser solely for the user to log in (M7). This is the ONLY
-// place we ever call chromium.launch with headless:false. When the user has set
-// UI2API_CHROME / UI2API_USER_DATA_DIR, the login happens in THEIR real Chrome
-// and profile so the authenticated session lives in their own data — the core of
-// the "drive the user's own browser" vision; otherwise a fresh bundled Chromium
-// window is used and the resulting session is captured. Returns cookies + the
-// full profile snapshot (cookies + localStorage + sessionStorage + IndexedDB).
-async function doInteractiveLogin(url: string, host: string): Promise<{ cookies: unknown[]; snapshot: import("./runtime/session-store.js").ProfileSnapshot }> {
+// ── `analyse --login`: the interactive login window ───────────────────────────
+//
+// A DECLARED EXCEPTION to the launch-seam bench rule, and the reason is
+// mechanical, not stylistic: Playwright's `chromium.launch()` has NO
+// `userDataDir` parameter. The option is not in `LaunchOptions` at all
+// (playwright-core/types.d.ts — 41 fields, `headless` among them,
+// `userDataDir` not), the client DROPS it before the params leave the process
+// (`filterLaunchOptions`, a 12-key whitelist), and the server mkdtemps a
+// throwaway `playwright_chromiumdev_profile-*` for `--user-data-dir`. So the
+// previous call — `chromium.launch(buildLaunchOptions({headless:false}))` —
+// silently opened a TEMP-PROFILE browser, and the comment above it claimed the
+// login "happens in THEIR real Chrome and profile so the authenticated session
+// lives in their own data". MEASURED FALSE. The only Playwright API that hands
+// a real on-disk profile to a browser is `launchPersistentContext`, and the
+// repo already declares that exception for the identical reason
+// (`xhost-capture.ts:292`). Same shape, same derivation from the seam.
+//
+// The option bag is still DERIVED from `buildLaunchOptions`, so the real-Chrome
+// decision and the clean flag set (no `--no-sandbox`/`--disable-gpu` tells) are
+// the seam's, not a second hand-typed list. `userDataDir` is positional for
+// `launchPersistentContext`, so it leaves the bag and becomes argument one.
+
+/** Where the login profile lives when the operator configured none of their own. */
+export function interactiveLoginProfileDir(sessionDir: string): string {
+  return resolve(sessionDir, "chrome-login-profile");
+}
+
+export interface InteractiveLoginLaunch {
+  /** The on-disk profile Chrome will actually use. */
+  profileDir: string;
+  /** The seam's option bag, minus the positional `userDataDir`. */
+  options: Record<string, unknown>;
+  /** True when this is the operator's OWN configured profile, not ours. */
+  usingRealProfile: boolean;
+}
+
+/**
+ * Resolve the interactive-login launch: which profile, and with which options.
+ *
+ * PURE w.r.t. the filesystem (it never creates or launches anything) so the
+ * contract is unit-testable without a browser.
+ *
+ * Profile choice, and why each branch says what it says:
+ *   - `UI2API_USER_DATA_DIR` / `UI2API_CHROME_PROFILE_PATH` (the seam's
+ *     `userChromeProfile()`): the login lands in the operator's OWN profile, so
+ *     every later run of that browser is already signed in. TRUE now, and only
+ *     true because of the persistent-context form.
+ *   - otherwise: a dedicated per-site profile under the session dir
+ *     (`sites/<host>/.session/chrome-login-profile`, covered by the
+ *     `sites/<host>/.session/` gitignore rule). The login is still DURABLE — it
+ *     is not a temp dir that vanishes with the process — and re-running
+ *     `analyse --login` reuses the sign-in instead of asking again.
+ */
+export function interactiveLoginLaunch(sessionDir: string): InteractiveLoginLaunch {
+  const real = userChromeProfile();
+  const profileDir = real ?? interactiveLoginProfileDir(sessionDir);
+  const { userDataDir: _positional, ...bag } = buildLaunchOptions({
+    userDataDir: profileDir,
+    // FORCED, not inherited: this window exists so a human can sign in. An
+    // invisible window is not a login, so `resolvedHeadless` is never asked.
+    headless: false,
+  }) as Record<string, unknown>;
+  void _positional;
+  return { profileDir, options: bag, usingRealProfile: Boolean(real) };
+}
+
+// Launch a HEADED browser solely for the user to log in (`analyse --login`).
+// Returns cookies + the full profile snapshot (cookies + localStorage +
+// sessionStorage + IndexedDB).
+async function doInteractiveLogin(url: string, host: string, sessionDir: string): Promise<{ cookies: unknown[]; snapshot: import("./runtime/session-store.js").ProfileSnapshot }> {
   const { chromium } = await import("playwright");
-  const opts = buildLaunchOptions({ headless: false });
-  const browser = await chromium.launch(opts as any);
+  const launch = interactiveLoginLaunch(sessionDir);
+  mkdirSync(launch.profileDir, { recursive: true, mode: 0o700 });
+  // A persistent context, so the sign-in DIES with nothing: the profile on disk
+  // is the one Chrome writes, which is the whole point of an interactive login.
+  const context = await chromium
+    .launchPersistentContext(launch.profileDir, launch.options as any)
+    .catch((e: unknown) => {
+      // The one failure an operator can actually cause here: Chrome's
+      // one-instance-per-profile rule. Name it instead of surfacing a raw
+      // ProcessSingleton.
+      const msg = String(e);
+      if (/ProcessSingleton|profile appears to be in use/i.test(msg)) {
+        throw new Error(
+          `cannot open ${launch.profileDir} — a Chrome already holds that profile (Chrome allows one ` +
+            `instance per profile). Close that Chrome and re-run, or unset ` +
+            `UI2API_USER_DATA_DIR/UI2API_CHROME_PROFILE_PATH to log in on this site's own profile ` +
+            `(${interactiveLoginProfileDir(sessionDir)}). Underlying error: ${msg}`,
+        );
+      }
+      throw e;
+    });
   try {
-    const page = await browser.newPage();
+    const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(url, { waitUntil: "load", timeout: 60000 });
-    console.log(`[ui2api] Login page opened${usingUserChrome() ? " (your Chrome + profile)" : ""}. Sign in, then return here and press Enter.`);
+    const where = launch.usingRealProfile
+      ? ` (your own Chrome profile: ${launch.profileDir})`
+      : ` (this site's login profile: ${launch.profileDir} — the sign-in persists there)`;
+    console.log(`[ui2api] Login page opened${where}. Sign in, then return here and press Enter.`);
     await new Promise<void>((resolve) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       rl.question("Press Enter once logged in: ", () => {
@@ -298,7 +383,7 @@ async function doInteractiveLogin(url: string, host: string): Promise<{ cookies:
         resolve();
       });
     });
-    const cookies = await page.context().cookies();
+    const cookies = await context.cookies();
     // The snapshot captures the same origin the page is on; if the login flow
     // redirected off the target origin, fall back to the final landing origin —
     // the FIRST-party cookies are what carry the auth.
@@ -319,7 +404,7 @@ async function doInteractiveLogin(url: string, host: string): Promise<{ cookies:
     });
     return { cookies, snapshot };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
@@ -613,7 +698,10 @@ async function cmdPromptd(flags: Flags): Promise<void> {
   const svc = await startPromptd({
     port,
     dataDir,
-    token: process.env.UI2API_PROMPTD_TOKEN ?? "",
+    // The knob NAME comes from the one definition site (prompt/posture.ts), never
+    // from a literal typed here — a renamed knob that only this file still
+    // answers to is how a gate silently stops gating.
+    token: process.env[TOKEN_ENV] ?? "",
     profiles,
     min: flags.poolMin,
     max: flags.poolMax,
@@ -709,8 +797,10 @@ async function cmdProfileCapture(url: string, flags: Flags): Promise<void> {
     console.log(`[ui2api] capture is login-first — opening the sign-in flow for ${host} (--login is the default capture mode)`);
   }
 
-  // Default capture: headed browser as current user (existing flow).
-  const session = await doInteractiveLogin(url, host);
+  // Default capture: headed browser as current user (existing flow). The login
+  // profile lives in the SAME private session dir the snapshot is written to, so
+  // the sign-in is durable and stays inside the gitignored `.session` tree.
+  const session = await doInteractiveLogin(url, host, dirname(snapshotPath(dataDir, host)));
   const identity = flags.identity;
   if (identity) {
     // GOAL 50 account-INDEX collision gate: a same-slug DIFFERENT identity
