@@ -103,11 +103,31 @@ test("session locks: the doctor's per-package verdict is pass on a verified lock
   const report = verifyCapabilitySessionLocks();
 
   // A lock that was measured carries a pass verdict with the measured evidence.
-  const checked = report.checked[0];
-  assert.ok(checked, "expected at least one measured lock");
-  const okResult = sessionLockResultFor(checked, report);
-  assert.equal(okResult.status, "pass", `expected pass for ${checked}, got ${okResult.status}: ${okResult.reason ?? ""}`);
-  assert.match(okResult.detail ?? "", /session lock verified against/);
+  //
+  // GOAL 146: this USED to assert `report.checked[0]` exists, which made the test
+  // depend on the OPERATOR'S CAPTURED VAULT — `data/` is gitignored, so a clean CI
+  // checkout has none and the test failed there on every run. Proven by hiding the
+  // vault locally, which reproduced CI's exact `expected at least one measured
+  // lock` failure. A test may not require machine state that the repository
+  // deliberately does not carry.
+  //
+  // What is asserted instead is the property that is ALWAYS true — a measured
+  // lock reads `pass` with its evidence, and a lock with no vault reads `skip`
+  // with a NAMED reason (never a silent default). On a box WITH sessions the
+  // first branch runs for real; on a bare runner it is vacuously satisfied and
+  // the skip branch is what carries the weight.
+  for (const checked of report.checked) {
+    const okResult = sessionLockResultFor(checked, report);
+    assert.equal(okResult.status, "pass", `expected pass for ${checked}, got ${okResult.status}: ${okResult.reason ?? ""}`);
+    assert.match(okResult.detail ?? "", /session lock verified against/);
+  }
+  // Non-vacuity that does not need a vault: every declared package is accounted
+  // for as either measured or skipped — never silently dropped.
+  assert.equal(
+    report.checked.length + report.skipped.length,
+    report.details.length,
+    "every capability package must appear as checked or skipped, never dropped"
+  );
 
   // A site with no lock at all and an uncheckable lock both SKIP with a named
   // reason — never "pass", never a silent default.

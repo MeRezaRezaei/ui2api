@@ -79,6 +79,17 @@ function makeDeps(overrides: Partial<RequirementsDeps> = {}): RequirementsDeps {
     now: () => new Date("2026-09-25T00:00:00.000Z"),
     packages: () => [],
     registryVerified: () => false,
+    // GOAL 138/146: these are INJECTED seams for the same reason chromeOwner is
+    // (see the comment above) — the fixture must decide, not the host. They were
+    // NOT injected, so the display-stack and display-usable checks fell through to
+    // the REAL `hasBinary` / `xdpyinfo` probes. That passed on the operator's box
+    // (the desktop stack is installed there) and FAILED on a bare CI runner, which
+    // is why pipeline 197 reported `on-hold: 4, ready: 0` where this test expects
+    // `ready: 2, working: 1`. The checks were honest about the runner; the TEST
+    // was asserting a verdict while silently reading a real host. Proven: forcing
+    // `hasBinary: () => false` reproduces CI's exact diff.
+    hasBinary: () => true,
+    displayUsable: () => ({ name: ":20", declared: true, usable: true }),
     ...overrides,
   };
 }
