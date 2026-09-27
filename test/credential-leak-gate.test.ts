@@ -68,14 +68,30 @@ d("GOAL 98: the credential red line is machine-verified", () => {
     assert.deepEqual(real, [], `these tracked files look like session snapshots/credentials: ${real.join(" ")}`);
   });
 
-  t("privacy gate: .brain/ is tracked iff the repo is PRIVATE", () => {
+  // The network half of the privacy gate. `gh repo view` is a NETWORK + CLI +
+  // AUTH dependency, and it ran inside `test:unit` on every runner: it could
+  // burn the full 120 s file timeout on a slow/absent runner, and its verdict
+  // differed per environment. It is now opt-in, gated EXACTLY the way
+  // test/install.test.ts:141 gates its live-registry test
+  // (`{ skip: process.env.X !== "1" }`) — the sibling idiom, not a new one.
+  // The deterministic half below runs unconditionally, so nothing is lost.
+  t("privacy gate (live half): .brain/ tracked/ignored matches REAL repo visibility, opt-in via UI2API_GH_LIVE=1", { skip: process.env.UI2API_GH_LIVE !== "1" }, (tt) => {
     const brainTracked = TRACKED.some((f) => f.startsWith(".brain/"));
-    let isPrivate = true;
+    // `gh` colourises its JSON when it believes it is on a terminal, so the raw
+    // stdout is NOT valid JSON (measured: `[\1;37m{[\0m...`). The old test hid
+    // that behind a try/catch, so its `isPrivate` branch was UNREACHABLE on a
+    // colourised host — it always fell through to the fail-safe return. Strip the
+    // ANSI first, so the branch it was written to pin can actually run.
+    // eslint-disable-next-line no-control-regex
+    const ANSI = /\u001B\[[0-9;]*m/g;
+    let isPrivate: boolean;
     try {
-      isPrivate = JSON.parse(execFileSync("gh", ["repo", "view", "MeRezaRezaei/ui2api", "--json", "isPrivate"], { encoding: "utf8" , timeout: 120000 })).isPrivate === true;
-    } catch {
-      // gh unavailable/offline: do not fabricate a verdict — assert the safe branch only
-      assert.ok(brainTracked, "if repo visibility cannot be proven, .brain/ must still be tracked (fail safe)");
+      const raw = execFileSync("gh", ["repo", "view", "MeRezaRezaei/ui2api", "--json", "isPrivate"], { encoding: "utf8" , timeout: 120000 });
+      isPrivate = (JSON.parse(raw.replace(ANSI, "")) as { isPrivate: boolean }).isPrivate === true;
+    } catch (e) {
+      // Opted IN and the verdict still cannot be obtained. Do not fabricate one:
+      // skip with the named reason and let the offline half above hold the line.
+      tt.skip(`gh could not prove repo visibility: ${(e as Error).message.split("\n")[0]}`);
       return;
     }
     if (isPrivate) {
@@ -85,6 +101,18 @@ d("GOAL 98: the credential red line is machine-verified", () => {
       assert.ok(!brainTracked, "PUBLIC repo: .brain/ must never be tracked");
       assert.ok(GITIGNORE.split("\n").some((l) => l.trim() === ".brain/"), "PUBLIC repo: .brain/ must be gitignored");
     }
+  });
+
+  // The offline half — no network, no gh, no auth: the fail-safe branch the old
+  // test could only reach by accident (when gh happened to be missing). It is
+  // the CONSERVATIVE direction, so it can never leak .brain/ to a public remote:
+  // if visibility cannot be proven here, .brain/ must still be tracked. Pinned
+  // unconditionally so a runner with no `gh` still enforces the red line.
+  t("privacy gate (offline half, no network): .brain/ stays tracked and ungitignored until a live probe proves otherwise", () => {
+    const brainTracked = TRACKED.some((f) => f.startsWith(".brain/"));
+    const brainIgnored = GITIGNORE.split("\n").some((l) => l.trim() === ".brain/");
+    assert.ok(brainTracked, "if repo visibility cannot be proven here, .brain/ must still be tracked (fail safe)");
+    assert.ok(!brainIgnored, ".brain/ must not be gitignored while it is tracked — that would silently untrack the brain");
   });
 
   t("negative: a credential-shaped path in the file list is reported (the gate CAN fail)", () => {

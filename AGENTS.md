@@ -342,17 +342,26 @@ trust posture — read them before deploying.
 ## Site status (2026-09-19)
 
 - **Default chat set** (`defaultChatProfiles()`, `src/prompt/registry.ts`,
-  GOAL 30 + GOAL 32 truth-gate): **23 sites** — the builtin profile catalog
-  (gemini, chatgpt, claude, copilot, perplexity, huggingchat, deepseek, kimi,
-  tencent-aistudio, + more) merged with every installed **driveable** chat-shaped
-  package whose composer/answer selectors parse under Playwright's own selector
-  grammar (t3chat's former prose rows refused; duckduckgo, poe, grok, …);
-  dormant/dead-end packages (zenmux parked origin, xiaomimimo DNS dead-end) are
-  EXCLUDED from the chat surface until live-verified but stay fully served on
-  /registry + /capability/<id> with their honest metadata status; every surfaced
-  packaged id carries its status (`verified` / `unverified-candidate`) on
-  GET /sites + `prompt --sites`; capability-only packages (gmail/youtube/
-  araprat/…) never become chat models.
+  GOAL 30 + GOAL 32 truth-gate): **22 ids, measured 2026-09-27** — the builtin
+  profile catalog (gemini, chatgpt, claude, copilot, perplexity, huggingchat,
+  deepseek, kimi, tencent-aistudio, + more) merged with every installed
+  **driveable** chat-shaped package whose composer/answer selectors parse under
+  Playwright's own selector grammar (t3chat's former prose rows refused;
+  duckduckgo, poe, grok, …); dormant/dead-end packages (zenmux parked origin,
+  xiaomimimo DNS dead-end) are EXCLUDED from the chat surface until
+  live-verified but stay fully served on /registry + /capability/<id> with their
+  honest metadata status; every surfaced packaged id carries its status
+  (`verified` / `unverified-candidate`) on GET /sites + `prompt --sites`;
+  capability-only packages (gmail/youtube/araprat/…) never become chat models.
+  **Do not trust this number — derive it** (it has already moved 25 → 23 → 22
+  as gates tightened): `npx tsx src/cli.ts prompt --sites`, or
+  `curl -s http://127.0.0.1:9797/v1/models | jq -r '.data[].id'`, both print the
+  live surface. **GOAL 147 dropped `google-ai-search` (23 → 22):** its profile is
+  composer-less, its manifest declares no `*_chat` capability, and its runner is
+  a `loginGatedResult(...)` short-circuit — it was advertised as a chat model
+  with no chat tool behind it. It is NOT removed: it stays fully served as a
+  capability package on `/registry` + `POST /capability/google-ai-search`, and an
+  explicit `--site google-ai-search` still resolves.
 - **Session-locked + live-verified round-trips**:
   - `deepseek` (chat.deepseek.com) — localStorage `userToken` Bearer auth;
     AWS WAF + PoW; verified answering (proof PASS 11462, 2026-09-19). Full

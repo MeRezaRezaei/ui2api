@@ -164,19 +164,64 @@ test("storageReplayScript is self-contained and refuses a foreign origin", async
   const script = storageReplayScript(snap);
   assert.ok(script.includes("https://x.example")); // origin guard baked in
   assert.ok(script.includes("sessionStorage"));
-  // Evaluating it on a DIFFERENT origin must not throw (guard returns early).
-  const dir = mkdtempSync(join(tmpdir(), "u2a-snap3-"));
+  // "self-contained" is a real, checkable claim: the emitted source must parse
+  // and run as a standalone IIFE with no reference to any outer scope.
+  assert.doesNotThrow(() => new Function(script), "the replay script must be self-contained (parses standalone)");
+
+  // The REAL property, on the loopback fixture origin. Evaluating the script on
+  // a DIFFERENT origin must not throw (the guard returns early) AND must write
+  // nothing — so it is asserted from both sides:
+  //   A. the snapshot origin (https://x.example) vs the fixture origin -> refused
+  //   B. the SAME script with ORIGIN rewritten to the fixture origin -> replayed
+  // B is the control: without it A could pass on a script that is a no-op, which
+  // is the same "proves nothing" disease this test used to carry.
+  const site = await startFixture();
   let browser: Browser | undefined;
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-    await page.goto("http://example.com/", { waitUntil: "domcontentloaded" }).catch(() => {});
+    const pageErrors: string[] = [];
+    page.on("pageerror", (e) => pageErrors.push(String(e)));
+
+    // Seed the fixture origin with foreign values first, so a refused replay
+    // cannot be confused with an origin that simply has no storage.
+    await page.goto(`${site.origin}/`, { waitUntil: "load" });
+    await page.evaluate(() => {
+      localStorage.setItem("k", "untouched");
+      sessionStorage.setItem("s", "untouched");
+    });
+
+    // A. foreign origin -> the guard must return early, writing nothing.
     await page.addInitScript({ content: script });
-    await page.goto("about:blank").catch(() => {});
-    assert.ok(true);
+    await page.reload({ waitUntil: "load" });
+    const refused = await page.evaluate(() => ({
+      ls: localStorage.getItem("k"),
+      ss: sessionStorage.getItem("s"),
+    }));
+    assert.deepEqual(pageErrors, [], "a foreign origin must make the guard return early, not throw");
+    assert.equal(refused.ls, "untouched", "a foreign origin must NOT receive the snapshot's localStorage");
+    assert.equal(refused.ss, "untouched", "a foreign origin must NOT receive the snapshot's sessionStorage");
+
+    // B. control: the SAME script with only ORIGIN rewritten to the fixture
+    // origin must replay the snapshot's storage. Same script, one token
+    // different, opposite outcome — so A cannot be vacuous.
+    const controlled = script.replace(JSON.stringify("https://x.example"), JSON.stringify(site.origin));
+    assert.notEqual(controlled, script, "the control must actually differ from the guarded script");
+    const page2 = await browser.newPage();
+    const controlErrors: string[] = [];
+    page2.on("pageerror", (e) => controlErrors.push(String(e)));
+    await page2.addInitScript({ content: controlled });
+    await page2.goto(`${site.origin}/`, { waitUntil: "load" });
+    const replayed = await page2.evaluate(() => ({
+      ls: localStorage.getItem("k"),
+      ss: sessionStorage.getItem("s"),
+    }));
+    assert.deepEqual(controlErrors, [], "the matching-origin replay must not throw either");
+    assert.equal(replayed.ls, "v", "control: the snapshot's localStorage IS replayed on the matching origin");
+    assert.equal(replayed.ss, "1", "control: the snapshot's sessionStorage IS replayed on the matching origin");
   } finally {
     await browser?.close().catch(() => {});
-    rmSync(dir, { recursive: true, force: true });
+    site.close();
   }
 });
 

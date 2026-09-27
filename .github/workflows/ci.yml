@@ -57,4 +57,9 @@ jobs:
       - run: npm run test:unit
         env:
           UI2API_REGISTRY_LIVE: "1"
+          # GOAL 147: the credential-leak gate's live half shells out to `gh`.
+          # Opt-in for the same reason as the registry knob above: the unit suite
+          # must not depend on the network. Without it the offline half still
+          # holds the line and the live half skips with a named reason.
+          UI2API_GH_LIVE: "1"
           WIGOLO_REPO: ${{ github.workspace }}/wigolo

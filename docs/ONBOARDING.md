@@ -213,15 +213,24 @@ $ curl http://127.0.0.1:9797/v1/models
  {"id":"duckduckgo","object":"model","created":0,"owned_by":"ui2api","permission":[],
  "root":"duckduckgo","parent":null,"site":"DuckDuckGo AI Chat (duck.ai)",
 "url":"https://duck.ai/chat","loginRequired":false},
-  ... 21 more entries ... ]}
-  # 23 models = the servable chat set (count measured 2026-09-24 on a real default
-  # daemon — GOAL 35): the 11 builtin chat sites + every installed DRIVEABLE
-  # chat-shaped package. Dormant/dead-end or capability-only packages are NOT
-  # models — /v1/chat/completions 404s ids it cannot serve, so /v1/models never
-  # lists them (id list = the daemon's measured /v1/models order):
-  # gemini, google-ai-search, chatgpt, claude, copilot, perplexity, huggingchat,
+   ... 20 more entries ... ]}
+  # 22 models = the servable chat set (count measured 2026-09-27 on a real default
+  # daemon, UI2API_POOL_MIN=0 — GOAL 35 re-measure, GOAL 147's correction): the
+  # builtin chat sites that actually HAVE a chat surface + every installed
+  # DRIVEABLE chat-shaped package. Dormant/dead-end or capability-only packages
+  # are NOT models — /v1/chat/completions 404s ids it cannot serve, so
+  # /v1/models never lists them. DERIVE it, never hand-type it:
+  #   curl -s http://127.0.0.1:9797/v1/models | jq -r '.data[].id'
+  # (equivalently: npx tsx src/cli.ts prompt --sites) — the id list below is that
+  # measured /v1/models order, printed 2026-09-27:
+  # gemini, chatgpt, claude, copilot, perplexity, huggingchat,
   # kimi, deepseek, tencent-aistudio, hunyuan, blackbox, codex, copilot-m365,
   # duckduckgo, grok, inner-ai, manus, notion, poe, t3chat, v0, venice
+  # google-ai-search is NOT in that list and must not be added by hand: it has a
+  # composer-less profile, its manifest declares no *_chat capability, and its
+  # runner is a loginGatedResult short-circuit, so POST /v1/chat/completions
+  # would 404 unknown_model. It is NOT removed — it is still fully served on
+  # GET /registry and POST /capability/google-ai-search.
 
 $ curl -X POST http://127.0.0.1:9797/v1/chat/completions \
     -H 'Content-Type: application/json' \
@@ -244,7 +253,7 @@ Other daemon endpoints:
 | `GET /health` | liveness |
 | `GET /status` | pool state (browser up, warm/idle/busy) |
 | `GET /sites` | configured chat profiles (per-id status) |
-| `GET /v1/models` | OpenAI-compatible model list over the servable chat set (`{object:"list",data:[{id,...}]}` — model id = site id; the 23 ids above are exactly what `/v1/chat/completions` answers) |
+| `GET /v1/models` | OpenAI-compatible model list over the servable chat set (`{object:"list",data:[{id,...}]}` — model id = site id; the 22 ids above, measured 2026-09-27, are exactly what `/v1/chat/completions` answers) |
 | `GET /registry` | installed packages + `verified` records + per-package `chat.model` (truth, folds #8/#34) |
 | `GET /requirements` | OS-level readiness report (GOAL 33 — same data as `ui2api requirements`: per-package verdict ready/working/on-hold/not-ready with named reasons, before any browser work) |
 | `GET /accounts?site=<id>` | vault accounts for a profile |
@@ -270,7 +279,8 @@ never by claim. `false`/absent = honestly not verified.
 
 **The `chat.model` contract (GOAL 34)** — `chat.model` is present on a
 `/registry` package **ONLY** when that id is on the servable chat set (the
-23 ids in §5 — the exact gate `/v1` builds its allow-list from). Absence means
+22 ids in §5, measured 2026-09-27 — the exact gate `/v1` builds its
+allow-list from). Absence means
 **no chat**: capability-only / url-less / dormant / dead-end packages
 (gmail, youtube, araprat, chatglm, zenmux, xiaomimimo, …) keep their
 status/tools/accounts on `/registry` but carry **no** `chat` key, because

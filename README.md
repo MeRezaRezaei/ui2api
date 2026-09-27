@@ -180,7 +180,7 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 99 hermetic unit-test files — no browser needed
+npm run test:unit   # 100 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
@@ -317,7 +317,10 @@ copy-paste unblock in **`docs/UNLOCK.md`**.
 A machine-checkable `verified` record (since/evidence/via) rides on every
 `/registry` package — absent or `false` = honestly not verified. Each package's
 `chat.model` is present **only** on the servable chat ids `GET /v1/models`
-lists (23 on a default daemon, GOAL 34) — absence = no chat surface, and
+lists (22 on a default daemon, measured 2026-09-27, GOAL 34 — derive the live
+set from `GET /v1/models` or `npx tsx src/cli.ts prompt --sites`; `google-ai-search`
+is deliberately absent, it has no chat surface behind it yet is still served as a
+capability package) — absence = no chat surface, and
 `POST /v1/chat/completions` 404s refused ids. Each verified
 chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
 Sending is always the site's **own JS**: paste event + Enter — no synthetic

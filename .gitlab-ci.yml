@@ -82,6 +82,11 @@ verify:
   variables:
     WIGOLO_REPO: "$CI_PROJECT_DIR/wigolo"
     UI2API_REGISTRY_LIVE: "1"
+    # GOAL 147: the credential-leak gate's live half shells out to `gh`. It is
+    # opt-in (UI2API_GH_LIVE=1) so the unit suite never depends on the network,
+    # exactly like the registry knob above; without it the offline half still holds
+    # the line and the live half skips with a named reason.
+    UI2API_GH_LIVE: "1"
   script:
     - npm ci --cache .npm --prefer-offline
     - npx playwright install --with-deps chromium

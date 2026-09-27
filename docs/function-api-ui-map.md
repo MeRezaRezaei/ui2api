@@ -256,7 +256,7 @@ the honest answer until a live capture + implementation lands.
 | conol | 1 | http.ts:939 | gated |
 | copilot-m365 | 5 | http.ts:968 | gated |
 | doubao | 12 | http.ts:997 | gated |
-| google-ai-search | `google_ai_mode_search` (1) | http.ts:1058 | gated (also builtin `POST /prompt` chat profile; BLOCKED at the site — portal v20 external sign-in, fold #17f honest dead-end; manifest tool now dispatches honestly gated instead of dead) |
+| google-ai-search | `google_ai_mode_search` (1) | http.ts:1058 | gated (NOT a chat model — GOAL 147: composer-less profile, no `*_chat` capability, so it is absent from `defaultChatProfiles()` / `/v1/models` while remaining served here; BLOCKED at the site — portal v20 external sign-in, fold #17f honest dead-end; manifest tool now dispatches honestly gated instead of dead) |
 | grok | 1 | http.ts:1087 | gated |
 | inner-ai | 6 | http.ts:1116 | gated |
 | manus | 5 | http.ts:1145 | gated |
@@ -282,7 +282,7 @@ branch reachable by a declared capability, no browser launched.
 | POST | `/capability/<site>` ×**33** (14 real runners http.ts:443-793 + 1029, 19 gated http.ts:823-997 + 1058-1377) | `{capability, args?}` | `200` ok:true → result; `ok:false → 502`, throw → 500; unknown/undeclared capability → `400 {error:"unknown capability "<cap>" for "<site>"; available: […]}` (pre-dispatch manifest guard http.ts:220-237, 400 at :232) | manifest guard `registryPackageFor(site)` http.ts:224 → `new <Site>Capabilities(profile, {browser: pool.sharedBrowser()})` → `run()` switch (table in §0) |
 | GET | `/capabilities/<site>` | — | `200 {site, name, url, capabilities:[{id,name,description,method}], accounts}` for EVERY installed package (gate = package existence, not profile — works for capability-first sites like youtube/araprat); `400 {error:"no capability package installed for "<site>"}` otherwise | path-form branch http.ts:321-346 (regex http.ts:322, response http.ts:327-344) from `registryPackageFor(site)` → manifest `tools[]` |
 | GET | `/registry` | — | `{packages:[{id,name,url,description,version,site,authRequired,status,verified,chat?:{model,streaming} /* ONLY on the servable chat surface — GOAL 34: refused packages carry no chat key */,tools:[{name,id,description,method,workType,reloadAfterSuccess,inputSchema}]}], generatedAt}` | `buildRegistryPackages()` registry.ts:366 |
-| GET | `/sites` | — | `{sites:[{id,name,url,loginRequired,status}]}` — the driveable chat catalog http.ts:253 | `defaultChatProfiles()` (23) → `chatSurfaceStatus(id)` |
+| GET | `/sites` | — | `{sites:[{id,name,url,loginRequired,status}]}` — the driveable chat catalog http.ts:253 | `defaultChatProfiles()` (22 — measured 2026-09-27) → `chatSurfaceStatus(id)` |
 | GET | `/v1/models` | — | `{object:"list", data:[{id,object,created,owned_by:"ui2api",root,parent,site,url,loginRequired}]}` openai.ts:95 | `Object.values(profilesById)` — configured chat profiles only |
 | POST | `/v1/chat/completions` | `{model?"ui2api/<site>"\|"ui2api-<site>", messages:[{role,content\|parts}], stream?, new_chat?, account?}` openai.ts:111 | non-stream: chat.completion JSON + `ui2api` meta (openai.ts:171-185); stream: SSE `chat.completion.chunk` → `[DONE]` replay of the completed DOM answer (openai.ts:153-169) | `siteIdFromModel` openai.ts:55 → `profileById` (origin pin) → `pool.acquire` → `driver.ask` |
 | GET | `/status` / `/health` (`/`) | — | `{ok, pool:{…}}` http.ts:392 / http.ts:414 | pool.status |
@@ -311,7 +311,12 @@ returns the honest login-gated short-circuit.
 
 `GET /v1/models` is **not** the registry — it lists only the daemon's configured
 chat profiles. `defaultChatProfiles()` (registry.ts:347) currently enumerates
-**23**: the builtin catalog + every installed driveable chat-shaped package
+**22** (measured 2026-09-27; re-measure with
+`node scripts/measure-function-map.mjs`, which spawns the real registry — the
+same seam that feeds the `CHAT_PROFILES:` census line at the top): the builtin
+catalog — minus `google-ai-search`, which has a composer-less profile, no
+`*_chat` manifest capability and a `loginGatedResult(...)` runner, so it is no
+chat model — plus every installed driveable chat-shaped package
 whose composer/answer selectors parse. Capability-only packages (gmail,
 youtube, araprat, …) and dormant/dead-end packages are **absent from /v1/models**
 even though they exist in `/registry` and on `/capability/<site>` — that is

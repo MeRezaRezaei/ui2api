@@ -42,13 +42,20 @@ per-site knowledge is a `ChatSiteProfile` (`src/profile/profile.ts`: composer /
 send / answer selectors, dismiss list, delays) — declarative, overridable via
 JSON with `--profile FILE`. The default chat set is
 `defaultChatProfiles()` (`src/prompt/registry.ts`): the builtin catalog merged
-with every installed **driveable** chat-shaped package — 23 sites incl.
-duckduckgo, poe, grok — where "driveable" (GOAL 32 truth-gate) means every
-composer/answer entry is a parseable CSS selector under Playwright's own
+with every installed **driveable** chat-shaped package — **22 ids, measured
+2026-09-27** (derive the live set with `npx tsx src/cli.ts prompt --sites` or
+`GET /v1/models`; the number has already moved 25 → 23 → 22 as the gates
+tightened) incl. duckduckgo, poe, grok — where "driveable" (GOAL 32 truth-gate)
+means every composer/answer entry is a parseable CSS selector under Playwright's own
 selector grammar (prose rows and playwright-only pseudo-classes are refused)
 and the package's metadata status is not dormant/dead-end (zenmux, xiaomimimo
 stay on /registry + /capability/<id> with their honest status until
-live-verified) — capability-only packages never become chat models. GOAL 34:
+live-verified) — capability-only packages never become chat models. GOAL 147
+dropped `google-ai-search` from the chat surface (composer-less profile, no
+`*_chat` capability, `loginGatedResult(...)` runner) for the same reason: it is
+**not removed from the product** — it stays fully served on `/registry` +
+`POST /capability/google-ai-search`, and an explicit `--site google-ai-search`
+still resolves; only its chat-model claim is withdrawn. GOAL 34:
 `/registry` stamps `chat.model` ONLY on these surfaced ids, so a consumer
 never sees a chat provider that `/v1` would refuse.
 
