@@ -224,9 +224,19 @@ d("PRODUCTION READINESS: the stored state cannot lie", () => {
     assert.equal(naiveReader, "READY FOR PRODUCTION", "precondition: a naive reader accepts the fabrication");
     // the gate recomputes from criteria, and refuses it
     const gateSays = !hasFail && ackField() === "yes" ? "READY" : "NOT READY";
+    // Map the gate's verdict onto the file's own headline string HERE, outside
+    // the branch below. `assert.equal` from node:assert/strict is `strictEqual`
+    // re-exported, typed `asserts actual is T`, so the assert.equal on the next
+    // line narrows `gateSays` to "NOT READY" — and a ternary comparing it to
+    // "READY" AFTER that point is provably dead to the typechecker (TS2367).
+    // The pin is not dead: the READY arm is data-reachable (operator_ack is the
+    // operator's field, measured live), and the naive reader genuinely does
+    // disagree with the gate. Computing the mapping before the narrowing keeps
+    // the comparison typed as the full verdict union with no behaviour change.
+    const gateStamp = gateSays === "READY" ? "READY FOR PRODUCTION" : "NOT READY FOR PRODUCTION";
     if (ackField() !== "yes" || hasFail) {
       assert.equal(gateSays, "NOT READY", "the gate refuses the fabricated stamp");
-      assert.notEqual(naiveReader, gateSays === "READY" ? "READY FOR PRODUCTION" : "NOT READY FOR PRODUCTION", "the naive reader and the gate DISAGREE — that disagreement is the pin working");
+      assert.notEqual(naiveReader, gateStamp, "the naive reader and the gate DISAGREE — that disagreement is the pin working");
     }
   });
 

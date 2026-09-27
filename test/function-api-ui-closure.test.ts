@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CAPABILITY_DISPATCH } from "../src/prompt/capability-dispatch.js";
-import { buildRegistryPackages, bareCapabilityId } from "../src/prompt/registry.js";
+import { buildRegistryPackages, bareCapabilityId, type RegistryTool } from "../src/prompt/registry.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -169,7 +169,15 @@ for (const site of pkgNames) {
         `${site}: registry tools[] contains duplicate names — a capability maps to two tools`
       );
       for (const id of capIds) {
-        const tool = pkg!.tools.find((x) => x.id === id);
+        // Explicit element type: the `assert.equal(tool!.name, …)` below is an
+        // ASSERTION function (node:assert's `equal` is `strictEqual`, typed
+        // `asserts actual is T`), so its narrowing analysis asks the checker for
+        // the type of `tool` while `tool`'s own type is still being inferred —
+        // a self-reference in the initializer (TS7022). The element type is fully
+        // determined (`Array<RegistryTool>.find`), so naming it ends the cycle.
+        // Proven, not assumed: the annotation also type-checks `.name`,
+        // `.inputSchema.type` and `.inputSchema.required` below.
+        const tool: RegistryTool | undefined = pkg!.tools.find((x) => x.id === id);
         assert.ok(tool, `${site}: manifest capability "${id}" has NO registry tool — missing <site>_<capability> tool entry`);
         const expectedName = `${site}_${bareCapabilityId(site, id)}`;
         assert.equal(tool!.name, expectedName, `${site}: tool for "${id}" must be named ${expectedName} (found ${tool!.name})`);

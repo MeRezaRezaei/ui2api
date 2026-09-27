@@ -48,12 +48,17 @@ interface FixtureRow {
 
 function makeCookiesDb(dbPath: string, rows: FixtureRow[]): void {
   const db = new DatabaseSync(dbPath);
+  // node:sqlite DatabaseSync.exec(sql) takes ONE argument (@types/node:
+  // `exec(sql: string): void`). A second `{ timeout }` bag is silently ignored by
+  // node 24.20 (measured under an EXCLUSIVE lock: exec with {timeout:1500} returned
+  // in 0ms, while `PRAGMA busy_timeout = 1500` blocked 1502ms), so dropping it is
+  // provably behaviour-preserving. PRAGMA busy_timeout is the real mechanism.
   db.exec(`CREATE TABLE cookies (
     host_key TEXT NOT NULL, name TEXT NOT NULL, value TEXT,
     encrypted_value BLOB, path TEXT, expires_utc INTEGER,
     is_secure INTEGER, is_httponly INTEGER, samesite INTEGER,
     has_expires INTEGER, source_scheme INTEGER
-  )`, { timeout: 120000 });
+  )`);
   const ins = db.prepare(
     `INSERT INTO cookies (host_key,name,value,encrypted_value,path,expires_utc,is_secure,is_httponly,samesite,has_expires,source_scheme)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`
@@ -192,8 +197,18 @@ test("launchHeadedChromeForLogin never throws on failure", async () => {
     });
     assert.ok(res && typeof res === "object");
     assert.equal(res.launched, false);
-    assert.equal(typeof res.error, "string");
-    assert.ok(res.error.length > 0);
+    // `error` is OPTIONAL on LaunchHeadedResult (`error?: string`), so the
+    // compiler cannot assume it is there — and an unguarded `res.error.length`
+    // is exactly the failure this pin exists to prevent: a launch that reported
+    // NO reason at all would throw a TypeError on `undefined.length` instead of
+    // stating the real defect. Narrow through the same condition the pin already
+    // cares about, and print what it actually got, so a genuine missing-reason
+    // regression stays loud AND legible.
+    assert.equal(typeof res.error, "string", "a launch failure must be reported as a named string, never undefined");
+    assert.ok(
+      typeof res.error === "string" && res.error.length > 0,
+      `a launch failure must carry a named, non-empty reason; got ${JSON.stringify(res.error)}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

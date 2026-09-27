@@ -50,7 +50,10 @@ function poolRefusalCodes(src: string, into: Emitted): void {
   const start = src.indexOf("function poolRefusal");
   if (start < 0) return;
   const body = src.slice(start, src.indexOf("\n}", start));
-  const status = Number(/Answer (\d{3})/.exec(src.slice(Math.max(0, start - 500), start), { timeout: 120000 })?.[1] ?? 0);
+  // RegExp.prototype.exec takes ONE argument; a second `{ timeout }` arg is
+  // silently ignored by V8 and was never a regex API. Removing it is provably
+  // behaviour-preserving (measured: /a/.exec("a", {timeout:5}) -> ["a"]).
+  const status = Number(/Answer (\d{3})/.exec(src.slice(Math.max(0, start - 500), start))?.[1] ?? 0);
   for (const m of body.matchAll(/return \{ code: "([a-z_]+)" \}/g)) into.set(m[1]!, status);
 }
 
