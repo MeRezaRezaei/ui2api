@@ -34,10 +34,11 @@ cannot rot silently.
 
 Every one of the 161 functions has **all three layers**: a dispatch branch in
 `src/capabilities/<site>.ts`, a `POST /capability/<site>` route in http.ts, and
-a `/registry` tool row. **Zero advertised tools are unreachable.** Suite:
-**817 tests / 44 suites (816 pass + 1 env skip)** as of GOAL 82 (re-measured
-per flip — the doc's standing count is the node-only `npm run test:unit`
-output, never prose).
+a `/registry` tool row. **Zero advertised tools are unreachable.** The suite's
+size is deliberately **not stated here**: `test/*.test.ts` hold a handful of
+literal `test(`/`it(` calls and generate the rest from `for` loops, so any
+hand-typed total is unverifiable from the repo and can only rot. Get the real
+`# tests` / `# suites` from the last lines of `npm run test:unit` (never prose).
 
 ---
 

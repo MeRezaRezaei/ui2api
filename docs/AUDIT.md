@@ -44,7 +44,7 @@ box. No open first-release blockers (all previously-noted gaps are closed).
 | `npm run test:unit` | **PASS 418/418** *(fold-#11 record, not a current total)* | re-run at fold #11: tests 418, pass 418, fail 0 (incl. capability-dispatch 18/18, validate-packages 211, capability-probe 8, registry verified-shape, xhost-capture 13 incl. `ui2apiUserDataDir` 4) |
 | `npm test` (integration, fixture-site e2e) | **PASS** | re-run at fold #11 (2026-09-21): `INTEGRATION OK — send_prompt: Echo[default]: hello \| search(replay): {}`; plugin on 127.0.0.1:44411 ready, 5 tools |
 | Manifest/package shape enforcement | **PASS** | `test/validate-packages.test.ts` + `scripts/validate-registry.mjs`; verified contract enforced (bare `true` refused; truthy requires since+evidence+via) |
-| Package↔runner dispatch sync | **PASS** | `test/capability-dispatch.test.ts` 18/18, 1:1 with runner wiring in `src/prompt/http.ts` |
+| Package↔runner dispatch sync | **PASS** | `test/capability-dispatch.test.ts` (`HARD_FAIL_ON_DRIFT = true`) asserts the 1:1 manifest↔runner property — a runner added without a manifest row, or a manifest cap with no `case`, fails the run; the runner set is the `RUNNERS` array itself, whose length is re-derived from disk by `scripts/measure-function-map.mjs` and pinned as the `REAL_RUNNERS` census in `docs/function-api-ui-map.md` (`test/function-doc-truth.test.ts`), and the single `/capability/` handler reaches it through `CAPABILITY_DISPATCH` (`src/prompt/capability-dispatch.ts`). The per-case total is a run fact (loop-generated, so unverifiable from the repo) — get it from a run, never prose |
 
 ## B. The two execution models
 

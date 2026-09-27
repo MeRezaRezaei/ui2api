@@ -43,6 +43,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { docsMentionPath } from "./helpers/doc-scan.js";
 
 export const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 

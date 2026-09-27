@@ -152,7 +152,8 @@ the only true no-trace posture).
    stretch: search toggle, conversation CRUD, Gems, deep research.
 4. `kimi` — chat core + web search + file upload (the 411-method RPC surface).
    ✅ **DONE (2026-09-18)**: package grounded (`capabilities/kimi/`, recipes
-   closed — validator 211/211); session captured on www.kimi.ai; ChatDriver
+   closed — validator run green; its case count is a run fact, read it from the
+   run, never prose); session captured on www.kimi.ai; ChatDriver
    round-trip live-verified (thinking-block-safe answer selector locked in).
 5. `hunyuan-yuanbao` — chat + deep search + doc analysis (single SSE endpoint,
    needs the real session cookies for /api/chat). Package grounded in inventory
@@ -164,8 +165,11 @@ the only true no-trace posture).
    recipes; each needs a first `--login` capture).
 7. **Runner sync (2026-09-16)**: all 9 runners (gemini/kimi/hunyuan/venice/
    deepseek/claude/chatgpt/copilot/huggingchat) manifest↔runner IN-SYNC —
-   enforced by `test/capability-dispatch.test.ts` (18/18). **2026-09-19: +1
-   runner (`tencent-aistudio`) → 10 runners, 20/20**, unknown-capability guard
+   enforced by `test/capability-dispatch.test.ts` — the `RUNNERS` array in that
+   file IS the runner set (its length is re-measured from disk by
+   `scripts/measure-function-map.mjs`), and the per-case total is a run fact,
+   never a documentable one. **2026-09-19: +1
+   runner (`tencent-aistudio`) → 10 runners**, unknown-capability guard
    safe in all (branch before any browser op).
 8. **Second catalog wave (2026-09-16)**: +14 packages from provider-catalog —
    grounded: inner-ai/tencent-aistudio/codex/doubao/notion/duckduckgo/
