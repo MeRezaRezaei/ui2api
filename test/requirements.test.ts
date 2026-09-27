@@ -733,14 +733,39 @@ test("GOAL 147: with both seams failing, checkRequirements' summary takes CI 199
 // this fix both shipped). This compares the fixture's keys against the one
 // complete deps object the module exports — a seam nobody injects is not a seam.
 
-// The one seam the interface declares that defaultRequirementsDeps does NOT
-// fill: `chromeOwner` falls back to resolveChromeOwner() inline (requirements.ts
-// :460), exactly like the two seams GOAL 147 fixed. It is part of the required
-// set for coverage purposes.
-const INLINE_FALLBACK_SEAMS = ["chromeOwner"];
+// The seams the interface DECLARES that defaultRequirementsDeps does NOT fill
+// are exactly the ones read as `deps.x ?? someRealThing` INLINE at the call
+// site (requirements.ts:410-460: missingSharedLibraries, fontCount, hasBinary,
+// displayUsable, chromeOwner). A hand-typed list cannot guard that set — a NEW
+// inline seam is the exact shape that caused this whole incident, and a
+// hand-list would be blind to it. So it is DERIVED from the source text.
+//
+// Tolerant by construction: the file is stripped of comments first, and the
+// regex allows whitespace/newlines on both sides of the `.` and of the
+// `??`/`||`, so Prettier line-breaking the expression across lines cannot hide
+// a seam.
+const REQUIREMENTS_SRC = readFileSync(new URL("../src/runtime/requirements.ts", import.meta.url), "utf8");
+
+/**
+ * Every `deps.<field> ?? <fallback>` / `deps.<field> || <fallback>` seam in
+ * src/runtime/requirements.ts, comments excluded. Returns unique field names.
+ */
+export function inlineFallbackSeamsIn(src: string = REQUIREMENTS_SRC): string[] {
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(\/\/|\*)[^\n]*/g, " ");
+  const out: string[] = [];
+  for (const m of code.matchAll(/deps\s*\.\s*([A-Za-z_$][\w$]*)\s*(?:\?\?|\|\|)/g)) {
+    if (!out.includes(m[1])) out.push(m[1]);
+  }
+  return out.sort();
+}
+
+/** The full required set: the module's declared deps PLUS its inline fallbacks. */
+export function requiredDepsSeams(): string[] {
+  return [...new Set([...Object.keys(defaultRequirementsDeps({ dataDir: "/tmp/req-seam-gate" })), ...inlineFallbackSeamsIn()])].sort();
+}
 
 test("GOAL 147: deps-seam-coverage — makeDeps injects EVERY seam the module declares (no un-injected host read can recur)", () => {
-  const required = [...Object.keys(defaultRequirementsDeps({ dataDir: "/tmp/req-seam-gate" })), ...INLINE_FALLBACK_SEAMS].sort();
+  const required = requiredDepsSeams();
   const provided = Object.keys(makeDeps()).sort();
   const missing = required.filter((k) => !provided.includes(k));
   assert.deepEqual(missing, [], `deps seam coverage: the fixture never injects ${JSON.stringify(missing)} — those fall through to the real host probe (\`?? default…\` in requirements.ts). Inject them in makeDeps.`);
@@ -748,11 +773,30 @@ test("GOAL 147: deps-seam-coverage — makeDeps injects EVERY seam the module de
 });
 
 test("GOAL 147: the seam-coverage gate is itself falsifiable — a key removed from the fixture is named LOUD (a gate that cannot fail is not a gate)", () => {
-  const required = [...Object.keys(defaultRequirementsDeps({ dataDir: "/tmp/req-seam-gate" })), ...INLINE_FALLBACK_SEAMS].sort();
+  const required = requiredDepsSeams();
   const gapped = Object.fromEntries(Object.entries(makeDeps()).filter(([k]) => k !== "fontCount"));
   const missing = required.filter((k) => !(k in gapped));
   assert.deepEqual(missing, ["fontCount"]);
   assert.ok(missing.length > 0, "with the seam gone the gate reports exactly it — never an empty pass");
+});
+
+// MUTATION proof for the DERIVATION itself: the seam set must come from the
+// source, so a fake inline seam written into the source text is SEEN, and one
+// written across a Prettier-style line break is seen too.
+test("GOAL 147: the inline-fallback set is DERIVED from requirements.ts — a fake seam in the source is seen, not a hand-list", () => {
+  const direct = "const a = deps.fakeSeam ?? defaultFake;";
+  const wrapped = "const b =\n  deps.otherFakeSeam\n    ??\n    defaultOtherFake;";
+  const withComment = "const c = deps.notASeam ?? x; // deps.commentedSeam ?? y";
+  assert.deepEqual(inlineFallbackSeamsIn(direct), ["fakeSeam"]);
+  assert.deepEqual(inlineFallbackSeamsIn(wrapped), ["otherFakeSeam"], "a line-broken seam must still be extracted");
+  assert.deepEqual(inlineFallbackSeamsIn(withComment), ["notASeam"], "a comment mentioning the shape must not become a seam");
+  // And the live source: the derivation is non-empty and every derived seam is
+  // one the fixture actually supplies.
+  const derived = inlineFallbackSeamsIn();
+  assert.ok(derived.length > 0, "the live source must expose at least one inline fallback seam");
+  assert.ok(derived.includes("chromeOwner"), "the known inline seam must be in the derived set");
+  const provided = Object.keys(makeDeps());
+  assert.deepEqual(derived.filter((k) => !provided.includes(k)), [], "every derived inline seam must be injected by the fixture");
 });
 
 // --- GOAL 42: the scoped report the --json payload serializes (doctor <site>) ---

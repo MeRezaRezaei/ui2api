@@ -43,6 +43,45 @@ export function realTestFileCount(): number {
   return (script.match(/test\/[a-z0-9-]+\.test\.ts/g) ?? []).length;
 }
 
+/**
+ * The test files the `test:unit` script names.
+ *
+ * GOAL 145 was six test files on disk that NO script ran — the gates were real
+ * but never executed in CI. The count above cannot see that: it regexes the
+ * script STRING, so a file missing from the script is invisible to the very pin
+ * that appears to guard the suite. This returns the script's side of that set
+ * so it can be compared against the disk side.
+ */
+export function testFilesNamedByUnitScript(): Set<string> {
+  const script = PKG.scripts["test:unit"] ?? "";
+  return new Set((script.match(/test\/[a-z0-9-]+\.test\.ts/g) ?? []).map((p) => p.slice("test/".length)));
+}
+
+/**
+ * The test files that exist on disk — the source of truth, derived with
+ * `readdirSync` exactly like the package-dir count below. Any `*.test.ts` in
+ * `test/` counts, whatever its name, so an oddly-named file cannot slip past
+ * both sides of the comparison.
+ */
+export function testFilesOnDisk(): Set<string> {
+  return new Set(
+    readdirSync(join(ROOT, "test"), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".test.ts"))
+      .map((e) => e.name),
+  );
+}
+
+/** test/*.test.ts files that no script runs — the GOAL 145 regression, live. */
+export function unrunTestFiles(
+  onDisk: Set<string> = testFilesOnDisk(),
+  inScript: Set<string> = testFilesNamedByUnitScript(),
+): { unrun: string[]; missing: string[] } {
+  return {
+    unrun: [...onDisk].filter((f) => !inScript.has(f)).sort(),
+    missing: [...inScript].filter((f) => !onDisk.has(f)).sort(),
+  };
+}
+
 /** Real number of capabilities package dirs that carry a manifest.json. */
 export function realPackageCount(): number {
   const dir = join(ROOT, "capabilities");
@@ -203,6 +242,30 @@ test("README's unit-test file count equals the real package.json test:unit file 
 test("README's test-file claim does not hand-type an unverifiable test COUNT", () => {
   const hits = findForbidden(README);
   assert.deepEqual(hits, [], `README reintroduced unverifiable counts: ${hits.join("; ")}`);
+});
+
+test("GOAL 145: every test/*.test.ts on disk is named by a script — a file no script runs is named LOUD", () => {
+  const { unrun, missing } = unrunTestFiles();
+  assert.deepEqual(
+    unrun,
+    [],
+    `test files on disk that no npm script runs: ${JSON.stringify(unrun)} — add them to scripts["test:unit"] (or whatever script owns them); a gate nobody runs is not a gate`,
+  );
+  assert.deepEqual(missing, [], `package.json scripts["test:unit"] names files that do not exist: ${JSON.stringify(missing)}`);
+  // Both sides must also agree numerically, so a file dropped from BOTH still
+  // moves the derived count and the README claim with it.
+  assert.equal(testFilesOnDisk().size, testFilesNamedByUnitScript().size);
+});
+
+test("MUTATION: a test file present on disk but absent from test:unit is reported as unrun", () => {
+  // The REAL predicate, fed a file set that has one extra file on disk — the
+  // GOAL 145 shape, made observable without touching the working tree.
+  const onDisk = new Set([...testFilesOnDisk(), "zzz-not-in-suite.test.ts"]);
+  const { unrun } = unrunTestFiles(onDisk, testFilesNamedByUnitScript());
+  assert.deepEqual(unrun, ["zzz-not-in-suite.test.ts"], "the pin must name exactly the file no script runs");
+  // And the inverse: a script naming a file that is not on disk is named too.
+  const { missing } = unrunTestFiles(testFilesOnDisk(), new Set([...testFilesNamedByUnitScript(), "ghost.test.ts"]));
+  assert.deepEqual(missing, ["ghost.test.ts"]);
 });
 
 test("restriction-marker ratios in the docs equal the computed builtin and packaged values", () => {
