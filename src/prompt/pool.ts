@@ -63,6 +63,29 @@ type PoolWaiter = {
 const DEFAULT_MAX_WAITERS = 16;
 const DEFAULT_WAITER_TIMEOUT_MS = 240_000;
 
+/**
+ * GOAL 145: the pool refusal classes, in ONE place.
+ *
+ * Before this the daemon's `poolRefusal()` (http.ts) kept a hand-written COPY
+ * of these three message prefixes, and a reword here silently turned a named
+ * 503 into a bare 500 `internal_error` for every client — the copy was the
+ * rot. So the PREFIX lives here, next to the throw, and `http.ts` imports it:
+ * a reword can no longer desync the emitter from the labeller.
+ *
+ * The KEY is the code, deliberately not derived from the prefix: a code is a
+ * published contract string (a PHP consumer branches on it — see the generated
+ * `Ui2apiException::$errorCode`), and contract strings are written down, not
+ * computed. Only the prose follows the emitter.
+ */
+export const POOL_REFUSAL_CODES = {
+  pool_saturated: "pool saturated ",
+  pool_queue_timeout: "pool queue timeout ",
+  pool_closed: "pool closed ",
+} as const;
+
+/** A code from `POOL_REFUSAL_CODES` — the set the daemon labels a 503 with. */
+export type PoolRefusalCode = keyof typeof POOL_REFUSAL_CODES;
+
 /* GOAL 87 — the reaper's default interval. 30s is frequent enough that a dead
    idle page is evicted long before the next request would have hit it, and rare
    enough that the probe (one `evaluate` round-trip per idle page) is noise. */
@@ -344,7 +367,7 @@ export class ChatPool {
     if (this.waiters.length >= this.maxWaiters) {
       return Promise.reject(
         new Error(
-          `pool saturated (${this.waiters.length} waiting, limit ${this.maxWaiters}) — no page is free and the queue is full`
+          `${POOL_REFUSAL_CODES.pool_saturated}(${this.waiters.length} waiting, limit ${this.maxWaiters}) — no page is free and the queue is full`
         )
       );
     }
@@ -367,7 +390,7 @@ export class ChatPool {
           this.settleWaiter(
             waiter,
             new Error(
-              `pool queue timeout after ${this.waiterTimeoutMs}ms waiting for a "${siteId}" page ` +
+              `${POOL_REFUSAL_CODES.pool_queue_timeout}after ${this.waiterTimeoutMs}ms waiting for a "${siteId}" page ` +
                 `(${this.waiters.length} waiting, limit ${this.maxWaiters})`
             )
           );
@@ -743,7 +766,7 @@ export class ChatPool {
     // browser goes away. Never `this.waiters = []` (a silent drop: the parked
     // acquire() promises had no reject, so the awaiting HTTP handlers never
     // answered and their sockets kept server.close() waiting forever).
-    this.settleAllWaiters("pool closed (daemon shutdown)");
+    this.settleAllWaiters(`${POOL_REFUSAL_CODES.pool_closed}(daemon shutdown)`);
     // In attach mode the browser is the operator's own Chrome: the daemon must
     // never close/kill it. Only the pool's own tabs (workers) are closed; the
     // stand-by pages quietly close as the daemon goes down.

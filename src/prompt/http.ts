@@ -43,7 +43,7 @@
 // browser, `min` warmed pages, `max` cap from UI2API_POOL_MAX / free memory) so
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { ChatPool, type PoolStatus } from "./pool.js";
+import { ChatPool, POOL_REFUSAL_CODES, type PoolRefusalCode, type PoolStatus } from "./pool.js";
 import { daemonPosture } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
@@ -382,14 +382,33 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   if (cached) return Promise.resolve(cached);
   return new Promise((resolve, reject) => {
     let body = "";
+    // GOAL 145: count BYTES, not string units. The refusal says "bytes" and the
+    // cap is documented as 1 MB, but `body.length` counts UTF-16 code units —
+    // so a 600k-character Persian body measured 600k "units" and passed a limit
+    // that is, in bytes, already blown. Chunks arrive as Buffers (no encoding is
+    // set), so `c.length` IS the byte count; this accumulator is the truth the
+    // message promises.
+    let size = 0;
     req.on("data", (c) => {
-      body += c;
-      if (body.length > MAX_BODY_BYTES) {
-        // Stop the upload: without this the client keeps streaming megabytes at
-        // a server that already refused the request.
-        req.destroy();
+      size += typeof c === "string" ? Buffer.byteLength(c) : c.length;
+      if (size > MAX_BODY_BYTES) {
+        // Stop reading IMMEDIATELY: without this the client keeps streaming
+        // megabytes at a server that already refused the request.
+        //
+        // GOAL 145: the socket is NOT destroyed HERE. It used to be, and that
+        // is why `payload_too_large` was a code no client could ever receive:
+        // the destroy killed the connection before the 413 could be written, so
+        // the caller got ECONNRESET and NO answer at all — a refusal class
+        // classified into oblivion. The read side stops now; the socket is torn
+        // down AFTER the answer has flushed (the request's catch answers 413
+        // with `connection: close`, then destroys). The client keeps the
+        // refusal AND the upload still stops.
+        req.pause();
+        req.removeAllListeners("data");
         reject(new HttpClientError(413, "payload_too_large", `request body exceeds ${MAX_BODY_BYTES} bytes`));
+        return;
       }
+      body += c;
     });
     req.on("end", () => {
       try {
@@ -403,8 +422,15 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
         }
         (req as IncomingMessage & { bodyCache?: Record<string, unknown> }).bodyCache = parsed as Record<string, unknown>;
         resolve(parsed as Record<string, unknown>);
-      } catch (e) {
-        reject(new Error("invalid JSON body"));
+      } catch {
+        // GOAL 145: a body that is not JSON AT ALL is the same caller mistake
+        // as a body that is JSON but not an object — it was thrown as a bare
+        // Error, which this module's own catch could not classify, so a client
+        // that sent `{not json` was answered 500 `internal_error`: the server
+        // taking the blame for the caller's typo. Same named 400, same code,
+        // and no internal text is echoed. This `catch` deliberately does NOT
+        // re-wrap the HttpClientError thrown two lines above.
+        reject(new HttpClientError(400, "invalid_json", "request body is not valid JSON"));
       }
     });
     req.on("error", reject);
@@ -429,14 +455,24 @@ function send(res: ServerResponse, status: number, data: unknown, headers: Recor
   }
 }
 
+// GOAL 145: the PREFIXES are no longer copied here — they are imported from
+// `POOL_REFUSAL_CODES` (pool.ts), the same constant the pool throws with, so a
+// reworded refusal message can no longer silently stop matching and strip the
+// name off a class that used to carry one. Only the CODE stays written out: it
+// is a published contract string, not prose, and it sits on the same line as
+// the prefix it labels, so a rename is visible rather than derived.
+//
+// Exported so a test can pin the label against the REAL pool's own messages:
+// a derivation is only worth anything if something checks the join.
+//
 // A pool refusal is not a server fault: the queue is full, a page never freed
 // in time, or the daemon is shutting down. Answer 503 with a stable code AND
 // the named cause, so a client can tell "come back later" from "this is
 // broken" — never a bare 500 with no reason.
-function poolRefusal(message: string): { code: string } | null {
-  if (/^pool saturated /.test(message)) return { code: "pool_saturated" };
-  if (/^pool queue timeout /.test(message)) return { code: "pool_queue_timeout" };
-  if (/^pool closed /.test(message)) return { code: "pool_closed" };
+export function poolRefusal(message: string): { code: PoolRefusalCode } | null {
+  if (message.startsWith(POOL_REFUSAL_CODES.pool_saturated)) return { code: "pool_saturated" };
+  if (message.startsWith(POOL_REFUSAL_CODES.pool_queue_timeout)) return { code: "pool_queue_timeout" };
+  if (message.startsWith(POOL_REFUSAL_CODES.pool_closed)) return { code: "pool_closed" };
   return null;
 }
 
@@ -939,6 +975,25 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
 
       send(res, 404, { error: "not found" });
     } catch (e) {
+      // GOAL 145: a TYPED client fault keeps its own status and code. This
+      // branch did not exist, which is why the two codes the error contract
+      // DECLARES could never reach a client: `readJson` is awaited inside this
+      // handler, so its `HttpClientError` rejections landed HERE, and with no
+      // branch to catch them they fell through to the generic 500 below —
+      // a caller mistake answered as a server fault, under a code
+      // (`internal_error`) that said the opposite of the truth. The outer
+      // `handleRequest(...).catch` net (below) already had exactly this branch
+      // and was UNREACHABLE for a body error, because the inner catch always
+      // got there first.
+      if (e instanceof HttpClientError) {
+        // The oversized-body class is special: the upload is still in flight and
+        // was deliberately stopped mid-stream (readJson paused it), so the
+        // socket must not be reused. Answer FIRST, then destroy — the reverse
+        // order is what made this class unsendable in the first place.
+        send(res, e.status, { error: { code: e.code, message: e.message } }, { connection: "close" });
+        if (e.code === "payload_too_large") res.once("finish", () => req.destroy());
+        return;
+      }
       // GOAL 83: a pool refusal (queue full / page never freed in time /
       // shutdown) answers 503 with a stable code + the NAMED cause, so a client
       // can retry instead of reading a bare server fault.

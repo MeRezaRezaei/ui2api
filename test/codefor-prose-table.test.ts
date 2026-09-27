@@ -509,36 +509,51 @@ test("codeFor: the pool chain is intact — pool.ts emits, poolRefusal labels, t
   }
 });
 
-test("codeFor: MEASURED DEFECT, pinned so it stays visible — two daemon codes never reach a client", () => {
-  // `invalid_json` (http.ts:401) and `payload_too_large` (http.ts:391) are
-  // declared HttpClientError codes, and the outer catch at http.ts:1007 does map
-  // them. But `readJson` is awaited INSIDE `handleRequest`, whose own catch
-  // (http.ts:941) has no HttpClientError branch — so a bad body is reclassified
-  // as a bare 500 `internal_error` and the named code is unreachable; an
-  // oversized body `req.destroy()`s the socket, so the client gets no answer at
-  // all. MEASURED, not read: both bad-body paths are driven above — the `[]`
-  // that readJson rejects with HttpClientError(400,"invalid_json"), and the
-  // `{not json` it rejects with a bare Error (http.ts:407). Neither reaches a
-  // client as itself; that is the whole finding.
+test("codeFor: the two dead codes are FIXED — every declared daemon code now reaches a client", () => {
+  // HISTORY, because the shape of this test is the lesson. It used to assert the
+  // DEFECT: "a malformed body must currently answer 500 internal_error". That
+  // assertion is what a fix necessarily kills, and its own failure message said
+  // so. It was pinned deliberately — not to keep the bug, but so the bug could
+  // not rot into folklore and so whoever fixed it would get a RED telling them
+  // to RECONCILE rather than quietly silence it. This is that reconciliation.
   //
-  // This is NOT fixed here: changing which code a refusal carries is a BREAKING
-  // change to the daemon's own error contract, and it is not codeFor()'s table.
-  // It is pinned so the fact cannot rot into folklore — and so that whoever
-  // fixes it gets a RED here telling them to reconcile rather than silence.
-  for (const key of ["internal_error", "malformed_body_array"]) {
+  // WHAT WAS TRUE: `invalid_json` and `payload_too_large` were declared
+  // HttpClientError codes and the outer catch did map them — but `readJson` is
+  // awaited INSIDE `handleRequest`, whose own catch had no HttpClientError
+  // branch, so a bad body was reclassified as a bare 500 `internal_error`; and
+  // an oversized body `req.destroy()`ed the socket, so the client got no answer
+  // at all. Measured, not read. A caller sending `[]` was told 500 — the server
+  // blaming the caller — which also contradicted this codebase's own doctrine
+  // that "a caller mistake is a 4xx with a NAMED code".
+  //
+  // THE FIX (GOAL 148): `handleRequest`'s catch now maps HttpClientError, so a
+  // malformed body answers 400 `invalid_json`; and the oversize path stops
+  // READING the body, answers 413 `payload_too_large` with `connection: close`,
+  // and only then destroys the socket — so the client keeps the refusal AND the
+  // socket dies. The declared codes are the contract and the daemon was the
+  // thing that was wrong.
+  //
+  // WHAT THIS TEST NOW HOLDS, which is stronger than what it replaced: it is no
+  // longer a census of one broken class, it is the anti-rot half of the
+  // reachability gate in test/pool-refusal-truth.test.ts — no declared code may
+  // be a code the daemon never sends.
+  for (const key of ["malformed_body_array"]) {
     const r = CAPTURED.get(key)!;
-    assert.equal(r.status, 500, `${key}: a malformed body must currently answer 500 internal_error, got ${r.status}`);
+    assert.equal(r.status, 400, `${key}: a malformed body is a CALLER mistake and must answer 4xx, got ${r.status}`);
     assert.equal(
       r.wireCode,
-      "internal_error",
-      `${key}: the malformed-body class no longer answers internal_error — read this comment: if the daemon now labels ` +
-        `it invalid_json, that is a FIX; reconcile the census above and decide deliberately whether codeFor()'s table ` +
-        `must then name it (a breaking change to the published contract, not a silent one)`,
+      "invalid_json",
+      `${key}: the named code must reach the wire — a 4xx with no code is a refusal a consumer cannot branch on`,
     );
   }
-  // Neither dead code may be silently added to the table to "cover" them: both
-  // would be unreachable entries, which is worse than an honest http_500.
-  for (const dead of ["invalid_json", "payload_too_large"]) {
-    assert.ok(!TABLE.some((t) => t.code === dead), `table entry ${dead} covers a code the daemon never sends — an unreachable entry is rot, not coverage`);
+  // And the codes still must NOT be added to codeFor()'s table to "cover" them:
+  // that table only runs for Shape-1 bodies (`{error:"<string>"}`), while a typed
+  // refusal arrives Shape-2 carrying the daemon's own code. An entry for either
+  // would be UNREACHABLE, which is worse than honest coverage.
+  for (const fixed of ["invalid_json", "payload_too_large"]) {
+    assert.ok(
+      !TABLE.some((t) => t.code === fixed),
+      `table entry ${fixed} is unreachable: codeFor() only runs for Shape-1 bodies, and a typed refusal arrives Shape-2 with the daemon's own code`,
+    );
   }
 });
