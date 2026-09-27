@@ -33,6 +33,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
     "start": "tsx src/cli.ts",
     "analyse": "tsx src/cli.ts analyse",
     "generate": "tsx src/cli.ts generate",
