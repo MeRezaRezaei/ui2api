@@ -95,17 +95,24 @@ export function smokeExitCode(outcome: SmokeOutcome): 0 | 1 {
 // The first CONTENT line of an answer read off the page. Some sites
 // (duckduckgo — live-verified) prepend UI chrome — the active-model chip —
 // to the assistant bubble's innerText ("<model chip>\n\n<answer>..."); the
-// chip line is short and lacks terminal punctuation. Honest + site-agnostic:
-// a first line that is short and has no terminal punctuation while more lines
-// follow is treated as chrome and skipped (the same live-verified heuristic
-// the duckduckgo capability runner uses, capabilities/duckduckgo.ts:293-298).
+// chip line lacks terminal punctuation while more lines follow. Honest +
+// site-agnostic: such a first line is treated as chrome and skipped.
+//
+// This MUST stay the same predicate the duckduckgo runner applies to the same
+// text (`src/capabilities/duckduckgo.ts:288-292`), because the smoke's whole
+// claim is "the end-to-end path works". It used to add a length cap
+// (`first.length <= 40`) the runner does not have, so a model chip longer than
+// 40 chars was stripped by the runner and KEPT by the smoke — the smoke then
+// printed `smoke OK: "<the chip>"` and exited 0, a green verdict on chrome
+// instead of an answer. A forged pass is worse than a named failure, so the cap
+// is gone: the two now agree on every input.
 export function firstContentLine(raw: string): string {
   const lines = raw
     .split("\n")
     .map((l) => l.trim());
   while (lines.length && !lines[0]) lines.shift();
   const first = lines[0] ?? "";
-  if (lines.length > 1 && first.length <= 40 && !/[.,!?]$/.test(first)) {
+  if (lines.length && first && !/[?.,!]$/.test(first) && lines.length > 1) {
     const next = lines.slice(1).find((l) => l);
     return (next ?? first).slice(0, 200);
   }

@@ -71,7 +71,13 @@ export function userChromeProfile(): string | undefined {
 // and passing them to the user's own browser would print "you are using an
 // unsupported command-line flag" and change its fingerprint. The whole point of
 // user-chrome mode is that the session IS the user's browser.
-function userChromeLaunchArgs(channel: string | undefined): string[] {
+//
+// EXPORTED, because the argument list is a CONTRACT with the fingerprint: a
+// second copy of it is a second thing that can drift away from the browser the
+// site actually sees. `launchHeadedChromeForLogin` (xhost-capture.ts) used to
+// type `["--window-size=1280,800"]` a second time by hand.
+export function userChromeLaunchArgs(channel: string | undefined): string[] {
+  void channel; // the flag set is deliberately channel-independent — see above
   return ["--window-size=1280,800"];
 }
 
@@ -216,6 +222,40 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
 
 // --- Managed Chrome spawn + CDP attach (wigolo cdp-direct pattern) ---
 
+// THE Chrome ladder, as DATA, in ONE place — the third copy this repo used to
+// carry (the seam here, `chromeExec()` in chrome-daemon.ts, and the remedy prose
+// in requirements.ts) with no edge between any of them. MEASURED drift: the
+// daemon's private 4-path list could not see `/opt/google/chrome/chrome`, which
+// EXISTS on this box, so `ui2api requirements` (which folds THIS ladder) called
+// Chrome ready while `ui2api chrome start` — the actual point of use — answered
+// "no Chrome executable found". Two commands an operator runs back to back,
+// contradicting each other, because one of them typed its own list.
+//
+// ORDER is POLICY and is stated here once, so it cannot be re-typed elsewhere:
+// real Chrome before Chromium, because the whole project exists to be
+// indistinguishable from the user's own browser (see `usingUserChrome` and the
+// headless-gets-you-blocked rule in AGENTS.md). The knobs stay LITERAL —
+// `UI2API_CHROME_PATH` is a name a consumer types into their environment, so it
+// is a published contract, not rot.
+//
+// `resolveChromeExec` walks SYSTEM paths only, then the Playwright cache: that is
+// the seam's resolution, UNCHANGED, so nothing about how the seam picks a binary
+// moves. The daemon walks SYSTEM then CHROMIUM (see chrome-daemon.ts) — its old
+// order had chromium in 3rd place, and the new one puts the real Chrome ahead of
+// it, which is the only box whose outcome changes: a host with BOTH
+// `/opt/google/chrome/chrome` and `/usr/bin/chromium` now gets the REAL Chrome,
+// matching every other launcher in the project. Every other host is unaffected.
+export const CHROME_SYSTEM_PATHS: readonly string[] = [
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/opt/google/chrome/chrome",
+];
+
+export const CHROME_CHROMIUM_PATHS: readonly string[] = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+];
+
 // Resolve a real Chrome executable. Order: explicit path flag/env, then Playwright's
 // `channel: "chrome"` registry, then the two common linux locations. Exported for
 // the requirements/doctor checker (GOAL 33) so the readiness check folds the SAME
@@ -223,11 +263,7 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
 export function resolveChromeExec(overrides: LaunchOpts): string | undefined {
   const explicit = overrides.executablePath ?? process.env.UI2API_CHROME_PATH;
   if (explicit && existsSync(explicit)) return explicit;
-  for (const cand of [
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-    "/opt/google/chrome/chrome",
-  ]) {
+  for (const cand of CHROME_SYSTEM_PATHS) {
     if (existsSync(cand)) return cand;
   }
   try {

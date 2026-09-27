@@ -11,6 +11,7 @@ import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ingestProfile, detectProfileIdentity } from "./profile-ingest.js";
 import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity, slugCollision } from "./session-store.js";
+import { siteHostCatalog } from "../prompt/registry.js";
 import type { IngestResult } from "./profile-ingest.js";
 
 // --- Constants ---
@@ -23,39 +24,58 @@ const CANDIDATE_SUBPATHS = [
   ".config/Google/Chrome",
 ] as const;
 
-const KNOWN_HOSTS: ReadonlySet<string> = new Set([
-  "gemini.google.com",
-  "chatgpt.com",
-  "claude.ai",
-  "copilot.microsoft.com",
-  "www.kimi.com",
-  "yuanbao.tencent.com",
-  "huggingface.co",
-  "www.perplexity.ai",
-  "www.google.com",
-  "poe.com",
-  "deepseek.com",
-  "venice.ai",
-  "grok.com",
-  "aistudio.google.com",
-  "chat.deepseek.com",
-  "doubao.com",
-  "duckduckgo.com",
-  "v0.dev",
-  "notion.so",
-  "manus.im",
-  "chatglm.cn",
-  "aistudio.xiaomimimo.com",
-  "conol.ai",
-  "t3.chat",
-  "codex.openai.com",
-  "copilot.cloud.microsoft",
-  "blackbox.ai",
+/**
+ * Hosts that are OURS, but that no site in this build declares.
+ *
+ * POLICY, not derivation — and kept separate from the derived catalog precisely
+ * so the two cannot be confused. Every entry is a host a real capture has
+ * plausibly written cookies under while no manifest/profile names it: the
+ * apex/parent domains a site redirects through, and two url-less packages
+ * (chatglm declares no `url` at all, so nothing can derive its host).
+ *
+ * What would invalidate an entry: a vault with no snapshot for that host any
+ * more, AND no plausible future capture — i.e. when `ui2api profile list` no
+ * longer shows an account for it. Nothing forces that; the test below is what
+ * fails LOUD if a derived host is missing from the union.
+ */
+const LEGACY_KNOWN_HOSTS: readonly string[] = [
+  "chatglm.cn", // url-less package — no manifest url to derive from
+  "chatglm.com", // url-less package — no manifest url to derive from
+  "tencent.com", // parent of aistudio.tencent.ai / yuanbao.tencent.com
+  "deepseek.com", // parent of chat.deepseek.com
+  "duckduckgo.com", // parent of duck.ai
+  "kimi.com", // parent of www.kimi.ai
+  "v0.dev", // v0's former domain
+  "aistudio.google.com", // former Google AI Studio host
+  "codex.openai.com", // OpenAI Codex surface
+  "inner-ai.com", // parent of app.innerai.com
   "www.aigcbest.top",
-  "inner-ai.com",
-  "tencent.com",
-  "chatglm.com",
-]);
+  // The three APEX domains whose site moved behind a `www.`: the catalog names
+  // www.notion.so / www.doubao.com / www.blackbox.ai, and `isKnownHost` matches a
+  // SUBDOMAIN of a known host, never the other way round — so dropping these
+  // three would have silently marked a real apex-domain capture [UNKNOWN]. Found
+  // by the monotone gate in test/runtime-derivation-truth.test.ts, which is the
+  // only reason they are listed here rather than forgotten again.
+  "notion.so",
+  "doubao.com",
+  "blackbox.ai",
+];
+
+/**
+ * Every host a stored session could belong to: the DERIVED site catalog
+ * (builtin profiles + installed package manifests — see `siteHostCatalog`) plus
+ * the policy list above.
+ *
+ * This used to be 31 hosts typed by hand, with no edge to either of the two
+ * places that actually know which sites exist. MEASURED drift in the typed list:
+ * 10 real sites were missing (www.kimi.ai, aistudio.tencent.ai, duck.ai,
+ * youtube.com, mail.google.com, v0.app, www.aparat.com, adapta.app,
+ * app.innerai.com, zenmux.com), so the bulk-login command the README leads with
+ * marked them `[UNKNOWN]` on a box whose cookies were sitting right there.
+ * The change is MONOTONE — every host the old set knew is still known (all 11
+ * old-only hosts are kept above), so no host can lose its marker; 10 gain one.
+ */
+const KNOWN_HOSTS: ReadonlySet<string> = new Set([...siteHostCatalog(), ...LEGACY_KNOWN_HOSTS]);
 
 // --- Helpers ---
 
@@ -107,6 +127,16 @@ function isKnownHost(host: string): boolean {
     if (host.endsWith("." + k)) return true;
   }
   return false;
+}
+
+/**
+ * Is this host one of ours? Exported so the gate can ask the REAL question
+ * ("is every site in the catalog recognised by the scanner?") instead of
+ * re-deriving the host list a second time in a test, which would be the same
+ * hand-typed twin this constant just stopped being.
+ */
+export function isKnownSiteHost(host: string): boolean {
+  return isKnownHost(host);
 }
 
 /**

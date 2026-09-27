@@ -424,6 +424,47 @@ function packageStatusOf(siteId: string): ChatSurfaceStatus | "unknown" {
   return "unknown";
 }
 
+/**
+ * Every cookie host this build knows a site for: the builtin catalog's own
+ * profile urls plus every installed package manifest's url, deduplicated.
+ *
+ * This is the DERIVATION for anything that needs to recognise "a host we care
+ * about" — the bulk-login scanner's `[KNOWN]` flag above all. It used to be a
+ * 31-host list typed by a human in `src/runtime/profile-scan.ts`, with no edge
+ * to either of the two places that actually know the sites. MEASURED drift: 10
+ * real sites were missing from it — `www.kimi.ai`, `aistudio.tencent.ai` (the
+ * live-verified Tencent chat surface), `duck.ai` (the full-surface-verified
+ * DuckDuckGo package), `youtube.com`, `mail.google.com` and five more — so an
+ * operator running the one-command bulk login on a box whose cookies live
+ * under `www.kimi.ai` saw a host with no `[KNOWN]` marker, i.e. the command the
+ * README tells them to run looked like it had found nothing.
+ *
+ * A url-less package (chatglm declares none) contributes nothing here; hosts
+ * only a human knows about belong in that caller's own POLICY list, not here.
+ */
+export function siteHostCatalog(): string[] {
+  const hosts = new Set<string>();
+  const add = (u: unknown) => {
+    if (typeof u !== "string" || !u) return;
+    try {
+      hosts.add(new URL(u).host);
+    } catch {
+      /* a relative or placeholder url names no host */
+    }
+  };
+  for (const p of listProfiles()) add(p.url);
+  for (const id of listInstalledPackageIds()) {
+    const dir = findPackageDir(id);
+    if (!dir) continue;
+    try {
+      add((JSON.parse(readFileSync(resolve(dir, "manifest.json"), "utf8")) as Manifest).url);
+    } catch {
+      /* a malformed manifest names no host; validate-packages gates that case */
+    }
+  }
+  return [...hosts].sort();
+}
+
 export interface ChatSurfaceEntry {
   id: string;
   profile: ChatSiteProfile;
@@ -475,7 +516,14 @@ export function defaultChatSurface(): ChatSurfaceEntry[] {
   for (const p of listProfiles()) {
     if (!isDriveableChatProfile(p)) continue; // GOAL 147 — same gate as the packaged loop below
     byId.set(p.id, p);
-    entries.push({ id: p.id, profile: p, status: "builtin", packaged: false });
+    // ONE resolver for the status, never a second implementation of it. This
+    // hard-coded "builtin" while `chatSurfaceStatus()` — the function /sites,
+    // `prompt --sites` and `requirements` actually call — reported the packaged
+    // record instead, so the two disagreed on every builtin that has one
+    // (MEASURED: gemini, kimi, deepseek, tencent-aistudio all said "builtin"
+    // here and "verified" there). Both are public exports of this module, so a
+    // consumer reading either got a different answer for the same id.
+    entries.push({ id: p.id, profile: p, status: chatSurfaceStatus(p.id), packaged: false });
   }
   for (const id of listInstalledPackageIds()) {
     if (byId.has(id)) continue;

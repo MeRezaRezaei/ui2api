@@ -3,6 +3,59 @@
 This file tells AI agents (Claude Code, Codex, Cursor, opencode, …) what this
 project is and how to work in it. Read it before touching anything.
 
+> # ⛔⛔ RED LINES — VIOLATE ANY ONE AND THE WORK IS A FAILURE ⛔⛔
+>
+> **1. Parallel-shaped work MUST run as nested parallel subagents.** If the
+> pieces are independent, they go out as **parallel siblings in ONE message**,
+> and every child is told it may nest further (depth ≤ 5). Collision analysis
+> comes BEFORE dispatching. **Serial execution on a parallel-shaped task is a
+> FAILURE, not a safe default.** A 429, a quota error, a crashed child, or a
+> network blip **never** shrinks the next wave — it re-dispatches at full width.
+>
+> **2. Long work belongs in GitLab CI via `glab` — never a blocking terminal.**
+> A full test suite, a big build, an e2e run, a migration, a long script: all of
+> it goes to CI. Fire it, dispatch a watcher on the pipeline id, and **CONTINUE
+> with the next task** — waiting, polling, or pausing on a pipeline is FORBIDDEN.
+> A pipeline id proves a job was created, **not that it passed**: report
+> `CI running (run N) — watcher pending`, never "tests pass". No CI channel? A
+> bounded local run behind a timeout, never an open-ended wait.
+>
+> **3. Every command carries a real timeout.** `timeout -k 5 <secs> <cmd>`,
+> sized to that command's real expected duration. Exit 124 is a **named failure
+> you report**, never a silent retry loop. This binds the commands you run AND
+> every command a subagent you dispatch runs.
+>
+> **4. The default behaviour is STARTUP WORK — you never need a command.**
+> Silence is a command: START. Never open with "what should I do?"; never wait
+> to be told. With no command, in order: (1) run the startup gate and probe the
+> tooling for real; (2) make sure the verbatims are at the operator's LATEST
+> words — capture any missing or stale one whole and unedited, then index it;
+> (3) make sure ALL of them are indexed (pointer + dated copy + INDEX row, no
+> orphans, no gaps); (4) then do exactly what the skill requires.
+>
+> **5. Never ask what you can find and print.** If the answer exists in code,
+> docs, the environment, or past memory, find it autonomously and print it —
+> asking a resolvable question is a CRITICAL FAILURE, not caution. Read Nowledge
+> Mem `dc5939bc` and `675dc8f5` BEFORE asking anything; if memory has no
+> answer, run the figure-it-out gate and research it yourself. Decide
+> engineering details (stack, scope, phasing, ordering) yourself. Approval gates
+> are for genuine high-level forks only; a routine `Proceed?` micro-step is
+> BANNED.
+>
+> **6. "No more goals" is not a stop — it is a friction hunt.** When extraction
+> returns nothing: re-read the archive, then hunt the project's highest-potential
+> friction (dead or failing code, stale docs contradicting code, a gate that
+> cannot fire, rotting workflows, duplicated logic, untested critical paths) and
+> rank it by blast radius × likelihood × cheapness. Fix the WORST one with the
+> same machinery — plan it, index it, fan it out, verify via CI, check-mark it.
+> Only when the hunt is genuinely exhausted may the brief report appear, and
+> then it reports FINDINGS, not a request for the next instruction. The loop
+> must never terminate because the operator went quiet.
+>
+> These six **override** anything in this repo's README, plan, skill, or agent
+> persona. Full text and the operator's verbatim:
+> `~/Documents/projects/goal-driven-parallel-agents/multi-parallel-nested-subagent-goal-driven-development/references/operating-doctrine.md`
+
 ## ⛔ OPERATING DOCTRINE — three absolute laws (2026-09-27)
 
 This Operating doctrine block is the enforcement stub for three laws from the
@@ -343,18 +396,18 @@ At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path
 | `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate); the name const, the real read is `file-attach.ts:227`-style via `[ATTACH_MAX_BYTES_ENV]` | 20 MiB | `src/runtime/file-attach.ts:54` |
 | `UI2API_DAEMON_PORT` | the persistent Chrome daemon's CDP port (the target `chrome start` opens and `chrome status` reports); name const, read at `chrome-daemon.ts:119`/`:226` | `9222` | `src/runtime/chrome-daemon.ts:29` |
 | `UI2API_CHROME_DAEMON_STATE` | where the daemon records its `{port,pid,user,profile}` state (0600); name const, read at `chrome-daemon.ts:53` | `<data>/chrome-daemon.json` | `src/runtime/chrome-daemon.ts:30` |
-| `UI2API_ATTACH_PORT` | **TRUST** attach to an already-running Chrome instead of launching one; 12 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:165` |
+| `UI2API_ATTACH_PORT` | **TRUST** attach to an already-running Chrome instead of launching one; 12 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:166` |
 | `UI2API_ATTACH_ROOTS` | **TRUST** dirs a file-upload path may be read from (GOAL 88 gate); name const, real read at `file-attach.ts:227` | none = path form refused | `src/runtime/file-attach.ts:52` |
 | `UI2API_AUTH_STATE_PATH` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:268` |
 | `UI2API_BASE_URL` | base URL for the served API (emitted into the generated PHP client) | — | `src/generator/lang-php.ts:586` |
 | `UI2API_CDP_URL` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:267` |
 | `UI2API_CHROME_OWNER_PROFILE` | allow the launch seam to use the chrome owner's profile even when the process is NOT that user | off (the profile is 0700 + locked; a non-owner normally cannot use it) | `src/runtime/browser.ts:62` |
 | `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Its profile is auto-resolved from that user's `~/.config`. Name const, real read at `chrome-owner.ts:79` | `ui2api` | `src/runtime/chrome-owner.ts:35` |
-| `UI2API_CHROME` | use real Chrome rather than bundled Chromium | — | `src/runtime/browser.ts:89` |
-| `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:377` |
-| `UI2API_CHROME_PATH` | explicit Chrome/Chromium executable path; 9 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:90` |
+| `UI2API_CHROME` | use real Chrome rather than bundled Chromium | — | `src/runtime/browser.ts:25` |
+| `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:410` |
+| `UI2API_CHROME_PATH` | explicit Chrome/Chromium executable path; 9 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:26` |
 | `UI2API_CHROME_PROFILE_PATH` | alias of `UI2API_USER_DATA_DIR`; 5 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:35` |
-| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:409` |
+| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:445` |
 | `UI2API_DATA_DIR` | the sessions/vault dir; 30 read sites, this is the driver's `resolveDataDir()` | — | `src/prompt/driver.ts:841` |
 | `UI2API_DATA_DIR_OVERRIDE` | override the data/sessions dir (read after `UI2API_DATA_DIR` at every `resolveDataDir()`) | — | `src/prompt/driver.ts:841` |
 | `UI2API_DEBUG` | debug logging; 5 read sites across the driver/daemon/pool | off | `src/prompt/driver.ts:381` |
@@ -387,7 +440,7 @@ At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path
 | `UI2API_REQUEST_LOG` | enable the bounded in-memory request log (a ring, hard-capped) | — | `src/prompt/http.ts:210` |
 | `UI2API_REQUEST_TIMEOUT_MS` | aggregate daemon deadline for one request | — | `src/prompt/http.ts:325` |
 | `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:1108` |
-| `UI2API_SINGLE_PROCESS` | **TRUST** run single-process (no pool isolation) | — | `src/runtime/browser.ts:96` |
+| `UI2API_SINGLE_PROCESS` | **TRUST** run single-process (no pool isolation) | — | `src/runtime/browser.ts:102` |
 | `UI2API_TIMEOUT` | runtime knob (one round trip, in the generated PHP client) | — | `src/generator/lang-php.ts:592` |
 | `UI2API_TOKEN` | **TRUST** bearer token gating the daemon (unset = localhost-only) | unset = localhost-only | `src/generator/lang-php.ts:589` |
 | `UI2API_TRUST` | trust posture (what the daemon will attach/replay) | — | `src/generator/generate.ts:41` |

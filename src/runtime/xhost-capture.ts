@@ -17,6 +17,7 @@ import { constants, existsSync, mkdirSync, readdirSync, statSync, accessSync } f
 import { join } from "node:path";
 import { userInfo } from "node:os";
 import { chromium } from "playwright";
+import { buildLaunchOptions, userChromeLaunchArgs } from "./browser.js";
 import { detectProfileIdentity, ingestProfile } from "./profile-ingest.js";
 import { accountSnapshotPath, saveAccountSnapshot, slugifyIdentity, slugCollision } from "./session-store.js";
 
@@ -291,19 +292,38 @@ export async function launchHeadedChromeForLogin(opts: {
     // Persistent context: Playwright rejects userDataDir on launch(); the
     // persistent-context form is the one that hands a real on-disk profile
     // dir to the user's Chrome (same mechanism the pool's own Chrome uses).
-    const context = await chromium.launchPersistentContext(opts.profileDir, {
+    //
+    // The option bag is DERIVED from the launch seam (`buildLaunchOptions`) — the
+    // arg list, the `channel: "chrome"` decision and the `UI2API_CHROME_PATH`
+    // override used to be typed a second time here, so the browser this opens
+    // could carry a different fingerprint from every other launcher in the
+    // project. `userDataDir` is positional for launchPersistentContext, so it
+    // is removed from the bag and passed as the first argument; the explicit
+    // profileDir still wins over any ambient env.
+    const { userDataDir: _positional, ...bag } = buildLaunchOptions({
+      userDataDir: opts.profileDir,
+      // FORCED, not inherited: this flow's entire purpose is a window a human
+      // logs into. `resolvedHeadless` must never be allowed to answer here —
+      // an invisible window is not a login, and pretending otherwise is exactly
+      // the silent headless fallback the posture rules forbid.
       headless: false,
-      channel: "chrome",
-      args: ["--window-size=1280,800"],
+    }) as Record<string, unknown>;
+    void _positional;
+    const context = await chromium.launchPersistentContext(opts.profileDir, {
+      ...bag,
       env: { ...process.env, DISPLAY: opts.display } as Record<string, string>,
-      ...(process.env.UI2API_CHROME_PATH ? { executablePath: process.env.UI2API_CHROME_PATH } : {}),
     });
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(opts.url, { waitUntil: "load", timeout: 60000 });
     const executable = process.env.UI2API_CHROME_PATH || "chrome";
+    // The printed command is what an operator copies to reproduce the launch, so
+    // its flags are DERIVED from the same source the launch used — a hand-typed
+    // window-size here would print a command that differs from the one that just
+    // ran, which is the worst kind of lie in a copy-paste box.
+    const printedFlags = userChromeLaunchArgs("chrome").join(" ");
     return {
       launched: true,
-      command: `${executable} --user-data-dir=${opts.profileDir} --window-size=1280,800 ${opts.url}`,
+      command: `${executable} --user-data-dir=${opts.profileDir} ${printedFlags} ${opts.url}`,
     };
   } catch (e) {
     const ownership =

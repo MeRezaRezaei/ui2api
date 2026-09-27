@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "
 import { createServer } from "node:net";
 import { resolve, dirname } from "node:path";
 import { resolveChromeOwner, type ChromeOwner } from "./chrome-owner.js";
-import { resolvedHeadless } from "./browser.js";
+import { resolvedHeadless, CHROME_SYSTEM_PATHS, CHROME_CHROMIUM_PATHS } from "./browser.js";
 
 /**
  * THE PERSISTENT CHROME DAEMON.
@@ -30,12 +30,24 @@ export const DAEMON_PORT_ENV = "UI2API_DAEMON_PORT";
 export const DAEMON_STATE_ENV = "UI2API_CHROME_DAEMON_STATE";
 export const DEFAULT_DAEMON_PORT = 9222;
 
+/**
+ * Where a recorded daemon came from. This is the fact `stop` needs and could
+ * not get: `user` is written identically by BOTH paths, so it cannot tell "we
+ * spawned this" from "we adopted a browser the operator started".
+ *
+ * Optional in the type on purpose — a state file written by an older build has
+ * no `origin`, and "we cannot prove we started it" must read as UNKNOWN, not as
+ * "spawned". `stopChromeDaemon` refuses on unknown unless `--force`.
+ */
+export type ChromeDaemonOrigin = "spawned" | "adopted";
+
 export interface ChromeDaemonState {
   port: number;
   pid: number;
   user: string;
   profile: string;
   startedAt: string;
+  origin?: ChromeDaemonOrigin;
 }
 
 /**
@@ -138,6 +150,7 @@ export async function chromeDaemonStatus(
           user: resolveChromeOwner().user,
           profile: ownerProfile,
           startedAt: new Date().toISOString(),
+          origin: "adopted",
         };
         try {
           writeDaemonState(dataDir, adopted);
@@ -147,7 +160,7 @@ export async function chromeDaemonStatus(
       }
       return {
         running: true,
-        state: state ?? { port: found.port, pid: found.pid, user: resolveChromeOwner().user, profile: ownerProfile, startedAt: new Date().toISOString() },
+        state: state ?? { port: found.port, pid: found.pid, user: resolveChromeOwner().user, profile: ownerProfile, startedAt: new Date().toISOString(), origin: "adopted" },
         port: found.port,
         note: `adopting the Chrome already running for ${resolveChromeOwner().user} on 127.0.0.1:${found.port} (pid ${found.pid}) — not spawning another`,
       };
@@ -158,11 +171,23 @@ export async function chromeDaemonStatus(
   return { running: false, state: null, port, note: `no chrome daemon on 127.0.0.1:${port}` };
 }
 
-/** Resolve the Chrome executable the same way the launch seam does. */
+/**
+ * Resolve the Chrome executable the same way the launch seam does — because it
+ * now READS the seam's ladder instead of typing a fourth copy of it.
+ *
+ * It walks the seam's SYSTEM paths, then the CHROMIUM paths. The Playwright
+ * cache is deliberately NOT here: that cache lives in the OPERATOR's home
+ * (`~/.cache/ms-playwright`), and this function's result is spawned AS the
+ * chrome owner (`sudo -n -u <owner> -H <exec>`), which may not be able to read
+ * or execute it. Offering it would trade a clean "no Chrome executable found"
+ * for an opaque EACCES from a `sudo` — a worse answer, not a better one. The
+ * seam itself keeps the cache as its last resort, because it runs as whoever
+ * holds the cache.
+ */
 function chromeExec(): string | null {
   const explicit = process.env.UI2API_CHROME_PATH;
   if (explicit && existsSync(explicit)) return explicit;
-  for (const c of ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+  for (const c of [...CHROME_SYSTEM_PATHS, ...CHROME_CHROMIUM_PATHS]) {
     if (existsSync(c)) return c;
   }
   return null;
@@ -295,6 +320,8 @@ export async function startChromeDaemon(opts: {
     user: owner.user,
     profile: owner.profile,
     startedAt: new Date().toISOString(),
+    // The one fact that makes `stop` safe: THIS process group is ours.
+    origin: "spawned",
   };
   // wait briefly for the port to come up so the caller gets a real answer
   for (let i = 0; i < 20; i++) {
@@ -312,12 +339,31 @@ export async function startChromeDaemon(opts: {
  * Stop the daemon — but ONLY a Chrome we started. A browser we merely attached
  * to (the operator's own) is never killed; that rule is why GOAL 119 made
  * restartBrowser refuse to close an attached browser.
+ *
+ * MEASURED DEAD GUARD, now closed. This used to read
+ * `if (state.user === "me" && !opts.force)`. `state.user` is only ever written
+ * from `resolveChromeOwner().user` (or an explicit `--user`), which resolves to
+ * the default owner name or whatever `CHROME_USER_ENV` names — it is NEVER the
+ * literal "me" in the production configuration, so the veto could never fire. The
+ * consequence was the exact thing the docstring promises against: ADOPTION
+ * deliberately writes state for a browser it did not start (see
+ * chromeDaemonStatus), records it under the owner's user name, and `stop` then
+ * SIGTERM'd it — the operator's own Chrome. A sibling comment 30 lines above
+ * records that hardcoding a username there was already a measured bug and was
+ * fixed in `isThisProcessOwner`; the same mistake survived here. The predicate is
+ * now the fact that actually distinguishes the two paths: `origin`.
  */
 export function stopChromeDaemon(opts: { dataDir: string; force?: boolean }): { stopped: boolean; note: string } {
   const state = readDaemonState(opts.dataDir);
   if (!state) return { stopped: false, note: "no recorded chrome daemon to stop" };
-  if (state.user === "me" && !opts.force) {
-    return { stopped: false, note: "refusing to stop: this Chrome was not started by ui2api as a dedicated owner" };
+  if (!opts.force && state.origin !== "spawned") {
+    return {
+      stopped: false,
+      note:
+        state.origin === "adopted"
+          ? "refusing to stop: this Chrome was ADOPTED, not started by ui2api — it belongs to whoever launched it. Re-run with --force only if you are certain it is ours."
+          : "refusing to stop: the recorded daemon carries no spawn provenance (written by an older build), so we cannot prove ui2api started it. Re-run with --force only if you are certain it is ours.",
+    };
   }
   try {
     process.kill(state.pid, "SIGTERM");
