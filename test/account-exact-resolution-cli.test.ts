@@ -1,8 +1,10 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveRequestedAccount } from "../src/cli.js";
 import {
   capabilitiesPath,
@@ -29,12 +31,18 @@ import {
  * or the write gate and the read gate disagree about who "account" means.
  */
 
-const CLI_RAW = readFileSync("src/cli.ts", "utf8");
+/** The repo root, resolved from THIS file's own location — never from cwd. A
+ *  cwd-relative `readFileSync("src/cli.ts")` happens to work only because the
+ *  runner's working directory is the repo root; resolve() from import.meta.url
+ *  is the property, not the coincidence. */
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const CLI_RAW = readFileSync(resolve(REPO, "src/cli.ts"), "utf8");
 // strip comments: the GOAL 118 fix NAMES the old `?? accounts[0]` shape in its
 // explanatory comment, so a raw-source scan would match the very prose that
 // documents the fix. A pin must forbid the CALL, not the word about it.
 const CLI = CLI_RAW.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-const HTTP = readFileSync("src/prompt/http.ts", "utf8");
+const HTTP = readFileSync(resolve(REPO, "src/prompt/http.ts"), "utf8");
 const HOST = "gemini.google.com";
 const ACCOUNTS = [
   { identity: "osbulk", slug: "osbulk" },
@@ -87,6 +95,25 @@ function tempVault(): { dir: string; sitesDir: string; victim: string; cleanup: 
   // A real fingerprint, written through the real write seam.
   saveCapabilities(sitesDir, HOST, slugifyIdentity(VICTIM_IDENTITY), { probedAt: "2026-09-27T00:00:00.000Z", marker: "the-real-stored-fingerprint" });
   return { dir, sitesDir, victim, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/**
+ * Run the REAL CLI in a child process and report its exit status + combined
+ * output, never throwing on a nonzero exit (a refusal IS the expected result
+ * here). Bounded by an explicit `timeout` per the GOAL 102 rule — a hung
+ * child must be a named failure, not a silent file-level drop.
+ *
+ * `process.execPath` + the tsx loader is used rather than the `tsx` shim, so
+ * this does not depend on a PATH entry or an npx resolution on the runner.
+ */
+function runCli(args: string[]): { status: number; output: string } {
+  const r = spawnSync(
+    process.execPath,
+    ["--import", "tsx", resolve(REPO, "src/cli.ts"), ...args],
+    { cwd: REPO, encoding: "utf8", timeout: 120_000 },
+  );
+  if (r.error) throw r.error;
+  return { status: r.status ?? -1, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
 d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () => {
@@ -149,7 +176,7 @@ d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () =
     assert.throws(() => resolveRequestedAccount(ACCOUNTS, "nobody@example.com", HOST));
   });
 
-  t("MEASURED (hermetic vault): an unknown --account is refused by name AND leaves the other account's stored fingerprint byte- and mtime-identical", () => {
+  t("MEASURED (real CLI, hermetic vault): an unknown --account exits 1, names itself, and leaves the other account's stored fingerprint byte- and mtime-identical", () => {
     const { sitesDir, victim, cleanup } = tempVault();
     try {
       // The vault this test just built is a REAL, populated vault: both rows are
@@ -180,16 +207,27 @@ d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () =
       assert.equal(before, SENTINEL.getTime(), "precondition: the sentinel mtime was really applied to the stored fingerprint");
       const bytes = readFileSync(victim, "utf8");
 
-      // The guard: an unmatched account is refused, naming itself and the
-      // alternatives — and the refusal is a THROW, so no write path is reached.
-      let msg = "";
-      try {
-        resolveRequestedAccount(stored, "nobody@example.com", HOST);
-      } catch (e) {
-        msg = (e as Error).message;
-      }
-      assert.match(msg, /no stored account "nobody@example\.com" for "gemini\.google\.com"/, "the refusal must fire and name both sides");
-      assert.match(msg, new RegExp(slugifyIdentity(VICTIM_IDENTITY)), "and must name the account that was NOT silently used");
+      // THE REAL COMMAND, not the pure resolver. The in-process
+      // `resolveRequestedAccount` call the previous version made was a THROW
+      // with no write path reachable, so "the file is unchanged" was true by
+      // construction — it measured nothing about the defect, which happened in
+      // `cmdProfileCapabilities` AFTER the resolver returned. Driving the
+      // actual CLI is what makes the mtime/bytes comparison falsifiable: the
+      // command that used to print `saved ->` and exit 0 now runs, and the
+      // fingerprint must survive it untouched.
+      //
+      // It stays hermetic because --data-dir points the command at the fixture
+      // vault, and it never reaches a browser: the refusal is thrown at
+      // cli.ts:1263, before probeAccountCapabilities()'s launchBrowser at
+      // cli.ts:1291. A regression that let the fall-through through would
+      // attempt a real browser launch — visible as this test going red, not as
+      // a silent pass.
+      const cli = runCli(["profile", "capabilities", "gemini", "--account", "nobody@example.com", "--data-dir", sitesDir]);
+
+      assert.equal(cli.status, 1, `a refused account must exit nonzero; stdout/stderr was: ${cli.output}`);
+      assert.doesNotMatch(cli.output, /saved ->/, "the command must never claim it saved a fingerprint it refused to attribute");
+      assert.match(cli.output, /no stored account "nobody@example\.com" for "gemini\.google\.com"/, "the refusal must fire and name both sides");
+      assert.match(cli.output, new RegExp(slugifyIdentity(VICTIM_IDENTITY)), "and must name the account that was NOT silently used");
 
       assert.equal(statSync(victim).mtimeMs, before, "a refused account must not rewrite another account's fingerprint");
       assert.equal(readFileSync(victim, "utf8"), bytes, "...and must not touch its bytes either (mtime alone can miss a same-ms write)");

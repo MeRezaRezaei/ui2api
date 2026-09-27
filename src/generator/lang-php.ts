@@ -163,6 +163,43 @@ final class Ui2apiException extends \\RuntimeException
      * pool_closed) plus the request/account/site refusals it names. Text we do
      * not recognize is NOT guessed at: it falls back to http_<status>, which is
      * the honest answer when no name was sent.
+     *
+     * ── THIS TABLE IS A PUBLISHED CONTRACT, AND IT IS HAND-MAINTAINED ON PURPOSE ──
+     * The code reaches a consumer on three public surfaces (errorCode,
+     * toArray()['code'], and the thrown message), so a consumer can branch on
+     * it. Adding, renaming or removing an entry is a BREAKING change to every
+     * already-generated client — never a cleanup, and never a side effect of
+     * some other edit.
+     *
+     * WHY IT IS NOT DERIVED (measured, not assumed — see the census in
+     * test/codefor-prose-table.test.ts): it is only reached for a Shape-1 body
+     * {error:"<string>"}, and a Shape-1 body carries NO machine code at all.
+     * send(res, 404, {error:"not found"}) (http.ts:940) names its class in
+     * ENGLISH and nothing else, so there is nothing to derive from: naming it
+     * is a client-side policy choice, and this generator emits PHP with no
+     * daemon in scope to ask. Deriving from the daemon's own code list is not
+     * behaviour-identical either — it would add codes that already arrive
+     * Shape-2 and never consult this table, while moving the Shape-1 census
+     * away from http_<status>, which IS breaking.
+     *
+     * SO IT IS SPLIT, and both halves are pinned by
+     * test/codefor-prose-table.test.ts, which drives the real emitters and
+     * executes this emitted file:
+     *   - 6 of the 7 are a LEGACY SHIM. Every one of those codes is a code the
+     *     daemon already publishes; they exist for a pre-GOAL-143 daemon that
+     *     sent the same sentences as bare strings. On today's daemon the class
+     *     arrives Shape-2 carrying the daemon's own code, so the table is
+     *     BYPASSED — what the pin protects is that a reworded emitter can never
+     *     silently turn one of these entries dead.
+     *   - "not found" is live POLICY: the one class the table genuinely names,
+     *     for a refusal the daemon labels with nothing.
+     *
+     * WHAT WOULD INVALIDATE THIS TABLE: the daemon re-inheriting a Shape-1
+     * (bare-string) body for a class listed here, which would make the shim
+     * earn its keep again; a NEW Shape-1 refusal, which the pinned census must
+     * be extended to cover deliberately; or a decision to publish a code for an
+     * unnamed Shape-1 class, which changes what a consumer branching on
+     * http_<status> sees. All three are contract changes, not refactors.
      */
     public static function codeFor(string $message, int $status): string
     {

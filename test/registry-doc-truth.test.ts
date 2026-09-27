@@ -25,10 +25,12 @@ import {
  *   - the default-URL failure names the real cause (nothing is published) and
  *     the real remedy (`--registry` / `UI2API_REGISTRY_URL`).
  *
- * The "is the registry published YET?" half is NOT a unit assertion: it is a
- * fact about the world, so it is a documented one-line curl (in the last
- * describe) rather than a fetch inside `test:unit` — no third party's uptime
- * can decide a verdict here, and no slow network can burn the file timeout.
+ * The "is the registry published YET?" half is NOT part of the default unit
+ * run: it is a fact about the world, so it is the last test in the file and it
+ * is OPT-IN behind `UI2API_REGISTRY_LIVE=1` — the same idiom as
+ * test/install.test.ts:141, which CI sets. No third party's uptime can decide
+ * a verdict in `npm run test:unit`, and no slow network can burn the file
+ * timeout; an operator who wants the live fact runs the knob.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -242,13 +244,9 @@ d("GOAL 116 — the not-published claim is pinned to the 404 it is written for (
     // testable with no network at all — drive the 404 in through the same
     // `withStubbedFetch` stub the failure-message pins use, and assert both
     // halves. The live half ("has the repo been published YET?") is a fact
-    // about the world, not about this code, so it is run ON DEMAND instead:
-    //
-    //   curl -s -o /dev/null -w '%{http_code}\n' \
-    //     "https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}"
-    //
-    // 404 = still unpublished, the pins above stand. 200 = the registry now
-    // exists and these doc-truth pins MUST be revisited.
+    // about the world, not about this code, so it lives in the OPT-IN test
+    // below, behind the same UI2API_REGISTRY_LIVE=1 idiom as
+    // test/install.test.ts:141 — not as a comment nobody runs.
     const err = await withStubbedFetch(() =>
       fetchRegistryIndex(DEFAULT_REGISTRY_URL).then(
         () => assert.fail("a 404 on the code's own default URL must reject, never resolve"),
@@ -263,4 +261,43 @@ d("GOAL 116 — the not-published claim is pinned to the 404 it is written for (
     assert.ok(statesUnpublished(README), "while the default registry is 404, README must say it is not published");
     assert.ok(statesUnpublished(ONBOARDING), "while the default registry is 404, ONBOARDING must say it is not published");
   });
+
+  // The live half, ON DEMAND and NEVER inside the default `test:unit` run.
+  // Skipped (not failed, not silently passed) when the knob is unset, exactly
+  // like test/install.test.ts:141 — so `npm run test:unit` can never have its
+  // verdict decided by GitHub's uptime, while CI (which sets the knob) can
+  // still MACHINE-CHECK the "published yet?" fact instead of eyeballing a curl.
+  //
+  // What it asserts is AGREEMENT, not a hardcoded 404: the docs' published /
+  // not-published claim must match what the registry ACTUALLY serves, in
+  // whichever direction the world has moved. Hardcoding `assert.equal(res
+  // .status, 404)` would be a second lie the moment the repo is published —
+  // it would go red for a reason that is not a defect, and the fix would be to
+  // delete the pin. An agreement pin goes red for exactly one reason: the docs
+  // and the world disagree.
+  t(
+    "LIVE: the docs' published/not-published claim matches what the registry actually serves (opt-in; UI2API_REGISTRY_LIVE=1)",
+    { skip: process.env.UI2API_REGISTRY_LIVE !== "1" },
+    async () => {
+      const res = await fetch(`https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}`, {
+        headers: { "user-agent": "ui2api-registry-doc-truth" },
+      });
+      const published = res.ok;
+      for (const [name, doc] of [["README.md", README], ["docs/ONBOARDING.md", ONBOARDING]] as const) {
+        if (published) {
+          assert.equal(
+            statesUnpublished(doc),
+            false,
+            `${name} still says the registry is NOT published, but ${DEF_OWNER}/${DEF_REPO} answers HTTP ${res.status} and serves a working index.json — that claim is now a lie and the docs must be rewritten`,
+          );
+        } else {
+          assert.equal(
+            statesUnpublished(doc),
+            true,
+            `${name} does not say the registry is not published, while it answers HTTP ${res.status}`,
+          );
+        }
+      }
+    },
+  );
 });

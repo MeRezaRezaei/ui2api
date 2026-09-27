@@ -272,53 +272,11 @@ export interface AllowEntry {
 
 export const ALLOW_LIST: AllowEntry[] = [
   {
-    file: "profile-scan.test.ts",
-    rule: "R2-real-identity",
-    match: "userInfo().username",
-    reason:
-      "DEBT (owner: test/profile-scan.test.ts): findAllChromeProfilesOnOs derives a profile's `user` from the OS account, so the test compares the code's output to os.userInfo().username. Deterministic ONLY because both sides read the same box — and os.userInfo() THROWS where the running uid has no passwd entry, which is a real bare-container risk (exactly the pipeline-199 class). Fix: inject the username into findAllChromeProfilesOnOs and assert the fixture value.",
-  },
-  {
-    file: "pool-deadline.test.ts",
-    rule: "R3-relative-vault",
-    match: 'const pool = new ChatPool({ profiles: [], dataDir: "data", ...opts } as PoolOptions);',
-    reason:
-      "DEBT (owner: test/pool-deadline.test.ts): ChatPool is constructed with dataDir:\"data\" and profiles: [], so no session is ever read from the real vault. Harmless today ONLY because the empty profile list makes the pool inert; add one profile and it reads the operator vault. Fix: a mkdtempSync dir.",
-  },
-  {
-    file: "status-honesty.test.ts",
-    rule: "R3-relative-vault",
-    match: 'return new ChatPool({ profiles: [], dataDir: "data", max: 1, ...opts } as PoolOptions);',
-    reason:
-      "DEBT (owner: test/status-honesty.test.ts): the pool FACTORY takes dataDir:\"data\" with profiles: [], so it is never used to resolve a session. Fix: a mkdtempSync dir.",
-  },
-  {
-    file: "status-honesty.test.ts",
-    rule: "R3-relative-vault",
-    match: 'const pool = new ChatPool({ profiles: [], dataDir: "data", max: 1, maxWaiters: 3',
-    reason:
-      "DEBT (owner: test/status-honesty.test.ts): second ChatPool construction with dataDir:\"data\", profiles: []. Fix: a mkdtempSync dir.",
-  },
-  {
     file: "registry-doc-truth.test.ts",
     rule: "R4-external-reach",
     match: "await fetch(`https://api.github.com/repos/",
     reason:
       "Named and fail-safe by its own author: the GOAL 116 reachability probe fetches api.github.com, then tt.skip()s on ANY network failure, non-ok status or inconclusive answer, and asserts only what is true while the registry is 404 (the current honest state). It cannot fail on a runner with no network — but it can still burn the 120 s file timeout on a slow one. Fix worth taking: gate it behind the same UI2API_REGISTRY_LIVE=1 idiom as test/install.test.ts:141.",
-  },
-  {
-    file: "account-exact-resolution-cli.test.ts",
-    rule: "R5-tautology",
-    match: 'assert.ok(true, "skipped: no vault artifact',
-    reason:
-      "DEBT (owner: test/account-exact-resolution-cli.test.ts): a placeholder the test returns into when the real vault has nothing to compare. The message is honest about skipping, but the assertion pins nothing. Fix: t.skip() — the idiom test/install.test.ts:141 already uses — or a temp-dir artifact.",
-  },
-  {
-    file: "account-exact-resolution-cli.test.ts",
-    rule: "R5-tautology",
-    match: "assert.equal(before, before,",
-    reason:
-      "DEBT (owner: test/account-exact-resolution-cli.test.ts): compares a value with itself. Fix: drop the line — the real pin is two below it, which re-stats the file and compares against `before`.",
   },
 ];
 

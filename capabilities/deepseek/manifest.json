@@ -80,7 +80,12 @@
       "recipe": "recipes/deepseek_chat.json",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "read by the runner as args.state"
+          }
+        },
         "required": []
       }
     },
@@ -93,7 +98,12 @@
       "recipe": "",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "read by the runner as args.state"
+          }
+        },
         "required": []
       }
     }
