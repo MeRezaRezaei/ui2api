@@ -61,10 +61,47 @@ export function realRunnerIds() {
   return [...table.matchAll(/id: "([a-z0-9-]+)"/g)].map((m) => m[1]).filter((id, i, a) => a.indexOf(id) === i);
 }
 
-/** login-gated-by-design ids: the set in test/function-api-ui-closure.test.ts. */
+/** login-gated-by-design ids: the `LOGIN_GATED_BY_DESIGN` Set in
+ *  test/function-api-ui-closure.test.ts.
+ *
+ *  ANCHORED, and it refuses to answer when the anchor is gone. This was the one
+ *  unguarded census in this file: it ran a whole-file
+ *  /^\s+"([a-z0-9-]+)",\s*$/gm scan, which matches ANY bare quoted lowercase
+ *  string sitting alone on a line ANYWHERE in a 259-line test file. Two
+ *  independent ways to fabricate the number, both silent:
+ *
+ *    1. an unrelated scratch fixture on its own line ADDS a "gated" package
+ *       (exactly how GOAL 147's falsifiability proof broke realRunnerIds — it
+ *       wrote `id: "scratch-stamped"` and the census answered 15 real runners);
+ *    2. renaming or reindenting the declaration makes the scan find NOTHING, and
+ *       `realGatedSplit()` then reports `gatedN: 0` — a CLEAN ZERO presented as
+ *       SUCCESS, with the doc number silently dropping 76 capabilities to 0.
+ *
+ *  A gate that finds nothing because it understood nothing is not a gate. So
+ *  this anchors to `const LOGIN_GATED_BY_DESIGN = new Set([` .. its closing
+ *  `]);` and throws a named error if either end is missing, exactly as
+ *  realRunnerIds does. The 0-arg signature is fixed by
+ *  scripts/measure-function-map.d.mts, so the anchoring is proved falsifiable
+ *  in test/scripts-measure-anchoring.test.ts by relocating a byte-identical
+ *  copy of THIS script into a temp root holding a mutated source file. */
 export function gatedIds() {
-  const src = readFileSync(join(ROOT, "test", "function-api-ui-closure.test.ts"), "utf8");
-  return [...src.matchAll(/^\s+"([a-z0-9-]+)",\s*$/gm)].map((m) => m[1]);
+  const file = join(ROOT, "test", "function-api-ui-closure.test.ts");
+  const src = readFileSync(file, "utf8");
+  const start = src.search(/^const\s+LOGIN_GATED_BY_DESIGN\s*=\s*new Set\(\[/m);
+  if (start < 0)
+    throw new Error(
+      "gatedIds: no `const LOGIN_GATED_BY_DESIGN = new Set([` in " +
+        `${file} — the census can no longer be measured (an unanchored scan would ` +
+        `silently answer 0, which reads as "no package is login-gated")`
+    );
+  const end = src.indexOf("\n]);", start);
+  if (end < 0)
+    throw new Error(
+      "gatedIds: the LOGIN_GATED_BY_DESIGN set in " +
+        `${file} has no closing \`]);\` — the census can no longer be measured`
+    );
+  const table = src.slice(start, end);
+  return [...table.matchAll(/^\s*"([a-z0-9-]+)",?\s*$/gm)].map((m) => m[1]);
 }
 
 /** capability totals split by real-runner vs gated (sums to capabilityTotal()). */

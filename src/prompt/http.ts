@@ -44,7 +44,7 @@
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { ChatPool, POOL_REFUSAL_CODES, type PoolRefusalCode, type PoolStatus } from "./pool.js";
-import { daemonPosture } from "./posture.js";
+import { daemonPosture, TOKEN_ENV } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
 import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
@@ -531,7 +531,7 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
 }
 
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {
-  const token = opts.token ?? process.env.UI2API_PROMPTD_TOKEN ?? "";
+  const token = opts.token ?? process.env[TOKEN_ENV] ?? "";
   // GOAL 100: the SAME bind address the listener uses, resolved up front so the
   // posture report can never disagree with where we actually listen.
   const bindAddr = opts.host ?? "127.0.0.1";
@@ -696,7 +696,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       // else: GET /registry -> { packages: [...] }
       if (req.method === "GET" && req.url === "/registry") {
         return send(res, 200, {
-          ...buildRegistryContract(Boolean(process.env.UI2API_PROMPTD_TOKEN)),
+          ...buildRegistryContract(Boolean(process.env[TOKEN_ENV])),
           packages: buildRegistryPackages(),
           generatedAt: new Date().toISOString(),
         });
