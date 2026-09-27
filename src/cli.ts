@@ -19,7 +19,7 @@ import { serveInstanceStdio, serveInstanceAcp } from "./hub/serve.js";
 import { servePlugin } from "./plugin/serve.js";
 import { loadPluginModule } from "./plugin/loader.js";
 import { resolveProfile, resolveProfileWithOverride, defaultSiteId } from "./profile/profile.js";
-import { defaultChatProfiles, chatSurfaceStatus } from "./prompt/registry.js";
+import { defaultChatProfiles, chatSurfaceStatus, resolveDataDir } from "./prompt/registry.js";
 import { ChatDriver } from "./prompt/driver.js";
 import { startPromptd, resolveCapabilityAccount } from "./prompt/http.js";
 import { TOKEN_ENV } from "./prompt/posture.js";
@@ -733,7 +733,30 @@ async function cmdLiveProof(flags: Flags): Promise<void> {
 
 async function cmdPromptd(flags: Flags): Promise<void> {
   const port = Number(flags.port ?? process.env.UI2API_PROMPTD_PORT ?? 9797);
-  const dataDir = flags.dataDir ?? resolve(process.cwd(), "data");
+  // ROUND N+99 — this was `resolve(process.cwd(), "data")`, which never consults
+  // UI2API_DATA_DIR. That works by ACCIDENT in a checkout, because the cwd IS the
+  // repo and the repo has a data/ next to it. It breaks the moment the same code
+  // runs from anywhere else, and it broke the moment it did.
+  //
+  // MEASURED, deployed: cwd /opt/ui2api, UI2API_DATA_DIR pointing at the real
+  // vault, and `listAccounts` returned **0 accounts for every chat-profile site**
+  // — gemini, deepseek, kimi all empty — while package-only sites like araprat
+  // worked. Two resolvers were live inside ONE handler: the chat-profile branch
+  // (`http.ts:729`) took this cwd-derived value and read a nonexistent
+  // /opt/ui2api/data, while the package branch (`http.ts:731` ->
+  // `registryPackageFor` -> `resolveDataDir()`) read the env var and got it
+  // right.
+  //
+  // The service was healthy the whole time: /health ok, /registry serving 33
+  // packages, /v1/models serving 22 models. It would have replayed SIGNED-OUT on
+  // every chat site, and reported success while doing it. A wrong vault path is
+  // not an error, it is a silent total failure — which is why the deploy asserts
+  // the vault is visible rather than trusting a green health check.
+  //
+  // One resolver, env-aware, is the whole fix: `resolveDataDir()` honours
+  // UI2API_DATA_DIR and falls back to the cwd-relative default, so the checkout
+  // behaviour is unchanged and the deployed behaviour becomes correct.
+  const dataDir = flags.dataDir ?? resolveDataDir();
   const profiles = flags.site && flags.profile
     ? [resolveProfileWithOverride(flags.site, flags.profile)]
     : flags.site ? [resolveProfile(flags.site)] : flags.profile ? [resolveProfile(flags.profile)] : undefined;
