@@ -9,26 +9,36 @@ After=ui2api-chrome.service
 
 [Service]
 Type=simple
-# WHO RUNS THE API, and why it is NOT the chrome user.
+# WHO RUNS THE API — and why this comment previously argued the OPPOSITE.
 #
-# Chrome runs as `ui2api`: that user owns the browser profile and the warm
-# anti-bot state, and that is this project's point of use.
+# This block used to argue at length for `User=me`, on the grounds that the vault
+# belonged to the operator and `ui2api` could not read it. Both halves were true
+# at the time and BOTH are now false: the vault is owned by `ui2api`, and the line
+# below is `User=ui2api`. The stale reasoning was left sitting directly above the
+# value it contradicted, which is the worst place a wrong comment can be — it is
+# trusted, and it would have walked the next reader straight back into the
+# incident it described.
 #
-# The API runs as the OPERATOR, because the vault belongs to the operator. The
-# captured sessions are the operator's own login state, hardened to 0700/0600 by
-# the write seam, so they are readable by their owner and by nobody else. Running
-# the API as `ui2api` cannot read them — and the alternative, chowning real
-# credentials to a service account, would either weaken the 0600/0700 pin or
-# blind every gate that verifies the vault honestly.
+# WHAT THE STALE REASONING GOT WRONG, because it is the reusable part. It asked
+# "who owns the credentials?" and answered "therefore the daemon must run as that
+# user", then never checked the other side of the same boundary. MEASURED: with
+# `User=me` the daemon drove a browser it did not own, `realProfileInPlay` was
+# `false`, and every chat site replayed signed-out — 23 minutes of `GET /health`
+# returning `ok: true` while serving 22 models it could not drive. The daemon
+# needed the same identity as the BROWSER, not as the credential file.
 #
-# This is safe because the API does not touch the browser directly: it ATTACHES
-# over CDP to the `ui2api` Chrome (UI2API_ATTACH_PORT below), which is the
-# project's documented attach seam. Different users, one browser, no shared
-# profile access.
-User=me
-Group=me
+# So: Chrome, the vault, and the API all run as `ui2api`. One user owns the
+# profile, the sessions, and the process that reads them, and there is no
+# cross-user seam for a session to get lost in. The operator keeps full access
+# through sudo, which is the right shape for a human doing maintenance on a
+# service account's files.
+#
+# The 0600/0700 hardening is unchanged and still pinned — ownership moved, the
+# modes did not.
+User=ui2api
+Group=ui2api
 WorkingDirectory=/opt/ui2api
-Environment=HOME=/home/me
+Environment=HOME=/home/ui2api
 # The DEPLOYED tree, not a git checkout. Written only by scripts/ops/deploy.sh.
 # THE VAULT. The captured sessions live in the operator's checkout and are real
 # login state; a deploy must never move or overwrite them, so the service is
