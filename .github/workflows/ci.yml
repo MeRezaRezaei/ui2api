@@ -44,6 +44,11 @@ jobs:
           npx playwright install chromium
         working-directory: wigolo
       - run: npm run build
+      # GOAL 147: typecheck the TESTS too. `npm run build` only compiles src/ —
+      # tsconfig.json excludes test/ — so a test fixture could omit a field its
+      # interface declares REQUIRED and nothing would notice until it ran on a
+      # different machine (pipeline 199). The backlog this surfaced is zero.
+      - run: npm run typecheck
       # GOAL 78: the verbatim-completeness gate (P1..P5) is part of the
       # human-free chain — a PR that leaves the corpus inconsistent fails here.
       - run: npm run check:verbatim

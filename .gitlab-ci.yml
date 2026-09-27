@@ -60,6 +60,13 @@ build:
     - .gitlab/fetch-wigolo.sh "$CI_PROJECT_DIR/wigolo" d69bf773be06f29fc1d335f8ba35ec88457ac707
     - cd "$CI_PROJECT_DIR/wigolo" && npm ci && npx playwright install chromium
     - cd "$CI_PROJECT_DIR" && npm run build
+    # GOAL 147: typecheck the TESTS too. `npm run build` only compiles src/ —
+    # tsconfig.json excludes test/ — so a test fixture could omit a field its
+    # interface declares REQUIRED and nothing would notice until CI ran it on a
+    # different machine. That is exactly how pipeline 199 went red: a fixture
+    # that omitted two seams read the real host (933 fonts here, none on a bare
+    # runner). The backlog this surfaced is now zero, so it is safe to gate.
+    - cd "$CI_PROJECT_DIR" && npm run typecheck
 
 verify:
   stage: verify
