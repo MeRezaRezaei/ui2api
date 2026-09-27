@@ -19,7 +19,9 @@
 #
 # WHAT IT NEVER TOUCHES — `data/`. That is the captured-session vault: real
 # login state for a real account. It is never synced, never moved, never
-# deleted, and never overwritten by a deploy. The service reaches it through
+# deleted, and never overwritten by a deploy, and — new — the ROLLBACK copy
+# carries the same `data/` exclusion and the same absence assertion, so a
+# restore can never move the vault either. The service reaches it through
 # UI2API_DATA_DIR, which is set in the unit, NOT in this script.
 #
 # Usage:  sudo ./scripts/ops/deploy.sh [--repo DIR] [--target DIR] [--no-restart]
@@ -37,6 +39,16 @@ CHROME_USER="${UI2API_CHROME_USER:-ui2api}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
 DO_RESTART=1
 
+# The rollback point sits BESIDE the target, never inside it, so a restore can
+# never rsync a previous release into itself and never ships as part of a deploy.
+ROLLBACK_DIR="${UI2API_DEPLOY_ROLLBACK_DIR:-${TARGET_DIR}.rollback}"
+ROLLBACK_TMP="${ROLLBACK_DIR}.tmp"
+# Bounded everywhere. A rollback that can loop is an outage that never ends.
+HEALTH_ATTEMPTS=30
+HEALTH_INTERVAL=2
+RESTORE_HEALTH_ATTEMPTS=10
+RSYNC_TIMEOUT=120
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo) REPO_DIR="$2"; shift 2 ;;
@@ -47,11 +59,242 @@ while [[ $# -gt 0 ]]; do
 done
 
 say()  { printf '[deploy] %s\n' "$*"; }
+loud() { printf '[deploy] %s\n' "$*" >&2; }
 fail() { printf '[deploy] FATAL: %s\n' "$*" >&2; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || fail "must run as root (systemctl + chown)"
 id -u "$CHROME_USER" >/dev/null 2>&1 || fail "user $CHROME_USER does not exist"
 [[ -f "$REPO_DIR/package.json" ]] || fail "no package.json in $REPO_DIR — bad --repo?"
+
+# --- 0. preserve the release we are about to overwrite ------------------------
+# A health failure has to be able to put the previous release back, so the live
+# tree is copied aside BEFORE the rsync. Same excludes as the deploy rsync — in
+# particular `data/` — so the rollback point can never carry the vault.
+PRESERVED=0
+if [[ -f "$TARGET_DIR/package.json" ]]; then
+  say "preserving the current release: $TARGET_DIR -> $ROLLBACK_DIR (the rollback point)"
+  rm -rf "$ROLLBACK_TMP"
+  mkdir -p "$ROLLBACK_TMP"
+  if ! rsync -a --delete \
+      --exclude 'data/' --exclude '/data' \
+      --exclude '.git/' --exclude 'node_modules/' --exclude 'dist/' \
+      --exclude '.brain/' --exclude 'sites/' --exclude '.agents/' --exclude '.opencode/' \
+      --exclude 'graphify-out/' \
+      --timeout="$RSYNC_TIMEOUT" \
+      "$TARGET_DIR/" "$ROLLBACK_TMP/"; then
+    rm -rf "$ROLLBACK_TMP"
+    fail "could not preserve the current release — refusing to deploy (a deploy with no rollback point is the failure this guards)"
+  fi
+  if [[ -e "$ROLLBACK_TMP/data" ]]; then
+    rm -rf "$ROLLBACK_TMP"
+    fail "the preserved release contains a data/ dir — a rollback point must NEVER carry the vault"
+  fi
+  rm -rf "$ROLLBACK_DIR"
+  mv "$ROLLBACK_TMP" "$ROLLBACK_DIR"
+  PRESERVED=1
+  say "rollback point ready at $ROLLBACK_DIR (vault excluded, asserted)"
+else
+  say "no previous release at $TARGET_DIR — a failed health check will have NOTHING to roll back to (this is reported loudly, not silently)"
+fi
+
+# --- http helpers -------------------------------------------------------------
+# `curl -fsS ... >/dev/null` is NOT a health signal: a literal `ok:true` body
+# passes whether or not the service can do anything. So every probe below keeps
+# the STATUS CODE and the BODY, and a failure is: refused connection (000),
+# any non-2xx, an unparseable body, or a parsed `ok !== true`.
+# Each call is bounded by --max-time, so a hung service fails instead of hanging.
+http_probe() {
+  # $1 = path. Sets HTTP_CODE and HTTP_BODY_FILE.
+  local code
+  HTTP_BODY_FILE="$(mktemp)"
+  code="$(curl -sS --max-time 3 -o "$HTTP_BODY_FILE" -w '%{http_code}' \
+    "http://127.0.0.1:$API_PORT$1" 2>/dev/null)" || code="000"
+  [[ -n "$code" ]] || code="000"
+  HTTP_CODE="$code"
+}
+
+http_is_2xx() { [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; }
+
+# Count a JSON array at a JS expression; prints the number, or nothing (exit!=0)
+# when the body does not parse or the shape is absent. Never guesses a number.
+json_count() {
+  node -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch { process.exit(3); }
+    const v = (new Function("d", "return (" + process.argv[2] + ")"))(d);
+    if (typeof v !== "number" || !Number.isFinite(v)) process.exit(4);
+    process.stdout.write(String(v));
+  ' "$1" "$2" 2>/dev/null
+}
+
+json_string() {
+  node -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch { process.exit(3); }
+    const v = (new Function("d", "return (" + process.argv[2] + ")"))(d);
+    if (typeof v !== "string" || !v) process.exit(4);
+    process.stdout.write(v);
+  ' "$1" "$2" 2>/dev/null
+}
+
+json_ok_is_true() {
+  node -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
+    catch { process.exit(3); }
+    process.exit(d && d.ok === true ? 0 : 4);
+  ' "$1" 2>/dev/null
+}
+
+# --- health: /health must be a REAL signal ------------------------------------
+health_probe_once() {
+  http_probe /health
+  if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+    say "  /health -> HTTP $HTTP_CODE — FAILURE (000 = connection refused or timeout)"
+    rm -f "$HTTP_BODY_FILE"
+    return 1
+  fi
+  if ! json_ok_is_true "$HTTP_BODY_FILE"; then
+    say "  /health -> HTTP 200 but the body is not a JSON {\"ok\":true} — FAILURE (unparseable body, or ok !== true)"
+    rm -f "$HTTP_BODY_FILE"
+    return 1
+  fi
+  say "  /health -> HTTP 200, JSON, ok:true"
+  rm -f "$HTTP_BODY_FILE"
+  return 0
+}
+
+wait_healthy() {
+  # $1 = attempts, $2 = interval seconds. Bounded, single loop, no recursion.
+  local attempts="$1" interval="$2"
+  for _ in $(seq 1 "$attempts"); do
+    if health_probe_once; then return 0; fi
+    sleep "$interval"
+  done
+  return 1
+}
+
+# --- the served surface must be real, not just alive --------------------------
+# `health ok` with an empty /registry and an unreadable vault is the exact broken
+# deploy this script exists to catch, so the surface is asserted too. NONZERO
+# counts are fatal; a zero-account vault is only a warning (see below).
+assert_surface() {
+  local n
+  http_probe /registry
+  if ! http_is_2xx; then
+    loud "  /registry -> HTTP $HTTP_CODE — FAILURE (the service is not serving the package surface)"
+    rm -f "$HTTP_BODY_FILE"; return 1
+  fi
+  n="$(json_count "$HTTP_BODY_FILE" "(Array.isArray(d.packages) ? d.packages : []).length")" || n=""
+  rm -f "$HTTP_BODY_FILE"
+  if [[ -z "$n" || "$n" -lt 1 ]]; then
+    loud "  /registry reports ${n:-unparseable} packages — FAILURE (expected at least 1; an empty registry is a broken deploy, not a healthy one)"
+    return 1
+  fi
+  say "  /registry: $n package(s)"
+
+  http_probe /v1/models
+  if ! http_is_2xx; then
+    loud "  /v1/models -> HTTP $HTTP_CODE — FAILURE (the OpenAI-compatible chat surface is not being served)"
+    rm -f "$HTTP_BODY_FILE"; return 1
+  fi
+  n="$(json_count "$HTTP_BODY_FILE" "(Array.isArray(d.data) ? d.data : []).length")" || n=""
+  CHAT_SITE_ID="$(json_string "$HTTP_BODY_FILE" "(d.data && d.data[0] && d.data[0].id) || ''")" || CHAT_SITE_ID=""
+  rm -f "$HTTP_BODY_FILE"
+  if [[ -z "$n" || "$n" -lt 1 ]]; then
+    loud "  /v1/models reports ${n:-unparseable} models — FAILURE (expected at least 1)"
+    return 1
+  fi
+  say "  /v1/models: $n model(s)"
+  return 0
+}
+
+# The vault check. Two OPPOSITE problems share a symptom ("no accounts"), so they
+# are never treated the same:
+#
+#   * vault UNREACHABLE  — /accounts errors (000 / 5xx), or answers with a body
+#     that is not a JSON `accounts` array. The service cannot read its own
+#     session store: a real defect, and FATAL, because every capability that
+#     replays a login would fail at run time.
+#   * NOT LOGGED IN      — /accounts answers 200 with a real, well-formed
+#     `accounts` array that happens to be empty. The vault is demonstrably
+#     READABLE; the operator is simply signed out. That is a WARNING, never a
+#     deploy failure — a logout is not something a deploy can or should fix.
+# The discriminator is the response's parseability, not the count.
+warn_accounts() {
+  local site="$CHAT_SITE_ID" n
+  if [[ -z "$site" ]]; then
+    say "  WARN vault: no chat site id to probe (empty /v1/models) — cannot check accounts; this is already fatal above"
+    return 0
+  fi
+  http_probe "/accounts?site=$site"
+  if ! http_is_2xx; then
+    loud "  /accounts?site=$site -> HTTP $HTTP_CODE — FATAL: the vault is UNREACHABLE (this is NOT a logout; the service cannot read its session store)"
+    rm -f "$HTTP_BODY_FILE"; return 1
+  fi
+  # -1 = parsed JSON but no `accounts` array (wrong shape -> not a logout).
+  # empty output = the body did not parse at all -> also not a logout.
+  n="$(json_count "$HTTP_BODY_FILE" "(Array.isArray(d.accounts) ? d.accounts.length : -1)")" || n=""
+  rm -f "$HTTP_BODY_FILE"
+  if [[ -z "$n" || "$n" == "-1" ]]; then
+    loud "  /accounts?site=$site answered 2xx without a usable JSON accounts array (${n:-unparseable body}) — FATAL: the vault is UNREACHABLE, which is NOT a logout"
+    return 1
+  fi
+  if [[ "$n" -lt 1 ]]; then
+    say "  WARN vault: $site has 0 stored accounts and the vault IS readable — you are logged OUT (not a deploy defect; re-run 'ui2api profile add-all' or 'profile capture' to log back in)"
+    return 0
+  fi
+  say "  vault: $n stored account(s) for $site"
+  return 0
+}
+
+# --- rollback -----------------------------------------------------------------
+# Bounded: one mv aside, one rsync restore (--timeout), one bounded health
+# re-check. No loop that can re-enter itself, and it ALWAYS speaks — a silent
+# rollback that leaves the operator believing the new version is live is worse
+# than no rollback at all.
+rollback() {
+  local reason="$1"
+  loud "ROLLBACK: $reason"
+  if [[ "$PRESERVED" -ne 1 ]]; then
+    loud "ROLLBACK IMPOSSIBLE: there was no previous release to preserve (nothing installed at $TARGET_DIR when this deploy started)."
+    loud "THE BROKEN RELEASE IS STILL LIVE. Do not trust this service until it is fixed by hand."
+    return 0
+  fi
+  rm -rf "${TARGET_DIR}.broken"
+  mv "$TARGET_DIR" "${TARGET_DIR}.broken" || {
+    loud "ROLLBACK FAILED: could not move the broken tree aside; nothing was changed."
+    return 1
+  }
+  mkdir -p "$TARGET_DIR"
+  if ! rsync -a --delete --exclude 'data/' --exclude '/data' --timeout="$RSYNC_TIMEOUT" \
+      "$ROLLBACK_DIR/" "$TARGET_DIR/"; then
+    loud "ROLLBACK FAILED: could not copy the previous release back. The broken tree is at ${TARGET_DIR}.broken and the rollback point is at $ROLLBACK_DIR — restore by hand."
+    return 1
+  fi
+  if [[ -e "$TARGET_DIR/data" ]]; then
+    loud "ROLLBACK REFUSED TO FINISH: $TARGET_DIR/data appeared during the restore — leaving the broken tree at ${TARGET_DIR}.broken for inspection."
+    return 1
+  fi
+  chown -R "$CHROME_USER:$CHROME_USER" "$TARGET_DIR"
+  say "previous release restored from $ROLLBACK_DIR; restarting the service on it"
+  if systemctl list-unit-files ui2api-api.service >/dev/null 2>&1 \
+     && systemctl cat ui2api-api.service >/dev/null 2>&1; then
+    systemctl restart ui2api-api.service \
+      || loud "ROLLBACK WARNING: the restart of the previous release FAILED — read the journal before trusting the service."
+  fi
+  if wait_healthy "$RESTORE_HEALTH_ATTEMPTS" "$HEALTH_INTERVAL"; then
+    loud "ROLLBACK OK: the previous release is live and answering again (broken tree kept at ${TARGET_DIR}.broken for diagnosis). The deploy that just failed is REVERTED."
+  else
+    loud "ROLLBACK UNPROVEN: the previous release is restored but did not answer /health within $((RESTORE_HEALTH_ATTEMPTS * HEALTH_INTERVAL))s — read the journal; the service is NOT known-good."
+  fi
+  return 0
+}
 
 # --- 1. stage the code -------------------------------------------------------
 # `data/` is excluded in every form it can appear as: the real dir, a trailing
@@ -96,22 +339,37 @@ else
 fi
 
 # --- 4. health check ---------------------------------------------------------
-# The deploy is only successful if the API answers. A green exit with a dead
-# service is the exact failure this script exists to prevent, so the check is
-# part of the exit status, not a log line.
+# The deploy is only successful if the API answers AND serves. A green exit with
+# a dead service — or with a service that answers `ok:true` and has nothing
+# behind it — is the exact failure this script exists to prevent, so the check
+# is part of the exit status, not a log line, and a failure ROLLS BACK.
 if [[ "$DO_RESTART" -eq 1 ]]; then
-  say "waiting for GET /health on 127.0.0.1:$API_PORT"
+  say "health gate: /health must be 2xx AND parse as JSON with ok:true (connection refused, any non-2xx, an unparseable body and ok!==true all FAIL)"
   ok=0
-  for _ in $(seq 1 30); do
-    if curl -fsS --max-time 3 "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1; then ok=1; break; fi
-    sleep 2
+  for _ in $(seq 1 "$HEALTH_ATTEMPTS"); do
+    if health_probe_once; then ok=1; break; fi
+    sleep "$HEALTH_INTERVAL"
   done
   if [[ "$ok" -ne 1 ]]; then
     say "health check FAILED — last journal lines:"
     journalctl -u ui2api-api.service -n 30 --no-pager 2>/dev/null || true
-    fail "the service did not become healthy; the previous release is NOT restored automatically — check the journal above"
+    rollback "the new release never became healthy"
+    fail "deploy FAILED and was ROLLED BACK to the previous release; exit nonzero on purpose"
   fi
-  say "health OK: $(curl -fsS --max-time 3 "http://127.0.0.1:$API_PORT/health" 2>/dev/null | head -c 200)"
+  say "health OK"
+  if ! assert_surface; then
+    say "surface check FAILED — last journal lines:"
+    journalctl -u ui2api-api.service -n 30 --no-pager 2>/dev/null || true
+    rollback "the new release is alive but serves an empty/incorrect surface"
+    fail "deploy FAILED and was ROLLED BACK to the previous release; exit nonzero on purpose"
+  fi
+  if ! warn_accounts; then
+    say "vault check FAILED — last journal lines:"
+    journalctl -u ui2api-api.service -n 30 --no-pager 2>/dev/null || true
+    rollback "the new release cannot read the session vault"
+    fail "deploy FAILED and was ROLLED BACK to the previous release; exit nonzero on purpose"
+  fi
+  say "surface OK: registry + /v1/models serve real entries, vault readable"
 fi
 
 say "deployed $REPO_DIR -> $TARGET_DIR (commit $(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))"

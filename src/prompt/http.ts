@@ -32,7 +32,10 @@
 //                 ready/working/on-hold/not-ready with named reasons, BEFORE
 //                 any browser work), scoped to this daemon's profilesById gate
 //                 + every installed capability package
-//   GET  /health  -> {ok, defaultSite, sites, pool, liveness}
+//   GET  /health  -> {ok (COMPUTED, never a literal), defaultSite, sites, counts:
+//                 {chatModels, registryPackages, vaultAccounts, vaultUsable},
+//                 vault {root, present, hosts, accounts, usable, unusable,
+//                 unusableReasons[{host,slug,reason}]}, pool, posture, liveness}
 //   GET  /requests -> the bounded request ring (GOAL 87): the last N requests
 //                 with {method, path, status, durationMs, site, account,
 //                 outcome} so a wedged or refused request is visible. Prompts,
@@ -50,7 +53,8 @@ import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from 
 import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
-import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount } from "../runtime/session-store.js";
+import { readdirSync } from "node:fs";
+import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount, vaultRoot } from "../runtime/session-store.js";
 import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
@@ -296,6 +300,178 @@ function livenessBlock(st: PoolStatus): Record<string, unknown> {
     browserCheckedAt: st.browserCheckedAt,
     reaper: st.reaper,
     lastSweep: st.lastSweep,
+  };
+}
+
+/* ---- THE HEALTH VERDICT IS COMPUTED, NOT A LITERAL (prod 2026-09-27) ----
+ *
+ * `GET /health` used to answer `ok: true` as a LITERAL, with no conditional in
+ * the handler. That cost a real 23-minute production incident: with the vault
+ * owned by the wrong user, four `POST /prompt {"site":"kimi"}` calls failed
+ * ("no answer appeared on kimi within 60000ms — this site requires sign-in")
+ * while `/health` said `ok:true` throughout, even though `/registry` served 33
+ * packages and `/v1/models` served 22 models that could not be driven at all.
+ * A health check that cannot fail is decoration; one that cries wolf gets
+ * ignored. So:
+ *
+ *  - `vault` is read from the SAME honest seam `/accounts` and the registry
+ *    `accounts[]` already use — `listAccounts()` → `verifyStoredAccount()` —
+ *    so it carries the reconciled `usable` flag and the NAMED reason
+ *    (`snapshot-unreadable`, `anonymous (…)`, `shape-invalid`, …) per row.
+ *    Nothing is re-implemented here, so health can never disagree with
+ *    `/accounts` about the same account.
+ *  - FAST and NEVER THROWS: pure fs, no browser, no network, a per-host
+ *    try/catch so one bad host is data (a named error), not a 500, and hard
+ *    caps on hosts and rows so a pathological vault cannot make /health slow.
+ */
+export interface HealthVaultBlock {
+  /** Absolute vault root (`<sitesDir>/sessions`), or null when it cannot be resolved. */
+  root: string | null;
+  /** True when the vault root exists and could be listed. */
+  present: boolean;
+  /** NAMED error when the root could not be listed (EACCES, ENOTDIR, …). */
+  error: string | null;
+  /** Host directories actually examined. */
+  hosts: number;
+  /** Host directories that exist but are not directories — named, counted. */
+  skipped: number;
+  /** Account index rows found across every host. */
+  accounts: number;
+  /** Rows that reconcile to a readable, well-shaped, AUTHED snapshot. */
+  usable: number;
+  /** `accounts - usable`. */
+  unusable: number;
+  /** NAMED reason per unusable row (slug + host, never any cookie/token value). */
+  unusableReasons: { host: string; slug: string; reason: string }[];
+  /** True when a host scan was cut short by a cap, so counts are a floor. */
+  truncated: boolean;
+}
+
+/** How many hosts a single /health call will enumerate. */
+export const HEALTH_VAULT_MAX_HOSTS = 128;
+/** How many unusable rows the health block will name before truncating. */
+export const HEALTH_VAULT_MAX_REASONS = 50;
+
+export type HealthVaultDeps = {
+  /** The honest seam itself — injectable so the gate can drive a temp vault. */
+  listAccounts?: typeof listAccounts;
+};
+
+export function healthVaultBlock(sitesDir: string, deps: HealthVaultDeps = {}): HealthVaultBlock {
+  const list = deps.listAccounts ?? listAccounts;
+  const block: HealthVaultBlock = {
+    root: null,
+    present: false,
+    error: null,
+    hosts: 0,
+    skipped: 0,
+    accounts: 0,
+    usable: 0,
+    unusable: 0,
+    unusableReasons: [],
+    truncated: false,
+  };
+  let root: string;
+  try {
+    root = vaultRoot(sitesDir);
+    block.root = root;
+  } catch (e) {
+    block.error = `vault-root-unresolvable: ${e instanceof Error ? e.message : String(e)}`;
+    return block;
+  }
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+    block.present = true;
+  } catch (e) {
+    // ENOENT is "no vault yet" — NOT an error: a fresh install has no sessions
+    // dir and that is not a fault. Anything else (EACCES, ENOTDIR, EIO) is.
+    const code = (e as { code?: string }).code;
+    if (code !== "ENOENT") block.error = `vault-unreadable: ${code ?? (e instanceof Error ? e.message : String(e))}`;
+    return block;
+  }
+  const dirs = entries.filter((d) => d.isDirectory());
+  void dirs;
+  for (const d of entries) {
+    if (!d.isDirectory() && !d.isSymbolicLink()) {
+      // A stray file where a host dir belongs is a fact worth counting, not a
+      // crash: it is also a strong hint the vault root is the wrong path.
+      block.skipped++;
+      continue;
+    }
+    if (block.hosts >= HEALTH_VAULT_MAX_HOSTS) {
+      block.truncated = true;
+      break;
+    }
+    if (!d.isDirectory()) {
+      block.skipped++;
+      continue;
+    }
+    block.hosts++;
+    let rows: ReturnType<typeof listAccounts>;
+    try {
+      rows = list(sitesDir, d.name);
+    } catch (e) {
+      // One bad host must never be a 500 on /health: record it as a named
+      // error against the block and keep counting the rest.
+      block.error = block.error ?? `host-unreadable: ${d.name}: ${e instanceof Error ? e.message : String(e)}`;
+      continue;
+    }
+    for (const row of rows) {
+      block.accounts++;
+      if (row.usable === true) {
+        block.usable++;
+        continue;
+      }
+      block.unusable++;
+      if (block.unusableReasons.length < HEALTH_VAULT_MAX_REASONS) {
+        block.unusableReasons.push({
+          host: row.host ?? d.name,
+          slug: row.slug,
+          reason: row.reason ?? "unusable (no reason recorded)",
+        });
+      } else {
+        block.truncated = true;
+      }
+    }
+  }
+  block.unusable = block.accounts - block.usable;
+  return block;
+}
+
+/** The exact rule for `ok` — one expression, deliberately narrow so it cannot
+ *  cry wolf (see the report): a health check that is red on a healthy box is
+ *  as useless as one that is green on a broken one.
+ *
+ *   accounts == 0  ->  ok only when the surface advertises NO chat models.
+ *                      Nothing is broken because nothing is advertised; a
+ *                      fresh install with an empty vault is healthy.
+ *   accounts  > 0  ->  ok only when at least ONE row reconciles usable.
+ *                      Every row anonymous/unreadable/missing is exactly the
+ *                      prod incident, and it is a real fault, not a config
+ *                      choice.
+ */
+export function healthOk(vault: HealthVaultBlock, chatModels: number): boolean {
+  if (vault.error && vault.accounts === 0) return false;
+  if (vault.accounts === 0) return chatModels === 0;
+  return vault.usable > 0;
+}
+
+/** The honest part of the `/health` payload — the block that MUST exist for a
+ *  health check to be a measurement: the computed `ok`, the advertised
+ *  counts, and the `vault` block itself. Extracted so the gate can assert the
+ *  shape against the REAL builder instead of a hand-written reconstruction
+ *  (a reconstruction would keep passing after the real field was deleted —
+ *  exactly the vacuous gate this file exists to prevent). */
+export function healthVerdict(
+  vault: HealthVaultBlock,
+  chatModels: number,
+  registryPackages: number,
+): Record<string, unknown> {
+  return {
+    ok: healthOk(vault, chatModels),
+    counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },
+    vault,
   };
 }
 
@@ -860,7 +1036,48 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       }
       if (req.method === "GET" && (req.url === "/health" || req.url === "/")) {
         const st = pool.status;
-        return send(res, 200, { ok: true, defaultSite: defaultSiteId(), sites: Object.keys(profilesById), pool: st, posture: daemonPosture(process.env, bindAddr), liveness: livenessBlock(st) });
+        // `ok` is COMPUTED, never a literal. The vault is read through the
+        // SAME honest seam /accounts + /registry accounts[] use, so the
+        // verdict carries the real counts and the NAMED reason per unusable
+        // row. Everything is wrapped: /health answers 200 with honest data
+        // even when the vault is unreadable — it never throws and never hangs.
+        let vault: HealthVaultBlock;
+        try {
+          vault = healthVaultBlock(dataDir);
+        } catch (e) {
+          vault = {
+            root: null,
+            present: false,
+            error: `health-vault-probe-threw: ${e instanceof Error ? e.message : String(e)}`,
+            hosts: 0,
+            skipped: 0,
+            accounts: 0,
+            usable: 0,
+            unusable: 0,
+            unusableReasons: [],
+            truncated: false,
+          };
+        }
+        // What the surface actually advertises — the same `profilesById` the
+        // chat gate serves, i.e. exactly what /v1/models and /prompt can be
+        // asked for. Counts only, so a deploy can assert them.
+        const chatModels = Object.keys(profilesById).length;
+        let registryPackages = 0;
+        try {
+          registryPackages = buildRegistryPackages().length;
+        } catch {
+          registryPackages = 0; // a registry build fault is not a /health fault
+        }
+        return send(res, 200, {
+          ...healthVerdict(vault, chatModels, registryPackages),
+          defaultSite: defaultSiteId(),
+          sites: Object.keys(profilesById),
+          counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },
+          vault,
+          pool: st,
+          posture: daemonPosture(process.env, bindAddr),
+          liveness: livenessBlock(st),
+        });
       }
       if (req.method === "POST" && req.url === "/prompt") {
         const body = await readJson(req);
