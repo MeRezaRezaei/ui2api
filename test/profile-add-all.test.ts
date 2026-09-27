@@ -289,7 +289,7 @@ test("add-all read-back: known host with cookies -> account listed, snapshot usa
   }
 });
 
-test("add-all read-back: matched-but-zero cookies -> honest 'decrypt-limited (portal v20)'", async () => {
+test("add-all read-back: a MATCHED-but-undecryptable cookie is REFUSED, not counted as auth (ROUND N+99)", async () => {
   const base = mkdtempSync(join(tmpdir(), "u2a-addall-limited-"));
   try {
     const root = makeProfile(join(base, "profile"), {
@@ -302,19 +302,35 @@ test("add-all read-back: matched-but-zero cookies -> honest 'decrypt-limited (po
     const host = "gemini.google.com";
 
     const imp = await importSiteSnapshot({ root, host, dataDir });
-    assert.equal(imp.stats.cookiesMatched, 1, "the HAD a cookie for the host");
-    assert.equal(imp.ok, true, "matched>0 -> ok (captured), but unusable");
+    assert.equal(imp.stats.cookiesMatched, 1, "the profile HAD a cookie for the host");
+    // ROUND N+99 — this assertion used to read `ok: true` with the comment
+    // "matched>0 -> ok (captured), but unusable", and THAT WAS THE BUG PINNED AS
+    // EXPECTED BEHAVIOUR. A decrypt-limited cookie MATCHES the host but its value
+    // is not extractable, so counting the MATCH said "we have auth" while the
+    // artifact about to be written carried none — and because an account
+    // snapshot is overwritten in place, that silently DESTROYED a previously good
+    // captured session. Measured live: after one `profile add-all --known`,
+    // `www.aparat.com` (recorded live-verified with three `ok:true` capabilities)
+    // was left holding a 210-byte snapshot with `cookies: []`. The gate is now on
+    // the SNAPSHOT, not on the scan's match count, and it refuses.
+    assert.equal(imp.ok, false, "a matched-but-undecryptable cookie is NOT auth — the import is REFUSED");
+    assert.equal(imp.snapshotPath, "", "refused at the write seam — nothing written, and no snapshot path");
 
     const slug = slugifyIdentity(imp.identity);
     const snap = loadAccountSnapshot(dataDir, host, slug);
-    assert.ok(snap);
-    assert.equal((snap!.cookies ?? []).length, 0, "undecryptable cookies must not survive");
+    assert.equal(snap, null, "nothing may be written for a zero-auth import");
     assert.ok(
       imp.warnings.some((w) => /could not be decrypted/i.test(w)),
       `warning present: ${JSON.stringify(imp.warnings)}`
     );
+    assert.ok(
+      imp.warnings.some((w) => /skipped-no-auth \(nothing to save\)/i.test(w)),
+      `the refusal is named, not silent: ${JSON.stringify(imp.warnings)}`
+    );
 
-    assert.equal(addAllVerdict(imp, dataDir, host, slug), "decrypt-limited (portal v20)");
+    // The verdict ladder still names the underlying cause honestly rather than
+    // reporting a successful import.
+    assert.equal(addAllVerdict(imp, dataDir, host, slug), "skipped-no-auth (nothing to save)");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

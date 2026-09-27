@@ -10,7 +10,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ingestProfile, detectProfileIdentity } from "./profile-ingest.js";
-import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity, slugCollision } from "./session-store.js";
+import { saveAccountSnapshot, accountSnapshotPath, slugifyIdentity, slugCollision, snapshotHasAuth } from "./session-store.js";
 import { siteHostCatalog } from "../prompt/registry.js";
 import type { IngestResult } from "./profile-ingest.js";
 
@@ -525,10 +525,27 @@ export async function importSiteSnapshot(
   // account ("skipped-no-auth" rows persisting as listed accounts). Refusal
   // means NOTHING is written: no snapshot, no accounts.json entry — and the
   // returned snapshotPath is empty ("refused — nothing to save").
-  const ok = stats.cookiesMatched > 0 || stats.localStorageEntries > 0;
+  // ...and the gate is on the SNAPSHOT, not on the stats. MEASURED defect
+  // (ROUND N+99): `stats.cookiesMatched > 0` is NOT the same question as "does
+  // the artifact I am about to write carry auth". A decrypt-limited cookie
+  // (Chrome's "portal v20" — the value is matched to the host but NOT
+  // extractable) counts as a MATCH, so `ok` was true, the write proceeded, and
+  // the snapshot landed with `cookies: []` — silently OVERWRITING a previously
+  // good per-account snapshot with an empty one. Measured live: after
+  // `profile add-all --known`, `www.aparat.com` and `chatgpt.com` both held
+  // 210-byte/204-byte snapshots with `cookies: []` and `localStorage: []`, and
+  // `www.aparat.com` is a site this repo records as live-verified with three
+  // working capabilities. The gate was measuring the wrong object: the stats
+  // describe the READ, the snapshot is the WRITE.
+  const ok = snapshotHasAuth(snapshot);
   const warnings = [...ingestWarnings];
   if (!ok) {
-    warnings.push("skipped-no-auth (nothing to save) — no cookies and no localStorage matched");
+    warnings.push(
+      `skipped-no-auth (nothing to save) — the snapshot carries no cookies and no ` +
+        `localStorage (${stats.cookiesMatched} matched of ${stats.cookiesTotal} cookies, ` +
+        `${stats.localStorageEntries} localStorage entries; a matched-but-undecryptable ` +
+        `cookie does NOT count as auth)`
+    );
     return {
       host: opts.host,
       identity,

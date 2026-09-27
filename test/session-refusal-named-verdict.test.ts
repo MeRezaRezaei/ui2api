@@ -17,9 +17,9 @@
 // `data/` dir: every case works inside `os.tmpdir()`.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   loadSnapshot,
   loadSnapshotVerdict,
@@ -27,6 +27,7 @@ import {
   loadAccountSnapshotVerdict,
   listAccounts,
   saveAccountSnapshot,
+  slugifyIdentity,
   snapshotPath,
   accountSnapshotPath,
   saveSnapshot,
@@ -66,13 +67,29 @@ function writeUsable(dataDir: string, identity: string, host = HOST): void {
 
 // An index row that points at NOTHING usable — the exact GOAL 124 class. The
 // file exists and parses, but the content is the GOAL 49 anonymous class.
+// ROUND N+99: this fixture used to build the anonymous row THROUGH
+// `saveAccountSnapshot`, which is exactly how the write seam's missing gate stayed
+// invisible — the helper was the only way these tests made an anonymous snapshot
+// exist, so "the seam happily writes one" never surfaced as a failure.
+//
+// The write seam now REFUSES a zero-auth snapshot (nothing written, named error), so
+// this reproduces the LEGACY on-disk state instead: a real index row, paired with a
+// snapshot that turned out to carry no auth. It writes a credential-bearing snapshot
+// first (which legitimately creates the index row) and then overwrites the snapshot
+// with the anonymous one.
+//
+// That is deliberate, not a workaround. An anonymous snapshot CAN still exist on
+// disk — written by an older build, or by a flat non-account path — and it WILL be
+// listed, because the index was written when the import looked fine. The READ-side
+// named verdict these tests exist to prove must still fire on exactly that state. A
+// read verdict only reachable through a writer that now refuses would be untested,
+// and the blind-empty failure they guard against would be unreachable.
 function writeAnonymousRow(dataDir: string, identity: string, host = HOST): void {
-  saveAccountSnapshot(
-    dataDir,
-    host,
-    identity,
-    snap({ host, cookies: [], localStorage: [] }),
-    { source: "capture" }
+  const row = saveAccountSnapshot(dataDir, host, identity, snap({ host }), { source: "capture" });
+  writeFileSync(
+    accountSnapshotPath(dataDir, host, row.slug),
+    JSON.stringify(snap({ host, cookies: [], localStorage: [] }), null, 2),
+    "utf8"
   );
 }
 
@@ -81,7 +98,6 @@ function writeCorruptRow(dataDir: string, identity: string, host = HOST): void {
   const row = saveAccountSnapshot(dataDir, host, identity, snap({ host }), { source: "capture" });
   writeFileSync(accountSnapshotPath(dataDir, host, row.slug), "{ this is not json", "utf8");
 }
-
 // A row whose snapshot parses but is GOAL-59 shape-invalid (cookies is a string).
 function writeShapeInvalidRow(dataDir: string, identity: string, host = HOST): void {
   const row = saveAccountSnapshot(dataDir, host, identity, snap({ host }), { source: "capture" });

@@ -605,6 +605,36 @@ export function saveAccountSnapshot(
   meta: { source: AccountSource; profileDir?: string }
 ): StoredAccount {
   const slug = slugifyIdentity(identity);
+  // ROUND N+99 — the per-account write seam refuses a zero-auth snapshot.
+  //
+  // The GOAL 49 gate ("a snapshot with ZERO cookies AND ZERO localStorage is
+  // REFUSED at the write seam … nothing written to the vault") was true in the
+  // COMMENT and in a test's own verdict ladder, but NOT in this function: it
+  // wrote whatever it was handed. `snapshotHasAuth` existed and was consulted
+  // only on the READ path. Reproduced directly — saving a snapshot with
+  // `cookies: []` wrote a 208-byte `state.json` at 0600 plus an `accounts.json`
+  // index row, with `snapshotHasAuth` returning `false` the whole time.
+  //
+  // Why that matters beyond tidiness: an account snapshot is OVERWRITTEN in
+  // place, so writing an empty one DESTROYS a previously good captured session.
+  // Measured live on this box: after one `profile add-all --known`,
+  // `www.aparat.com` — recorded live-verified with `araprat_search` /
+  // `araprat_trending` / `araprat_video_detail` all `ok:true` — was left holding
+  // a 210-byte snapshot with `cookies: []`, and `chatgpt.com` a 204-byte one.
+  // Both had reported `decrypt-limited (portal v20)`, where a cookie MATCHES the
+  // host but its value is not extractable: the scan counted a match, so the
+  // caller believed it had auth, and the artifact it wrote was empty. A gate
+  // reachable only by a caller that remembers to call it is not a gate, so it
+  // lives HERE — the one choke point every account write passes through — and it
+  // throws a NAMED error rather than returning a value a caller may ignore.
+  if (!snapshotHasAuth(snap)) {
+    throw new Error(
+      `no-auth-snapshot-refused: refusing to write a zero-auth snapshot for ` +
+        `"${sanitizeHost(host)}" account "${slug}" — it would overwrite any existing ` +
+        `captured session with an empty one, and a decrypt-limited cookie (matched but ` +
+        `not extractable) does not count as auth. Nothing was written.`
+    );
+  }
   const account: StoredAccount = {
     slug,
     identity,
