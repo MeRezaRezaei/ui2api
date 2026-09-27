@@ -95,7 +95,7 @@
       "description": "Flip the composer 'Search' toggle (div.ds-toggle-button:has-text('Search'), state = ds-toggle-button--selected class) so the next completion carries search_enabled. Verified live 2026-09-19: click flips the --selected class both ways; the state reaches the wire as search_enabled in the next POST /api/v0/chat/completion body.",
       "method": "ui-path (real toggle click in the logged-in page)",
       "implementation": "verified DOM toggle on the composer; feeds search_enabled in the completion body; localStorage searchEnabledStorageHandle stayed null in the verified session (state held in the app store)",
-      "recipe": "",
+      "recipe": null,
       "inputSchema": {
         "type": "object",
         "properties": {

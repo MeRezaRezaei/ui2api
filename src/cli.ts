@@ -503,6 +503,46 @@ export function installFollowUp(
   ];
 }
 
+/**
+ * The install's own line, split by WHO SAID IT.
+ *
+ * `Installed ${host} v${result.version} (${result.trust}) -> ${result.dir}` read as
+ * one verified sentence, and it is three different kinds of statement glued
+ * together:
+ *
+ *   - `host`, `result.dir`, `result.files` are LOCAL facts. The install ran, it
+ *     wrote these bytes to this directory, it can list them. The daemon really
+ *     does serve from there.
+ *   - `result.version` and `result.trust` are NOT. They are `index[host].version`
+ *     and `index[host].trust` (src/registry/install.ts:335-336), read straight off
+ *     the REGISTRY INDEX — a stranger's JSON, fetched over the network from
+ *     `--registry` / `UI2API_REGISTRY_URL` — and defaulted to the strings
+ *     `"unknown"` / `"unreviewed"` when the stranger omits them. So `v1.2.3` is
+ *     whatever the stranger typed, and `(reviewed)` is the stranger grading its
+ *     OWN package. Nothing in the install path compares either value against the
+ *     bytes that were actually fetched, so an operator reading that line had NO
+ *     way to know the difference between "this install confirmed v1.2.3" and "a
+ *     stranger asserted v1.2.3 and we believed it".
+ *
+ * The information is not removed — an operator needs both numbers — it is
+ * LABELLED by provenance, using the same voice the repo already uses for things
+ * nobody has verified (`unverified-candidate` in src/prompt/registry.ts:387):
+ * `registry-claims-trust`. The claim is reported; the fact is not.
+ */
+export function installSummaryLine(
+  host: string,
+  dir: string,
+  claim: { version: string; trust: string },
+  registryBase: string
+): string[] {
+  return [
+    `Installed ${host} -> ${dir}`,
+    `  registry-claims-trust: version=v${claim.version} trust=${claim.trust}`,
+    `    ^ UNVERIFIED third-party claim from the registry index at ${registryBase}.`,
+    `      The install fetched and validated package FILES; it did not check these two values.`,
+  ];
+}
+
 async function cmdInstall(host: string, flags: Flags): Promise<void> {
   const reg = flags.registry ?? process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
   // The install target is the packages root (capabilities/<site>/) — the same
@@ -514,7 +554,9 @@ async function cmdInstall(host: string, flags: Flags): Promise<void> {
   const profileAbs = existsSync(resolve(result.dir, "profile.json"))
     ? resolve(result.dir, "profile.json")
     : undefined;
-  console.log(`Installed ${host} v${result.version} (${result.trust}) -> ${result.dir}`);
+  for (const line of installSummaryLine(host, result.dir, result, reg)) {
+    console.log(line);
+  }
   console.log(`Files: ${result.files.join(", ")}`);
   for (const line of installFollowUp(result.dir, daemonRoot, {
     outOverride: flags.out !== undefined,

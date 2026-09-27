@@ -20,13 +20,16 @@
 //   - a missing snapshot is a skip, not a failure: the vault (`data/`) is
 //     gitignored, so the snapshot is a per-box capture. Unverifiable here is
 //     honestly reported as unverifiable, never dressed up as a pass;
-//   - a declared path that escapes the repo root is REFUSED (the gate never
-//     hashes a file the lock does not legitimately own);
+//   - a declared path that escapes the tree being validated is REFUSED (the gate
+//     never hashes a file the lock does not legitimately own) — and that refusal
+//     is decided on the path's REAL location, not merely on its spelling,
+//     because a textual `relative()` check is BLIND TO A SYMLINK. See
+//     `realLocationOf` for the measurement that forced this;
 //   - every lock file on disk lands in exactly one bucket (checked / skipped /
 //     failed) so a gate that silently ignores packages cannot pass.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Repo root: `src/runtime/` (and the compiled `dist/runtime/`) → two levels up. */
@@ -87,6 +90,72 @@ interface LockSnapshotClaim {
 }
 
 const SHA_RE = /^[0-9a-f]{4,64}$/;
+
+/** True when `candidate` is `root` itself or lies OUTSIDE it.
+ *
+ *  Deliberately EXACT, and the difference from the textual guard above is the
+ *  point: a file legitimately named `..weird.json` inside the tree is INSIDE
+ *  it. `rel === ".."` / `rel.startsWith(".." + sep)` is the precise predicate;
+ *  a bare `rel.startsWith("..")` also matches `..weird.json` and would refuse a
+ *  file the tree legitimately owns. (The textual guard upstream still uses the
+ *  loose form — that is a pre-existing false positive in the SAFE direction and
+ *  it is left exactly as it is, because loosening a refusal to make a suite
+ *  green is the failure this module exists to prevent.) */
+function escapesRoot(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
+/** The REAL, symlink-resolved location of `abs` — the place the bytes would
+ *  actually come from.
+ *
+ *  WHY THIS EXISTS, and the measurement that forced it. The original guard was
+ *  purely TEXTUAL (`relative(root, resolve(root, declared))`), and it does stop
+ *  the obvious shapes: `../../../etc/passwd`, an absolute `/etc/passwd`, and an
+ *  escape-and-come-back all measured as REFUSED. But it is blind to a symlink,
+ *  because a symlink's own path is legitimately inside the tree while its
+ *  TARGET is not. MEASURED against the real function: a lock declaring
+ *  `data/probe.test/link.json`, where that file is a symlink to a JSON file
+ *  OUTSIDE the root, was ACCEPTED — `ok:false` with BOTH claims measured
+ *  ("sha256 123d… does NOT match declared prefix dead", "cookie count 3
+ *  matches the declared count") — and `strace -e trace=openat` shows the
+ *  `openat(..., "/…/probe.test/link.json")` that read the outside file. So the
+ *  textual check was, in fact, a lock file naming a location outside the tree.
+ *
+ *  It is computed from the DEEPEST EXISTING ANCESTOR and the remainder
+ *  re-appended, not just from the leaf, because that is what catches a hop
+ *  through a symlinked DIRECTORY (`data/evil -> /etc`, leaf `state.json` absent)
+ *  — a `realpathSync(abs)` alone would simply throw there and let the caller
+ *  fall through to the not-on-disk skip, mis-attributing an ESCAPE as a
+ *  MISSING FILE. `existed` says whether the leaf itself was resolvable, so the
+ *  caller can keep the two causes apart and name the right one. */
+function realLocationOf(abs: string): { real: string; existed: boolean } {
+  let probe = abs;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync(probe);
+      return { real: tail.length === 0 ? real : join(real, ...tail), existed: tail.length === 0 };
+    } catch {
+      const parent = dirname(probe);
+      if (parent === probe) return { real: abs, existed: false };
+      tail.unshift(basename(probe));
+      probe = parent;
+    }
+  }
+}
+
+/** The root's own real location, resolved once per call site. A root that is
+ *  itself reached through a symlink (every macOS `/tmp`, many CI workdirs) must
+ *  be compared on the same footing as the candidate, or every legitimate file
+ *  under it would measure as an escape. */
+function realRootOf(root: string): string {
+  try {
+    return realpathSync(root);
+  } catch {
+    return resolve(root);
+  }
+}
 
 function lockDirName(lockPath: string): string {
   return lockPath.split(/[\\/]/).filter(Boolean).slice(-2, -1)[0] ?? lockPath;
@@ -193,13 +262,32 @@ export function verifySessionLock(lockPath: string, opts: VerifySessionLockOptio
     );
   }
 
-  // (a'') refuse a declared path that escapes the repo root.
+  // (a'') refuse a declared path that escapes the tree being validated — first on
+  // its SPELLING, then (below) on its REAL location. The spelling check stops
+  // `../` and absolute paths; it cannot see a symlink.
   const abs = isAbsolute(declaredPath) ? resolve(declaredPath) : resolve(root, declaredPath);
   const rel = relative(root, abs);
   if (rel.startsWith("..") || rel.split(sep)[0] === "" || isAbsolute(rel)) {
     return skipReport(
       site,
       `declared snapshot path escapes the repo root and was REFUSED: ${declaredPath} (${site}/session.lock.json)`,
+      { declaredHost, lockPath, snapshotPath: declaredPath }
+    );
+  }
+
+  // (a''') …and refuse it again on its REAL location, so a path that merely
+  // LOOKS contained cannot name a file outside the tree. Deliberately placed
+  // BEFORE the `statSync` and before any read, so a refused path is never
+  // opened at all — the point of a confinement is that the read does not
+  // happen, not that it happens and is afterwards reported.
+  const realRoot = realRootOf(root);
+  const { real: realAbs, existed: leafExists } = realLocationOf(abs);
+  if (escapesRoot(realRoot, realAbs)) {
+    return skipReport(
+      site,
+      `declared snapshot path resolves OUTSIDE the tree being validated and was REFUSED: ${declaredPath} ` +
+        `-> ${realAbs} (${site}/session.lock.json) — ${leafExists ? "the path is inside the tree only by SPELLING; a symlink points at it" : "a path component is a symlink that points outside the tree"}, ` +
+        `and the gate never hashes a file the lock does not legitimately own`,
       { declaredHost, lockPath, snapshotPath: declaredPath }
     );
   }
