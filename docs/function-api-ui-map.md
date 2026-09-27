@@ -24,8 +24,13 @@ cannot rot silently.
 - **SITES_DISPATCHED: 33** (rows in `CAPABILITY_DISPATCH`,
   `src/prompt/capability-dispatch.ts` — the per-site inventory the single
   handler serves)
-- **CHAT_PROFILES: 23** (`defaultChatProfiles()`, src/prompt/registry.ts:347 —
-  the `GET /sites` list under `src/prompt/http.ts:253`)
+- **CHAT_PROFILES: 22** (`defaultChatProfiles()`, src/prompt/registry.ts —
+  the `GET /sites` list under `src/prompt/http.ts:253`. GOAL 147 dropped
+  `google-ai-search`: the BUILTIN loop admitted the whole catalog without the
+  `isDriveableChatProfile` gate the packaged loop ran, so a composer-less
+  profile whose manifest declares no `*_chat` capability was advertised as a
+  chat model with no chat tool behind it. It stays fully served as a capability
+  package.)
 
 Every one of the 161 functions has **all three layers**: a dispatch branch in
 `src/capabilities/<site>.ts`, a `POST /capability/<site>` route in http.ts, and

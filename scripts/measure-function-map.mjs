@@ -41,10 +41,24 @@ export function capabilityTotal() {
   return packageIds().reduce((n, id) => n + manifestCapabilityIds(id).length, 0);
 }
 
-/** real-runner ids: the RUNNERS table in test/capability-dispatch.test.ts. */
+/** real-runner ids: the RUNNERS table in test/capability-dispatch.test.ts.
+ *
+ *  Scoped to the TABLE on purpose. A whole-file `/id: "…"/` scan counted any
+ *  such literal anywhere in the file, so the first scratch fixture that carried
+ *  an `id:` (GOAL 147's falsifiability proof wrote `id: "scratch-stamped"`)
+ *  silently reported 15 real runners and turned a doc census number into a
+ *  fiction. The census is a MEASUREMENT; a measurement that any unrelated edit
+ *  can move is not one. It is anchored to `const RUNNERS` .. its closing `];`
+ *  and refuses to answer if that table cannot be found, so a moved or renamed
+ *  table is a named failure rather than a plausible wrong number. */
 export function realRunnerIds() {
   const src = readFileSync(join(ROOT, "test", "capability-dispatch.test.ts"), "utf8");
-  return [...src.matchAll(/id: "([a-z0-9-]+)"/g)].map((m) => m[1]).filter((id, i, a) => a.indexOf(id) === i);
+  const start = src.search(/^const RUNNERS\b[^\n]*=\s*\[/m);
+  if (start < 0) throw new Error("realRunnerIds: no `const RUNNERS = [` table in test/capability-dispatch.test.ts — the census can no longer be measured");
+  const end = src.indexOf("\n];", start);
+  if (end < 0) throw new Error("realRunnerIds: the RUNNERS table in test/capability-dispatch.test.ts has no closing `];` — the census can no longer be measured");
+  const table = src.slice(start, end);
+  return [...table.matchAll(/id: "([a-z0-9-]+)"/g)].map((m) => m[1]).filter((id, i, a) => a.indexOf(id) === i);
 }
 
 /** login-gated-by-design ids: the set in test/function-api-ui-closure.test.ts. */
