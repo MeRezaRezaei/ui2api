@@ -1,0 +1,60 @@
+[Unit]
+Description=ui2api API (promptd) — OpenAI-compatible + capability endpoints
+Documentation=https://github.com/MeRezaRezaei/ui2api
+After=network-online.target ui2api-xvfb.service ui2api-chrome.service
+Wants=network-online.target ui2api-xvfb.service
+# Chrome is wanted, not required: promptd must still come up and answer
+# honestly ("no browser") rather than not come up at all.
+After=ui2api-chrome.service
+
+[Service]
+Type=simple
+# WHO RUNS THE API, and why it is NOT the chrome user.
+#
+# Chrome runs as `ui2api`: that user owns the browser profile and the warm
+# anti-bot state, and that is this project's point of use.
+#
+# The API runs as the OPERATOR, because the vault belongs to the operator. The
+# captured sessions are the operator's own login state, hardened to 0700/0600 by
+# the write seam, so they are readable by their owner and by nobody else. Running
+# the API as `ui2api` cannot read them — and the alternative, chowning real
+# credentials to a service account, would either weaken the 0600/0700 pin or
+# blind every gate that verifies the vault honestly.
+#
+# This is safe because the API does not touch the browser directly: it ATTACHES
+# over CDP to the `ui2api` Chrome (UI2API_ATTACH_PORT below), which is the
+# project's documented attach seam. Different users, one browser, no shared
+# profile access.
+User=me
+Group=me
+WorkingDirectory=/opt/ui2api
+Environment=HOME=/home/me
+# The DEPLOYED tree, not a git checkout. Written only by scripts/ops/deploy.sh.
+Environment=UI2API_DEPLOY_DIR=/opt/ui2api
+# THE VAULT. The captured sessions live in the operator's checkout and are real
+# login state; a deploy must never move or overwrite them, so the service is
+# pointed at them explicitly instead of inheriting a default relative to its own
+# install dir. Get this wrong and the service starts perfectly and replays
+# signed-out on every site — a silent total failure, not an error.
+Environment=UI2API_DATA_DIR=/home/me/Documents/projects/ui2api/data
+Environment=UI2API_CHROME_USER=ui2api
+Environment=UI2API_PROMPTD_PORT=9797
+Environment=UI2API_ATTACH_PORT=9222
+Environment=UI2API_DAEMON_PORT=9222
+# A display is what makes this TRUE. Without Xvfb the daemon silently falls back
+# to --headless=new and the sites challenge it.
+Environment=UI2API_HEADED=1
+Environment=DISPLAY=:99
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/ui2api/dist/cli.js promptd
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+PrivateTmp=false
+# The API is the project's documented surface and binds 127.0.0.1 only.
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/ui2api
+
+[Install]
+WantedBy=multi-user.target

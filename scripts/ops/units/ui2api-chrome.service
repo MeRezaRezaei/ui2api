@@ -1,0 +1,24 @@
+[Unit]
+Description=ui2api Chrome — the long-lived headed browser (NOT restarted by deploys)
+Documentation=https://github.com/MeRezaRezaei/ui2api
+After=network-online.target ui2api-xvfb.service
+Wants=network-online.target ui2api-xvfb.service
+
+[Service]
+Type=simple
+User=ui2api
+Group=ui2api
+Environment=HOME=/home/ui2api
+Environment=DISPLAY=:99
+Environment=UI2API_CHROME_USER=ui2api
+Environment=UI2API_DAEMON_PORT=9222
+# Chrome is the point of use, not a sandbox escape hatch: it needs the profile
+# in a real HOME, and PrivateTmp would hide it.
+PrivateTmp=false
+ExecStart=/usr/bin/google-chrome-stable --user-data-dir=/home/ui2api/.config/ui2api-chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

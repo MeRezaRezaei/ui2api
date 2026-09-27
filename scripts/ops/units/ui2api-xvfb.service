@@ -1,0 +1,30 @@
+# ui2api — the DEPLOYED service units.
+#
+# Installed by scripts/ops/install-services.sh. The tree they run from is
+# /opt/ui2api, which ONLY scripts/ops/deploy.sh writes. That separation is the
+# whole point: a human editing a git checkout can never change what the service
+# is running, and a deploy can never ship an editor's uncommitted file.
+#
+# Three units, in dependency order:
+#   ui2api-xvfb    the virtual display — WITHOUT it UI2API_HEADED=1 is a lie
+#                   (headless-degraded), and headless is what gets challenged.
+#   ui2api-chrome  the long-lived Chrome owned by the `ui2api` user. It is NOT
+#                   restarted by a deploy: it holds the warm anti-bot state and
+#                   the profile lock, and it is expensive to start.
+#   ui2api-api     promptd, the HTTP API everything else calls.
+
+[Unit]
+Description=ui2api virtual display (Xvfb :99) — required for a truthful headed browser
+After=network.target
+
+[Service]
+Type=simple
+User=ui2api
+Group=ui2api
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

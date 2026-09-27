@@ -22,6 +22,7 @@
 stages:
   - build
   - verify
+  - deploy
 
 variables:
   CI_NODE_VERSION: "24"
@@ -101,3 +102,44 @@ verify:
     - npm run check:verbatim:goals
     - npm test
     - npm run test:unit
+
+# ---------------------------------------------------------------- deploy ----
+#
+# Every push to main updates the RUNNING app on this box. That is the whole
+# point: the known failure this fixes is a daemon left over from an older
+# commit, still answering /registry happily while 404ing every route added
+# since — code on disk that is not the code you are talking to.
+#
+# This job runs on a SHELL-EXECUTOR runner (`tags: [deploy]`), not the docker
+# one. That is deliberate and load-bearing: a docker-executor job cannot reach
+# the host's systemd, so a deploy from there could not restart anything, and a
+# deploy that cannot restart the service is a no-op with extra steps. The shell
+# runner is `run_untagged: false` and locked, so only a `deploy`-tagged job in
+# this project can land on this machine.
+#
+# It runs ONLY after verify is green. A red suite must never reach /opt.
+deploy:
+  stage: deploy
+  tags: [deploy]
+  # Long enough for npm ci + tsc + install + restart + health check on a real box.
+  timeout: 20 minutes
+  interruptible: false
+  needs: ["verify"]
+  dependencies: []
+  resource_group: ui2api-production
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    - echo "deploying $CI_COMMIT_SHA to /opt/ui2api on $CI_RUNNER_DESCRIPTION"
+    # One script, so the manual path and the CI path cannot drift apart. It
+    # builds BEFORE switching over, restarts, and FAILS if /health does not
+    # answer — a green pipeline with a dead service is the exact failure this
+    # job exists to prevent.
+    - sudo ./scripts/ops/deploy.sh
+    - |
+      echo "--- post-deploy verification ---"
+      curl -fsS --max-time 5 http://127.0.0.1:9797/health
+      echo
+      echo "packages: $(curl -fsS --max-time 5 http://127.0.0.1:9797/registry | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).packages.length))')"
+      echo "models:   $(curl -fsS --max-time 5 http://127.0.0.1:9797/v1/models  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).data.length))')"
+      systemctl is-active ui2api-api
