@@ -48,6 +48,12 @@ HEALTH_ATTEMPTS=30
 HEALTH_INTERVAL=2
 RESTORE_HEALTH_ATTEMPTS=10
 RSYNC_TIMEOUT=120
+# The restore REBUILDS (see `rollback`), so the rollback's install+build is
+# bounded on its own clock. Generous enough for a cold `npm ci` on a slow box
+# (the stage path is unbounded today and stays that way), but it is a ceiling,
+# not an open-ended wait: a hung restore is a NAMED outcome, reported loudly.
+RESTORE_BUILD_TIMEOUT=900
+RESTORE_BUILD_KILL_GRACE=15
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -254,12 +260,24 @@ warn_accounts() {
 }
 
 # --- rollback -----------------------------------------------------------------
-# Bounded: one mv aside, one rsync restore (--timeout), one bounded health
-# re-check. No loop that can re-enter itself, and it ALWAYS speaks — a silent
-# rollback that leaves the operator believing the new version is live is worse
-# than no rollback at all.
+# WHY THE RESTORE REBUILDS. The rollback point is a BARE SOURCE TREE: the
+# preserve rsync excludes `dist/` and `node_modules/` (they are machine-specific
+# and not worth copying — the same excludes the deploy rsync uses). So a restore
+# that ONLY copied it back produced a tree with no `node_modules/` and no
+# `dist/cli.js`, and the restart it immediately performs would launch a service
+# that cannot start. "Restored, still broken" is the worst outcome a rollback can
+# have: it looks like recovery. So the restore runs the SAME install+build the
+# stage path runs, before the restart, bounded on its own clock, and loud.
+#
+# WHY IT CANNOT LOOP. Everything below is a straight line, run ONCE: one mv
+# aside, one rsync restore, one bounded build, one bounded health re-check. There
+# is no loop construct and no call back into `rollback` (or into this script), so
+# there is no edge by which the restore can re-enter itself. The only loop in this
+# script (`wait_healthy`) is bounded and terminal — it returns 1, it does not call
+# anything. A failed rebuild does NOT retry and does NOT restore again: it reports
+# FAILED and returns 1.
 rollback() {
-  local reason="$1"
+  local reason="$1" rc=0
   loud "ROLLBACK: $reason"
   if [[ "$PRESERVED" -ne 1 ]]; then
     loud "ROLLBACK IMPOSSIBLE: there was no previous release to preserve (nothing installed at $TARGET_DIR when this deploy started)."
@@ -282,16 +300,49 @@ rollback() {
     return 1
   fi
   chown -R "$CHROME_USER:$CHROME_USER" "$TARGET_DIR"
-  say "previous release restored from $ROLLBACK_DIR; restarting the service on it"
+
+  # The rebuild. Same install+build the stage path runs, as the same user, in the
+  # restored tree, BEFORE anything is pointed at it. Bounded by
+  # RESTORE_BUILD_TIMEOUT; run exactly once. A non-zero result here is a FAILED
+  # restore, not a reason to try again.
+  say "ROLLBACK: rebuilding the restored release (npm ci + npm run build as $CHROME_USER, bounded at ${RESTORE_BUILD_TIMEOUT}s) — the rollback point is a bare source tree (dist/ and node_modules/ are never copied)"
+  # `|| rc=$?` (not a bare call then `rc=$?`): under `set -e` a failing build
+  # would abort the script before the exit code could be read and reported. This
+  # way the failure is CAPTURED and named below instead of killing the rollback.
+  timeout -k "$RESTORE_BUILD_KILL_GRACE" "$RESTORE_BUILD_TIMEOUT" \
+    sudo -u "$CHROME_USER" -H bash -lc "cd '$TARGET_DIR' && npm ci --no-audit --no-fund && npm run build" \
+    || rc=$?
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    loud "ROLLBACK FAILED: the restore rebuild was KILLED after ${RESTORE_BUILD_TIMEOUT}s (timeout) — the previous release could not be rebuilt. Broken tree at ${TARGET_DIR}.broken, source at $ROLLBACK_DIR. NOT restarting a half-built tree."
+    return 1
+  fi
+  if [[ "$rc" -ne 0 ]]; then
+    loud "ROLLBACK FAILED: the restore rebuild FAILED (npm ci/build exit $rc) — the previous release is restored as SOURCE but has no working build. Broken tree at ${TARGET_DIR}.broken, source at $ROLLBACK_DIR. NOT restarting a half-built tree."
+    return 1
+  fi
+  if [[ ! -f "$TARGET_DIR/dist/cli.js" ]]; then
+    loud "ROLLBACK FAILED: the restore rebuild produced no $TARGET_DIR/dist/cli.js — the previous release cannot be served. Broken tree at ${TARGET_DIR}.broken, source at $ROLLBACK_DIR."
+    return 1
+  fi
+  # Re-assert the vault AFTER the build: `npm ci` is the one step in the restore
+  # that writes into the tree from the network, and it must not be able to leave a
+  # `data/` behind either.
+  if [[ -e "$TARGET_DIR/data" ]]; then
+    loud "ROLLBACK REFUSED TO FINISH: $TARGET_DIR/data appeared during the restore rebuild — leaving the broken tree at ${TARGET_DIR}.broken for inspection."
+    return 1
+  fi
+  say "ROLLBACK: rebuild OK (dist/cli.js present, vault still absent)"
+
+  say "previous release restored AND rebuilt from $ROLLBACK_DIR; restarting the service on it"
   if systemctl list-unit-files ui2api-api.service >/dev/null 2>&1 \
      && systemctl cat ui2api-api.service >/dev/null 2>&1; then
     systemctl restart ui2api-api.service \
       || loud "ROLLBACK WARNING: the restart of the previous release FAILED — read the journal before trusting the service."
   fi
   if wait_healthy "$RESTORE_HEALTH_ATTEMPTS" "$HEALTH_INTERVAL"; then
-    loud "ROLLBACK OK: the previous release is live and answering again (broken tree kept at ${TARGET_DIR}.broken for diagnosis). The deploy that just failed is REVERTED."
+    loud "ROLLBACK OK: the previous release is rebuilt, live and answering again (broken tree kept at ${TARGET_DIR}.broken for diagnosis). The deploy that just failed is REVERTED."
   else
-    loud "ROLLBACK UNPROVEN: the previous release is restored but did not answer /health within $((RESTORE_HEALTH_ATTEMPTS * HEALTH_INTERVAL))s — read the journal; the service is NOT known-good."
+    loud "ROLLBACK UNPROVEN: the previous release is restored and rebuilt but did not answer /health within $((RESTORE_HEALTH_ATTEMPTS * HEALTH_INTERVAL))s — read the journal; the service is NOT known-good."
   fi
   return 0
 }
@@ -324,6 +375,15 @@ sudo -u "$CHROME_USER" -H bash -lc "cd '$TARGET_DIR' && npm ci --no-audit --no-f
   || fail "install/build failed — the service was NOT restarted and still serves the previous release"
 
 [[ -f "$TARGET_DIR/dist/cli.js" ]] || fail "dist/cli.js missing after build"
+
+# The vault is re-asserted AFTER the build, not only before the rsync: `npm ci`
+# is the one step in the deploy that writes into the tree from the network, and
+# it must not be able to leave a `data/` behind either. Symmetric with the
+# post-build assertion in `rollback()`.
+if [[ -e "$TARGET_DIR/data" ]]; then
+  fail "$TARGET_DIR/data appeared during the install/build — a deploy must never create or replace the vault"
+fi
+say "build OK (dist/cli.js present, vault still absent)"
 
 # --- 3. restart --------------------------------------------------------------
 if [[ "$DO_RESTART" -eq 1 ]]; then
