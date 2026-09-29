@@ -222,14 +222,27 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
   // if we are not the chrome owner, attach or fail. Attaching is the correct
   // answer, not a compromise — the daemon already holds the profile, the session
   // and the warm state, and a second browser cannot have any of those.
-  if (!isChromeOwnerProcess()) {
-    const port = process.env.UI2API_ATTACH_PORT ?? overrides.attachPort;
-    if (port) {
-      try {
-        return await connectExistingChrome(Number(port));
-      } catch (e) {
-        lastErr = e;
-      }
+  // ROUND N+106 — scoped to where the invariant is ENFORCEABLE. Caught by CI on
+  // pipeline 472: `npm test` (test/integration.ts -> analyse -> launchBrowser) died
+  // with "refusing to spawn a browser: this process is not the chrome owner".
+  //
+  // That was a real defect in my rule, not in CI. The invariant this guards is
+  // "on a box that HAS the ui2api daemon, no second browser may be born" — which
+  // is exactly where the 23 orphans came from. A host with NO daemon configured
+  // (CI, a dev container, a one-shot analysis run) has no duplicate to prevent,
+  // and refusing there buys nothing except a broken test suite.
+  //
+  // So the refusal is now conditional on a daemon being EXPECTED: an attach port
+  // is configured. With one, we attach, and if that fails we refuse rather than
+  // quietly becoming the second browser. Without one, the spawn is legitimate
+  // because there is nothing to attach to and nothing to duplicate.
+  const expectedPort = process.env.UI2API_ATTACH_PORT ?? overrides.attachPort;
+  if (!isChromeOwnerProcess() && expectedPort) {
+    const port = expectedPort;
+    try {
+      return await connectExistingChrome(Number(port));
+    } catch (e) {
+      lastErr = e;
     }
     throw new Error(
       `refusing to spawn a browser: this process is not the chrome owner ` +
