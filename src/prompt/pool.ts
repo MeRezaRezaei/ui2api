@@ -213,6 +213,30 @@ function resourceMax(): number {
   return Math.max(1, Math.min(4, Math.floor(gb / 2)));
 }
 
+/**
+ * Minimum idle interval between requests, per site, in ms.
+ *
+ * `UI2API_SITE_MIN_INTERVAL_MS` is a JSON object keyed by site id, so an operator can
+ * tune a site without a code change: `{"kimi":4000,"deepseek":4000}`. A site that is
+ * absent falls back to `UI2API_DEFAULT_MIN_INTERVAL_MS`, which is NOT zero — a default
+ * of zero would mean "no limit unless configured", and the whole point is that the safe
+ * behaviour is the default behaviour.
+ */
+export function siteRateLimitMs(siteId: string): number {
+  const raw = process.env.UI2API_SITE_MIN_INTERVAL_MS;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const v = Number(parsed[siteId]);
+      if (Number.isFinite(v) && v >= 0) return v;
+    } catch {
+      /* malformed config must not disable the limit — fall through to the default */
+    }
+  }
+  const dflt = Number(process.env.UI2API_DEFAULT_MIN_INTERVAL_MS);
+  return Number.isFinite(dflt) && dflt >= 0 ? dflt : 1_500;
+}
+
 export class ChatPool {
   private browser?: Browser;
   private workers: PoolWorker[] = [];
@@ -336,7 +360,50 @@ export class ChatPool {
   // `account` (identity-keyed vault account, "default" = legacy) gets a
   // dedicated worker instead of a pooled page, so warm pages keep the default
   // account and per-account requests never pick up the wrong session.
-  acquire(siteId: string, account?: string): Promise<PoolWorker> {
+  /**
+   * ROUND N+107 — PER-SITE RATE LIMITING. The operator's requirement: kimi and
+   * deepseek have lower limits, and nothing managed the request rate.
+   *
+   * This is the single most account-protective thing missing from the surface.
+   * The whole premise of this project is that the traffic is indistinguishable
+   * from a person's, and a person cannot send a chat message every 200ms from
+   * twelve parallel agents. An agent integrating against /v1 is exactly the kind
+   * of caller that WOULD, and the failure it causes is not a 429 — it is a
+   * challenge on a real logged-in account, which is the one outcome this project
+   * cannot recover from. Throttling here is cheaper than a ban by an enormous
+   * margin.
+   *
+   * A slot being FREE is not permission to send. Before handing a worker out we
+   * wait until this site has been idle for its own minimum interval, so the
+   * cadence is per-SITE rather than per-pool: three agents on three different
+   * sites never wait on each other, and five agents on the SAME site are paced
+   * as one person typing.
+   *
+   * Limits are per-site because a site that tolerates bursts and one that does
+   * not must not be given the same number. The default is deliberately
+   * conservative, and a site with a known tighter limit is configured rather
+   * than special-cased in code.
+   */
+  private async paceSite(siteId: string): Promise<void> {
+    const limit = siteRateLimitMs(siteId);
+    if (limit <= 0) return;
+    for (;;) {
+      const last = this.lastSendBySite.get(siteId) ?? 0;
+      const waitFor = last + limit - Date.now();
+      if (waitFor <= 0) {
+        this.lastSendBySite.set(siteId, Date.now());
+        return;
+      }
+      // Bounded: a pacing wait must never become a hung request. If the caller
+      // is already gone by the time the wait ends, it simply proceeds — the
+      // alternative is a deadlock between a timer and a client that walked away.
+      await new Promise((r) => setTimeout(r, Math.min(waitFor, 5_000)));
+    }
+  }
+  private readonly lastSendBySite = new Map<string, number>();
+
+  async acquire(siteId: string, account?: string): Promise<PoolWorker> {
+    await this.paceSite(siteId);
     if (account && account !== "default") {
       return this.spawn(siteId, account).then((w) => {
         this.markBusy(w);

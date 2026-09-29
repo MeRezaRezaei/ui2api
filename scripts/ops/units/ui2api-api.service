@@ -53,6 +53,14 @@ Environment=UI2API_DAEMON_PORT=9222
 # A display is what makes this TRUE. Without Xvfb the daemon silently falls back
 # to --headless=new and the sites challenge it.
 Environment=UI2API_HEADED=1
+# ROUND N+107 — per-site pacing. The operator: "kimi and deepseek have lower limits and
+# nothing managed the request rate." A person cannot send a message every 200ms, and an
+# agent integrating against /v1 would happily try. A challenge on a real logged-in account
+# is the one failure this project cannot recover from, so the limit is ON BY DEFAULT and
+# these are the two sites known to be tighter than the rest. Tunable without a code
+# change via a JSON object keyed by site id.
+Environment=UI2API_DEFAULT_MIN_INTERVAL_MS=1500
+Environment=UI2API_SITE_MIN_INTERVAL_MS={"kimi":4000,"deepseek":4000}
 Environment=DISPLAY=:99
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node /opt/ui2api/dist/cli.js promptd
