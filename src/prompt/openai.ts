@@ -556,6 +556,22 @@ function siteIdFromModel(model: unknown, fallback: string): string {
 }
 export { siteIdFromModel };
 
+/** A request carried content parts this surface cannot honour (image_url,
+ *  input_image, file, …). Carries the kinds so the 400 can NAME them. */
+export class ContentPartUnsupported extends Error {
+  constructor(readonly kinds: string[]) {
+    super(
+      `unsupported content part${kinds.length === 1 ? "" : "s"}: ${kinds.join(", ")}. ` +
+        `This surface sends text through each site's own composer, and an image ` +
+        `cannot be typed — the site has a real file-upload UI for that, and it is ` +
+        `reached on /capability/<site> today. Silently dropping the part would ` +
+        `return a real answer to a question that was never actually asked, so it ` +
+        `is refused instead.`
+    );
+    this.name = "ContentPartUnsupported";
+  }
+}
+
 function messagesToPrompt(messages: unknown): string {
   if (!Array.isArray(messages) || messages.length === 0) return "";
   const parts: string[] = [];
@@ -565,8 +581,30 @@ function messagesToPrompt(messages: unknown): string {
     const raw = (m as { content?: unknown })?.content;
     if (typeof raw === "string") content = raw;
     else if (Array.isArray(raw)) {
-      // multimodal content parts — keep text; image/file parts are refused on
-      // /v1 for now (site file/vision flows live on /capability/<site>)
+      // ROUND N+106 — image and file parts used to be SILENTLY DROPPED. An agent
+      // that sent a picture got a text-only prompt, a real answer, and no
+      // indication that the picture had never been seen. That is the worst class
+      // of failure this project has: not an error, just a confidently wrong
+      // answer, and the caller has no way to detect it.
+      //
+      // So the part is now NAMED and refused. A caller learns immediately that
+      // this surface does not take images, which is a fact it can act on, instead
+      // of discovering it from a wrong answer three turns later.
+      //
+      // Vision is not merely unimplemented on the sites: many of them have a real
+      // file-upload UI in their composer, driven exactly the way a human would.
+      // That path exists on /capability/<site> and is being wired into /v1
+      // properly — by uploading through the site's own UI, never by inventing a
+      // wire payload. Until it lands, this refusal is the honest state.
+      const nonText = raw.filter(
+        (p) => typeof (p as { type?: unknown })?.type === "string"
+          && (p as { type: string }).type !== "text"
+          && (p as { type: string }).type !== "input_text"
+      );
+      if (nonText.length > 0) {
+        const kinds = [...new Set(nonText.map((p) => String((p as { type: string }).type)))];
+        throw new ContentPartUnsupported(kinds);
+      }
       content = raw
         .filter((p) => typeof (p as { type?: unknown })?.type === "string" && ((p as { type: string }).type === "text" || (p as { type: string }).type === "input_text"))
         .map((p) => String((p as { text?: unknown })?.text ?? ""))
@@ -670,7 +708,27 @@ export async function handleOpenAIRoutes(
         },
       });
     }
-    let prompt = messagesToPrompt(body.messages);
+    let prompt: string;
+    try {
+      prompt = messagesToPrompt(body.messages);
+    } catch (e) {
+      // A caller's mistake keeps its NAMED 4xx and its own message — OpenAI
+      // clients parse this shape, so an agent can branch on it programmatically
+      // instead of parsing prose. A 500 here would tell the caller nothing except
+      // that something went wrong somewhere, which is the same deception as the
+      // silent drop this replaced.
+      if (e instanceof ContentPartUnsupported) {
+        return sendJson(res, 400, {
+          error: {
+            message: e.message,
+            type: "invalid_request_error",
+            param: "messages[].content",
+            code: "unsupported_content_part",
+          },
+        });
+      }
+      throw e;
+    }
     // ROUND N+103 — the SOFT tool layer, wired here and nowhere else.
     //
     // This is deliberately the ONLY place the instruction is injected, and it is
