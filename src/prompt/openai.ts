@@ -7,13 +7,41 @@
 //
 //   GET  /v1/models
 //           -> {object:"list", data:[{id:"deepseek", ...}, {id:"kimi", ...}, ...]}
+//   GET  /v1/models/<id>
+//           -> the SAME single entry the list would contain for that id
 //   POST /v1/chat/completions
 //           body: {model:"deepseek"|"ui2api/deepseek", messages:[...],
-//                  stream?:boolean, new_chat?:boolean, account?:string,
+//                  stream?:boolean, stream_options?:{include_usage?:boolean},
+//                  new_chat?:boolean, account?:string,
 //                  temperature?, max_tokens?}
 //           -> non-stream: OpenAI chat.completion JSON
 //              stream:     SSE of chat.completion.chunk events then [DONE]
 //
+// ── PARAMETER HONESTY (read this before adding a knob) ───────────────────────
+//
+// This surface types a prompt into a site's own composer through its own UI and
+// reads the rendered answer back. There is no sampling API underneath: the site
+// is not asked for a temperature, a top_p, a seed or a stop sequence, because
+// the site is not being ASKED anything of the kind — a human is not either.
+//
+// So those parameters are NOT honoured, and the important part is that they are
+// not SILENTLY dropped. A caller that tunes `temperature: 0.2` and believes it
+// got a greedy answer has been told something false, and a caller that tunes it
+// and cannot see that it was ignored will keep tuning it forever. Every response
+// therefore REPORTS the ignored ones back, by name, under
+// `ui2api.parameters.ignored` — the caller learns from the response that the
+// knob did nothing, without reading this file.
+//
+// Deliberately NOT "honoured" by truncating the finished answer: `stop` and
+// `max_tokens` both mean "generate less". The site already generated the whole
+// answer and we hold it complete; cutting it would produce a short answer that
+// is byte-identical in shape to a model that genuinely stopped there, and the
+// caller could not tell the difference. That is the confidently-wrong-answer
+// class this project refuses, so these are reported as ignored instead. The
+// parameters that ARE honoured are `stream`, `stream_options.include_usage`,
+// `tools` (soft, when a tool layer is wired), `new_chat` and `account`.
+//
+
 // Streaming note (honest): the ChatDriver reads the site's rendered answer
 // when it stops growing, so the completion is COMPLETE before we start
 // writing. stream:true replays the finished answer as incremental SSE
@@ -523,6 +551,121 @@ export function modelCapabilities(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// USAGE ACCOUNTING — an ESTIMATE, ALWAYS LABELLED AS ONE
+//
+// `response.usage` used to be absent on both paths, and a missing usage object
+// is not a neutral omission: openai-python's accounting, LangChain's cost
+// middleware and every budget tracker treat it as a broken provider, and
+// `stream_options:{include_usage:true}` was read and then ignored. A field that
+// is `None` where a client needs a number is a crash or a mis-bill, so a real
+// object is emitted here instead.
+//
+// WHAT THE NUMBER IS, precisely: a character-based estimate over OUR OWN text —
+// the prompt string this surface typed into the site's composer, and the answer
+// string this surface read back off the page. It is NOT the site's backend
+// tokenization and it is NOT the provider's billable count. The site's own
+// tokenizer is never exposed to us (there is no endpoint that reports it), so
+// there is no honest way to produce its number, and producing a number that
+// merely LOOKS like one is exactly the fabrication this surface exists to
+// avoid. It is therefore an estimate, on a field a billing system can read but
+// never mistake for a measurement, because `estimated: true` and
+// `siteReported: false` sit right next to it — and, on the streaming path, in
+// the same object.
+//
+// The ratio is 4 characters per token, the widely used English-text heuristic.
+// It is chosen for being roughly right on prose, not for being exact: an
+// estimate labelled as an estimate is usable for a budget guard, while a
+// missing field is not.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The OpenAI usage block. Field names and nesting are the protocol's own, so a
+ *  client reads it without knowing anything about ui2api. */
+export interface OpenAIUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/** The label that travels WITH the estimate. A consumer that wants a bill must
+ *  read this; a consumer that wants a number gets the number. */
+export interface UsageAccounting {
+  /** Always true. There is no path here that produces a measured count. */
+  estimated: true;
+  /** The concrete method, so the number is auditable rather than magic. */
+  method: "ui2api-char-estimate";
+  /** What was measured, in words. */
+  basis: "characters/4 over ui2api's own prompt and answer text";
+  /** Always false: the site's backend tokenization is never available here. */
+  siteReported: false;
+  note: string;
+}
+
+const CHARS_PER_TOKEN = 4;
+
+function estimateTokens(text: string): number {
+  return Math.ceil((text ?? "").length / CHARS_PER_TOKEN);
+}
+
+/** Build the usage block + its label from the exact two strings this request
+ *  really involved: the prompt the site received, and the answer the caller
+ *  receives. Passing anything else would make the accounting describe a
+ *  conversation that did not happen. */
+export function estimateUsage(promptText: string, completionText: string): { usage: OpenAIUsage; usageAccounting: UsageAccounting } {
+  const prompt_tokens = estimateTokens(promptText);
+  const completion_tokens = estimateTokens(completionText);
+  return {
+    usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens },
+    usageAccounting: {
+      estimated: true,
+      method: "ui2api-char-estimate",
+      basis: "characters/4 over ui2api's own prompt and answer text",
+      siteReported: false,
+      note:
+        "Estimated by ui2api from the text it sent and read. This is NOT the site's own " +
+        "backend tokenization and must not be treated as a billable provider count.",
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PARAMETER HONESTY — the ignored set, as DATA the response is built from
+//
+// Listed once, used twice: the comment at the top of the file explains WHY, and
+// this array is what actually names them on the wire, so the two cannot drift
+// into "documented but not reported" (which is the silent drop this replaces).
+//
+// Not a capability table — it says nothing about any model, only about this
+// surface's own seam to the site.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** OpenAI sampling/generation parameters this surface cannot honour, because
+ *  the site is driven through its own composer and exposes no sampling API. */
+export const IGNORED_REQUEST_PARAMETERS: readonly string[] = [
+  "temperature",
+  "top_p",
+  "seed",
+  "stop",
+  "max_tokens",
+  "max_completion_tokens",
+  "n",
+  "presence_penalty",
+  "frequency_penalty",
+  "logprobs",
+  "top_k",
+  "logit_bias",
+  "response_format",
+];
+
+/** Which of the ignored parameters this caller ACTUALLY sent — the ones a
+ *  consumer can act on. A caller that sent nothing gets an empty list, so the
+ *  field is not noise on every response. Presence in the request is the test,
+ *  not truthiness of the value: `temperature: 0` and `max_tokens: 0` are both
+ *  attempts to tune and both did nothing. */
+export function ignoredParametersOf(body: Record<string, unknown>): string[] {
+  return IGNORED_REQUEST_PARAMETERS.filter((name) => Object.prototype.hasOwnProperty.call(body, name));
+}
+
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
   // GOAL 83: answer at most once. The daemon's aggregate deadline answers an
   // over-deadline /v1 request with a named 504 while this route's browser work
@@ -545,6 +688,17 @@ function profileById(id: string, profilesById: Record<string, ChatSiteProfile>):
   const p = profilesById[id];
   if (p) return p;
   throw new Error(`unknown site "${id}" — try one of ${Object.keys(profilesById).join(", ")}`);
+}
+
+/** Percent-decode a path segment without letting a malformed escape throw out
+ *  of the route: a client sending a stray `%` gets the raw segment (and then a
+ *  named 404), not a stack trace and a dropped connection. */
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function siteIdFromModel(model: unknown, fallback: string): string {
@@ -649,6 +803,10 @@ export async function handleOpenAIRoutes(
 ): Promise<void> {
   const { pool, profilesById } = opts;
   const url = req.url ?? "";
+  // A query string on a client-library call is ordinary (`?v=1`, cache busters),
+  // and refusing it would be a pointless 404. The PATH is what routes; the raw
+  // url is still what the terminal 404 quotes back, so a mistake stays visible.
+  const path = url.split("?")[0].split("#")[0];
 
   // GET /v1/models — the chat sites this daemon can serve, each with the
   // DERIVED capability metadata a consumer needs to materialise a provider
@@ -657,9 +815,18 @@ export async function handleOpenAIRoutes(
   // (context_window: this repo has no measured per-site value, so the field is
   // OMITTED rather than invented — a made-up context window is a number a
   // consumer would size real requests against).
-  if (req.method === "GET" && url === "/v1/models") {
+  //
+  // GET /v1/models/<id> is the SAME entry, and it exists because client
+  // libraries call it as a matter of course (openai-python's
+  // `client.models.retrieve`, the VS Code / Continue model pickers, several
+  // routers' health checks). A 404 there reads to those callers as "this
+  // provider does not know its own models", and they drop the provider. Both
+  // routes therefore build the entry through ONE function, so a single-model
+  // answer can never be a differently-shaped or differently-honest version of
+  // the list entry.
+  if (req.method === "GET" && (path === "/v1/models" || path.startsWith("/v1/models/"))) {
     const onSurface = new Map(defaultChatSurface().map((e) => [e.id, { packaged: e.packaged }]));
-    const data = Object.values(profilesById).map((p) => ({
+    const entryFor = (p: ChatSiteProfile) => ({
       id: p.id,
       object: "model",
       created: 0,
@@ -681,7 +848,27 @@ export async function handleOpenAIRoutes(
         toolMechanisms: modelToolMechanisms(opts, p.id),
         onSurface,
       }),
-    }));
+    });
+    const single = path.slice("/v1/models".length).replace(/^\//, "");
+    if (single) {
+      // A nested path is a different endpoint, not a model id: answering
+      // /v1/models/a/b with a's entry would be a lie about what was asked.
+      const first = single.split("/")[0];
+      const id = siteIdFromModel(safeDecode(first), "");
+      const profile = profilesById[id];
+      if (!profile || single.includes("/")) {
+        return sendJson(res, 404, {
+          error: {
+            message: `the model \`${single}\` does not exist; GET /v1/models lists every model this daemon serves`,
+            type: "invalid_request_error",
+            code: "model_not_found",
+            param: "id",
+          },
+        });
+      }
+      return sendJson(res, 200, { ...entryFor(profile), capabilitiesVersion: MODEL_CAPABILITIES_VERSION });
+    }
+    const data = Object.values(profilesById).map(entryFor);
     return sendJson(res, 200, { object: "list", capabilitiesVersion: MODEL_CAPABILITIES_VERSION, data });
   }
 
@@ -693,6 +880,14 @@ export async function handleOpenAIRoutes(
       return openAiError2(res, 400, "request body is not valid JSON");
     }
     const stream = Boolean(body.stream);
+    // `stream_options.include_usage` was accepted and dropped. It is the one
+    // generation option this surface CAN honour honestly, because the estimate
+    // it asks for is over our own text and is emitted either way (see
+    // estimateUsage) — the flag only decides whether the streaming path carries
+    // it, which is the OpenAI convention.
+    const streamOptions = (body.stream_options ?? null) as { include_usage?: unknown } | null;
+    const includeUsage = Boolean(streamOptions && typeof streamOptions === "object" && streamOptions.include_usage === true);
+    const ignoredParams = ignoredParametersOf(body);
     const modelRaw = body.model;
     const site = siteIdFromModel(modelRaw, "");
     let profile: ChatSiteProfile;
@@ -890,6 +1085,12 @@ export async function handleOpenAIRoutes(
       // envelope as if it were the model's answer.
       const answer =
         toolCall !== null ? (softTools?.stripToolCall(result.answer ?? "").content ?? "") : (result.answer ?? "");
+      // The accounting is built from the two strings this request really
+      // involved: the prompt the SITE received (the flattened messages plus any
+      // tool instruction — not the caller's pre-flattening transcript) and the
+      // answer the CALLER receives. It is an estimate over our own text, and it
+      // is labelled as one on the wire (see estimateUsage).
+      const { usage, usageAccounting } = estimateUsage(prompt, answer);
       const id = `chatcmpl-ui2api-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       const created = Math.floor(Date.now() / 1000);
       if (stream) {
@@ -900,6 +1101,16 @@ export async function handleOpenAIRoutes(
           "X-Accel-Buffering": "no",
         });
         const chunk = (payload: unknown) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        // The OpenAI streaming convention for usage: a final chunk whose `choices`
+        // is EMPTY and which carries only `usage`, written after the terminal
+        // frame and immediately before the stream's terminator sentinel. Emitted
+        // only when the caller asked for it with `stream_options.include_usage`,
+        // so a consumer that does not read usage is not handed a frame its
+        // parser has no rule for. Every streaming exit (wall / tool call /
+        // answer) ends through it, so no path can quietly drop the accounting
+        // the caller asked for.
+        const usageFrame = () =>
+          chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [], usage, ui2api: { usageAccounting } });
         // GOAL 109: a restriction wall (paywall / limit / login) is NOT an empty
         // success. The OpenAI protocol has the right vocabulary for it —
         // finish_reason "content_filter" plus a `refusal` string — so use it
@@ -911,6 +1122,7 @@ export async function handleOpenAIRoutes(
             choices: [{ index: 0, delta: { refusal: detail }, finish_reason: "content_filter" }],
             ui2api: { site: profile.id, doneReason: "restricted", restrictions: result.restrictions ?? [] },
           });
+          if (includeUsage) usageFrame();
           res.write("data: [DONE]\n\n");
           res.end();
           return;
@@ -955,6 +1167,7 @@ export async function handleOpenAIRoutes(
             model: profile.id,
             choices: [{ index: 0, delta: {}, finish_reason: OPENAI_TOOL_CALL_FINISH_REASON, ui2api: { toolCall: provenance } }],
           });
+          if (includeUsage) usageFrame();
           res.write("data: [DONE]\n\n");
           res.end();
           return;
@@ -964,6 +1177,7 @@ export async function handleOpenAIRoutes(
           chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [{ index: 0, delta: { content: answer.slice(i, i + 8) }, finish_reason: null }] });
         }
         chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
+        if (includeUsage) usageFrame();
         res.write("data: [DONE]\n\n");
         res.end();
         return;
@@ -979,7 +1193,19 @@ export async function handleOpenAIRoutes(
             // GOAL 109: never "stop" + empty content for a restriction wall.
             message: {
               role: "assistant",
-              content: answer,
+              // `null` whenever the message carries `tool_calls`, which is the
+              // OpenAI protocol's own convention and the reason a consumer that
+              // renders `content` can be trusted: a tool turn has no prose answer,
+              // and what this surface would otherwise hand it is the residue of
+              // the instruction WE wrote into the prompt (or the site's own
+              // "calling the tool" prose) — rendered as if the model had said it.
+              //
+              // The reason it is null and not the stripped residue is that the
+              // two are indistinguishable to the reader: a client that prints
+              // `content` would display our scaffolding as the model's answer.
+              // The residue is still available where it is honest — it stays in
+              // the call's own arguments when the site produced them.
+              content: toolCall ? null : answer,
               // Present ONLY when a call was actually produced, so a consumer can
               // branch on the key's existence rather than on a magic empty value.
               // There is no such thing as an empty tool_calls array here: with no
@@ -1012,12 +1238,39 @@ export async function handleOpenAIRoutes(
             ...(provenance ? { ui2api: { toolCall: provenance } } : {}),
           },
         ],
+        // A real usage object on the non-streaming path, ALWAYS. It used to be
+        // absent, and absent is not neutral: openai-python's accounting, cost
+        // middleware and budget trackers all read this field, and a missing one
+        // is a crash or a mis-bill rather than a zero. `usageAccounting` sits
+        // next to it so the number is never mistaken for the site's own billing.
+        usage,
         ui2api: {
           site: profile.id,
+          usageAccounting,
           chunkCount: result.chunkCount ?? 0,
           doneReason: result.doneReason ?? "stop",
           url: result.url ?? undefined,
           title: result.title ?? undefined,
+          // Which request parameters the caller sent that this surface did NOT
+          // honour, by name. A silently ignored `temperature` is worse than a
+          // rejected one: the caller tunes it, believes it worked, and never
+          // learns otherwise. Naming them here makes the ignore VISIBLE, and
+          // `reason` says why in one line so nobody has to read this file to
+          // find out. Omitted entirely when the caller sent none of them, so a
+          // clean request carries no noise.
+          ...(ignoredParams.length > 0
+            ? {
+                parameters: {
+                  ignored: ignoredParams,
+                  reason:
+                    "This surface types the prompt into the site's own composer and reads the rendered " +
+                    "answer back, so it has no sampling API to pass these to: they were received and had " +
+                    "no effect on this answer. Truncating the finished answer to fake 'stop' or " +
+                    "'max_tokens' was rejected because the result would be indistinguishable from a " +
+                    "model that genuinely stopped there.",
+                },
+              }
+            : {}),
           // Why a native read-back produced nothing, when this site has a reader
           // at all. This is the field that makes a MISSING call diagnosable: the
           // overwhelmingly common real answer is "the site did not run the tool

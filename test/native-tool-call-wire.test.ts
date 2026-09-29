@@ -183,6 +183,14 @@ async function ask(opts: {
   withSoft?: boolean;
   tools?: unknown;
   stream?: boolean;
+  /**
+   * The explicit CONSENT the soft path requires (4b7ee4b). A soft tool call is
+   * surfaced ONLY when the request carries `tool_choice: "auto"` (or an object);
+   * anything else — absent, "none", "required" — leaves the layer unrun and the
+   * answer untouched. So a request that means to exercise the SOFT path must say
+   * so in its own body: offering `tools` is no longer enough.
+   */
+  toolChoice?: "auto";
 }): Promise<any> {
   const { base, close } = await serve(
     REAL,
@@ -194,6 +202,7 @@ async function ask(opts: {
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.tools ? { tools: opts.tools } : {}),
       ...(opts.stream ? { stream: true } : {}),
+      ...(opts.toolChoice ? { tool_choice: opts.toolChoice } : {}),
     });
     return body;
   } finally {
@@ -324,8 +333,12 @@ d("A consumer can tell a NATIVE call from a SOFT call by reading the response", 
   const OFFERED_TOOLS = [{ type: "function", function: { name: "get_weather", parameters: { type: "object", properties: { city: { type: "string" } } } } }];
 
   t("the two are distinguishable by mechanism + executed, with no ui2api documentation", async () => {
-    const native = CHOICE(await ask({ answer: "18C in Tokyo.", scrape: FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS }));
-    const soft = CHOICE(await ask({ answer: 'CALLME {"name":"get_weather","arguments":{"city":"Tehran"}}', scrape: NOT_FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS }));
+    // Both requests mean to exercise a path that can produce a call, so BOTH
+    // carry the explicit consent the soft path requires. The native side ignores
+    // it (its consent is the site's own read-back), but the soft side is gated on
+    // it — without `tool_choice: "auto"` there is no soft call to compare to.
+    const native = CHOICE(await ask({ answer: "18C in Tokyo.", scrape: FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS, toolChoice: "auto" }));
+    const soft = CHOICE(await ask({ answer: 'CALLME {"name":"get_weather","arguments":{"city":"Tehran"}}', scrape: NOT_FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS, toolChoice: "auto" }));
 
     assert.equal(native.ui2api.toolCall.mechanism, "native");
     assert.equal(native.ui2api.toolCall.executed, true, "the site really ran the tool");
@@ -341,8 +354,8 @@ d("A consumer can tell a NATIVE call from a SOFT call by reading the response", 
 
   t("both are valid OpenAI tool calls — the provenance is ADDITIVE, never a fork of the protocol", async () => {
     for (const body of [
-      await ask({ answer: "18C in Tokyo.", scrape: FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS }),
-      await ask({ answer: 'CALLME {"name":"get_weather","arguments":{"city":"Tehran"}}', scrape: NOT_FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS }),
+      await ask({ answer: "18C in Tokyo.", scrape: FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS, toolChoice: "auto" }),
+      await ask({ answer: 'CALLME {"name":"get_weather","arguments":{"city":"Tehran"}}', scrape: NOT_FIRED_SCRAPE, withSoft: true, tools: OFFERED_TOOLS, toolChoice: "auto" }),
     ]) {
       const m = CHOICE(body).message;
       assert.equal(m.role, "assistant");
@@ -362,6 +375,9 @@ d("A consumer can tell a NATIVE call from a SOFT call by reading the response", 
       scrape: FIRED_SCRAPE,
       withSoft: true,
       tools: OFFERED_TOOLS,
+      // The soft scaffolding is on the wire here, so consent must be too —
+      // otherwise the soft layer never runs and there is nothing to suppress.
+      toolChoice: "auto",
     }));
     assert.equal(choice.ui2api.toolCall.mechanism, "native", "the site's real invocation is the one reported");
     assert.equal(choice.message.tool_calls[0].function.name, "kimi_web_search");
