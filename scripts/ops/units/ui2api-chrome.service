@@ -1,24 +1,47 @@
 [Unit]
-Description=ui2api Chrome — the long-lived headed browser (NOT restarted by deploys)
-Documentation=https://github.com/MeRezaRezaei/ui2api
-After=network-online.target ui2api-xvfb.service
-Wants=network-online.target ui2api-xvfb.service
+Description=ui2api persistent Chrome (the point of use for the ui2api user)
+Documentation=file:///opt/ui2api/docs/CHROME_POINT_OF_USE.md
+After=ui2api-xvfb.service
+Requires=ui2api-xvfb.service
 
 [Service]
 Type=simple
 User=ui2api
 Group=ui2api
 Environment=HOME=/home/ui2api
-Environment=DISPLAY=:99
 Environment=UI2API_CHROME_USER=ui2api
 Environment=UI2API_DAEMON_PORT=9222
-# Chrome is the point of use, not a sandbox escape hatch: it needs the profile
-# in a real HOME, and PrivateTmp would hide it.
+Environment=DISPLAY=:99
+# RESTORED VERBATIM from the provision script that was proven working. Every one
+# of these was DROPPED when this unit was first rewritten, and the rewrite is
+# what broke the "looks like a real user" posture:
+#   - the --disable-* family is what keeps background chatter out of a session,
+#     and a Chrome visibly ticking along in the background is not the profile a
+#     human produces;
+#   - `--remote-debugging-address=127.0.0.1` RESTRICTS the CDP port to loopback.
+#     Without it the debug port listens on EVERY interface, which is both a
+#     live exposure of the browser to the LAN and a behavioural difference;
+#   - `about:blank` is the proven landing state, not whatever the last page was.
+ExecStart=/usr/bin/google-chrome-stable \
+  --no-first-run --no-default-browser-check \
+  --disable-background-networking --disable-component-update \
+  --mute-audio --disable-hang-monitor \
+  --disable-v8-idle-tasks --disable-background-timer-throttling \
+  --disable-renderer-backgrounding \
+  --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
+  --user-data-dir=/home/ui2api/.config/ui2api-chrome \
+  about:blank
+# on-failure, NOT always — and the reason is not stylistic: `ui2api chrome stop`
+# is a deliberate operator action, and `always` resurrects the browser a second
+# later, silently undoing the stop. The original comment said exactly this.
+Restart=on-failure
+RestartSec=3
+# One instance per profile is a CHROME rule, not ours: let systemd's stop win.
+KillMode=mixed
+TimeoutStopSec=20
+NoNewPrivileges=true
+# Chrome needs a real HOME for the profile; PrivateTmp would hide it.
 PrivateTmp=false
-ExecStart=/usr/bin/google-chrome-stable --user-data-dir=/home/ui2api/.config/ui2api-chrome --remote-debugging-port=9222 --no-first-run --no-default-browser-check
-Restart=always
-RestartSec=5
-TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
