@@ -77,6 +77,25 @@ function deadDriver(): unknown {
   return { page: undefined, close: async () => {}, ask: async () => ({}) };
 }
 
+// A driver whose `ask()` NEVER SETTLES — the "wedged request" shape. Its
+// liveness probe PASSES, so the pool hands the page out normally and the request
+// is genuinely still awaiting when the aggregate deadline fires.
+//
+// This exists because a daemon built with NO injected pool reaches a REAL
+// ChatDriver: /prompt calls pool.spawn → driver.start() → getPage(), which
+// navigates the real browser to the fake profile's host
+// (`https://<id>.example.com`). That is a live page navigation owned by a unit
+// test, and it is what made this file's PROCESS never exit — see the two
+// `/prompt` tests below. Nothing here touches a browser: `close()` resolves, so
+// the pool's shutdown is not left holding a promise that can never settle.
+function wedgedDriver(): unknown {
+  return {
+    page: { context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }) },
+    close: async () => {},
+    ask: () => new Promise<never>(() => {}),
+  };
+}
+
 function insertWorker(pool: ChatPool, worker: unknown): void {
   const list = (pool as unknown as { workers: PoolWorker[] }).workers;
   list.push(worker as PoolWorker);
@@ -469,7 +488,22 @@ test("GOAL87: a wedged request is visible — the aggregate deadline records a `
   const dir = mkdtempSync(join(tmpdir(), "u2a-wedge-"));
   // A 60ms deadline raced by a body that trickles in past it, so the route is
   // genuinely still awaiting when the deadline fires (the GOAL 83 shape).
-  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [fakeProfile("gemini")], requestTimeoutMs: 60, reaperIntervalMs: 0 });
+  //
+  // The pool is injected with ONE worker whose `ask()` never settles. That is
+  // what makes the request genuinely wedge WITHOUT a browser: the page is handed
+  // out normally, and nothing about the wait depends on a real navigation. This
+  // test used to build the daemon with NO pool, so /prompt really did
+  // pool.spawn → driver.start() → a live `goto` of `https://gemini.example.com/`.
+  // The 60ms deadline answered 504 and the assertions passed, but the in-flight
+  // navigation was ABANDONED when the daemon closed — a promise that never
+  // settles, backed by no handle, so the event loop drained while the test
+  // runner still had a pending promise. `node --test` then never exited: this
+  // file hung the whole `test:unit` suite (exit 124 under any real timeout) with
+  // every one of its tests already printed as a pass. A test that reaches a real
+  // browser is a test that owns a real browser's lifetime, and it was not closing it.
+  const pool = new ChatPool({ profiles: [fakeProfile("gemini")], dataDir: dir, max: 1, reaperIntervalMs: 0 } as PoolOptions);
+  insertWorker(pool, { profileId: "gemini", driver: wedgedDriver(), busy: false, busySince: Date.now() } as unknown as PoolWorker);
+  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [fakeProfile("gemini")], requestTimeoutMs: 60, reaperIntervalMs: 0, pool });
   const req = fetch(`http://127.0.0.1:${svc.port}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ site: "gemini", prompt: "slow one" }) });
   req.catch(() => undefined);
   try {
@@ -489,13 +523,23 @@ test("GOAL87: a wedged request is visible — the aggregate deadline records a `
 
 test("GOAL87: NO SECRETS — /requests and /status never echo a prompt, an answer, a cookie or a token", async () => {
   const dir = mkdtempSync(join(tmpdir(), "u2a-nosecret-"));
-  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [fakeProfile("gemini")], reaperIntervalMs: 0 });
+  // The pool is injected ALREADY AT CAPACITY (one busy page) with a zero-length
+  // queue, so /prompt is refused by name and IMMEDIATELY — no spawn, no driver,
+  // no browser. This test used to build the daemon with NO pool, so the refusal it
+  // was relying on was really a real `pool.spawn` racing a real navigation to
+  // `https://gemini.example.com/`, abandoned on close — the same never-settling
+  // promise that hung this file. A saturated pool refuses on its own account, so
+  // the property under test (a refusal must not echo a secret) is unchanged and
+  // the test no longer owns a browser it never asked for.
+  const pool = new ChatPool({ profiles: [fakeProfile("gemini")], dataDir: dir, max: 1, maxWaiters: 0, reaperIntervalMs: 0 } as PoolOptions);
+  insertWorker(pool, { profileId: "gemini", driver: liveDriver(), busy: true, busySince: Date.now() } as unknown as PoolWorker);
+  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [fakeProfile("gemini")], reaperIntervalMs: 0, pool });
   const PROMPT = "MY-SECRET-PROMPT-9f3a2b";
   const TOKEN = "Bearer ui2api-secret-token-7c1d";
   const COOKIE = "SID=secret-cookie-value-4e5f";
   try {
     // A request that CARRIES a prompt, a bearer token and a cookie. The pool
-    // has no pages, so it is refused — the refusal must still not leak anything.
+    // is at capacity, so it is refused — the refusal must still not leak anything.
     const res = await fetch(`http://127.0.0.1:${svc.port}/prompt`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: TOKEN, cookie: COOKIE },

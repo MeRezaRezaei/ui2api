@@ -12,6 +12,10 @@ import { readFileSync, statSync } from "node:fs";
  * removed route is harmless and must not rewrite prose.
  */
 const HTTP = readFileSync("src/prompt/http.ts", "utf8");
+// The /v1 OpenAI-compatible routes are dispatched in openai.ts, so the scan must
+// read BOTH files or the gate is blind to a route it documents.
+const OPENAI = readFileSync("src/prompt/openai.ts", "utf8");
+const ROUTE_SRC = `${HTTP}\n${OPENAI}`;
 const DOCS = ["README.md", "AGENTS.md", "docs/ONBOARDING.md", "docs/ENGINE.md", "docs/TROUBLESHOOTING.md"]
   .filter((f) => { try { statSync(f); return true; } catch { return false; } })
   .map((f) => readFileSync(f, "utf8"))
@@ -37,10 +41,28 @@ export const SERVED_ROUTES = [
 
 /** Routes the daemon actually serves, read from the source's own route table
  *  rather than a hand-typed list, so a new route is measured, not assumed. */
-export function servedRoutes(src: string = HTTP): string[] {
+export function servedRoutes(src: string = ROUTE_SRC): string[] {
   const found = new Set<string>();
-  for (const m of src.matchAll(/(?:url|pathname)\s*===\s*"(\/[a-z0-9/_-]*)"/gi)) found.add(m[1]!);
-  for (const m of src.matchAll(/(?:url|pathname)\.startsWith\("(\/[a-z0-9/_-]*)"/gi)) found.add(m[1]!);
+  // The identifier alternation must carry every name the dispatch code actually
+  // compares — `path` included, or a `path === "/v1/models"` guard in
+  // openai.ts is invisible and the gate below goes silently green.
+  // The optional chain in `req.url?.startsWith("/capabilities")` is the same
+  // class of blindness: the old form required `.startsWith` immediately after
+  // the identifier, and the `?.` in between defeated it.
+  const IDENT = "(?:url|path|pathname)";
+  for (const m of src.matchAll(new RegExp(`${IDENT}\\s*===\\s*"(\\/?[a-z0-9/_-]*)"`, "gi"))) found.add(m[1]!);
+  // `(?:\?\.|\.)` not `(?:\?\.)?\.` — in an optional chain the `?` REPLACES
+  // the dot (`url?.startsWith`, not `url?.startsWith`), so requiring a literal
+  // dot after the `?.` matched nothing at all.
+  for (const m of src.matchAll(new RegExp(`${IDENT}(?:\\?\\.|\\.)\\s*startsWith\\("(\\/?[a-z0-9/_-]*)"`, "gi"))) {
+    // A bare version root (`/v1/`) is the PROXY branch in http.ts that forwards
+    // to the openai handler — it is not itself a served endpoint, and the real
+    // `/v1/*` routes are read from their own guards. Drop it; keep every other
+    // prefix form (`/capability/`, `/accounts`, `/capabilities`, `/requests`)
+    // so a route cannot hide behind a trailing slash.
+    if (/^\/v\d+\/?$/.test(m[1]!)) continue;
+    found.add(m[1]!);
+  }
   for (const m of src.matchAll(/url === "(\/(?:v1\/)?[a-z0-9/_-]*)"/gi)) found.add(m[1]!);
   return [...found].sort();
 }

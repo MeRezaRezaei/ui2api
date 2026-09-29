@@ -77,14 +77,17 @@ const OPENAI_SRC = readFileSync(join(ROOT, "src/prompt/openai.ts"), "utf8");
  *  cannot tell those apart goes red on correct code (which is how a gate
  *  teaches people to ignore it).
  *
- *  MEASURED: the shared `servedRoutes` extractor in ./served-routes-truth is
- *  BLIND to two real shapes — `req.url?.startsWith("/capabilities")` (its regex
- *  requires `.startsWith` immediately after the identifier, so the optional
- *  chain `?.` defeats it) and `path === "/v1/models"` in openai.ts (it only
- *  matches `url`/`pathname`). It reads 12 routes where the daemon serves 15.
- *  This extractor matches the shapes the code ACTUALLY uses, and the
- *  non-vacuity pin below cross-checks the two so a regression in either is loud.
- *  Reported as a finding for a file this change does not own. */
+ *  MEASURED, AND NOW FIXED: the shared `servedRoutes` extractor in
+ *  ./served-routes-truth was BLIND to two real shapes —
+ *  `req.url?.startsWith("/capabilities")` (its regex required `.startsWith`
+ *  immediately after the identifier, so the optional chain `?.` defeated it) and
+ *  `path === "/v1/models"` in openai.ts (it only matched `url`/`pathname`, and
+ *  was not even passed that file). It read 11 routes where the daemon serves
+ *  15, and its OWN gate stayed green, so nobody noticed. This file's
+ *  independent extractor is what found it, and the shared extractor has since
+ *  been taught both shapes; the cross-check below now asserts the two AGREE and
+ *  that both are ALIVE, which is what keeps the disagreement detectable if a new
+ *  shape ever appears. */
 export function servedRouteGuards(src: string): Array<{ method: "GET" | "POST"; path: string }> {
   const out = new Map<string, { method: "GET" | "POST"; path: string }>();
   const add = (method: "GET" | "POST", path: string) => {
@@ -256,16 +259,37 @@ describe("ABSTRACTION GATE: a consumer needs zero knowledge of ui2api internals"
       `these routes are declared served and documented, but the guard extractor cannot ` +
         `find them in the source — one of the two derivations is blind: ${unguarded.join(", ")}`,
     );
-    // The two extractors are independent readings of the same source. Where the
-    // guard extractor finds a route the path extractor missed, the gap is a
-    // real blind spot in `servedRoutes` (there are three: the `url?.startsWith`
-    // shapes and openai's `path ===`). Pinning the gap keeps the blind spot
-    // DISCLOSED instead of quietly re-narrowing if either extractor is edited.
+    // The two extractors are independent readings of the same source, and this
+    // cross-check is what makes the second one worth having: while the shared
+    // `servedRoutes` extractor was blind to the `url?.startsWith` shapes and to
+    // openai's `path ===`, this file's own extractor found routes the other
+    // could not, and that DIFFERENCE is how the blind spot was discovered.
+    //
+    // So the contract is AGREEMENT plus ALIVENESS — not permanent disagreement.
+    // This assertion used to be `gap.length >= 1`, i.e. "the two must always
+    // disagree", which was only ever a proxy for "the cross-check can still see".
+    // Once the blindness was actually fixed the proxy inverted and fired on the
+    // fix, which is a test that punishes the correction — and a gate that
+    // punishes being right gets deleted within a week.
+    //
+    // What must hold now: the blind spot is GONE (the extractors agree), AND both
+    // are still ALIVE (each finds a real, non-trivial route set — otherwise two
+    // extractors that both return nothing would "agree" perfectly and the
+    // cross-check would be proving nothing).
     const gap = guards.map((g) => g.path).filter((p) => !routes.includes(p));
+    assert.deepEqual(
+      gap,
+      [],
+      `the shared servedRoutes extractor is BLIND again to ${gap.join(", ")} — the ` +
+        `independent extractor in this file can see routes the shared one cannot, which ` +
+        `is exactly how the original blind spot was found. A new route shape must be ` +
+        `taught to BOTH.`,
+    );
     assert.ok(
-      gap.length >= 1,
-      "the guard extractor found no route the path extractor missed — one of the two " +
-        "has gone blind, and this cross-check can no longer see it",
+      routes.length >= 10 && guards.length >= 10,
+      `both route derivations must be ALIVE, not merely equal: servedRoutes read ` +
+        `${routes.length} and the guard extractor read ${guards.length}. Two extractors ` +
+        `that both return nothing agree perfectly and this cross-check would prove nothing.`,
     );
     // The request-input vocabulary the daemon reads, over BOTH route files. This
     // is asserted for ALIVENESS, never for a classification: the point is that
