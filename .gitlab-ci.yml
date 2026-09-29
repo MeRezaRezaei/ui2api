@@ -30,13 +30,22 @@ variables:
   # leaves .brain/ inconsistent must fail the pipeline, not a person.
   npm_config_cache: "$CI_PROJECT_DIR/.npm"
 
+concurrent: 2
+
 cache:
   key:
     files:
       - package-lock.json
+    # Cache keys are NOT project-scoped by default: without this prefix the
+    # lockfile-hash key collides with the other CI projects on the shared
+    # runner, and one project's cache can be served to (or evicted by) another.
+    prefix: "ui2api"
   paths:
+    # node_modules/ is deliberately NOT cached. It is rebuilt by `npm ci` in
+    # every job anyway, and caching it is what blew the runner cache cap
+    # (1 GiB docker / 512 MiB shell) and produced the measured
+    # "413 Payload Too Large" upload failure. Do not re-add it.
     - .npm/
-    - node_modules/
 
 # The wigolo engine tests need a checkout at $WIGOLO_REPO.
 before_script:
@@ -48,12 +57,22 @@ build:
   # Pin the LTS image: the wigolo daemon's pinned playwright supports ubuntu-24.04
   # but not a rolled-forward image — its chromium installer refuses unlisted distros.
   image: node:24-bookworm
-  timeout: 30 minutes
+  timeout: 30m
+  retry: 1
   interruptible: true
+  allow_failure: false
   cache:
     key:
       files: [package-lock.json]
-    paths: [.npm/, node_modules/]
+      # Same project-unique key as the top-level cache. This job-level block
+      # REPLACES the top-level one, so the prefix has to be repeated here or
+      # the key goes back to being un-namespaced.
+      prefix: "ui2api"
+    # Sole writer for this key. `verify` runs pull-only, so a pipeline uploads
+    # the cache once instead of twice (the default pull-push had both jobs
+    # re-uploading the same archive).
+    policy: pull-push
+    paths: [.npm/]
   script:
     - npm ci --cache .npm --prefer-offline
     - npx playwright install --with-deps chromium
@@ -72,14 +91,20 @@ build:
 verify:
   stage: verify
   image: node:24-bookworm
-  timeout: 30 minutes
+  timeout: 30m
   interruptible: true
   needs: ["build"]
   dependencies: []
   cache:
     key:
       files: [package-lock.json]
-    paths: [.npm/, node_modules/]
+      # Must match build's key exactly to read what build wrote; repeated here
+      # because this job-level block replaces the top-level cache definition.
+      prefix: "ui2api"
+    # Reader only. Without this, verify re-uploaded the identical archive that
+    # build had just uploaded — double the cache I/O for no benefit.
+    policy: pull
+    paths: [.npm/]
   variables:
     WIGOLO_REPO: "$CI_PROJECT_DIR/wigolo"
     UI2API_REGISTRY_LIVE: "1"
