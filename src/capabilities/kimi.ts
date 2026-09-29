@@ -18,13 +18,30 @@
 //                              2026-09-19): [data-testid="model-select-trigger"]
 //                              opens a panel of button.model-item rows; the
 //                              picked model carries a "checked" class.
-//   kimi_web_search         -> flips the REAL composer web-search toggle
-//                              (VERIFIED 2026-09-19): [data-testid="toolkit-trigger-btn"]
-//                              opens the toolkit panel, then
+//   kimi_web_search         -> drives the REAL composer web-search path and READS
+//                              BACK whether the site itself ran the tool.
+//                              The toggle: [data-testid="toolkit-trigger-btn"] opens
+//                              the toolkit panel, then
 //                              button.toolkit-item[role="menuitem"]:has-text("Web Search")
-//                              toggles the search switch (state key selectSearch),
-//                              feeding kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH=1,
-//                              search{force}} on the next ChatService.Chat send.
+//                              is the row (VERIFIED 2026-09-19). Its state is NOT a
+//                              DOM switch — it is the localStorage key `selectSearch`
+//                              ("true"/"false"), read back here (VERIFIED 2026-09-29).
+//                              The READ-BACK (VERIFIED LIVE 2026-09-29 by opening
+//                              real conversations from the sidebar, both states):
+//                                fired   -> `div.toolcall-container…toolcall-web_search`
+//                                           (one per search call) AND a
+//                                           `span.toolcall-title-name-text` whose
+//                                           text is `Search（N results）` (FULLWIDTH
+//                                           U+FF08/U+FF09 parens), AND
+//                                           `a.pua-ref-cite-tag[href]` citation
+//                                           anchors carrying the real external URLs,
+//                                           AND a `.ref-action` reading "Reference".
+//                                not run -> zero `.toolcall-web_search` containers and
+//                                           zero citation tags (measured on a
+//                                           same-account no-search-needed chat).
+//                              "Used N tools" is NOT a discriminator — measured
+//                              ABSENT on 2 of 4 chats that did run search.
+//                              See KimiToolReadback + normalizeToolReadback.
 //   kimi_file_upload        -> attaches a file through the REAL UI
 //                              (VERIFIED 2026-09-19): toolkit panel "Add files &
 //                              images" is a <label class="toolkit-item"> wrapping
@@ -107,6 +124,141 @@ const KIMI_ATTACH_ACCEPT = [
  * refusal message can say the real wait the runner performed.
  */
 const KIMI_FILE_UPLOAD_CHIP_WAIT_MS = 3600;
+
+/**
+ * How long a read-back arm waits after a send (or a chat navigation) before it
+ * reads the site's render. Bounded, named so the refusal can quote the real wait.
+ */
+const KIMI_TOOL_SETTLE_MS = 7000;
+const KIMI_TOOL_SETTLE_POLLS = 45;
+
+/**
+ * The tool-invocation READ-BACK shape. This is what a tool-calling layer needs to
+ * turn Kimi's own rendered tool evidence into OpenAI `tool_calls` / `role:"tool"`
+ * messages WITHOUT inventing anything: every field is either something the site
+ * rendered or an explicit "not observed".
+ *
+ * MEASURED 2026-09-29 against a live kimi.ai account (www.kimi.ai, chat URLs
+ * reopened from the sidebar so both arms are the site's own render, not ours):
+ *   search FIRED  : toolcall-web_search containers = 1, tool labels included
+ *                   "Search（10 results）", citation anchors a.pua-ref-cite-tag
+ *                   carried real URLs (timeanddate.com, data.jma.go.jp,
+ *                   wunderground.com, japan.travel), `.ref-action` = "Reference".
+ *   search NOT run: toolcall-web_search containers = 0, citation tags = 0.
+ *                   (Same account, same model, a 17x23 arithmetic chat.)
+ *   "Used N tools" text is present on SOME fired chats and ABSENT on others
+ *   (absent on 2 of 4) — so it is NOT used as evidence anywhere below.
+ */
+export interface KimiToolEvidence {
+  /** Container count of the site's own fired-search node (`div.toolcall-web_search`). */
+  searchToolContainers: number;
+  /** The tool's own result label, e.g. "Search（10 results）"; null when not rendered. */
+  resultLabel: string | null;
+  /** N parsed out of resultLabel; null when not rendered. */
+  resultCount: number | null;
+  /** Every `span.toolcall-title-name-text` the page rendered (tool titles, "Thinking complete", …). */
+  labels: string[];
+  /** The site's `.ref-action` "Reference" affordance was present. */
+  referencesAction: boolean;
+  /** Citation URLs the SITE rendered on `a.pua-ref-cite-tag[href]`, in page order, deduped. */
+  citations: string[];
+}
+
+export interface KimiToolReadback {
+  /** Tool identity as the site labels it. Only "web_search" is measured so far. */
+  tool: string;
+  /** Whether the site itself rendered evidence that the tool ran. */
+  observed: boolean;
+  /** true ONLY when the site rendered its own `.toolcall-web_search` node. */
+  searchFired: boolean;
+  /** Measured composer web-search preference (localStorage `selectSearch`); null when unreadable. */
+  searchEnabled: boolean | null;
+  /** A human-facing tool title, e.g. "Retrieve Tokyo Current Weather via Web Search". */
+  toolTitle: string | null;
+  evidence: KimiToolEvidence;
+  /** NAMED reason when observed === false. Never null when observed === false. */
+  reason: string | null;
+}
+
+/** Raw, untrusted page scrape. The normalizer is the only thing allowed to make a verdict. */
+export interface KimiToolEvidenceRaw {
+  searchToolContainers?: number;
+  resultLabel?: string | null;
+  labels?: string[];
+  referencesAction?: boolean;
+  citations?: string[];
+  searchEnabled?: boolean | null;
+}
+
+/** "Search（10 results）" — the site uses FULLWIDTH parens; accept ASCII too. */
+const KIMI_SEARCH_RESULT_LABEL = /Search\s*[(（]\s*(\d+)\s*results?\s*[)）]/i;
+
+/** The site also renders a friendlier human title for the same call; match it, not "Thinking complete". */
+const KIMI_TOOL_TITLE_HINT = /web search|search/i;
+
+const REASON_NO_PROMPT = "no-prompt: kimi_web_search was called without a prompt or chatUrl, so no site-rendered tool evidence exists on the page to read back (nothing is sent and nothing is inferred)";
+const REASON_NO_EVIDENCE =
+  "not-observed: the site rendered no .toolcall-web_search container and no `Search（N results）` tool label, so the web_search tool is not observable on this turn (no citations are reported rather than invented ones)";
+
+/**
+ * The fabrication gate. This is the ONLY place a verdict is produced, and it is
+ * pure so the shape contract is testable without a browser.
+ *
+ * The invariant that matters: **an unobserved invocation can never be rendered as
+ * a successful search.** When the site's own fired-search evidence is absent,
+ * `citations` is forced to `[]` even if the scrape handed some in, `observed` is
+ * false, and a NAMED reason is attached. A raw blob carrying citations with no
+ * fired tool is treated as a scrape artifact and its citations are DROPPED.
+ */
+export function normalizeToolReadback(raw: KimiToolEvidenceRaw): KimiToolReadback {
+  const labels = (raw.labels ?? []).map((s) => String(s).trim()).filter(Boolean);
+  const scrapedLabel = (raw.resultLabel ?? "").trim() || null;
+  const labelMatch = (scrapedLabel ? [scrapedLabel] : labels).map((l) => l.match(KIMI_SEARCH_RESULT_LABEL)).find(Boolean);
+  const resultLabel = labelMatch ? (scrapedLabel && KIMI_SEARCH_RESULT_LABEL.test(scrapedLabel) ? scrapedLabel : labels.find((l) => KIMI_SEARCH_RESULT_LABEL.test(l)) ?? scrapedLabel) : scrapedLabel;
+  const resultCount = labelMatch ? Number(labelMatch[1]) : null;
+  const searchToolContainers = Number.isFinite(raw.searchToolContainers) ? Math.max(0, Number(raw.searchToolContainers)) : 0;
+  // A search fired when the site rendered its OWN search-tool node. The result
+  // label corroborates it; either alone is accepted because the site collapses
+  // the container on reload for some turns (measured), but nothing else counts.
+  const searchFired = searchToolContainers > 0 || resultCount !== null;
+  const scrapedCitations = (raw.citations ?? []).map((c) => String(c).trim()).filter((c) => /^https?:\/\//i.test(c));
+  const seen = new Set<string>();
+  const citations = searchFired
+    ? scrapedCitations
+        // The site puts a text-fragment highlight on the href
+        // ("…#:~:text=Showers%20throughout%20the%20day"); strip it so the same
+        // page cited twice is ONE citation, and dedupe on what is left.
+        .map((c) => c.split("#")[0])
+        .filter((c) => (seen.has(c) ? false : (seen.add(c), true)))
+    : [];
+  const title = labels.find((l) => KIMI_TOOL_TITLE_HINT.test(l) && !KIMI_SEARCH_RESULT_LABEL.test(l)) ?? null;
+  const searchEnabled = typeof raw.searchEnabled === "boolean" ? raw.searchEnabled : null;
+  if (!searchFired) {
+    return {
+      tool: "web_search",
+      observed: false,
+      searchFired: false,
+      searchEnabled,
+      toolTitle: null,
+      evidence: { searchToolContainers, resultLabel, resultCount, labels, referencesAction: Boolean(raw.referencesAction), citations: [] },
+      reason: REASON_NO_EVIDENCE,
+    };
+  }
+  return {
+    tool: "web_search",
+    observed: true,
+    searchFired: true,
+    searchEnabled,
+    toolTitle: title,
+    evidence: { searchToolContainers, resultLabel, resultCount, labels, referencesAction: Boolean(raw.referencesAction), citations },
+    reason: null,
+  };
+}
+
+/** The message the runner reports when there is nothing to read back at all. */
+export const KIMI_NO_PROMPT_REASON = REASON_NO_PROMPT;
+/** The message the runner reports when the site rendered no tool evidence. */
+export const KIMI_NOT_OBSERVED_REASON = REASON_NO_EVIDENCE;
 
 function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
@@ -333,41 +485,163 @@ export class KimiCapabilities {
     }
   }
 
-  // --- kimi_web_search: flip the REAL composer web-search toggle (VERIFIED) ---
+  // --- kimi_web_search: drive the REAL composer web-search path and read the
+  // tool invocation back off the page (VERIFIED 2026-09-29) ---
+  //
+  // The old version flipped the toolkit row and returned a literal ok:true
+  // without ever observing anything: a switch with no signal, and a claim that
+  // cannot fail. This version keeps the real UI path and adds the missing half —
+  // structured EVIDENCE of what the site actually did, so a tool-calling layer
+  // has something honest to convert into tool_calls.
+  //
+  // Idempotence / no flipped toggle: the toggle row carries NO switch element and
+  // its state is the localStorage key `selectSearch`; the row is clicked ONLY when
+  // that key reads "false" (measured: clicking an already-on row is a no-op). The
+  // read-back arm touches no site state at all — it only reads a chat the site's
+  // own sidebar already linked, or the turn the site's own JS just rendered.
   private async webSearch(args: Record<string, unknown>): Promise<KimiCapabilityResult> {
     const page = await this.openPage();
-    await page.waitForSelector('[data-testid="toolkit-trigger-btn"]', { timeout: 15000 }).catch(() => {});
     try {
-      const target = page.locator('button.toolkit-item').filter({ hasText: "Web Search" }).first();
-      await openToolkitItem(page, target);
-      await itemReady(page, target);
-      await target.click();
-      await page.waitForTimeout(800);
-      const state = await page.evaluate(() => {
-        const btn = [...document.querySelectorAll("button.toolkit-item")].find(
-          (b) => ((b as HTMLElement).innerText || "").trim() === "Web Search"
-        ) as HTMLElement | null;
-        // composer-area search chip / active switch, if the UI exposes one
-        const chip = document.querySelector(
-          '[data-testid*="web-search"], [class*="web-search"][class*="active"], [class*="web-search"][class*="checked"], [class*="toolkit-item"][class*="checked"], [class*="toolkit-item"][class*="active"]'
-        ) as HTMLElement | null;
+      // 1) Measured composer web-search preference, read the same way the site
+      //    persists it. A null here is honest "unread", never coerced to false.
+      const searchEnabled = await this.readSearchPreference(page);
+      if (searchEnabled === false) {
+        // Only touch the real UI when the site says search is OFF. Idempotent by
+        // construction: an already-on row is never clicked.
+        await page.waitForSelector('[data-testid="toolkit-trigger-btn"]', { timeout: 15000 }).catch(() => {});
+        const row = page.locator('button.toolkit-item').filter({ hasText: "Web Search" }).first();
+        await openToolkitItem(page, row);
+        await itemReady(page, row);
+        await row.click().catch(() => {});
+        await page.waitForTimeout(1000);
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.waitForTimeout(500);
+      }
+      const searchEnabledAfter = await this.readSearchPreference(page);
+
+      // 2) The read-back. Either a chat the site already linked (chatUrl, fully
+      //    read-only) or a turn the site's own composer just sent (prompt).
+      const chatUrl = typeof args.chatUrl === "string" ? args.chatUrl.trim() : "";
+      const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+      let turnUrl: string | null = null;
+      if (chatUrl) {
+        await page.goto(chatUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+        await page.waitForTimeout(KIMI_TOOL_SETTLE_MS);
+      } else if (prompt) {
+        const sent = await this.sendThroughComposer(page, prompt);
+        if (!sent.ok) {
+          const rb = normalizeToolReadback({ searchEnabled: searchEnabledAfter });
+          return {
+            capability: "kimi_web_search",
+            ok: false,
+            method: "dom.toolcall-readback",
+            data: { searchEnabled: searchEnabledAfter, readback: rb },
+            error: `prompt was not sent through the real composer (${sent.reason}) — no site-rendered tool evidence exists to read back`,
+          };
+        }
+        turnUrl = page.url();
+        await this.waitForTurnSettle(page);
+      } else {
+        // No prompt and no chat: report the toggle state honestly and refuse to
+        // invent an invocation.
+        const rb = normalizeToolReadback({ searchEnabled: searchEnabledAfter });
         return {
-          btnClass: btn ? (btn.className as string).toString().slice(0, 80) : null,
-          chipText: chip ? (chip.innerText || "").trim().slice(0, 40) : null,
-          chipClass: chip ? (chip.className as string).toString().slice(0, 80) : null,
+          capability: "kimi_web_search",
+          ok: false,
+          method: "dom.toolcall-readback",
+          data: { searchEnabled: searchEnabledAfter, readback: rb },
+          error: KIMI_NO_PROMPT_REASON,
         };
-      });
+      }
+
+      // 3) Read the site's own render. STRING evaluate only: the kimi bundle is
+      //    __name-mangled and named arrows inside page.evaluate hang or crash
+      //    (same constraint proven on duckduckgo chat history).
+      const raw = (await page.evaluate(`(() => {
+        const txt = (e) => ((e && (e.innerText || e.textContent)) || "").replace(/\\s+/g, " ").trim();
+        const labelNodes = [...document.querySelectorAll("span.toolcall-title-name-text")].map(txt).filter(Boolean);
+        const containers = document.querySelectorAll('div[class*="toolcall-container"][class*="web_search"], div.toolcall-web_search, [class*="toolcall"][class*="web_search"]');
+        const cite = [...document.querySelectorAll('a.pua-ref-cite-tag[href]')].map((a) => (a.getAttribute('href') || '').split('#')[0]).filter((h) => /^https?:\\/\\//.test(h));
+        const resultLabel = labelNodes.find((l) => /Search\\s*[(\\uff08]\\s*\\d+\\s*results?/i.test(l)) || null;
+        return {
+          labels: labelNodes,
+          resultLabel,
+          searchToolContainers: containers.length,
+          referencesAction: [...document.querySelectorAll(".ref-action")].some((e) => txt(e) === "Reference"),
+          citations: [...new Set(cite)],
+          searchEnabled: localStorage.getItem("selectSearch") === "true" ? true : localStorage.getItem("selectSearch") === "false" ? false : null,
+        };
+      })()`)) as KimiToolEvidenceRaw;
+      const readback = normalizeToolReadback(raw);
+      const data = { searchEnabled: searchEnabledAfter, turnUrl, readback };
+      if (!readback.observed) {
+        return {
+          capability: "kimi_web_search",
+          ok: false,
+          method: "dom.toolcall-readback",
+          data,
+          error: readback.reason ?? KIMI_NOT_OBSERVED_REASON,
+        };
+      }
       return {
         capability: "kimi_web_search",
         ok: true,
-        method: "dom.toolkit-toggle",
-        data: { toggled: "Web Search", state },
-        note: "flips composer web-search switch (state key selectSearch) — feeds kimi.chat.v1.Tool{type:TOOL_TYPE_SEARCH=1, search{force}} on the next ChatService.Chat send",
+        method: "dom.toolcall-readback",
+        data,
+        note:
+          "ok:true means the SITE ITSELF rendered the tool invocation — " +
+          `${readback.evidence.searchToolContainers} div.toolcall-web_search container(s), label ` +
+          `"${readback.evidence.resultLabel}", ${readback.evidence.citations.length} citation URL(s) the site rendered. ` +
+          "Citations come only from the site's own a.pua-ref-cite-tag[href] anchors; none are synthesized. " +
+          "Toggle state is the localStorage key `selectSearch`; the row is clicked only when it reads false, so a call never leaves the toggle flipped.",
       };
     } catch (e) {
       return this.fail("kimi_web_search", e);
     } finally {
       await this.teardownPage(page);
+    }
+  }
+
+  /** The site's own persisted web-search preference; null when the key is absent. */
+  private async readSearchPreference(page: Page): Promise<boolean | null> {
+    return page
+      .evaluate(`(() => { const v = localStorage.getItem("selectSearch"); return v === "true" ? true : v === "false" ? false : null; })()`)
+      .then((v) => (typeof v === "boolean" ? v : null))
+      .catch(() => null);
+  }
+
+  /** Type into the REAL contenteditable composer and press Enter — the site's own send. */
+  private async sendThroughComposer(
+    page: Page,
+    prompt: string
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const editor = page.locator('div.chat-input-editor[contenteditable="true"]').first();
+    try {
+      await editor.waitFor({ state: "visible", timeout: 15000 });
+    } catch {
+      return { ok: false, reason: "composer div.chat-input-editor[contenteditable=true] did not render" };
+    }
+    await editor.click({ force: true }).catch(() => {});
+    await editor.press("Control+a").catch(() => {});
+    await editor.press("Backspace").catch(() => {});
+    await editor.type(prompt, { delay: 5 }).catch(() => {});
+    await page.keyboard.press("Enter");
+    return { ok: true };
+  }
+
+  /** Wait until the rendered turn stops growing (bounded), then hand back to the read-back. */
+  private async waitForTurnSettle(page: Page): Promise<void> {
+    let prev = "";
+    let stable = 0;
+    for (let i = 0; i < KIMI_TOOL_SETTLE_POLLS; i++) {
+      await page.waitForTimeout(2000);
+      const len = await page.evaluate(`document.body.innerText.length`).catch(() => -1);
+      if (len === prev) {
+        if (++stable >= 3) return;
+      } else {
+        stable = 0;
+        prev = String(len);
+      }
     }
   }
 
