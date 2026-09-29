@@ -155,6 +155,37 @@ export function bundledChromiumPath(): string | null {
 // no browser was pinned (no channel/path/profile) and the bundled Chromium was
 // never downloaded, reuse the SYSTEM Chrome via `channel: "chrome"`. That keeps
 // every flow working on hosts that only have a normal Chrome installed.
+/** True when THIS process runs as the user that owns the Chrome profile. The
+ *  browser may only be born in that identity — see the refusal in launchBrowser. */
+function isChromeOwnerProcess(): boolean {
+  const owner = process.env.UI2API_CHROME_USER ?? "ui2api";
+  try {
+    // `os.userInfo()` reflects the REAL uid, not $USER, which an operator can set
+    // to anything and which would make this check trivially bypassable.
+    return typeof process.getuid === "function" && String(process.getuid()) === ownerUid(owner);
+  } catch {
+    return false;
+  }
+}
+
+function ownerUid(name: string): string {
+  // /etc/passwd is the only source that cannot be spoofed by an env var, and it
+  // is what `id -u` reads. A cache avoids a file read per launch attempt.
+  try {
+    const cached = uidCache.get(name);
+    if (cached !== undefined) return cached;
+    const line = readFileSync("/etc/passwd", "utf8")
+      .split("\n")
+      .find((l) => l.split(":")[0] === name);
+    const uid = line ? String(line.split(":")[2]) : "-1";
+    uidCache.set(name, uid);
+    return uid;
+  } catch {
+    return "-1";
+  }
+}
+const uidCache = new Map<string, string>();
+
 export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Promise<Browser> {
   const launchOpts = buildLaunchOptions(overrides);
   const pinless = !(launchOpts as any).channel && !(launchOpts as any).executablePath && !(launchOpts as any).userDataDir;
@@ -175,6 +206,37 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
     } catch (e) {
       lastErr = e;
     }
+  }
+  // ROUND N+104 — the ONLY supported way to get a browser here is the `ui2api`
+  // daemon. A managed spawn is refused unless this process IS the chrome owner.
+  //
+  // Measured cost of leaving it open: 23 orphaned Chrome processes owned by `me`
+  // while the real browser was `ui2api`'s. Nobody leaked them on purpose — every
+  // ad-hoc CLI invocation as the operator silently started a browser, and a
+  // second, duplicate, unmanaged, un-supervised browser accumulated for the life
+  // of the box. The "warm state" the pool was supposed to keep lived in the
+  // daemon's Chrome; the CLI's browsers were pure drain, and they were the ones
+  // that would eventually get an account challenged.
+  //
+  // So the invariant is now enforced at the only place a browser can be born:
+  // if we are not the chrome owner, attach or fail. Attaching is the correct
+  // answer, not a compromise — the daemon already holds the profile, the session
+  // and the warm state, and a second browser cannot have any of those.
+  if (!isChromeOwnerProcess()) {
+    const port = process.env.UI2API_ATTACH_PORT ?? overrides.attachPort;
+    if (port) {
+      try {
+        return await connectExistingChrome(Number(port));
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw new Error(
+      `refusing to spawn a browser: this process is not the chrome owner ` +
+        `(${process.env.UI2API_CHROME_USER ?? "ui2api"}), and the only supported browser is ` +
+        `that user's daemon. Spawning here produced 23 orphaned Chrome processes on this host. ` +
+        `Run as that user, or set UI2API_ATTACH_PORT to attach to its existing Chrome.`
+    );
   }
   // 1) Managed spawn + CDP attach (the path that actually survives heavy SPAs).
   try {
