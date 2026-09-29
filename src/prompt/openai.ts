@@ -397,7 +397,28 @@ export async function handleOpenAIRoutes(
         error: { message: "messages must contain at least one non-empty text part", type: "invalid_request_error", param: "messages" },
       });
     }
-    const newChat = Boolean(body.new_chat);
+    // ROUND N+103 — the OpenAI surface was NEVER starting a fresh conversation.
+    //
+    // It read `body.new_chat`, a ui2api-specific field that does not exist in the
+    // OpenAI wire format, so for every standards-compliant request this was
+    // `false` and the reset never ran. The driver then composed into whatever
+    // page the warm pool had handed back — a page still holding the PREVIOUS
+    // request's conversation. Measured: a request that had nothing to do with the
+    // weather came back with `"title":"Weather in Paris"`, the prior
+    // conversation's title, sitting in the response body.
+    //
+    // Why this matters more than a dirty title: the /v1 surface flattens the
+    // whole `messages` array into ONE prompt, so the request is self-contained
+    // and the site's own history is a SECOND, invisible source of truth. Two
+    // sources of truth, one of them the previous caller's conversation, is how an
+    // agent gets an answer that belongs to somebody else — silently, and with a
+    // confident-looking answer attached.
+    //
+    // So the default flips: a standards-compliant request ALWAYS starts a fresh
+    // chat, because the caller has just told us the entire conversation in
+    // `messages`. `new_chat:false` remains available to opt out and keep a
+    // warm page, for a caller that genuinely wants site-side continuity.
+    const newChat = body.new_chat === undefined ? true : Boolean(body.new_chat);
     const account = typeof body.account === "string" && body.account ? body.account : undefined;
     // Validate the identity-keyed account BEFORE any browser work (the same
     // guard /prompt runs): unknown -> the throw propagates to the server catch
