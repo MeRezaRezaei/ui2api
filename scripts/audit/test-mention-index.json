@@ -1,0 +1,905 @@
+[
+  {
+    "site": "adapta",
+    "cap": "adapta_chat",
+    "hits": []
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_comment",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_follow",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_like",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_playlist",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_search",
+    "hits": [
+      "test/capability-allowlist.test.ts:1",
+      "test/write-gate-no-auth-snapshot.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_subscribe",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_trending",
+    "hits": [
+      "test/write-gate-no-auth-snapshot.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_upload",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_video_detail",
+    "hits": [
+      "test/write-gate-no-auth-snapshot.test.ts:1"
+    ]
+  },
+  {
+    "site": "blackbox",
+    "cap": "blackbox_chat",
+    "hits": []
+  },
+  {
+    "site": "blackbox",
+    "cap": "blackbox_inference_api",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_chat",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_conversation_crud",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_file_upload",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_glms_assistant",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_image_gen",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_model_list",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_ppt",
+    "hits": []
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_web_search",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_artifacts",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_chat",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_conversation_crud",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_gpts",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_upload_attach",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_voice",
+    "hits": []
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_web_search",
+    "hits": []
+  },
+  {
+    "site": "claude",
+    "cap": "claude_artifacts",
+    "hits": []
+  },
+  {
+    "site": "claude",
+    "cap": "claude_chat",
+    "hits": []
+  },
+  {
+    "site": "claude",
+    "cap": "claude_extended_thinking",
+    "hits": []
+  },
+  {
+    "site": "claude",
+    "cap": "claude_list_conversations",
+    "hits": []
+  },
+  {
+    "site": "claude",
+    "cap": "claude_web_search",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_chat",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_cloud",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_environment",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_oauth_cli",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_repo_connect",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_task_crud",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "codex",
+    "cap": "codex_task_turns",
+    "hits": []
+  },
+  {
+    "site": "codex",
+    "cap": "codex_usage_credits",
+    "hits": []
+  },
+  {
+    "site": "conol",
+    "cap": "conol_chat",
+    "hits": []
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_chat",
+    "hits": []
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_history",
+    "hits": []
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_image_gen",
+    "hits": []
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_search_mode",
+    "hits": []
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_thinking_mode",
+    "hits": []
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_auth_entra",
+    "hits": []
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_chat",
+    "hits": []
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_deep_link",
+    "hits": []
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_grounding",
+    "hits": []
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_webchat",
+    "hits": []
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_chat",
+    "hits": [
+      "test/codefor-prose-table.test.ts:1",
+      "test/install-host-containment.test.ts:2",
+      "test/lang-php.test.ts:3",
+      "test/pool-refusal-truth.test.ts:1",
+      "test/registry.test.ts:2"
+    ]
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_list_conversations",
+    "hits": [
+      "test/lang-php.test.ts:3",
+      "test/registry.test.ts:2"
+    ]
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_reasoner",
+    "hits": [
+      "test/derive-args-delegation.test.ts:2",
+      "test/install-host-containment.test.ts:1"
+    ]
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_web_search",
+    "hits": [
+      "test/derive-args-delegation.test.ts:3",
+      "test/install-host-containment.test.ts:2",
+      "test/lang-php.test.ts:3",
+      "test/registry.test.ts:1"
+    ]
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_audio-voice",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_canvas",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_chat",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_code-interpreter",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_deep-research",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_document-analysis",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_image-generation",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_ppt-generation",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_search-images",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_video-generation",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_web-search",
+    "hits": []
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_writing",
+    "hits": []
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_chat",
+    "hits": [
+      "test/install.test.ts:1"
+    ]
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_chat_history",
+    "hits": []
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_file_upload",
+    "hits": [
+      "test/attach-gate.test.ts:1",
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_model_picker",
+    "hits": []
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_reasoning",
+    "hits": []
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_web_search",
+    "hits": []
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_chat",
+    "hits": [
+      "test/derive-dead-branch.test.ts:1",
+      "test/registry-args-truth.test.ts:1"
+    ]
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_file_upload",
+    "hits": [
+      "test/attach-gate.test.ts:1",
+      "test/gemini-file-upload.test.ts:4",
+      "test/mutating-capability-postcondition.test.ts:2"
+    ]
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_list_conversations",
+    "hits": []
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_model_list",
+    "hits": []
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_search_toggle",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:2"
+    ]
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_list_threads",
+    "hits": []
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_open_thread",
+    "hits": []
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_read_inbox",
+    "hits": []
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_search",
+    "hits": []
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_send",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1",
+      "test/mutation-readback-truth.test.ts:1"
+    ]
+  },
+  {
+    "site": "google-ai-search",
+    "cap": "google_ai_mode_search",
+    "hits": [
+      "test/capability-dispatch.test.ts:1",
+      "test/runtime-derivation-truth.test.ts:2"
+    ]
+  },
+  {
+    "site": "grok",
+    "cap": "grok_chat",
+    "hits": []
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_chat",
+    "hits": []
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_conversations",
+    "hits": []
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_mcp",
+    "hits": []
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_models",
+    "hits": []
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_settings",
+    "hits": []
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_chat",
+    "hits": []
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_deep_search",
+    "hits": []
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_document_qa",
+    "hits": []
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_list_conversations",
+    "hits": []
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_voice_mode",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_chat",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_conversations",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_files",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_models",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_realtime_history",
+    "hits": []
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_voice",
+    "hits": []
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_chat",
+    "hits": []
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_file_upload",
+    "hits": [
+      "test/attach-gate.test.ts:1",
+      "test/mutating-capability-postcondition.test.ts:3"
+    ]
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_list_conversations",
+    "hits": []
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_long_context",
+    "hits": []
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_model_list",
+    "hits": []
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_web_search",
+    "hits": []
+  },
+  {
+    "site": "manus",
+    "cap": "manus_chat",
+    "hits": []
+  },
+  {
+    "site": "manus",
+    "cap": "manus_sandbox",
+    "hits": []
+  },
+  {
+    "site": "manus",
+    "cap": "manus_session_list",
+    "hits": []
+  },
+  {
+    "site": "manus",
+    "cap": "manus_session_start",
+    "hits": []
+  },
+  {
+    "site": "manus",
+    "cap": "manus_upload",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_commands",
+    "hits": []
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_connectors",
+    "hits": []
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_search",
+    "hits": []
+  },
+  {
+    "site": "notion",
+    "cap": "notion_chat",
+    "hits": []
+  },
+  {
+    "site": "notion",
+    "cap": "notion_qna",
+    "hits": []
+  },
+  {
+    "site": "perplexity",
+    "cap": "perplexity_chat",
+    "hits": []
+  },
+  {
+    "site": "poe",
+    "cap": "poe_chat",
+    "hits": []
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_chat",
+    "hits": []
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_conversation_crud",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_file_upload",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_model_list",
+    "hits": []
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_model_switch",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_chat",
+    "hits": [
+      "test/capability-allowlist.test.ts:1",
+      "test/registry.test.ts:1"
+    ]
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_code_run",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_conversation_crud",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_deep_think",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_file_upload",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_image_gen",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_podcast",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_translations",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_tts",
+    "hits": []
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_web_search",
+    "hits": []
+  },
+  {
+    "site": "tinycms",
+    "cap": "tinycms_chat",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_agent_workspace",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_artifact_preview",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_chat",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_chat_history",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_deployments",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_git_sync",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_image_generation",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_integrations_mcp",
+    "hits": []
+  },
+  {
+    "site": "v0",
+    "cap": "v0_voice_input",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_audio",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_chat",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_image",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_list_conversations",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_model_list",
+    "hits": []
+  },
+  {
+    "site": "venice",
+    "cap": "venice_video",
+    "hits": []
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_api_gateway",
+    "hits": []
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_chat",
+    "hits": []
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_console",
+    "hits": []
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_comment",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_like",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_playlist_add",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:3"
+    ]
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_search",
+    "hits": [
+      "test/capability-allowlist.test.ts:2",
+      "test/codefor-prose-table.test.ts:1",
+      "test/derive-dead-branch.test.ts:2",
+      "test/registry-args-truth.test.ts:3"
+    ]
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_subscribe",
+    "hits": [
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_transcript",
+    "hits": []
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_upload",
+    "hits": [
+      "test/attach-gate.test.ts:1",
+      "test/mutating-capability-postcondition.test.ts:1"
+    ]
+  },
+  {
+    "site": "zenmux",
+    "cap": "zenmux_chat",
+    "hits": [
+      "test/capability-allowlist.test.ts:1"
+    ]
+  }
+]

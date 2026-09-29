@@ -1,0 +1,646 @@
+[
+  {
+    "site": "adapta",
+    "cap": "adapta_chat"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_comment"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_follow"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_like"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_playlist"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_search"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_subscribe"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_trending"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_upload"
+  },
+  {
+    "site": "araprat",
+    "cap": "araprat_video_detail"
+  },
+  {
+    "site": "blackbox",
+    "cap": "blackbox_chat"
+  },
+  {
+    "site": "blackbox",
+    "cap": "blackbox_inference_api"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_chat"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_conversation_crud"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_file_upload"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_glms_assistant"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_image_gen"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_model_list"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_ppt"
+  },
+  {
+    "site": "chatglm",
+    "cap": "chatglm_web_search"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_artifacts"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_chat"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_conversation_crud"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_gpts"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_upload_attach"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_voice"
+  },
+  {
+    "site": "chatgpt",
+    "cap": "chatgpt_web_search"
+  },
+  {
+    "site": "claude",
+    "cap": "claude_artifacts"
+  },
+  {
+    "site": "claude",
+    "cap": "claude_chat"
+  },
+  {
+    "site": "claude",
+    "cap": "claude_extended_thinking"
+  },
+  {
+    "site": "claude",
+    "cap": "claude_list_conversations"
+  },
+  {
+    "site": "claude",
+    "cap": "claude_web_search"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_chat"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_cloud"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_environment"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_oauth_cli"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_repo_connect"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_task_crud"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_task_turns"
+  },
+  {
+    "site": "codex",
+    "cap": "codex_usage_credits"
+  },
+  {
+    "site": "conol",
+    "cap": "conol_chat"
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_chat"
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_history"
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_image_gen"
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_search_mode"
+  },
+  {
+    "site": "copilot",
+    "cap": "copilot_thinking_mode"
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_auth_entra"
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_chat"
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_deep_link"
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_grounding"
+  },
+  {
+    "site": "copilot-m365",
+    "cap": "copilot_m365_webchat"
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_chat"
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_list_conversations"
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_reasoner"
+  },
+  {
+    "site": "deepseek",
+    "cap": "deepseek_web_search"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_audio-voice"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_canvas"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_chat"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_code-interpreter"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_deep-research"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_document-analysis"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_image-generation"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_ppt-generation"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_search-images"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_video-generation"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_web-search"
+  },
+  {
+    "site": "doubao",
+    "cap": "doubao_writing"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_chat"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_chat_history"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_file_upload"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_model_picker"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_reasoning"
+  },
+  {
+    "site": "duckduckgo",
+    "cap": "duckduckgo_web_search"
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_chat"
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_file_upload"
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_list_conversations"
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_model_list"
+  },
+  {
+    "site": "gemini",
+    "cap": "gemini_search_toggle"
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_list_threads"
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_open_thread"
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_read_inbox"
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_search"
+  },
+  {
+    "site": "gmail",
+    "cap": "gmail_send"
+  },
+  {
+    "site": "google-ai-search",
+    "cap": "google_ai_mode_search"
+  },
+  {
+    "site": "grok",
+    "cap": "grok_chat"
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_chat"
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_conversations"
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_mcp"
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_models"
+  },
+  {
+    "site": "huggingchat",
+    "cap": "huggingchat_settings"
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_chat"
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_deep_search"
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_document_qa"
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_list_conversations"
+  },
+  {
+    "site": "hunyuan",
+    "cap": "hunyuan_voice_mode"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_chat"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_conversations"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_files"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_models"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_realtime_history"
+  },
+  {
+    "site": "inner-ai",
+    "cap": "inner_ai_voice"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_chat"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_file_upload"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_list_conversations"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_long_context"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_model_list"
+  },
+  {
+    "site": "kimi",
+    "cap": "kimi_web_search"
+  },
+  {
+    "site": "manus",
+    "cap": "manus_chat"
+  },
+  {
+    "site": "manus",
+    "cap": "manus_sandbox"
+  },
+  {
+    "site": "manus",
+    "cap": "manus_session_list"
+  },
+  {
+    "site": "manus",
+    "cap": "manus_session_start"
+  },
+  {
+    "site": "manus",
+    "cap": "manus_upload"
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_commands"
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_connectors"
+  },
+  {
+    "site": "notion",
+    "cap": "notion_ai_search"
+  },
+  {
+    "site": "notion",
+    "cap": "notion_chat"
+  },
+  {
+    "site": "notion",
+    "cap": "notion_qna"
+  },
+  {
+    "site": "perplexity",
+    "cap": "perplexity_chat"
+  },
+  {
+    "site": "poe",
+    "cap": "poe_chat"
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_chat"
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_conversation_crud"
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_file_upload"
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_model_list"
+  },
+  {
+    "site": "t3chat",
+    "cap": "t3chat_model_switch"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_chat"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_code_run"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_conversation_crud"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_deep_think"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_file_upload"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_image_gen"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_podcast"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_translations"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_tts"
+  },
+  {
+    "site": "tencent-aistudio",
+    "cap": "tencent_aistudio_web_search"
+  },
+  {
+    "site": "tinycms",
+    "cap": "tinycms_chat"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_agent_workspace"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_artifact_preview"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_chat"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_chat_history"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_deployments"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_git_sync"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_image_generation"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_integrations_mcp"
+  },
+  {
+    "site": "v0",
+    "cap": "v0_voice_input"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_audio"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_chat"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_image"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_list_conversations"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_model_list"
+  },
+  {
+    "site": "venice",
+    "cap": "venice_video"
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_api_gateway"
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_chat"
+  },
+  {
+    "site": "xiaomimimo",
+    "cap": "xiaomimimo_console"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_comment"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_like"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_playlist_add"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_search"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_subscribe"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_transcript"
+  },
+  {
+    "site": "youtube",
+    "cap": "youtube_upload"
+  },
+  {
+    "site": "zenmux",
+    "cap": "zenmux_chat"
+  }
+]

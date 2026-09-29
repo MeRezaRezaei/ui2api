@@ -1,0 +1,1451 @@
+[
+  {
+    "cap": "adapta_chat",
+    "site": "adapta",
+    "runner": "src/capabilities/adapta.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_comment",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_follow",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_like",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_playlist",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_search",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_subscribe",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_trending",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_upload",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "araprat_video_detail",
+    "site": "araprat",
+    "runner": "src/capabilities/araprat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "blackbox_chat",
+    "site": "blackbox",
+    "runner": "src/capabilities/blackbox.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "blackbox_inference_api",
+    "site": "blackbox",
+    "runner": "src/capabilities/blackbox.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_chat",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_conversation_crud",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_file_upload",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_glms_assistant",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_image_gen",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_model_list",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_ppt",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatglm_web_search",
+    "site": "chatglm",
+    "runner": "src/capabilities/chatglm.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "chatgpt_artifacts",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_chat",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_conversation_crud",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_gpts",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_upload_attach",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_voice",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "chatgpt_web_search",
+    "site": "chatgpt",
+    "runner": "src/capabilities/chatgpt.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "claude_artifacts",
+    "site": "claude",
+    "runner": "src/capabilities/claude.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "claude_chat",
+    "site": "claude",
+    "runner": "src/capabilities/claude.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "claude_extended_thinking",
+    "site": "claude",
+    "runner": "src/capabilities/claude.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "claude_list_conversations",
+    "site": "claude",
+    "runner": "src/capabilities/claude.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "claude_web_search",
+    "site": "claude",
+    "runner": "src/capabilities/claude.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "codex_chat",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_cloud",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_environment",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_oauth_cli",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_repo_connect",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_task_crud",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_task_turns",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "codex_usage_credits",
+    "site": "codex",
+    "runner": "src/capabilities/codex.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "conol_chat",
+    "site": "conol",
+    "runner": "src/capabilities/conol.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "copilot_chat",
+    "site": "copilot",
+    "runner": "src/capabilities/copilot.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "copilot_history",
+    "site": "copilot",
+    "runner": "src/capabilities/copilot.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "copilot_image_gen",
+    "site": "copilot",
+    "runner": "src/capabilities/copilot.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "copilot_search_mode",
+    "site": "copilot",
+    "runner": "src/capabilities/copilot.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "copilot_thinking_mode",
+    "site": "copilot",
+    "runner": "src/capabilities/copilot.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "copilot_m365_auth_entra",
+    "site": "copilot-m365",
+    "runner": "src/capabilities/copilot-m365.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "copilot_m365_chat",
+    "site": "copilot-m365",
+    "runner": "src/capabilities/copilot-m365.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "copilot_m365_deep_link",
+    "site": "copilot-m365",
+    "runner": "src/capabilities/copilot-m365.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "copilot_m365_grounding",
+    "site": "copilot-m365",
+    "runner": "src/capabilities/copilot-m365.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "copilot_m365_webchat",
+    "site": "copilot-m365",
+    "runner": "src/capabilities/copilot-m365.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "deepseek_chat",
+    "site": "deepseek",
+    "runner": "src/capabilities/deepseek.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "deepseek_list_conversations",
+    "site": "deepseek",
+    "runner": "src/capabilities/deepseek.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "deepseek_reasoner",
+    "site": "deepseek",
+    "runner": "src/capabilities/deepseek.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "deepseek_web_search",
+    "site": "deepseek",
+    "runner": "src/capabilities/deepseek.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "doubao_audio-voice",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_canvas",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_chat",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_code-interpreter",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_deep-research",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_document-analysis",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_image-generation",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_ppt-generation",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_search-images",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_video-generation",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_web-search",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "doubao_writing",
+    "site": "doubao",
+    "runner": "src/capabilities/doubao.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "duckduckgo_chat",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "duckduckgo_chat_history",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "duckduckgo_file_upload",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "duckduckgo_model_picker",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "duckduckgo_reasoning",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "duckduckgo_web_search",
+    "site": "duckduckgo",
+    "runner": "src/capabilities/duckduckgo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gemini_chat",
+    "site": "gemini",
+    "runner": "src/capabilities/gemini.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gemini_file_upload",
+    "site": "gemini",
+    "runner": "src/capabilities/gemini.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gemini_list_conversations",
+    "site": "gemini",
+    "runner": "src/capabilities/gemini.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gemini_model_list",
+    "site": "gemini",
+    "runner": "src/capabilities/gemini.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gemini_search_toggle",
+    "site": "gemini",
+    "runner": "src/capabilities/gemini.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gmail_list_threads",
+    "site": "gmail",
+    "runner": "src/capabilities/gmail.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gmail_open_thread",
+    "site": "gmail",
+    "runner": "src/capabilities/gmail.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gmail_read_inbox",
+    "site": "gmail",
+    "runner": "src/capabilities/gmail.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gmail_search",
+    "site": "gmail",
+    "runner": "src/capabilities/gmail.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "gmail_send",
+    "site": "gmail",
+    "runner": "src/capabilities/gmail.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "google_ai_mode_search",
+    "site": "google-ai-search",
+    "runner": "src/capabilities/google-ai-search.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "grok_chat",
+    "site": "grok",
+    "runner": "src/capabilities/grok.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "huggingchat_chat",
+    "site": "huggingchat",
+    "runner": "src/capabilities/huggingchat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "huggingchat_conversations",
+    "site": "huggingchat",
+    "runner": "src/capabilities/huggingchat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "huggingchat_mcp",
+    "site": "huggingchat",
+    "runner": "src/capabilities/huggingchat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "huggingchat_models",
+    "site": "huggingchat",
+    "runner": "src/capabilities/huggingchat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "huggingchat_settings",
+    "site": "huggingchat",
+    "runner": "src/capabilities/huggingchat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "hunyuan_chat",
+    "site": "hunyuan",
+    "runner": "src/capabilities/hunyuan.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "hunyuan_deep_search",
+    "site": "hunyuan",
+    "runner": "src/capabilities/hunyuan.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "hunyuan_document_qa",
+    "site": "hunyuan",
+    "runner": "src/capabilities/hunyuan.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "hunyuan_list_conversations",
+    "site": "hunyuan",
+    "runner": "src/capabilities/hunyuan.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "hunyuan_voice_mode",
+    "site": "hunyuan",
+    "runner": "src/capabilities/hunyuan.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "inner_ai_chat",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "inner_ai_conversations",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "inner_ai_files",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "inner_ai_models",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "inner_ai_realtime_history",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "inner_ai_voice",
+    "site": "inner-ai",
+    "runner": "src/capabilities/inner-ai.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "kimi_chat",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "kimi_file_upload",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "kimi_list_conversations",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "kimi_long_context",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "kimi_model_list",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "kimi_web_search",
+    "site": "kimi",
+    "runner": "src/capabilities/kimi.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "manus_chat",
+    "site": "manus",
+    "runner": "src/capabilities/manus.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "manus_sandbox",
+    "site": "manus",
+    "runner": "src/capabilities/manus.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "manus_session_list",
+    "site": "manus",
+    "runner": "src/capabilities/manus.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "manus_session_start",
+    "site": "manus",
+    "runner": "src/capabilities/manus.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "manus_upload",
+    "site": "manus",
+    "runner": "src/capabilities/manus.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "notion_ai_commands",
+    "site": "notion",
+    "runner": "src/capabilities/notion.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "notion_ai_connectors",
+    "site": "notion",
+    "runner": "src/capabilities/notion.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "notion_ai_search",
+    "site": "notion",
+    "runner": "src/capabilities/notion.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "notion_chat",
+    "site": "notion",
+    "runner": "src/capabilities/notion.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "notion_qna",
+    "site": "notion",
+    "runner": "src/capabilities/notion.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "perplexity_chat",
+    "site": "perplexity",
+    "runner": "src/capabilities/perplexity.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "poe_chat",
+    "site": "poe",
+    "runner": "src/capabilities/poe.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "t3chat_chat",
+    "site": "t3chat",
+    "runner": "src/capabilities/t3chat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "t3chat_conversation_crud",
+    "site": "t3chat",
+    "runner": "src/capabilities/t3chat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "t3chat_file_upload",
+    "site": "t3chat",
+    "runner": "src/capabilities/t3chat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "t3chat_model_list",
+    "site": "t3chat",
+    "runner": "src/capabilities/t3chat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "t3chat_model_switch",
+    "site": "t3chat",
+    "runner": "src/capabilities/t3chat.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "tencent_aistudio_chat",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_code_run",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_conversation_crud",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_deep_think",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_file_upload",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_image_gen",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_podcast",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_translations",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_tts",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tencent_aistudio_web_search",
+    "site": "tencent-aistudio",
+    "runner": "src/capabilities/tencent-aistudio.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": true,
+    "armLoginGated": false
+  },
+  {
+    "cap": "tinycms_chat",
+    "site": "tinycms",
+    "runner": "src/capabilities/tinycms.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_agent_workspace",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_artifact_preview",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_chat",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_chat_history",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_deployments",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_git_sync",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_image_generation",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_integrations_mcp",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "v0_voice_input",
+    "site": "v0",
+    "runner": "src/capabilities/v0.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "venice_audio",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "venice_chat",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "venice_image",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "venice_list_conversations",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "venice_model_list",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "venice_video",
+    "site": "venice",
+    "runner": "src/capabilities/venice.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "xiaomimimo_api_gateway",
+    "site": "xiaomimimo",
+    "runner": "src/capabilities/xiaomimimo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "xiaomimimo_chat",
+    "site": "xiaomimimo",
+    "runner": "src/capabilities/xiaomimimo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "xiaomimimo_console",
+    "site": "xiaomimimo",
+    "runner": "src/capabilities/xiaomimimo.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  },
+  {
+    "cap": "youtube_comment",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_like",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_playlist_add",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_search",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_subscribe",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_transcript",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "youtube_upload",
+    "site": "youtube",
+    "runner": "src/capabilities/youtube.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": false
+  },
+  {
+    "cap": "zenmux_chat",
+    "site": "zenmux",
+    "runner": "src/capabilities/zenmux.ts",
+    "dispatched": true,
+    "armOkTrue": false,
+    "armOkFalse": false,
+    "armLoginGated": true
+  }
+]

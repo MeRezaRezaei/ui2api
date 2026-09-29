@@ -1,0 +1,1502 @@
+[
+  {
+    "cap": "adapta_chat",
+    "site": "adapta",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_comment",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_follow",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_like",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_playlist",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_search",
+    "site": "araprat",
+    "via": "search",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "ok:true-unclassified"
+  },
+  {
+    "cap": "araprat_subscribe",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_trending",
+    "site": "araprat",
+    "via": "trending",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "ok:true-unclassified"
+  },
+  {
+    "cap": "araprat_upload",
+    "site": "araprat",
+    "via": "loginGated",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "araprat_video_detail",
+    "site": "araprat",
+    "via": "videoDetail",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "read-with-nonempty-guard"
+  },
+  {
+    "cap": "blackbox_chat",
+    "site": "blackbox",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "blackbox_inference_api",
+    "site": "blackbox",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_chat",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_conversation_crud",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_file_upload",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_glms_assistant",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_image_gen",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_model_list",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_ppt",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatglm_web_search",
+    "site": "chatglm",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_artifacts",
+    "site": "chatgpt",
+    "via": "artifacts",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_chat",
+    "site": "chatgpt",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "chatgpt_conversation_crud",
+    "site": "chatgpt",
+    "via": "conversationCrud",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_gpts",
+    "site": "chatgpt",
+    "via": "gpts",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_upload_attach",
+    "site": "chatgpt",
+    "via": "uploadAttach",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_voice",
+    "site": "chatgpt",
+    "via": "voice",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "chatgpt_web_search",
+    "site": "chatgpt",
+    "via": "webSearch",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "claude_artifacts",
+    "site": "claude",
+    "via": "artifacts",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "claude_chat",
+    "site": "claude",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "claude_extended_thinking",
+    "site": "claude",
+    "via": "extendedThinking",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "claude_list_conversations",
+    "site": "claude",
+    "via": "listConversations",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "FAKE-ABLE-success-from-nonthrow"
+  },
+  {
+    "cap": "claude_web_search",
+    "site": "claude",
+    "via": "webSearch",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_chat",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_cloud",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_environment",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_oauth_cli",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_repo_connect",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_task_crud",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_task_turns",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "codex_usage_credits",
+    "site": "codex",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "conol_chat",
+    "site": "conol",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_chat",
+    "site": "copilot",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "copilot_history",
+    "site": "copilot",
+    "via": "history",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_image_gen",
+    "site": "copilot",
+    "via": "imageGen",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_search_mode",
+    "site": "copilot",
+    "via": "searchMode",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_thinking_mode",
+    "site": "copilot",
+    "via": "thinkingMode",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_m365_auth_entra",
+    "site": "copilot-m365",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_m365_chat",
+    "site": "copilot-m365",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_m365_deep_link",
+    "site": "copilot-m365",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_m365_grounding",
+    "site": "copilot-m365",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "copilot_m365_webchat",
+    "site": "copilot-m365",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "deepseek_chat",
+    "site": "deepseek",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "deepseek_list_conversations",
+    "site": "deepseek",
+    "via": "listConversations",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "FAKE-ABLE-success-from-nonthrow"
+  },
+  {
+    "cap": "deepseek_reasoner",
+    "site": "deepseek",
+    "via": "reasoner",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "other"
+  },
+  {
+    "cap": "deepseek_web_search",
+    "site": "deepseek",
+    "via": "webSearch",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "other"
+  },
+  {
+    "cap": "doubao_audio-voice",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_canvas",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_chat",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_code-interpreter",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_deep-research",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_document-analysis",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_image-generation",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_ppt-generation",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_search-images",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_video-generation",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_web-search",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "doubao_writing",
+    "site": "doubao",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "duckduckgo_chat",
+    "site": "duckduckgo",
+    "via": "chat",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "read-with-nonempty-guard"
+  },
+  {
+    "cap": "duckduckgo_chat_history",
+    "site": "duckduckgo",
+    "via": "chatHistory",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "FAKE-ABLE-success-from-nonthrow"
+  },
+  {
+    "cap": "duckduckgo_file_upload",
+    "site": "duckduckgo",
+    "via": "fileUpload",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "ok:true-unclassified"
+  },
+  {
+    "cap": "duckduckgo_model_picker",
+    "site": "duckduckgo",
+    "via": "modelPicker",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "read-with-nonempty-guard"
+  },
+  {
+    "cap": "duckduckgo_reasoning",
+    "site": "duckduckgo",
+    "via": "reasoning",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "ok:true-unclassified"
+  },
+  {
+    "cap": "duckduckgo_web_search",
+    "site": "duckduckgo",
+    "via": "webSearch",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "ok:true-unclassified"
+  },
+  {
+    "cap": "gmail_list_threads",
+    "site": "gmail",
+    "via": "listThreads",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": true,
+    "verdict": "other"
+  },
+  {
+    "cap": "gmail_open_thread",
+    "site": "gmail",
+    "via": "openThread",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "gmail_read_inbox",
+    "site": "gmail",
+    "via": "readInbox",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": true,
+    "verdict": "other"
+  },
+  {
+    "cap": "gmail_search",
+    "site": "gmail",
+    "via": "search",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "gmail_send",
+    "site": "gmail",
+    "via": "send",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "google_ai_mode_search",
+    "site": "google-ai-search",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "grok_chat",
+    "site": "grok",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "huggingchat_chat",
+    "site": "huggingchat",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "huggingchat_conversations",
+    "site": "huggingchat",
+    "via": "conversations",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "huggingchat_mcp",
+    "site": "huggingchat",
+    "via": "mcp",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "huggingchat_models",
+    "site": "huggingchat",
+    "via": "models",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "huggingchat_settings",
+    "site": "huggingchat",
+    "via": "settings",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "hunyuan_chat",
+    "site": "hunyuan",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "hunyuan_deep_search",
+    "site": "hunyuan",
+    "via": "deepSearch",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "hunyuan_document_qa",
+    "site": "hunyuan",
+    "via": "documentQa",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "hunyuan_list_conversations",
+    "site": "hunyuan",
+    "via": "listConversations",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "FAKE-ABLE-success-from-nonthrow"
+  },
+  {
+    "cap": "hunyuan_voice_mode",
+    "site": "hunyuan",
+    "via": "voiceMode",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_chat",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_conversations",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_files",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_models",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_realtime_history",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "inner_ai_voice",
+    "site": "inner-ai",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "manus_chat",
+    "site": "manus",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "manus_sandbox",
+    "site": "manus",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "manus_session_list",
+    "site": "manus",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "manus_session_start",
+    "site": "manus",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "manus_upload",
+    "site": "manus",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "notion_ai_commands",
+    "site": "notion",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "notion_ai_connectors",
+    "site": "notion",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "notion_ai_search",
+    "site": "notion",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "notion_chat",
+    "site": "notion",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "notion_qna",
+    "site": "notion",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "perplexity_chat",
+    "site": "perplexity",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "poe_chat",
+    "site": "poe",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "t3chat_chat",
+    "site": "t3chat",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "t3chat_conversation_crud",
+    "site": "t3chat",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "t3chat_file_upload",
+    "site": "t3chat",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "t3chat_model_list",
+    "site": "t3chat",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "t3chat_model_switch",
+    "site": "t3chat",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_chat",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_code_run",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_conversation_crud",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_deep_think",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_file_upload",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_image_gen",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_podcast",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_translations",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_tts",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tencent_aistudio_web_search",
+    "site": "tencent-aistudio",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "tinycms_chat",
+    "site": "tinycms",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_agent_workspace",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_artifact_preview",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_chat",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_chat_history",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_deployments",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_git_sync",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_image_generation",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_integrations_mcp",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "v0_voice_input",
+    "site": "v0",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "venice_audio",
+    "site": "venice",
+    "via": "audioGenerate",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "venice_chat",
+    "site": "venice",
+    "via": "chat",
+    "okTrue": true,
+    "driver": true,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "driver-guarded"
+  },
+  {
+    "cap": "venice_image",
+    "site": "venice",
+    "via": "imageGenerate",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "venice_list_conversations",
+    "site": "venice",
+    "via": "listConversations",
+    "okTrue": true,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "FAKE-ABLE-success-from-nonthrow"
+  },
+  {
+    "cap": "venice_model_list",
+    "site": "venice",
+    "via": "modelList",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "venice_video",
+    "site": "venice",
+    "via": "videoGenerate",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "xiaomimimo_api_gateway",
+    "site": "xiaomimimo",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "xiaomimimo_chat",
+    "site": "xiaomimimo",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "xiaomimimo_console",
+    "site": "xiaomimimo",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "youtube_comment",
+    "site": "youtube",
+    "via": "comment",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "other"
+  },
+  {
+    "cap": "youtube_like",
+    "site": "youtube",
+    "via": "like",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "other"
+  },
+  {
+    "cap": "youtube_playlist_add",
+    "site": "youtube",
+    "via": "playlistAdd",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "other"
+  },
+  {
+    "cap": "youtube_search",
+    "site": "youtube",
+    "via": "search",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "youtube_subscribe",
+    "site": "youtube",
+    "via": "subscribe",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "youtube_transcript",
+    "site": "youtube",
+    "via": "transcript",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": true,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "youtube_upload",
+    "site": "youtube",
+    "via": "upload",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": true,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  },
+  {
+    "cap": "zenmux_chat",
+    "site": "zenmux",
+    "via": "case",
+    "okTrue": false,
+    "driver": false,
+    "pageRead": false,
+    "nonEmpty": false,
+    "verdict": "honest-refusal"
+  }
+]
