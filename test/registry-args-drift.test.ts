@@ -47,17 +47,36 @@ test("GOAL 139: every declared capability's arg contract is DERIVABLE from its r
   );
 });
 
-test("GOAL 139: NO manifest schema has drifted from its runner", () => {
-  const report = derive();
+type Row = { site: string; cap: string; schema: unknown; why: string };
+
+/**
+ * The comparison the gate performs, as a PURE function over
+ * (derived row, manifest-side entry or null). Splitting it out is what makes the
+ * anti-vacuity half PROVABLE: the "row matches no manifest capability" case is
+ * unreachable by mutating the repo (the derivation iterates the manifests, so
+ * every row has a matching entry), which means an in-file self-test on a
+ * synthetic row is the only honest way to prove that case fails LOUD rather
+ * than being skipped. See the self-test below, which does exactly that.
+ */
+function compare(
+  rows: Row[],
+  lookup: (r: Row) => { id?: string; inputSchema?: unknown } | null
+): { drifted: string[]; unresolved: string[]; compared: number } {
   const drifted: string[] = [];
-  for (const r of report) {
-    const mf = resolve(CAP, r.site, "manifest.json");
-    if (!existsSync(mf)) continue;
-    const manifest = JSON.parse(readFileSync(mf, "utf8"));
-    const entry = (manifest.capabilities ?? []).find(
-      (c: { id?: string }) => c?.id === r.cap
-    );
-    if (!entry) continue;
+  const unresolved: string[] = [];
+  let compared = 0;
+  for (const r of rows) {
+    const entry = lookup(r);
+    if (!entry) {
+      // The original loop `continue`d here — a `-1` lookup silently DROPPING the
+      // row, which is exactly how a drift gate goes vacuous: shrink the report
+      // (or lose a package) and the gate compares less, then passes.
+      unresolved.push(
+        `${r.site}/${r.cap}: the derivation reported this row but no manifest capability declares that id`
+      );
+      continue;
+    }
+    compared++;
     if (entry.inputSchema === undefined) {
       drifted.push(`${r.site}/${r.cap}: manifest declares NO arg contract`);
       continue;
@@ -68,6 +87,12 @@ test("GOAL 139: NO manifest schema has drifted from its runner", () => {
       );
     }
   }
+  return { drifted, unresolved, compared };
+}
+
+/** The assertions the gate makes, factored so the self-test exercises the SAME ones. */
+function assertNoDrift(rows: Row[], lookup: (r: Row) => { id?: string; inputSchema?: unknown } | null): void {
+  const { drifted, unresolved, compared } = compare(rows, lookup);
   assert.deepEqual(
     drifted,
     [],
@@ -75,6 +100,85 @@ test("GOAL 139: NO manifest schema has drifted from its runner", () => {
       .slice(0, 12)
       .map((d) => `  - ${d}`)
       .join("\n")}`
+  );
+  // After the drift check, so a real drift still reads as a drift.
+  assert.deepEqual(
+    unresolved,
+    [],
+    `derivation rows that no manifest entry could be compared against — the gate would have skipped them silently.\n${unresolved
+      .slice(0, 12)
+      .map((d) => `  - ${d}`)
+      .join("\n")}`
+  );
+  assert.equal(
+    compared,
+    rows.length,
+    `only ${compared} of ${rows.length} derived rows were compared — a missing target narrowed the gate`
+  );
+}
+
+test("GOAL 139: NO manifest schema has drifted from its runner", () => {
+  const report = derive();
+  assertNoDrift(report, (r) => {
+    const mf = resolve(CAP, r.site, "manifest.json");
+    if (!existsSync(mf)) return null;
+    const manifest = JSON.parse(readFileSync(mf, "utf8"));
+    return (
+      (manifest.capabilities ?? []).find((c: { id?: string }) => c?.id === r.cap) ?? null
+    );
+  });
+});
+
+test("GOAL 139: the drift gate is PROVEN to FAIL on a row it cannot resolve (anti-vacuity self-test)", () => {
+  const schema = { type: "object", properties: { q: { type: "string" } }, required: ["q"] };
+  const row: Row = { site: "kimi", cap: "kimi_web_search", schema, why: "synthetic" };
+
+  // 1) In agreement — the gate must PASS.
+  assertNoDrift([row], () => ({ id: "kimi_web_search", inputSchema: schema }));
+
+  // 2) A real schema difference — must FAIL LOUDLY, naming both sides.
+  assert.throws(
+    () => assertNoDrift([row], () => ({ id: "kimi_web_search", inputSchema: { type: "object", properties: {} } })),
+    /kimi\/kimi_web_search: manifest says .*but the runner reads/,
+    "a schema difference must fail loudly, not pass"
+  );
+
+  // 3) THE VACUITY CASE. A `-1` lookup: the row resolves to no manifest entry.
+  // Under the original `if (!entry) continue;` this compared NOTHING and passed.
+  assert.throws(
+    () => assertNoDrift([row], () => null),
+    /no manifest capability declares that id/,
+    "a row that matches no manifest entry must be a LOUD failure, never a silent skip"
+  );
+
+  // 4) The same, with a second resolvable row alongside it: the unresolvable one
+  // must still be caught even though half the report resolves cleanly. The
+  // `unresolved` assertion fires first (it is the one that names the row), and
+  // the `compared === rows.length` assertion is the backstop that fires if the
+  // unresolved list is ever bypassed — proven separately in (5).
+  assert.throws(
+    () =>
+      assertNoDrift(
+        [row, { site: "kimi", cap: "kimi_chat", schema, why: "synthetic" }],
+        (r) => (r.cap === "kimi_web_search" ? { id: "kimi_web_search", inputSchema: schema } : null)
+      ),
+    /kimi\/kimi_chat: the derivation reported this row but no manifest capability declares that id/,
+    "a partially-resolvable report must fail on the unresolved row, not quietly compare less"
+  );
+
+  // 5) The backstop, isolated: `compared` is the assertion that fires when a row
+  // is dropped WITHOUT being reported as unresolved. Assert it on the raw
+  // compare() output, because assertNoDrift short-circuits on (4)'s list first.
+  const narrowed = compare(
+    [row, { site: "kimi", cap: "kimi_chat", schema, why: "synthetic" }],
+    (r) => (r.cap === "kimi_web_search" ? { id: "kimi_web_search", inputSchema: schema } : null)
+  );
+  assert.equal(narrowed.drifted.length, 0, "the resolvable half still agrees");
+  assert.equal(narrowed.unresolved.length, 1, "the unresolvable half is named");
+  assert.equal(
+    narrowed.compared,
+    1,
+    "compare() must report how many rows it actually compared, so a narrowed slice is visible"
   );
 });
 

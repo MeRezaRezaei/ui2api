@@ -379,6 +379,11 @@ export class ChatPool {
   // 2 live pages at max=1, which also bypassed the maxWaiters bound entirely
   // because the over-capacity branch sits after the spawn branch.
   private spawning = 0;
+  /* GOAL 156 (B): the SAME reservation, broken down per site. `spawning` alone
+     is a global count, so a burst of concurrent acquires for ONE site could
+     reserve every slot in the pool between them while each of them still saw
+     that site holding none — see `siteWorkerCount`. */
+  private spawningBySite = new Map<string, number>();
   private waiters: PoolWaiter[] = [];
   private readonly min: number;
   private readonly max: number;
@@ -507,12 +512,44 @@ export class ChatPool {
     return this.workers.filter((w) => w.profileId === siteId && !w.busy).length;
   }
 
-  /* GOAL 156 (B) — how many slots this site currently HOLDS (idle + busy).
+  /* GOAL 156 (B) — how many slots this site currently HOLDS: its materialised
+     pages (idle + busy) PLUS the slots it has RESERVED for spawns still in
+     flight.
+
      Busy pages are counted on purpose: the whole failure is a site whose
      requests are wedged IN FLIGHT, so counting only idle pages would let a
-     hung site keep adding capacity forever. */
+     hung site keep adding capacity forever.
+
+     The RESERVED slots are counted because `acquire()` is not `async` on
+     purpose (see its pacing note), so every one of a burst of concurrent
+     acquires for one site runs the capacity decision in the SAME synchronous
+     turn — before ANY of them has materialised a page. MEASURED, this was the
+     defect the cap existed to prevent: at max=4, perSiteMax=3, six concurrent
+     `acquire("gemini")` calls each saw `siteWorkerCount("gemini") === 0`
+     (nothing had spawned yet), so all four passed the per-site gate and took
+     the WHOLE global ceiling between them. A different site arriving in that
+     window then read `workers.length + spawning === max` and was parked, which
+     is precisely the cross-site head-of-line blocking GOAL 156 set out to
+     remove. A slot a site is ABOUT to hold is a slot it holds: the reservation
+     is the per-site count, and the global ceiling is then reached from other
+     sites rather than exhausted by one. */
   private siteWorkerCount(siteId: string): number {
-    return this.workers.filter((w) => w.profileId === siteId).length;
+    return (
+      this.workers.filter((w) => w.profileId === siteId).length + (this.spawningBySite.get(siteId) ?? 0)
+    );
+  }
+
+  /** Take/give back a spawn reservation for `siteId`, tracking the global total. */
+  private reserveSpawn(siteId: string): void {
+    this.spawning++;
+    this.spawningBySite.set(siteId, (this.spawningBySite.get(siteId) ?? 0) + 1);
+  }
+
+  private releaseSpawnReservation(siteId: string): void {
+    const held = this.spawningBySite.get(siteId) ?? 0;
+    if (held <= 0) return;
+    this.spawningBySite.set(siteId, held - 1);
+    this.spawning--;
   }
 
   // Borrow a ready page for `siteId`, creating + warming one on demand (subject
@@ -616,17 +653,29 @@ export class ChatPool {
     // wedged site degrade to ITSELF: the reserve stays reachable by everyone
     // else even while this site is mid-storm.
     if (this.workers.length + this.spawning < this.max && this.siteWorkerCount(siteId) < this.perSiteMax) {
-      this.spawning++;
+      this.reserveSpawn(siteId);
+      // A failed spawn must not leak a slot (GOAL 103), on EITHER counter: the
+      // global one and the per-site one, or a site that kept failing to warm
+      // would stay at its cap forever with nothing holding it.
+      let reserved = true;
+      const release = (): void => {
+        if (!reserved) return;
+        reserved = false;
+        this.releaseSpawnReservation(siteId);
+      };
       return (internal ? Promise.resolve() : this.paced(siteId))
         .then(() => this.spawn(siteId))
         .then((w) => {
           this.workers.push(w);
+          // The page is now a real worker, so the reservation must be given
+          // back BEFORE it is counted as held: `siteWorkerCount` adds the
+          // reservation to the materialised pages, and leaving it set for one
+          // tick would double-count this slot against the site's own cap.
+          release();
           this.markBusy(w);
           return w;
         })
-        .finally(() => {
-          this.spawning--;
-        });
+        .finally(release);
     }
     // Over capacity: wait for the next free page — but only inside the two
     // bounds. GOAL 83.

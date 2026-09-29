@@ -121,10 +121,42 @@ const PREDICATES: Array<[string, (s: string) => boolean]> = [
 
 // ------------------------------------------------------------------ tests
 
+/** `bash -n` parses a file and exits. It never waits on a network, a lock or a
+ *  tty, so its real cost is one fork+exec plus a parse of a few hundred lines —
+ *  single-digit milliseconds warm, and still well under a second on a loaded CI
+ *  runner that is compiling the test tree. 10s is therefore ~3 orders of
+ *  magnitude of headroom while remaining a bound that FIRES: a `bash -n` that
+ *  has not returned in 10s is not slow, it is stuck (a bash reading a script
+ *  from a hung mount, an fs on a wedged network volume), and a stuck parse must
+ *  be a named failure rather than the 864s file-level hang GOAL 102 exists to
+ *  prevent. A round number like 30000 would be the "hides a hang" choice the
+ *  gate's own comment warns against: long enough to swallow a real stall. */
+const BASH_SYNTAX_TIMEOUT_MS = 10_000;
+
 test("restart-policy.sh exists and is bash -n clean", () => {
   assert.ok(existsSync(SCRIPT), "scripts/ops/restart-policy.sh must exist");
-  execFileSync("bash", ["-n", SCRIPT], { stdio: "pipe" });
-  assert.ok(existsSync(`${SCRIPT}`), "script is syntactically valid bash");
+  // The bound is real, and a breach is reported as a BREACH — a bare
+  // execFileSync ETIMEDOUT is indistinguishable at the failure site from a
+  // syntax error, and the two demand opposite responses.
+  let checked = false;
+  try {
+    execFileSync("bash", ["-n", SCRIPT], { stdio: "pipe", timeout: BASH_SYNTAX_TIMEOUT_MS });
+    checked = true;
+  } catch (err) {
+    const e = err as { code?: string; signal?: string; status?: number | null };
+    assert.fail(
+      `bash -n on ${SCRIPT} did not complete cleanly ` +
+        `(code=${String(e.code)} signal=${String(e.signal)} status=${String(e.status)}). ` +
+        (e.signal === "SIGTERM" || e.code === "ETIMEDOUT"
+          ? `TIMED OUT after ${BASH_SYNTAX_TIMEOUT_MS}ms — the bound fired, which is the point: this is a stuck parse, not a slow one.`
+          : "The syntax check FAILED — the script does not parse."),
+    );
+  }
+  // ANTI-VACUITY: the check must have actually RUN. Reaching this line only
+  // because `bash -n` returned is the proof; the assertion is here so that a
+  // future edit which catches-and-ignores, or which short-circuits this test,
+  // cannot leave a green check that checked nothing.
+  assert.equal(checked, true, "bash -n must have run to completion, not been skipped or swallowed");
 });
 
 for (const [name, predicate] of PREDICATES) {
@@ -141,7 +173,17 @@ test("restart policy: --apply is the only mutating path (dry run mutates nothing
   // The DRY RUN branch must say so explicitly; a supervisor that mutates on
   // inspection is not a supervisor.
   assert.match(SRC, /DRY RUN — nothing was restarted/);
-  const afterGuard = SRC.slice(SRC.indexOf('if [ "$APPLY" = 1 ]'));
+  // The anchor is asserted FOUND before the slice, not after. `indexOf` returns
+  // -1 when the guard is absent, and `slice(-1)` on a multi-line source returns
+  // only its LAST character — so the raw slice does still fail (measured:
+  // `slice(-1)` === "\n", which `assert.match` rejects), but it fails with a
+  // regex-shaped error about a string that is obviously nothing like a script.
+  // Asserting the anchor first names the actual missing thing. Stated honestly:
+  // this is a READABILITY fix, not a vacuity fix — the un-asserted form was
+  // never green-on-absent, so nothing here changes this test's verdict.
+  const guardAt = SRC.indexOf('if [ "$APPLY" = 1 ]');
+  assert.notEqual(guardAt, -1, `restart-policy.sh must contain the literal APPLY guard 'if [ "$APPLY" = 1 ]'`);
+  const afterGuard = SRC.slice(guardAt);
   assert.match(afterGuard, /systemctl restart/);
 });
 

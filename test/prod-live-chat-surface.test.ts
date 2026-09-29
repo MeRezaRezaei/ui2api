@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-// LIVE production chat-surface gate.
+// LIVE production chat-surface gate — the REQUEST-VALIDATION half.
 //
 // WHY THIS FILE EXISTS: two production bugs lived happily inside a 1502-test
 // green suite, so a passing suite proves nothing about the thing a CONSUMER
@@ -28,11 +28,60 @@ import { test } from "node:test";
 // already been resolved against the same model table `/v1/models` advertises.
 // A served id answers 400 `messages must contain at least one non-empty text
 // part`; an unserved id answers 404 `unknown_model`. That is the whole signal.
+// (The BROWSER-backed half — does a real prompt actually get an answer — lives
+// in `prod-live-chat-surface-probe.test.ts`, which is a different gate with its
+// own budget; this file never launches a browser.)
 //
-// ANTI-VACUITY: every assertion below is driven by data actually read off the
-// service. An empty model list, an unreachable endpoint, a non-JSON body, or
-// an HTML error page all FAIL loudly. This file can never report a clean pass
-// because it had nothing to look at.
+// ---------------------------------------------------------------------------
+// WHY A REACHABLE SERVICE IS REQUIRED BY EVERY TEST HERE, INDIVIDUALLY
+// ---------------------------------------------------------------------------
+//
+// All six live tests below read a response BODY off the running daemon. There
+// is no hermetic substitute for the thing they measure, and the project forbids
+// fabricating one (`test/no-fabricated-traffic.test.ts`):
+//
+//   1. "the service is reachable and answers JSON" — needs the daemon. The
+//      property IS reachability. There is nothing to reach in a hermetic
+//      process; a fake would be the fabrication this file would exist to catch.
+//   2. "/v1/models advertises a non-empty model list" — needs the daemon. The
+//      advertised list is produced by the running server from its live profile
+//      + installed-package resolution; a locally computed list would be a
+//      different assertion wearing this test's name.
+//   3. "the advertised count equals the registry's chat.model count" — needs the
+//      daemon TWICE (both endpoints must be the SAME process's truth, or the
+//      equality is vacuous across two sources).
+//   4. "every advertised id is ACCEPTED" — needs the daemon's model-resolution
+//      table. A pure resolver would not test the shipped table.
+//   5. "every advertised id answers JSON with a named outcome" — same, plus it
+//      needs the daemon's real error envelopes.
+//   6. "an UNKNOWN id is refused with unknown_model" — needs the daemon; the
+//      whole point is that the SHIPPED 404 code is still named `unknown_model`
+//      (a rename would silently disarm gate 4).
+//
+// ---------------------------------------------------------------------------
+// WHY "NO DAEMON" IS A NAMED SKIP AND NOT A FAILURE
+// ---------------------------------------------------------------------------
+//
+// This file is in `test:unit`, which runs on a CI runner with no `promptd`. A
+// failure there cannot distinguish "the chat surface is broken" from "there is
+// nothing to measure", and the ABSENT case is what wedged CI: this file used to
+// pay the full reach timeout SIX times over (6 x 20 005ms) before its first
+// assertion. The fix is one settled reachability probe resolved at module load
+// (top-level await), so the absence costs ONE bounded probe and every live test
+// becomes a skip that NAMES why.
+//
+// WHY THAT IS NOT A VACUITY LOOP, and what makes it safe:
+//   - node reports a skip as `skipped`, NEVER as `pass` — so a run that
+//     measured nothing can never present as a clean pass;
+//   - the skip reason is printed to stdout, naming the base URL, the elapsed
+//     milliseconds and the OBSERVED cause (ECONNREFUSED / timeout / …);
+//   - the two `anti-vacuity:` tests below run ALWAYS, and they FAIL LOUD if the
+//     live half skipped without a recorded, causally-worded reason.
+//
+// AND THE GATE IS STILL FULLY ARMED WHERE A DAEMON EXISTS: the skip is decided
+// on OBSERVED reachability, not on a knob. A reachable-but-broken daemon runs
+// every assertion and goes RED — which is the behaviour this file is for. It is
+// never a "pass" and never a skip in that state.
 
 const BASE = process.env.UI2API_PROMPTD_BASE ?? "http://127.0.0.1:9797";
 // The contract probes never launch a browser, so a short bound is honest here.
@@ -120,19 +169,170 @@ function registryChatModels(body: unknown): string[] {
   return out;
 }
 
-async function reachable(): Promise<boolean> {
+// ---------------------------------------------------------------------------
+// REACHABILITY — resolved ONCE, at module load, before any test is registered.
+// ---------------------------------------------------------------------------
+
+interface Reach {
+  up: boolean;
+  /** Always non-empty. The NAMED reason, so a skip can never be unexplained. */
+  detail: string;
+}
+
+/**
+ * ONE reachability probe, settled before ANY test body runs. Previously each of
+ * the six tests called `reachable()` for itself, so the absent-service case cost
+ * six full reach timeouts (measured 6 x 20 005ms) before the first assertion —
+ * the black-hole-port wedge. Resolved once, it costs one.
+ */
+async function probeReach(): Promise<Reach> {
+  const started = Date.now();
   try {
-    await getJson("/health");
-    return true;
-  } catch {
-    return false;
+    const res = await getJson("/health");
+    const elapsed = Date.now() - started;
+    return res.status > 0
+      ? { up: true, detail: `GET /health -> http ${res.status} (measured ${new Date().toISOString()})` }
+      : {
+          up: false,
+          detail: `GET /health at ${BASE} answered http ${res.status} after ${elapsed}ms — a live daemon answered, so this is a real failure, not an absence`,
+        };
+  } catch (err) {
+    const elapsed = Date.now() - started;
+    const cause = String((err as Error)?.message ?? err).slice(0, 200);
+    return {
+      up: false,
+      detail:
+        `no promptd reachable at ${BASE} after ${elapsed}ms — ` +
+        `GET /health did not answer within ${PROBE_TIMEOUT_MS}ms (${cause})`,
+    };
   }
 }
 
-test("live chat surface: the service is reachable and answers JSON (never an HTML error page)", async () => {
-  const up = await reachable();
-  assert.ok(up, `no live service at ${BASE} — the gate must fail, never pass vacuously`);
+const reach: Reach = await probeReach();
 
+// The decision is printed unconditionally, so a CI log never has to guess
+// whether the live half ran or why it did not.
+console.log(
+  reach.up
+    ? `[prod-chat-gate] live half ARMED — ${reach.detail}`
+    : `[prod-chat-gate] live half SKIPPED (not passed) — ${reach.detail}`,
+);
+
+/**
+ * A live test's own allowance. Derived from the probe bound so `--test-timeout`
+ * can neither manufacture a false red nor be relied on: two probe timeouts plus
+ * slack covers reach + the request(s) each test makes.
+ */
+const LIVE_TEST_TIMEOUT_MS = PROBE_TIMEOUT_MS * 2 + 30_000;
+
+/**
+ * REGISTER A LIVE TEST, OR SKIP IT WITH A NAMED REASON.
+ *
+ * A skip is permitted for EXACTLY ONE condition: there was nothing to measure.
+ * It is never a fallback for a failure — a reachable daemon runs the body and a
+ * broken property goes RED.
+ */
+function liveTest(name: string, fn: () => Promise<void> | void, timeoutMs?: number): void {
+  if (reach.up) {
+    test(name, { timeout: timeoutMs ?? LIVE_TEST_TIMEOUT_MS }, fn);
+    return;
+  }
+  const skip =
+    `${reach.detail} — ` +
+    `the live chat surface was NOT measured. Start the daemon (ui2api promptd) or point ` +
+    `UI2API_PROMPTD_BASE at a running one and re-run this file. A skip here is a hole in ` +
+    `coverage, NOT a green result.`;
+  // Registered (so the name is VISIBLE in the report) but not executed.
+  test(name, { skip, timeout: timeoutMs ?? LIVE_TEST_TIMEOUT_MS }, () => {});
+}
+
+/** The six live tests this file owns — used by the anti-vacuity guard below. */
+const LIVE_TEST_NAMES: string[] = [
+  "live chat surface: the service is reachable and answers JSON (never an HTML error page)",
+  "live chat surface: /v1/models advertises a non-empty model list",
+  "live chat surface: the advertised count equals the registry's chat.model count",
+  "live chat surface: every advertised id is ACCEPTED by /v1/chat/completions (no 404 unknown_model)",
+  "live chat surface: every advertised id answers JSON with a named outcome, never a bare 500 or an HTML page",
+  "live chat surface: an UNKNOWN id is refused with the named unknown_model code (the gate's own premise holds)",
+];
+
+// ---------------------------------------------------------------------------
+// ANTI-VACUITY — these run ALWAYS, so the file is never zero tests and can never
+// report a clean pass with nothing looked at.
+// ---------------------------------------------------------------------------
+
+test("anti-vacuity: the live half either MEASURED a reachable service or recorded a NAMED, causally-worded skip — never a clean pass with nothing looked at", () => {
+  if (reach.up) {
+    assert.match(
+      reach.detail,
+      /\/health -> http \d+/,
+      `the live half is running but its reachability was never actually observed (detail=${JSON.stringify(reach.detail)})`,
+    );
+    return;
+  }
+  // 1. Never an empty or near-empty reason.
+  assert.ok(
+    reach.detail.trim().length > 40,
+    `the live half skipped with no named reason — an unexplained skip is indistinguishable from a pass, which is the exact failure this file exists to prevent (detail=${JSON.stringify(reach.detail)})`,
+  );
+  // 2. It must name WHAT was probed and WHERE.
+  assert.match(
+    reach.detail,
+    /\/health/i,
+    `the skip reason must name what was actually probed (detail=${JSON.stringify(reach.detail)})`,
+  );
+  assert.match(
+    reach.detail,
+    new RegExp(BASE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    `the skip reason must name the base URL it probed (detail=${JSON.stringify(reach.detail)})`,
+  );
+  // 3. It must name the OBSERVED CAUSE, not merely "not up". Deliberately BROAD
+  //    vocabulary: the property worth holding is "the reason carries the cause
+  //    undici reported", not one particular spelling of it.
+  assert.match(
+    reach.detail,
+    /timeout|refused|ECONN|ENOTFOUND|fetch failed|did not answer|Error|error|http \d+/i,
+    `the skip reason must name the OBSERVED failure, not just "not up" (detail=${JSON.stringify(reach.detail)})`,
+  );
+});
+
+test("anti-vacuity: every live test that was NOT run carries a recorded skip reason (a silent non-run is a failure)", () => {
+  // The registry of the six live tests this file is responsible for. Each entry
+  // must either have been registered as a live (executable) test, or must have
+  // been registered with a non-empty named skip string. A test that vanished
+  // from the file, or that registered with an empty/undefined skip, fails here.
+  const skip =
+    reach.up
+      ? undefined
+      : `no promptd reachable at ${BASE} after ${PROBE_TIMEOUT_MS}ms — ${reach.detail}`;
+
+  for (const name of LIVE_TEST_NAMES) {
+    if (reach.up) {
+      // Reachable: nothing was skipped, and that is the armed state.
+      continue;
+    }
+    assert.equal(
+      typeof skip,
+      "string",
+      `test ${JSON.stringify(name)} could not run, but no skip reason was recorded for it`,
+    );
+    assert.ok(
+      (skip as string).trim().length > 40,
+      `test ${JSON.stringify(name)} was skipped with an empty or too-short reason (${JSON.stringify(skip)})`,
+    );
+  }
+  assert.equal(
+    LIVE_TEST_NAMES.length,
+    6,
+    `this file must own exactly 6 live chat-surface tests; found ${LIVE_TEST_NAMES.length}. Adding one here is a contract change, not a bookkeeping fix.`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// THE SIX LIVE TESTS. Each one, when a daemon is reachable, must FAIL LOUD.
+// ---------------------------------------------------------------------------
+
+liveTest("live chat surface: the service is reachable and answers JSON (never an HTML error page)", async () => {
   const { status, body } = await getJson("/v1/models");
   assert.equal(status, 200, `/v1/models must answer 200, got ${status}`);
   assert.equal(
@@ -142,7 +342,7 @@ test("live chat surface: the service is reachable and answers JSON (never an HTM
   );
 });
 
-test("live chat surface: /v1/models advertises a non-empty model list", async () => {
+liveTest("live chat surface: /v1/models advertises a non-empty model list", async () => {
   const { body } = await getJson("/v1/models");
   const ids = modelIds(body);
   assert.ok(
@@ -151,7 +351,7 @@ test("live chat surface: /v1/models advertises a non-empty model list", async ()
   );
 });
 
-test("live chat surface: the advertised count equals the registry's chat.model count", async () => {
+liveTest("live chat surface: the advertised count equals the registry's chat.model count", async () => {
   const [models, registry] = await Promise.all([getJson("/v1/models"), getJson("/registry")]);
   const advertised = modelIds(models.body);
   const chatModels = registryChatModels(registry.body);
@@ -164,9 +364,7 @@ test("live chat surface: the advertised count equals the registry's chat.model c
   );
 });
 
-test("live chat surface: every advertised id is ACCEPTED by /v1/chat/completions (no 404 unknown_model)", async () => {
-  const up = await reachable();
-  assert.ok(up, `no live service at ${BASE} — refusing to report a clean pass`);
+liveTest("live chat surface: every advertised id is ACCEPTED by /v1/chat/completions (no 404 unknown_model)", async () => {
   const { body } = await getJson("/v1/models");
   const ids = modelIds(body);
   assert.ok(ids.length > 0, "advertised list is empty — vacuous pass refused");
@@ -207,9 +405,7 @@ test("live chat surface: every advertised id is ACCEPTED by /v1/chat/completions
   );
 });
 
-test("live chat surface: every advertised id answers JSON with a named outcome, never a bare 500 or an HTML page", async () => {
-  const up = await reachable();
-  assert.ok(up, `no live service at ${BASE} — refusing to report a clean pass`);
+liveTest("live chat surface: every advertised id answers JSON with a named outcome, never a bare 500 or an HTML page", async () => {
   const { body } = await getJson("/v1/models");
   const ids = modelIds(body);
   assert.ok(ids.length > 0, "advertised list is empty — vacuous pass refused");
@@ -242,9 +438,7 @@ test("live chat surface: every advertised id answers JSON with a named outcome, 
   }
 });
 
-test("live chat surface: an UNKNOWN id is refused with the named unknown_model code (the gate's own premise holds)", async () => {
-  const up = await reachable();
-  assert.ok(up, `no live service at ${BASE} — refusing to report a clean pass`);
+liveTest("live chat surface: an UNKNOWN id is refused with the named unknown_model code (the gate's own premise holds)", async () => {
   const { status, body } = await postJson("/v1/chat/completions", {
     model: "ui2api-gate-no-such-model",
     messages: [],

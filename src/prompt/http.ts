@@ -1086,9 +1086,42 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         const q = new URL(req.url, "http://localhost");
         const site = q.searchParams.get("site") ?? "";
         const account = q.searchParams.get("account") ?? "";
-        if (!site || !account) return send(res, 400, { error: "site and account are required" });
+        if (!site) return send(res, 400, { error: "site is required" });
         const profile = idFrom(site, profilesById);
         const host = new URL(profile.url).host;
+        // ABSTRACTION LEAK #1, closed: `account` is a ui2api INTERNAL concept
+        // (a vault slug/email), and this route used to REFUSE TO LIST without
+        // one — so browsing the capability surface required knowing a concept an
+        // external consumer of an OpenAI-compatible API could not guess. Only
+        // the operation that genuinely needs an identity (reading ONE account's
+        // stored fingerprint) may require it, and a missing input there is a
+        // named 400, never a refusal to list.
+        //
+        // So: `site` alone now BROWSE — the same declared capability surface the
+        // path form `/capabilities/<site>` serves, plus the stored accounts it
+        // lists (`[]` = none stored). This is strictly WIDENING: the previous
+        // 400 for a missing `account` is gone, nothing is renamed, and every
+        // request that answered before answers identically. `account` remains
+        // accepted and remains REQUIRED to read a fingerprint.
+        if (!account) {
+          const pkg = registryPackageFor(site);
+          return send(res, 200, {
+            site: profile.id,
+            host,
+            name: pkg?.name,
+            url: pkg?.url,
+            capabilities: (pkg?.tools ?? []).map((tool) => ({
+              id: tool.id,
+              name: tool.name,
+              description: tool.description,
+              method: tool.method,
+            })),
+            source: "manifest",
+            accounts: pkg?.accounts ?? [],
+            probed: false,
+            hint: "add &account=<id> to read that account's stored capability fingerprint",
+          });
+        }
         // GOAL 51: canonical resolution — an unresolvable account (write-refused
         // alias) 400s instead of reading a fingerprint under a folded slug.
         if (!resolveStoredAccount(dataDir, host, account)) {

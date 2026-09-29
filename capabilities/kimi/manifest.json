@@ -67,7 +67,16 @@
       "recipe": "recipes/kimi_web_search.json",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "chatUrl": {
+            "type": "string",
+            "description": "read by the runner as args.chatUrl"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "read by the runner as args.prompt"
+          }
+        },
         "required": []
       }
     },

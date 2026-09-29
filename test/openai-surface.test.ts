@@ -31,21 +31,78 @@ test("siteIdFromModel accepts bare, ui2api/ and ui2api- prefixes", () => {
   assert.equal(siteIdFromModel(undefined, ""), "");
 });
 
-test("messagesToPrompt joins text parts and drops non-text multimodal parts", () => {
-  const out = messagesToPrompt([
-    { role: "system", content: "be terse" },
-    { role: "user", content: "hello" },
+// RETARGETED (was: "joins text parts and drops non-text multimodal parts").
+//
+// The old expectation — that a non-text part is SILENTLY DROPPED and the text
+// around it is still sent — pinned a shape the implementation deliberately
+// abandoned (commit b276c10). Silently dropping an image meant the caller got
+// a confident, real answer to a question that was never asked, with no way to
+// detect it. The part is now NAMED and refused. The test was the stale side, so
+// it is rewritten to assert the CURRENT contract, by EXERCISING it:
+//
+//   - text parts (both "text" and "input_text") ARE joined, in order
+//   - roles are LABELLED, so a flattened transcript can be reconstructed
+//   - any non-text part REFUSES, naming every offending kind
+//
+// The refusal assertion is deliberately not `typeof out === "string"`: it
+// asserts the throw, its error class, and that the offending kind appears in
+// the message, so a silent-drop regression cannot pass here.
+test("messagesToPrompt joins text parts and refuses non-text multimodal parts by name", () => {
+  // text parts join, in order, for both OpenAI spellings
+  assert.equal(
+    messagesToPrompt([
+      { role: "user", content: [{ type: "text", text: "describe this" }, { type: "input_text", text: "in detail" }] },
+    ] as never),
+    "describe this\nin detail",
+    "text parts must be joined, not dropped or reordered",
+  );
+
+  // roles are labelled, so a consumer can reconstruct who said what
+  assert.equal(
+    messagesToPrompt([
+      { role: "system", content: "be terse" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ] as never),
+    "[system instruction]: be terse\nhello\n[assistant]: hi",
+  );
+
+  // a non-text part is REFUSED and NAMED — never silently dropped
+  const throws = (msgs: unknown) => {
+    try {
+      const out = messagesToPrompt(msgs as never);
+      return { threw: false as const, out };
+    } catch (e) {
+      return { threw: true as const, err: e as { name?: string; message?: string; kinds?: string[] } };
+    }
+  };
+
+  const img = throws([
+    { role: "user", content: [{ type: "text", text: "describe this" }, { type: "image_url", image_url: { url: "data:..." } }] },
+  ]);
+  assert.equal(img.threw, true, "an image part must NOT be silently dropped — a dropped image yields a confident answer to a question never asked");
+  if (img.threw) {
+    assert.equal(img.err.name, "ContentPartUnsupported");
+    assert.deepEqual(img.err.kinds, ["image_url"], "the refusal must name the offending kind");
+    assert.ok(String(img.err.message).includes("image_url"), "the message must name the kind so a caller can act on it");
+  }
+
+  // every offending kind is collected, so one refusal names them all
+  const many = throws([
     {
       role: "user",
       content: [
-        { type: "text", text: "describe this" },
+        { type: "text", text: "look" },
         { type: "image_url", image_url: { url: "data:..." } },
+        { type: "file", file: { file_id: "f" } },
       ],
     },
   ]);
-  assert.equal(out, "be terse\nhello\ndescribe this");
+  assert.equal(many.threw, true);
+  if (many.threw) assert.deepEqual(many.err.kinds, ["image_url", "file"], "every non-text kind must be named");
+
   assert.equal(messagesToPrompt([]), "");
-  assert.equal(messagesToPrompt([{ role: "user" }]), "");
+  assert.equal(messagesToPrompt([{ role: "user" }] as never), "");
 });
 
 function startTestServer(pool: unknown): Promise<{ server: Server; port: number }> {

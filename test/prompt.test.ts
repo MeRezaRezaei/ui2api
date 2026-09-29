@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatDriver } from "../src/prompt/driver.js";
@@ -108,6 +108,54 @@ function startMockChat(): Promise<{ url: string; close(): void; profile: ChatSit
   });
 }
 
+/* `GET /health`'s `ok` is COMPUTED (`healthOk`, src/prompt/http.ts), not a
+ * literal: a daemon that advertises chat models over a vault with ZERO usable
+ * accounts is exactly the prod 2026-09-27 incident (23 minutes of failing
+ * prompts while /health said ok:true), so it answers `ok:false` — correctly.
+ *
+ * These daemon tests run against a FRESH temp dataDir, i.e. an empty vault,
+ * while advertising one profile. That combination is honestly `ok:false`, so
+ * the `ok === true` assertions below could not pass against correct code.
+ *
+ * The fix is to make the fixture honest rather than to relax the assertion:
+ * seed ONE usable account into the temp vault, exactly through the on-disk
+ * layout `healthVaultBlock` -> `listAccounts` -> `verifyStoredAccount` read
+ * (index row + a well-shaped AUTHED snapshot). `ok:true` then has to be EARNED
+ * through the real verdict path. A dummy profile was not an option: with
+ * chatModels === 0 and no accounts the rule would pass vacuously.
+ */
+function seedUsableVault(dataDir: string, host = "fixture.test"): void {
+  const accDir = join(dataDir, "sessions", host, "tester");
+  mkdirSync(accDir, { recursive: true });
+  writeFileSync(
+    join(accDir, "state.json"),
+    JSON.stringify({
+      version: 1,
+      host,
+      origin: `https://${host}/`,
+      capturedAt: new Date().toISOString(),
+      cookies: [{ name: "auth_token", value: "x", domain: `.${host}` }],
+      localStorage: [["user", "me"]],
+      sessionStorage: [],
+      indexedDB: [],
+    }),
+  );
+  writeFileSync(
+    join(dataDir, "sessions", host, "accounts.json"),
+    JSON.stringify({
+      accounts: [
+        {
+          slug: "tester",
+          identity: "tester@example.com",
+          host,
+          source: "import",
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+}
+
 test("ChatDriver sends a prompt to an AI chat site (fixture) and returns the streamed answer", async () => {
   const site = await startMockChat();
   const dir = mkdtempSync(join(tmpdir(), "u2a-prompt-"));
@@ -184,6 +232,7 @@ test("promptd exposes the engine as localhost JSON so /var/www apps can use it u
   const site = await startMockChat();
   const dir = mkdtempSync(join(tmpdir(), "u2a-promptd-"));
   try {
+    seedUsableVault(dir);
     const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile] });
     const base = `http://127.0.0.1:${svc.port}`;
     try {
@@ -226,6 +275,7 @@ test("promptd bearer gate: token set => 401 without/with wrong token, 200 with i
   const site = await startMockChat();
   const dir = mkdtempSync(join(tmpdir(), "u2a-token-"));
   try {
+    seedUsableVault(dir);
     const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile], token: "op-secret" });
     const base = `http://127.0.0.1:${svc.port}`;
     try {
@@ -251,6 +301,7 @@ test("promptd without a token answers localhost requests unauthed (localhost-onl
   const site = await startMockChat();
   const dir = mkdtempSync(join(tmpdir(), "u2a-notoken-"));
   try {
+    seedUsableVault(dir);
     const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile] });
     const base = `http://127.0.0.1:${svc.port}`;
     try {

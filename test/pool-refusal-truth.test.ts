@@ -169,6 +169,16 @@ async function runEveryProbe(start: Start): Promise<Probe[]> {
     rec("invalid_json", "NEVER emitted: an under-limit body", await rawCall(port, "POST", "/prompt", Buffer.from(JSON.stringify({ filler: "x".repeat(UNDER_LIMIT), prompt: "" }))));
 
     rec("not_found", "GET /v1/no-such-endpoint (the /v1 terminal 404)", await call(port, "GET", "/v1/no-such-endpoint"));
+    // GOAL 156 added these two rows to the table. A DECLARED code with no probe
+    // is a gap this gate reports by design — so a new row is not done until it
+    // can be DRIVEN. Both are ordinary /v1 refusals on this same daemon:
+    // `model_not_found` is the single-id GET (src/prompt/openai.ts:827+), and
+    // `unsupported_content_part` is the non-text content part the flattener
+    // refuses rather than silently drops (openai.ts:760). A VALID model is used
+    // on the second so the 404-the-model guard cannot answer first — the point
+    // is the content part, not the model.
+    rec("model_not_found", "GET /v1/models/<an id the daemon does not serve>", await call(port, "GET", "/v1/models/no-such-model-id"));
+    rec("unsupported_content_part", "POST /v1/chat/completions with an image_url content part", await call(port, "POST", "/v1/chat/completions", { model: "deepseek", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "http://127.0.0.1/x.png" } }] }] }));
     rec("unknown_model", "POST /v1/chat/completions with a bogus model", await call(port, "POST", "/v1/chat/completions", { model: "no-such-model", messages: [{ role: "user", content: "hi" }] }));
     rec("unknown_capability", "POST /capability/deepseek with a bogus capability", await call(port, "POST", "/capability/deepseek", { capability: "no-such-capability" }));
     rec("no_stored_account", "POST /capability/deepseek with an account not in the vault", await call(port, "POST", "/capability/deepseek", { capability: "deepseek_chat", account: "ghost-account" }));
@@ -273,10 +283,13 @@ test("every code the error contract DECLARES is REACHABLE — driven over loopba
   );
 
   // The two codes this gate exists for, named explicitly so a regression reads
-  // as itself and not as a generic diff.
-  for (const [code, status] of [["invalid_json", 400], ["payload_too_large", 413]] as const) {
+  // as itself and not as a generic diff. The GOAL-156 pair rides along: they are
+  // named RECIVABLE too, so a probe that quietly stopped arriving fails HERE
+  // loudly rather than only as a bare "no probe" line — the silent-skip class
+  // this repo has been bitten by before.
+  for (const [code, status] of [["invalid_json", 400], ["payload_too_large", 413], ["model_not_found", 404], ["unsupported_content_part", 400]] as const) {
     const hit = probes.find((p) => p.expect === code && !p.how.startsWith("NEVER emitted") && p.got.code === code && p.got.status === status);
-    assert.ok(hit, `${code} must be RECEIVABLE at ${status} by a real client — it was the declared-but-dead code`);
+    assert.ok(hit, `${code} must be RECEIVABLE at ${status} by a real client — the probe that drives it did not arrive carrying it: ${JSON.stringify(probes.filter((p) => p.expect === code))}`);
   }
 });
 

@@ -1,7 +1,10 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { daemonPosture, TOKEN_ENV } from "../src/prompt/posture.js";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startPromptd } from "../src/prompt/http.js";
+import { daemonPosture, TOKEN_ENV, type Posture } from "../src/prompt/posture.js";
 
 /**
  * GOAL 100: the daemon disclosed nothing about its own posture. These pins make
@@ -9,7 +12,6 @@ import { daemonPosture, TOKEN_ENV } from "../src/prompt/posture.js";
  * (c) incapable of leaking a secret, and (d) actually responsive to the knobs.
  */
 
-const HTTP_SRC = readFileSync("src/prompt/http.ts", "utf8");
 const BROWSER_SRC = readFileSync("src/runtime/browser.ts", "utf8");
 
 d("GOAL 100: the daemon discloses its posture honestly", () => {
@@ -19,10 +21,46 @@ d("GOAL 100: the daemon discloses its posture honestly", () => {
     assert.equal(daemonPosture({ [TOKEN_ENV]: "   " }).auth, "localhost-only", "a whitespace token is not a token");
   });
 
-  t("served /health and /status actually carry the posture block", () => {
-    // the disclosure must be on the WIRE, not merely computed somewhere
-    assert.match(HTTP_SRC, /req\.url === "\/health"[\s\S]{0,400}posture: daemonPosture\(/, "/health must carry posture");
-    assert.match(HTTP_SRC, /req\.url === "\/status"[\s\S]{0,400}posture: daemonPosture\(/, "/status must carry posture");
+  t("served /health and /status actually carry the posture block", async () => {
+    // THE DISCLOSURE MUST BE ON THE WIRE. This gate USED to be a source-proximity
+    // pin — `req.url === "/health"[\s\S]{0,400}posture: daemonPosture(` — which
+    // is not a behaviour at all: it measures how many characters of unrelated
+    // work sit between two strings in a file, so any honest edit to the /health
+    // body (a vault probe, a stuckness block, a comment) broke a green property
+    // while a handler that dropped posture entirely and moved the prose around
+    // could still pass. Measured gap at HEAD~1 was 1784 chars, at HEAD 2038 —
+    // both far past 400, while the real handler (http.ts:1247) has always put
+    // `posture: daemonPosture(process.env, bindAddr)` INSIDE the /health `send()`
+    // object. So the code was RIGHT and the pin was WRONG.
+    //
+    // What replaces it asserts the PROPERTY: boot a real daemon on loopback,
+    // GET both routes, and require a genuine posture report — same keys, same
+    // values the in-process `daemonPosture()` computes for the same env/bind.
+    // Anti-vacuity: a missing `posture` key fails loudly with the served keys
+    // named, so "the block vanished" can never read as a pass.
+    const dir = mkdtempSync(join(tmpdir(), "u2a-posture-wire-"));
+    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [], reaperIntervalMs: 0 });
+    try {
+      for (const route of ["/health", "/status"] as const) {
+        const res = await fetch(`http://127.0.0.1:${svc.port}${route}`);
+        assert.equal(res.status, 200, `${route} must answer 200`);
+        const body = (await res.json()) as Record<string, unknown>;
+        const served = body.posture as Posture | undefined;
+        assert.ok(served && typeof served === "object", `${route} must carry a posture object; served keys were [${Object.keys(body).join(", ")}]`);
+        // not just present — IDENTICAL to what the enforcement layer computes.
+        // A /health that computed its own ad-hoc copy, or reported a stale bind,
+        // would diverge here.
+        assert.deepEqual(served, daemonPosture(process.env, "127.0.0.1"), `${route} posture must equal the real daemonPosture() for the same env + bind`);
+        // the fields the disclosure exists to answer, each named
+        for (const key of ["auth", "bind", "chromeNoSandbox", "singleProcess", "attachRootsCount", "warnings"]) {
+          assert.ok(key in served!, `${route} posture must disclose "${key}" (GOAL 100)`);
+        }
+        assert.equal(served!.bind, "127.0.0.1", `${route} posture must report the address it actually bound`);
+      }
+    } finally {
+      await svc.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   t("the reported sandbox flag mirrors browser.ts's real condition", () => {
