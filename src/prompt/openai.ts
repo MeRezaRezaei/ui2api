@@ -813,8 +813,27 @@ export async function handleOpenAIRoutes(
       // closed: anything that is not a well-formed call is treated as NO call,
       // which sends the answer through untouched rather than emitting a
       // `tool_calls` array built from a shape nobody validated.
+      // ROUND N+106 — CONSENT-GATED, and this is the decision that stops the soft
+      // path fabricating. The audit measured it returning a well-formed
+      // `tool_calls` entry whose arguments came from the PROMPT rather than from
+      // a model decision, with controls producing nothing. The parser can
+      // validate that an answer CONTAINS a tool-shaped envelope; it cannot
+      // validate that the MODEL chose it, because that information does not
+      // survive into rendered text. A consumer would execute a function the
+      // model never asked for — the same class as the silently dropped image and
+      // the empty-snapshot overwrite: not an error, a plausible result that is
+      // false.
+      //
+      // So a soft call is surfaced ONLY when the caller has explicitly opted in
+      // with `tool_choice: "auto"`. Any other value — absent, "none",
+      // "required", an object — and the layer does not run, the answer is
+      // returned untouched, and nothing invented. The default is therefore
+      // fail-CLOSED: an agent that sends `tools` and nothing else gets a normal
+      // answer, never a call it did not ask for.
+      const toolChoice = body.tool_choice;
+      const softConsent = toolChoice === "auto" || (toolChoice !== null && typeof toolChoice === "object");
       const narrowed = (
-        softTools && requestedTools && requestedTools.length > 0
+        softTools && requestedTools && requestedTools.length > 0 && softConsent
           ? softTools.parseToolCall(result.answer ?? "", requestedTools)
           : null
       ) as {
