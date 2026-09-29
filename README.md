@@ -161,6 +161,11 @@ ui2api install duckduckgo
 # Serve it — the daemon answers GET /registry, POST /capability/<site>, GET /v1/models
 ui2api promptd
 
+# Tighten the session vault's permissions — MODES ONLY, so it can never corrupt a
+# credential. DRY RUN is the default; --apply is required to change anything.
+ui2api vault tighten            # reports every file with old -> new mode
+ui2api vault tighten --apply    # actually tightens (0600 files / 0700 dirs)
+
 # Run a real installed capability (duck.ai's own browser session + UI)
 curl -s localhost:9797/capability/duckduckgo \
   -H 'content-type: application/json' \

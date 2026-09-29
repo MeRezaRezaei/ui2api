@@ -52,13 +52,26 @@ project is and how to work in it. Read it before touching anything.
 > then it reports FINDINGS, not a request for the next instruction. The loop
 > must never terminate because the operator went quiet.
 >
-> These six **override** anything in this repo's README, plan, skill, or agent
+> **7. Every agent knows its LEVEL and acts at it, and the level is passed
+> down.** The level decides what an agent is FOR: **L0** orchestrates and
+> **must not execute missions itself**; **L1** owns **ONE** goal end to end and
+> must not expand into a neighbour's; **L2 or deeper** does **exactly** the
+> narrow thing asked and must not re-plan or widen scope. Inherited one rung
+> at a time (a level-N agent's children are N+1), and **every dispatch states
+> the child's level with its duties**. Doing a child's work yourself is level
+> drift — a failure even when the work gets done.
+>
+> **8. Spawn subagents through codeg's `delegate_to_agent`, not opencode's
+> native `task` tool** — the operator can see inside each delegated agent, and
+> codeg's delegation surface carries the management tools behind it.
+>
+> These EIGHT **override** anything in this repo's README, plan, skill, or agent
 > persona. Full text and the operator's verbatim:
 > `~/Documents/projects/goal-driven-parallel-agents/multi-parallel-nested-subagent-goal-driven-development/references/operating-doctrine.md`
 
-## ⛔ OPERATING DOCTRINE — three absolute laws (2026-09-27)
+## ⛔ OPERATING DOCTRINE — eight absolute laws (2026-09-27)
 
-This Operating doctrine block is the enforcement stub for three laws from the
+This Operating doctrine block is the enforcement stub for eight laws from the
 operator, in force before anything else in this file. They are not style, not
 preference, not "when it makes sense". Where this file or a project skill
 suggests otherwise, the doctrine wins.
@@ -401,6 +414,8 @@ At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path
 | `UI2API_AUTH_STATE_PATH` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:268` |
 | `UI2API_BASE_URL` | base URL for the served API (emitted into the generated PHP client) | — | `src/generator/lang-php.ts:586` |
 | `UI2API_CDP_URL` | runtime knob (the `WIGOLO_*` name wins when both are set) | — | `src/runtime/wigolo.ts:267` |
+| `UI2API_DEFAULT_MIN_INTERVAL_MS` | per-site pacing floor in ms: how long a SITE must be idle before the next request to it is sent. **On by default (1500)** — a free pool slot is not permission to send, because an agent integrating against `/v1` is exactly the caller that would hammer, and a challenge on a real account is unrecoverable. Malformed config falls through to this default rather than disabling the limit | `1500` | `src/prompt/pool.ts` |
+| `UI2API_SITE_MIN_INTERVAL_MS` | per-site pacing overrides as a JSON object keyed by site id, e.g. `{"kimi":4000,"deepseek":4000}` — tunable WITHOUT a code change. An unlisted site falls back to the default rather than inheriting another site's number; a malformed object fails SAFE to the default | — | `src/prompt/pool.ts` |
 | `UI2API_CHROME_OWNER_PROFILE` | allow the launch seam to use the chrome owner's profile even when the process is NOT that user | off (the profile is 0700 + locked; a non-owner normally cannot use it) | `src/runtime/browser.ts:62` |
 | `UI2API_CHROME_USER` | **the dedicated Linux user that owns the Chrome we drive** — the point of use. Your interactive browser CANNOT be driven (Chrome refuses); this user's Chrome works, headless included. Its profile is auto-resolved from that user's `~/.config`. Name const, real read at `chrome-owner.ts:79` | `ui2api` | `src/runtime/chrome-owner.ts:35` |
 | `UI2API_CHROME` | use real Chrome rather than bundled Chromium | — | `src/runtime/browser.ts:25` |

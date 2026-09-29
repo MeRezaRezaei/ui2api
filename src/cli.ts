@@ -53,6 +53,7 @@ export const HELP_LINES: readonly string[] = [
   "  ui2api prompt '<text>' [--site ...]  (drive an AI chat website to answer a prompt — the MVP command)",
   "  ui2api promptd            [--port N] [--pool-min N] [--pool-max N]  (localhost HTTP service: POST /prompt, POST /capability/<site>, GET /sites, GET /registry, GET /accounts?site=, GET /capabilities/<site>, GET /v1/models, POST /v1/chat/completions, GET /status, GET /requirements, GET /health)",
   "  ui2api prompt --sites                (list the configured AI chat websites)",
+  "  ui2api vault tighten [--dry-run|--apply]  (remove group/other bits from the session vault: files to 0600, dirs to 0700. MODES ONLY — it never rewrites, re-serializes or deletes a snapshot, and never follows a symlink, so it cannot corrupt a credential. DRY RUN is the default; --apply is required to change anything. Reports every file with old -> new mode, and may only tighten, never loosen)",
   "  ui2api requirements [site]           (alias: doctor — OS-level readiness per package: ready/working/on-hold/not-ready with named reasons; exit nonzero on any not-ready) [--json = the same report as a machine-readable object, honoring the <site> scope]",
   "  ui2api proof                        (`ui2api live-proof` = same — live end-to-end proof: drive a chat site with a random arithmetic prompt and verify the answer; --site NAME --data-dir DIR)",
   "  ui2api doctor                       (alias: requirements — OS-level readiness gate per package, with the named reason)",
