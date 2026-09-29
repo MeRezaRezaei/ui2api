@@ -302,7 +302,33 @@ function messagesToPrompt(messages: unknown): string {
         .map((p) => String((p as { text?: unknown })?.text ?? ""))
         .join("\n");
     }
-    if (content.trim()) parts.push(content.trim());
+    if (!content.trim()) continue;
+    // ROUND N+103 — the tool round trip used to arrive UNLABELLED. The flattener
+    // pushed only `content`, so a `role:"tool"` result reached the model as bare
+    // text, indistinguishable from something the user had just said, and
+    // `tool_call_id` was dropped entirely. That defeats the purpose of the field:
+    // OpenAI's format carries the role and the id PRECISELY so the model can tell
+    // what it asked for from what it got back. Without them, a tool result is
+    // just an unattributed paragraph, and the model has to guess.
+    //
+    // The label is explicit rather than implicit. A consumer reading a flattened
+    // transcript should be able to reconstruct the roles, and a model reading one
+    // should be told the difference between its own prior turn, a user
+    // instruction, and an observation returned on its request.
+    const tcid = (m as { tool_call_id?: unknown }).tool_call_id;
+    if (role === "tool" || role === "function") {
+      const id = typeof tcid === "string" && tcid ? ` (tool_call_id: ${tcid})` : "";
+      parts.push(`[tool result${id}]: ${content.trim()}`);
+    } else if (role === "assistant") {
+      parts.push(`[assistant]: ${content.trim()}`);
+    } else if (role === "system" || role === "developer") {
+      // A system/developer turn is an INSTRUCTION, and it must not read as
+      // something the user typed — an agent's system prompt is the most
+      // authority-bearing text in the transcript.
+      parts.push(`[system instruction]: ${content.trim()}`);
+    } else {
+      parts.push(content.trim());
+    }
   }
   return parts.join("\n");
 }
