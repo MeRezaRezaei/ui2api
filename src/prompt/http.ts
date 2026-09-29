@@ -49,6 +49,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ChatPool, POOL_REFUSAL_CODES, type PoolRefusalCode, type PoolStatus } from "./pool.js";
 import { daemonPosture, TOKEN_ENV } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
+import { buildToolInstruction, parseToolCall, stripToolCall } from "./soft-tools.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
 import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
@@ -848,6 +849,16 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           // inside the route, so it receives the SAME vault-validating helper
           // the /capability and /prompt branches call directly.
           validateAccount: (account, profile) => resolveCapabilityAccount(account, profile, dataDir),
+          // The prompt-driven tool layer. Injected BY STRUCTURE, never imported
+          // here, so this file keeps building if the layer is absent — and its
+          // absence is the HONEST state: /v1/models then reports `tools: "none"`
+          // rather than a surface that accepts `tools` and quietly ignores them.
+          //
+          // The instruction is rendered into the PROMPT and typed into the site's
+          // own composer by its own JavaScript. No internal API is called, no
+          // payload is forged, and nothing is sent that a human clicking in the
+          // UI could not produce — which is the entire ban-safety argument.
+          softTools: { buildToolInstruction, parseToolCall, stripToolCall },
         });
         return;
       }
