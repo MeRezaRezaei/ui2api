@@ -55,10 +55,56 @@ import { test } from "node:test";
 //
 // NOT HAMMERING THE SERVICE. The pool has 4 slots and a 16-waiter queue, and
 // each browser round trip can take minutes. So the probe is strictly SERIAL
-// (one in-flight request at a time, no `Promise.all`) with a generous 300s
-// per-request timeout, and an overall run is bounded by
-// `UI2API_PROD_PROBE_MAX_IDS` plus the command-level `timeout`. Concurrency
-// here would manufacture `pool_saturated` noise rather than measure the bug.
+// (one in-flight request at a time, no `Promise.all`) with a generous per-id
+// budget. Concurrency here would manufacture `pool_saturated` noise rather
+// than measure the bug.
+//
+// ---------------------------------------------------------------------------
+// WHY THE BUDGETS BELOW ARE DERIVED, NOT TYPED (this file hung CI for 23+ min)
+// ---------------------------------------------------------------------------
+//
+// MEASURED on GitLab CI, `verify` job 1495, commit 4ef0dfd: last log line at
+// 17:33:44Z, then silence. `--test-timeout=120000` cannot explain it. The
+// reproduction, on a fake service that answers `/health` and `/v1/models` with
+// 24 ids but never answers `/v1/chat/completions`:
+//
+//   UI2API_PROD_PROBE_TIMEOUT_MS=5000 npx tsx --test --test-timeout=120000 \
+//     test/prod-live-chat-surface-probe.test.ts
+//   -> 24 ids x 5s, one test absorbs the whole sweep and is killed at exactly
+//      120001ms with 'test timed out after 120000ms'; total wall 2m20s.
+//
+// Scaled to this file's real defaults that is `MAX_IDS(24) x
+// REQUEST_TIMEOUT_MS(300_000)` = **7 200 000 ms = 2 hours inside ONE test**.
+//
+// THREE THINGS WERE WRONG, and all three are fixed here:
+//
+//   1. THE SWEEP WAS UNBOUNDED. `MAX_IDS` x per-id budget was the ONLY bound,
+//      and it was a TYPED constant (2 hours), not a derived one. It is now
+//      `SWEEP_BUDGET_MS`, derived from the id count and the per-id budget and
+//      hard-capped, and the sweep STOPS when the budget is spent — recording
+//      every unprobed id as an explicit `budget_exhausted` outcome rather than
+//      silently dropping it, so the verdict still sees them as no-response.
+//   2. `--test-timeout` MANUFACTURED A FALSE RED. The first test to await the
+//      memoized sweep absorbed the entire sweep duration and was killed at
+//      120001ms — so a perfectly healthy sweep reported a spurious failure and
+//      the contract assertion never even ran. Every live test now carries an
+//      explicit per-test `timeout` DERIVED from its own budget, which node
+//      honours over the global `--test-timeout`.
+//   3. THE MEMOIZED `sweepCache` HANDED A PENDING PROMISE TO THE NEXT TEST.
+//      Kept — one measurement, many readers is the right shape — but the
+//      promise is now GUARANTEED to settle inside `SWEEP_BUDGET_MS` by (1),
+//      so no later test can inherit an in-flight sweep. (Within one file
+//      node:test runs top-level tests SEQUENTIALLY, so this did not cost 6
+//      independent 120s waits; it cost one 120s kill plus a stalled file.)
+//
+// A NOTE ON WHAT WAS RULED OUT, because a plausible story that is wrong is
+// worse than no story. Undici sockets keeping the event loop alive past the
+// test timeout was MEASURED and is FALSE: a single `fetch` aborted by
+// `AbortSignal.timeout` exits cleanly 7ms later (`AbortSignal.timeout` timers
+// are unref'd), and the full black-hole-port run terminates on its own in
+// 2m3s with all six tests failing honestly. The 100s `timeout 124` that first
+// suggested a socket hang was simply my own budget being shorter than 6 x the
+// 20s reach probe. Reported as a correction rather than quietly dropped.
 //
 // ANTI-VACUITY. Every assertion is driven by data actually read off the
 // service: an empty model list FAILS, an unreachable endpoint FAILS, a non-JSON
@@ -66,11 +112,56 @@ import { test } from "node:test";
 // nothing to look at.
 
 const BASE = process.env.UI2API_PROMPTD_BASE ?? "http://127.0.0.1:9797";
-// A real browser round trip is minutes, so this is deliberately generous.
-const REQUEST_TIMEOUT_MS = Number(process.env.UI2API_PROD_PROBE_TIMEOUT_MS ?? 300_000);
-// Bound the whole run so a wedged service cannot make this file take hours.
-const MAX_IDS = Number(process.env.UI2API_PROD_PROBE_MAX_IDS ?? 24);
-const REACH_TIMEOUT_MS = Number(process.env.UI2API_PROD_PROBE_REACH_TIMEOUT_MS ?? 20_000);
+
+/** A positive finite integer from the environment, or the fallback. Never NaN. */
+function envMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+// The reach probe is a HEALTH check, not a browser round trip: short and hard,
+// because its only job is to decide whether the live half can run at all.
+const REACH_TIMEOUT_MS = envMs("UI2API_PROD_PROBE_REACH_TIMEOUT_MS", 20_000);
+// How many advertised ids the sweep will consider. Not a bound on TIME by
+// itself — it feeds the derived budget below.
+const MAX_IDS = envMs("UI2API_PROD_PROBE_MAX_IDS", 24);
+// A real browser round trip is minutes, so the per-id budget is generous. It is
+// still only ever a FRACTION of the sweep budget; see `clampToBudget`.
+const PER_ID_BUDGET_MS = envMs("UI2API_PROD_PROBE_TIMEOUT_MS", 300_000);
+
+// THE HARD CAP. No knob combination may make the live sweep outlive this, so a
+// live run cannot take hours even when every id burns its full per-id budget.
+const SWEEP_HARD_CAP_MS = envMs("UI2API_PROD_PROBE_SWEEP_HARD_CAP_MS", 15 * 60_000);
+
+// THE DERIVED SWEEP BUDGET — the fix for the 2-hour hang. It is computed from
+// the id count and the per-id budget, then clamped to the hard cap, so
+// MAX_IDS=24 x 300s can no longer become 7200s: it becomes 900s, and the sweep
+// records the ids it never got to as `budget_exhausted`.
+const SWEEP_BUDGET_MS = envMs(
+  "UI2API_PROD_PROBE_SWEEP_BUDGET_MS",
+  Math.min(SWEEP_HARD_CAP_MS, Math.max(1, MAX_IDS) * PER_ID_BUDGET_MS),
+);
+
+/**
+ * THE PER-ID BUDGET FOR ONE REQUEST, never more than what is LEFT of the run.
+ * This is what makes the deadline enforceable per request: an id started with
+ * 2s left is aborted in 2s, so the sweep cannot overrun its budget by one full
+ * per-id timeout — which is exactly how a serial loop turns a "bound" into a
+ * bound-plus-one-id.
+ */
+function clampToBudget(remainingMs: number): number {
+  return Math.max(1, Math.min(PER_ID_BUDGET_MS, remainingMs));
+}
+
+// A live test that consumes the sweep must be allowed the sweep's own budget.
+// Node honours this per-test `timeout` OVER the global `--test-timeout`, which
+// is what stops a healthy 24-id sweep from being killed at 120s and reported as
+// a failure it never earned. The slack covers the reach probe and the loop.
+const SWEEP_TEST_TIMEOUT_MS = SWEEP_BUDGET_MS + REACH_TIMEOUT_MS + 30_000;
+const PLAIN_TEST_TIMEOUT_MS = REACH_TIMEOUT_MS * 2 + 30_000;
+
 const PROBE_TEXT = "Reply with exactly: PRODCHECK";
 
 type Json = Record<string, unknown>;
@@ -231,7 +322,7 @@ async function getJson(
 async function postJson(
   path: string,
   payload: unknown,
-  timeoutMs = REQUEST_TIMEOUT_MS,
+  timeoutMs = PER_ID_BUDGET_MS,
 ): Promise<{ status: number; body: unknown; text: string; contentType: string }> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
@@ -302,17 +393,98 @@ async function reachable(): Promise<boolean> {
  * running daemon. Default is live: nothing sets this in CI or in `test:unit`.
  */
 const LIVE = process.env.UI2API_PROBE_NO_LIVE !== "1";
-function liveTest(name: string, fn: () => Promise<void> | void): void {
-  if (LIVE) test(name, fn);
+
+interface Reach {
+  up: boolean;
+  /** Always non-empty. The NAMED reason, so a skip can never be unexplained. */
+  detail: string;
+}
+
+/**
+ * ONE reachability probe, resolved BEFORE any live test is registered — so the
+ * decision every live test reads is a SETTLED value, never a pending promise.
+ *
+ * This is the second half of the pending-promise defect, and it is the same
+ * shape as the sweep memo: `reachable()` was called INSIDE each of six tests,
+ * each paying the full `REACH_TIMEOUT_MS` against a wedged service (measured:
+ * six tests x 20 005ms = 2m3s before the first assertion). Resolving it once,
+ * at module load, makes it six skips that cost one probe.
+ */
+let reachCache: Promise<Reach> | undefined;
+async function probeReach(): Promise<Reach> {
+  reachCache ??= (async (): Promise<Reach> => {
+    try {
+      const res = await getJson("/health");
+      return res.status > 0
+        ? { up: true, detail: `GET /health -> http ${res.status} (measured ${new Date().toISOString()})` }
+        : { up: false, detail: `GET /health answered http ${res.status}` };
+    } catch (err) {
+      return {
+        up: false,
+        detail:
+          `GET /health did not answer within ${REACH_TIMEOUT_MS}ms — ` +
+          String((err as Error)?.message ?? err).slice(0, 160),
+      };
+    }
+  })();
+  return reachCache;
+}
+
+// Top-level await, deliberately: by the time ANY test body runs, `reach` is a
+// plain settled object. When `LIVE` is false (the hermetic verdict test sets
+// `UI2API_PROBE_NO_LIVE=1` before importing) nothing is awaited at all, so
+// importing this file costs that test nothing.
+const reach: Reach = LIVE
+  ? await probeReach()
+  : { up: false, detail: "UI2API_PROBE_NO_LIVE=1 — the live half was disabled by the importing hermetic test" };
+
+/**
+ * REGISTER A LIVE TEST, OR SKIP IT HONESTLY.
+ *
+ * WHY SKIP RATHER THAN FAIL WHEN THE SERVICE IS ABSENT: this file is in
+ * `test:unit`, which runs on a CI runner with no `promptd`. A failure there
+ * cannot distinguish "the chat surface is broken" from "there is nothing to
+ * measure", and it is the ABSENT case that wedged CI: against a service that
+ * accepted connections and never answered, each test burned the full reach
+ * timeout before its first assertion (measured 6 x 20 005ms). Skipping makes
+ * the absence take one bounded probe instead of six.
+ *
+ * WHY THAT IS NOT A VACUITY LOOP: node reports a skip as `skipped`, never as
+ * `pass` — the anti-vacuity rule this file is built on is about never reporting
+ * a CLEAN PASS with nothing looked at, and a skip is not a pass. The reason is
+ * printed, it names the base URL and the observed failure, and
+ * `test("anti-vacuity: ...")` below FAILS if the skip is ever unexplained.
+ *
+ * WHY NOT OPTION (ii) (`test:unit` sets `UI2API_PROBE_NO_LIVE=1`): that deletes
+ * the gate from CI structurally, which is safer for the pipeline but also means
+ * the live half is never even ATTEMPTED anywhere that sets the knob — and the
+ * knob is global, so it silently disables the GOAL 156 gate on any box that
+ * exports it, including a dev box that has a daemon running. Gating on
+ * OBSERVED reachability keeps the gate armed wherever a daemon exists, which is
+ * the only place it means anything, and disarms it only where it cannot run.
+ */
+function liveTest(name: string, fn: () => Promise<void> | void, timeoutMs?: number): void {
+  if (!LIVE) return;
+  if (reach.up) {
+    test(name, { timeout: timeoutMs ?? PLAIN_TEST_TIMEOUT_MS }, fn);
+    return;
+  }
+  const skip =
+    `SKIPPED, NOT PASSED — the live chat surface was NOT measured. No reachable ui2api daemon at ${BASE}: ` +
+    `${reach.detail}. Start the daemon (ui2api promptd, or point UI2API_PROMPTD_BASE at one) and re-run ` +
+    `this file to measure the surface; a skip here is a hole in coverage, not a green result.`;
+  // Registered (so the name is VISIBLE in the report) but not executed.
+  test(name, { skip, timeout: timeoutMs ?? PLAIN_TEST_TIMEOUT_MS }, () => {});
 }
 
 /** One collected probe outcome. A client abort is recorded as `status: 0`. */
-async function probeId(id: string): Promise<ProbeOutcome> {
+async function probeId(id: string, timeoutMs: number): Promise<ProbeOutcome> {
   try {
-    const r = await postJson("/v1/chat/completions", {
-      model: id,
-      messages: [{ role: "user", content: PROBE_TEXT }],
-    });
+    const r = await postJson(
+      "/v1/chat/completions",
+      { model: id, messages: [{ role: "user", content: PROBE_TEXT }] },
+      timeoutMs,
+    );
     return { id, ...r };
   } catch (err) {
     // A timeout/abort IS an outcome, not a crash: it is exactly the
@@ -328,9 +500,40 @@ async function probeId(id: string): Promise<ProbeOutcome> {
 }
 
 /**
+ * An id the sweep never got to, because the budget ran out. Recorded as a
+ * NAMED outcome rather than dropped, for two reasons: the id count must stay
+ * equal to the advertised count or `probeVerdict` would measure a smaller
+ * surface than `/v1/models` advertises, and an unprobed id is honestly a
+ * no-response — which is what the verdict already treats as red.
+ */
+function budgetExhausted(id: string): ProbeOutcome {
+  return {
+    id,
+    status: 0,
+    body: {
+      error: {
+        code: "budget_exhausted",
+        message:
+          `the sweep's derived ${SWEEP_BUDGET_MS}ms budget ran out before this id was measured — ` +
+          `it is unmeasured, not passing (raise UI2API_PROD_PROBE_SWEEP_BUDGET_MS or lower MAX_IDS to cover it)`,
+      },
+    },
+    text: "",
+    contentType: "",
+  };
+}
+
+/**
  * The single SERIAL sweep every live assertion below reads. One sweep, not two
  * duplicated loops: a browser round trip is minutes, and re-measuring the same
  * surface twice can produce two different truths.
+ *
+ * BOUNDED, AND PROMISED TO SETTLE. The loop carries a deadline; each id is
+ * clamped to the time remaining, so the sweep cannot overrun `SWEEP_BUDGET_MS`
+ * by even one full per-id timeout, and every id past the deadline is recorded as
+ * `budget_exhausted`. That guarantee is what makes memoizing the promise safe:
+ * a later test can never inherit an in-flight sweep, because there is no window
+ * in which one is still in flight after the budget expires.
  */
 let sweepCache: Promise<ProbeOutcome[]> | undefined;
 async function sweep(): Promise<ProbeOutcome[]> {
@@ -339,9 +542,14 @@ async function sweep(): Promise<ProbeOutcome[]> {
     const ids = modelIds(body);
     assert.ok(ids.length > 0, "advertised list is empty — vacuous pass refused");
     const probe = ids.slice(0, Math.max(1, MAX_IDS));
+    const deadline = Date.now() + SWEEP_BUDGET_MS;
     const results: ProbeOutcome[] = [];
     for (const id of probe) {
-      const r = await probeId(id);
+      const remaining = deadline - Date.now();
+      const r =
+        remaining <= 0
+          ? budgetExhausted(id)
+          : await probeId(id, clampToBudget(remaining));
       results.push(r);
       // Per-id detail is always surfaced, pass or fail.
       console.log(`[prod-chat-probe] ${outcomeLine(id, r)}`);
@@ -350,6 +558,77 @@ async function sweep(): Promise<ProbeOutcome[]> {
   })();
   return sweepCache;
 }
+
+// ---------------------------------------------------------------------------
+// ANTI-VACUITY — these two run ALWAYS, live or not, so the file is never zero
+// tests and never reports a clean pass having measured nothing.
+// ---------------------------------------------------------------------------
+
+test("anti-vacuity: the live budgets are DERIVED and cannot be inflated past the hard cap", () => {
+  // A typed budget is how this file hung CI for 2 hours. These are the
+  // invariants that make the derivation real, and each one can genuinely fail.
+  assert.ok(
+    Number.isFinite(SWEEP_BUDGET_MS) && SWEEP_BUDGET_MS > 0,
+    `the derived sweep budget is not a positive number (${SWEEP_BUDGET_MS}) — a NaN budget is an unbounded sweep`,
+  );
+  assert.ok(
+    SWEEP_BUDGET_MS <= SWEEP_HARD_CAP_MS,
+    `the derived sweep budget (${SWEEP_BUDGET_MS}ms) exceeds the hard cap (${SWEEP_HARD_CAP_MS}ms) — ` +
+      `no combination of MAX_IDS and the per-id budget may make the live sweep outlive the cap`,
+  );
+  assert.ok(
+    Math.max(1, MAX_IDS) * PER_ID_BUDGET_MS <= SWEEP_BUDGET_MS || SWEEP_BUDGET_MS === SWEEP_HARD_CAP_MS,
+    `SWEEP_BUDGET_MS (${SWEEP_BUDGET_MS}ms) is smaller than the uncapped id-count x per-id product ` +
+      `(${Math.max(1, MAX_IDS)} x ${PER_ID_BUDGET_MS}ms) without the hard cap explaining it`,
+  );
+  assert.ok(
+    Number.isFinite(PER_ID_BUDGET_MS) && PER_ID_BUDGET_MS > 0,
+    `the per-id budget is not a positive number (${PER_ID_BUDGET_MS})`,
+  );
+  // The guarantee that lets the memoized promise be safe: every test that
+  // consumes the sweep is allowed at least the sweep's whole budget.
+  assert.ok(
+    SWEEP_TEST_TIMEOUT_MS >= SWEEP_BUDGET_MS,
+    `SWEEP_TEST_TIMEOUT_MS (${SWEEP_TEST_TIMEOUT_MS}ms) is below SWEEP_BUDGET_MS (${SWEEP_BUDGET_MS}ms) — ` +
+      `--test-timeout would then manufacture a false RED on a healthy sweep, which is the 120001ms kill this file just fixed`,
+  );
+});
+
+test("anti-vacuity: the live half either MEASURED a reachable service or reported a NAMED skip — never a clean pass with nothing looked at", () => {
+  if (!LIVE) return; // disabled deliberately by the importing hermetic test
+  if (reach.up) {
+    assert.match(
+      reach.detail,
+      /\/health -> http \d+/,
+      `the live half is running but its reachability was never actually observed (detail=${JSON.stringify(reach.detail)})`,
+    );
+    return;
+  }
+  assert.ok(
+    reach.detail.trim().length > 20,
+    "the live half skipped with no named reason — an unexplained skip is indistinguishable from a pass, which is the exact failure this file exists to prevent",
+  );
+  assert.match(
+    reach.detail,
+    /health/i,
+    `the skip reason must name what was actually probed (detail=${JSON.stringify(reach.detail)})`,
+  );
+  // The vocabulary is deliberately BROAD. This pin exists to refuse an
+  // UNEXPLAINED skip, not to insist on one particular wording: an earlier
+  // version listed only `timeout|refused|ECONN|ENOTFOUND|Error|error`, and a
+  // genuinely honest reason — undici's "GET /health did not answer within
+  // 20000ms — fetch failed" — did not match it, so the gate went RED on a
+  // CORRECT skip. A false red on correct code is worse than no gate, because it
+  // teaches the next maintainer to delete the gate. `reach.detail` is built by
+  // `observeReach()`, which always appends the underlying cause, so requiring
+  // the OBSERVED cause and rejecting a bare "not up" is the property worth
+  // holding; the exact spelling of the cause is not.
+  assert.match(
+    reach.detail,
+    /timeout|refused|ECONN|ENOTFOUND|fetch failed|did not answer|Error|error/i,
+    `the skip reason must name the OBSERVED failure, not just "not up" (detail=${JSON.stringify(reach.detail)})`,
+  );
+});
 
 liveTest("live chat probe: the service is reachable — an unreachable endpoint must FAIL, never pass vacuously", async () => {
   const up = await reachable();

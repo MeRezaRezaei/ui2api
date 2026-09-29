@@ -54,6 +54,7 @@ import {
   type PoolStatus,
 } from "./pool.js";
 import { daemonPosture, TOKEN_ENV } from "./posture.js";
+import { buildIdentity, type BuildIdentity } from "../runtime/build-info.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildToolInstruction, parseToolCall, stripToolCall } from "./soft-tools.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
@@ -302,12 +303,105 @@ function requestIdentity(req: IncomingMessage, url: string): { site: string | nu
 function livenessBlock(st: PoolStatus): Record<string, unknown> {
   return {
     daemon: "up",
+    // GOAL 157: WHICH BUILD IS ANSWERING. Every gate in this repo measures the
+    // REPO; this is the one that measures the RUNNING PROCESS. Derived, never
+    // literal, and honestly `unknown` with a named reason when it cannot be
+    // determined — a wrong stamp would be worse than an absent one.
+    build: buildIdentity(),
     browser: st.browser,
     browserProbe: st.browserProbe,
     browserCheckedAt: st.browserCheckedAt,
     reaper: st.reaper,
     lastSweep: st.lastSweep,
   };
+}
+
+/* GOAL 157 (2) — `/health` SAID ok:true WITH EVERY WORKER WEDGED.
+ *
+ * MEASURED on the deployed daemon 2026-09-29: all four pool workers busy on
+ * `copilot` at `busyMs ≈ 17,157,044` (4.77 hours), every model unreachable, and
+ * `GET /health` answering 200 `ok:true` throughout. `healthOk` below only ever
+ * looked at the VAULT — it never looked at the pool at all — so the one block
+ * of the verdict that describes whether requests can actually be served was
+ * the one block it ignored.
+ *
+ * THE CORRECT CONDITION IS **STUCKNESS**, NOT BUSYNESS**, and the difference is
+ * the whole design:
+ *
+ *  - BUSY is a NORMAL state under load. A pool at 100% busy with fresh
+ *    `busyMs` is a healthy pool doing its job, and a health check that flapped
+ *    on it would cry wolf on every busy moment — after which nobody reads it,
+ *    which is exactly the failure mode the header above this file is about.
+ *  - STUCK is `busy && busyMs > busyWatchdogMs` — the SAME bound the pool's own
+ *    watchdog reclaims slots at (`pool.ts`, `deriveBusyWatchdogMs`, 75% of the
+ *    request deadline). Deliberately NOT a second literal: a number that could
+ *    drift from the reclaim bound is how a "healthy" daemon keeps a bound the
+ *    enforcement path disagrees with.
+ *  - A pool is DEGRADED only when EVERY busy worker is stuck and there is at
+ *    least one worker (`total === 0` reports the honest empty, it does not
+ *    invent a verdict — a cold pool that has not spawned yet is not an outage).
+ *    Partial capacity is not an outage: some healthy workers means requests
+ *    can still be served.
+ */
+export type StuckWorker = { site: string; busyMs: number; account: string | null; dedicated: boolean };
+
+export type PoolStuckness = {
+  /** Workers busy right now. */
+  busy: number;
+  /** Workers whose `busyMs` exceeds the watchdog bound. */
+  stuck: number;
+  /** Busy workers that are still WITHIN the bound — the anti-flap evidence. */
+  healthyBusy: number;
+  /** Idle workers (usable capacity). */
+  idle: number;
+  /** The bound every worker is judged against, read from the pool. */
+  busyWatchdogMs: number;
+  /** true only when every busy worker is stuck AND the pool has workers. */
+  degraded: boolean;
+  /** NAMED reason whenever `degraded`, else a NAMED "why not". Never silent. */
+  reason: string;
+  /** Per-worker detail for the stuck ones, so the reason is actionable. */
+  stuckWorkers: StuckWorker[];
+  /** true when the pool reports no workers at all. */
+  noWorkers: boolean;
+};
+
+export function poolStuckness(st: PoolStatus): PoolStuckness {
+  const bound = st.busyWatchdogMs;
+  const workers = st.workers ?? [];
+  const busyWorkers = workers.filter((w) => w.busy);
+  const stuckList: StuckWorker[] = [];
+  let healthyBusy = 0;
+  for (const w of busyWorkers) {
+    // A busy worker whose `busyMs` is null is UNMEASURED, not healthy: the pool
+    // stamps `busyMs` from `busySince`, and a null means the stamp is missing.
+    // Counting that as fine would let a broken status read as green.
+    const busyMs = typeof w.busyMs === "number" ? w.busyMs : null;
+    if (busyMs !== null && busyMs > bound) {
+      stuckList.push({ site: w.site, busyMs, account: w.account ?? null, dedicated: Boolean(w.dedicated) });
+    } else {
+      healthyBusy++;
+    }
+  }
+  const idle = workers.filter((w) => !w.busy).length;
+  const total = workers.length;
+  const busy = busyWorkers.length;
+  const noWorkers = total === 0;
+  const degraded = !noWorkers && busy > 0 && stuckList.length === busy;
+  let reason: string;
+  if (noWorkers) {
+    reason = `no workers yet (the pool has spawned 0 of a max ${st.max}); no stuckness verdict is claimed`;
+  } else if (busy === 0) {
+    reason = `${idle} idle worker(s), 0 busy — nothing is stuck`;
+  } else if (degraded) {
+    const worst = stuckList.reduce((a, b) => (b.busyMs > a.busyMs ? b : a), stuckList[0]);
+    reason = `all ${busy} busy worker(s) are STUCK: every one has been busy longer than the ${bound}ms watchdog bound (worst: ${worst.site} at ${worst.busyMs}ms = ${(worst.busyMs / 3_600_000).toFixed(2)}h) — the pool cannot serve`;
+  } else if (stuckList.length === 0) {
+    reason = `${busy} busy worker(s), all within the ${bound}ms watchdog bound (busy is a normal state under load and does NOT degrade health)`;
+  } else {
+    reason = `${stuckList.length} of ${busy} busy worker(s) are stuck past ${bound}ms, but ${healthyBusy + idle} are still usable — partial capacity is not an outage`;
+  }
+  return { busy, stuck: stuckList.length, healthyBusy, idle, busyWatchdogMs: bound, degraded, reason, stuckWorkers: stuckList, noWorkers };
 }
 
 /* ---- THE HEALTH VERDICT IS COMPUTED, NOT A LITERAL (prod 2026-09-27) ----
@@ -457,11 +551,22 @@ export function healthVaultBlock(sitesDir: string, deps: HealthVaultDeps = {}): 
  *                      Every row anonymous/unreadable/missing is exactly the
  *                      prod incident, and it is a real fault, not a config
  *                      choice.
+ *
+ * GOAL 157 adds the STUCKNESS arm, which is a SEPARATE condition and not a
+ * loosening of the two above: a fully-usable vault with every worker wedged
+ * is not a serving pool. It is folded in LAST so it can only ever turn `ok`
+ * false, and it takes an optional argument so every existing caller (and the
+ * existing gate that drives this helper) keeps compiling unchanged.
  */
-export function healthOk(vault: HealthVaultBlock, chatModels: number): boolean {
-  if (vault.error && vault.accounts === 0) return false;
-  if (vault.accounts === 0) return chatModels === 0;
-  return vault.usable > 0;
+export function healthOk(vault: HealthVaultBlock, chatModels: number, stuckness?: PoolStuckness): boolean {
+  let ok: boolean;
+  if (vault.error && vault.accounts === 0) ok = false;
+  else if (vault.accounts === 0) ok = chatModels === 0;
+  else ok = vault.usable > 0;
+  // Absent stuckness (an old caller) is UNMEASURED, not "fine" — but it also
+  // must not invent a verdict the caller never asked for, so it is not applied.
+  if (stuckness && stuckness.degraded) ok = false;
+  return ok;
 }
 
 /** The honest part of the `/health` payload — the block that MUST exist for a
@@ -474,11 +579,16 @@ export function healthVerdict(
   vault: HealthVaultBlock,
   chatModels: number,
   registryPackages: number,
+  stuckness?: PoolStuckness,
 ): Record<string, unknown> {
   return {
-    ok: healthOk(vault, chatModels),
+    ok: healthOk(vault, chatModels, stuckness),
     counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },
     vault,
+    // GOAL 157: always present, even when nothing is stuck — the REASON a
+    // healthy pool is healthy is as load-bearing as the reason a sick one is
+    // sick. Absent only when a legacy caller passed no pool status at all.
+    ...(stuckness ? { stuckness } : {}),
   };
 }
 
@@ -1091,8 +1201,12 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         } catch {
           registryPackages = 0; // a registry build fault is not a /health fault
         }
+        // GOAL 157: the verdict now also reads the POOL. A healthy vault with
+        // every worker wedged is not a serving daemon, and /health used to say
+        // `ok:true` for exactly that.
+        const stuckness = poolStuckness(st);
         return send(res, 200, {
-          ...healthVerdict(vault, chatModels, registryPackages),
+          ...healthVerdict(vault, chatModels, registryPackages, stuckness),
           defaultSite: defaultSiteId(),
           sites: Object.keys(profilesById),
           counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },

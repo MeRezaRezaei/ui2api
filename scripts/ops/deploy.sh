@@ -72,12 +72,94 @@ fail() { printf '[deploy] FATAL: %s\n' "$*" >&2; exit 1; }
 id -u "$CHROME_USER" >/dev/null 2>&1 || fail "user $CHROME_USER does not exist"
 [[ -f "$REPO_DIR/package.json" ]] || fail "no package.json in $REPO_DIR — bad --repo?"
 
+# --- the build identity stamp -------------------------------------------------
+# WHY THIS IS HERE. `npm run build` writes `dist/runtime/build-info.json` from
+# `git rev-parse HEAD`, so the daemon can name the build that is answering
+# (`GET /status`). The deploy stages the repo with `--exclude '.git/'` and builds
+# INSIDE the target, and the target has no `.git` (MEASURED: no /opt/ui2api/.git).
+# So the stamp the target's own build writes carries `commit: null` — honest, and
+# useless: exactly the "a plausible-looking service nobody can name" defect the
+# stamp exists to close. The commit IS knowable at the only place that still has
+# it: this script, which runs from the repo checkout.
+#
+# THE RULE, which is the whole design: **a wrong stamp is worse than no stamp.**
+# Only a real full 40-hex commit is ever written. If the commit cannot be
+# resolved, the stamp is DELETED, so the resolver falls through to its `unknown`
+# step with its named reason. Never a placeholder, never the previous release's
+# commit, never a literal that merely looks like one — this project's core
+# property is that nothing it reports is invented, and a fabricated build id is
+# the same lie in a different field.
+#
+# $1 = the tree to stamp (its dist/). $2 = the commit, or empty = unresolvable.
+# $3 = "true" | "false" | "null" (the tree that commit was measured from).
+write_build_stamp() {
+  local target="$1" commit="${2:-}" dirty="${3:-null}" stamp="$1/dist/runtime/build-info.json"
+  # 40-hex is NOT enough on its own: git's "null oid" is 40 zeros, and it is a
+  # sentinel for "no object", not a commit. A stamp carrying it would be a
+  # placeholder wearing a commit's shape — refused here, at the only seam that
+  # can refuse it.
+  if [[ ! "$commit" =~ ^[0-9a-f]{40}$ || "$commit" =~ ^0{40}$ ]]; then
+    rm -f "$stamp"
+    say "build stamp: commit '${commit:-<unresolved>}' is not a resolvable commit — NO stamp written; the service will report identity=unknown with its named reason (honest, and better than a stamp naming the wrong build)"
+    return 0
+  fi
+  mkdir -p "$(dirname "$stamp")"
+  printf '{\n  "commit": "%s",\n  "builtAt": "%s",\n  "dirty": %s\n}\n' \
+    "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$dirty" > "$stamp" \
+    || { rm -f "$stamp"; say "build stamp: could not write $stamp — removed again (no stamp is better than a partial one)"; return 0; }
+  chown "$CHROME_USER:$CHROME_USER" "$stamp" 2>/dev/null || true
+  say "build stamp: $stamp <- $commit (dirty=$dirty)"
+}
+
+# The identity of the tree currently INSTALLED at the target, read from its own
+# stamp before the preserve rsync (which excludes dist/, so this is the last
+# chance to see it). Used by the rollback so a restored release is stamped with
+# ITS OWN commit rather than with the deploy that just failed. Empty when the
+# live release carries no stamp — and then the rollback deliberately writes none.
+PREV_COMMIT=""
+PREV_DIRTY="null"
+read_installed_identity() {
+  local stamp="$1"
+  # Reset first: a call that finds nothing must not leave a PREV_COMMIT from an
+  # earlier call standing, or the stamp written later would be a stale value
+  # that merely looks resolved.
+  PREV_COMMIT=""
+  PREV_DIRTY="null"
+  [[ -f "$stamp" ]] || return 0
+  PREV_COMMIT="$(node -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(0); }
+    const c = d && typeof d.commit === "string" ? d.commit.trim() : "";
+    if (!/^[0-9a-f]{40}$/.test(c)) process.exit(0);
+    process.stdout.write(c);
+  ' "$stamp" 2>/dev/null || true)"
+  PREV_DIRTY="$(node -e '
+    const fs = require("fs");
+    let d;
+    try { d = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(0); }
+    if (typeof d.dirty === "boolean") process.stdout.write(d.dirty ? "true" : "false");
+  ' "$stamp" 2>/dev/null || true)"
+  PREV_DIRTY="${PREV_DIRTY:-null}"
+}
+
 # --- 0. preserve the release we are about to overwrite ------------------------
 # A health failure has to be able to put the previous release back, so the live
 # tree is copied aside BEFORE the rsync. Same excludes as the deploy rsync — in
 # particular `data/` — so the rollback point can never carry the vault.
 PRESERVED=0
 if [[ -f "$TARGET_DIR/package.json" ]]; then
+  # The identity of what is LIVE right now, captured BEFORE the preserve rsync
+  # (which excludes dist/, so the live stamp is about to disappear). This is the
+  # only place the previous release's real commit can still be read; the restore
+  # rebuilds a tree with no `.git`, so without this a rollback would end up
+  # reporting `unknown` — or, worse, the failed deploy's commit.
+  read_installed_identity "$TARGET_DIR/dist/runtime/build-info.json"
+  if [[ -n "$PREV_COMMIT" ]]; then
+    say "live release identity: $PREV_COMMIT (kept for the rollback stamp)"
+  else
+    say "live release carries NO resolvable build stamp — a rollback of it will be stamped with NOTHING (honest unknown, never the failed deploy's commit)"
+  fi
   say "preserving the current release: $TARGET_DIR -> $ROLLBACK_DIR (the rollback point)"
   rm -rf "$ROLLBACK_TMP"
   mkdir -p "$ROLLBACK_TMP"
@@ -156,6 +238,7 @@ json_ok_is_true() {
     process.exit(d && d.ok === true ? 0 : 4);
   ' "$1" 2>/dev/null
 }
+
 
 # --- health: /health must be a REAL signal ------------------------------------
 health_probe_once() {
@@ -333,6 +416,15 @@ rollback() {
   fi
   say "ROLLBACK: rebuild OK (dist/cli.js present, vault still absent)"
 
+  # Stamp the restored tree with the RESTORED release's own commit — read from
+  # the live stamp before the preserve rsync, not from the repo (whose HEAD is
+  # the deploy that just failed, i.e. the build we are rolling back FROM). After
+  # the rebuild, before the restart, for the same reason the stage path stamps
+  # there. When the previous release carried no resolvable stamp, NOTHING is
+  # written and the restored service reports `unknown` — never the failed
+  # deploy's commit, and never a placeholder.
+  write_build_stamp "$TARGET_DIR" "$PREV_COMMIT" "$PREV_DIRTY"
+
   say "previous release restored AND rebuilt from $ROLLBACK_DIR; restarting the service on it"
   if systemctl list-unit-files ui2api-api.service >/dev/null 2>&1 \
      && systemctl cat ui2api-api.service >/dev/null 2>&1; then
@@ -384,6 +476,28 @@ if [[ -e "$TARGET_DIR/data" ]]; then
   fail "$TARGET_DIR/data appeared during the install/build — a deploy must never create or replace the vault"
 fi
 say "build OK (dist/cli.js present, vault still absent)"
+
+# The build stamp, written AFTER the build that produced dist/ and BEFORE the
+# restart, so the service can only ever start on a tree whose stamp already
+# describes it. It is derived from the REPO (which has `.git`), not from the
+# target (which does not) — see `write_build_stamp` for the rules.
+DEPLOY_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+# A sha the repository cannot vouch for is not a build identity. Verified, not
+# assumed: `rev-parse HEAD` can name an object that was pruned or never existed.
+if [[ -n "$DEPLOY_COMMIT" ]] && ! git -C "$REPO_DIR" cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null; then
+  say "HEAD ($DEPLOY_COMMIT) is not a commit object in $REPO_DIR — treating the build identity as UNRESOLVED (no stamp will be written)"
+  DEPLOY_COMMIT=""
+fi
+if [[ -n "$DEPLOY_COMMIT" ]]; then
+  if [[ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null || true)" ]]; then
+    DEPLOY_DIRTY=true
+  else
+    DEPLOY_DIRTY=false
+  fi
+else
+  DEPLOY_DIRTY=null
+fi
+write_build_stamp "$TARGET_DIR" "$DEPLOY_COMMIT" "$DEPLOY_DIRTY"
 
 # --- 3. restart --------------------------------------------------------------
 if [[ "$DO_RESTART" -eq 1 ]]; then
