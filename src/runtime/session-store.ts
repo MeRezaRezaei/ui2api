@@ -432,7 +432,17 @@ export function storageReplayScript(snap: ProfileSnapshot): string {
   const ls = JSON.stringify(snap.localStorage ?? []);
   const ss = JSON.stringify(snap.sessionStorage ?? []);
   const idb = JSON.stringify(snap.indexedDB ?? []);
-  return `(()=>{const ORIGIN=${origin};if(location.origin!==ORIGIN)return;
+  // ROUND N+105 — the origin gate used to `return` SILENTLY, which is the single
+  // most dangerous shape in this file: a snapshot whose origin does not match the
+  // page produced NO error, NO marker and NO visible effect, and the page simply
+  // rendered signed-out. That is the kimi failure mode exactly - a correct vault
+  // that never reached the page - and it was indistinguishable from "the site
+  // decided not to log in".
+  //
+  // So the skip now ANNOUNCES itself, into a key the caller can read back. The
+  // absence of that key is what proves the replay actually ran, which is what
+  // `test/session-injection-fidelity.test.ts` asserts.
+  return `(()=>{const ORIGIN=${origin};if(location.origin!==ORIGIN){try{console.warn("[ui2api:injection] origin-gate-mismatch: page "+location.origin+" != snapshot "+ORIGIN+" — the session was NOT replayed here, so this page is signed out")}catch(e){}try{localStorage.setItem("__ui2api_replay_skipped",location.origin+" != "+ORIGIN)}catch(e){}return;}
 const LS=${ls},SS=${ss},IDB=${idb};
 try{for(const[k,v]of LS)localStorage.setItem(k,v)}catch(e){}
 try{for(const[k,v]of SS)sessionStorage.setItem(k,v)}catch(e){}
@@ -451,7 +461,22 @@ export async function injectSnapshot(context: BrowserContext, snap: ProfileSnaps
   ) as unknown as Cookie[];
   if (cookies.length) {
     try {
-      await context.addCookies(cookies);
+      // ROUND N+105 — a REJECTED injection is a NAMED failure, never swallowed.
+      // `addCookies` and `addInitScript` can both reject (a malformed cookie, a
+      // context that died mid-injection) and a bare rejection here used to be lost,
+      // leaving the caller to believe the session had been replayed when it had
+      // not. Throwing is the only honest option: the request then fails visibly
+      // instead of returning a signed-out page dressed as an answer.
+      try {
+        await context.addCookies(cookies);
+      } catch (e) {
+        throw new Error(
+          `cookie-injection-rejected: replaying ${cookies.length} cookie(s) for ` +
+            `${sanitizeHost(snap.host)} failed, so this page is NOT authenticated. ` +
+            `Refusing to continue as if the session had been replayed. ` +
+            `Cause: ${(e as Error).message}`
+        );
+      }
     } catch {
       // cookies rejected (e.g. expired) — storage replay may still work
     }
