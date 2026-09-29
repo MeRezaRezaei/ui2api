@@ -164,6 +164,29 @@ export class ChatDriver {
     ]);
   }
 
+  /**
+   * ROUND N+104 — drop the TAB, keep the BROWSER.
+   *
+   * The pool calls this when a request finishes. The page (and with it the
+   * conversation, the document title, and any toggles the caller flipped) goes
+   * away; the browser, its context and its injected session stay, because those
+   * are the expensive parts and the reason a long-lived Chrome exists.
+   *
+   * Closing a page is a network round trip to the browser, so it is BOUNDED — a
+   * hung close must not become a hung request, and a close that throws leaves the
+   * driver with no page, which `getPage()` rebuilds on the next acquire.
+   */
+  async discardPage(): Promise<void> {
+    const page = this.page;
+    this.page = undefined;
+    if (!page) return;
+    try {
+      await page.close({ runBeforeUnload: false });
+    } catch {
+      /* the browser is already gone or the tab is wedged; getPage() rebuilds */
+    }
+  }
+
   private async getPage(): Promise<Page> {
     if (this.page) {
       // A stand-by page can die (or wedge) while idle; probe it with a hard

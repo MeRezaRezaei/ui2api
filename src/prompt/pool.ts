@@ -534,6 +534,32 @@ export class ChatPool {
   // Return a page to the pool after a prompt. Unusable pages (browser died) are
   // discarded and replaced lazily. Dedicated account workers are closed right
   // away — they never idle back into the pool.
+  /**
+   * ROUND N+104 — ONE REQUEST PER TAB: the slot is closed when the work is done.
+   *
+   * The operator's requirement, and it is the fix for three separate problems at
+   * once: "the chrome must close the tab after it did what it intended, and the
+   * pool only means the capacity we have — start and end one work at a time, a
+   * full open/close of one site in one slot."
+   *
+   * What was wrong: the pool treated "warm" as "keep the page". A released page
+   * kept its tab, its live conversation, its document title, and whatever toggles
+   * the previous caller had flipped, and the next request was handed that
+   * residue. Measured: a request unrelated to weather came back carrying
+   * `"title":"Weather in Paris"` from the PRIOR conversation. The code could not
+   * know that state, so it re-issued Playwright instructions into it and produced
+   * answers that looked confident and belonged to somebody else.
+   *
+   * What is right: a slot is a CAPACITY, not a cache. The browser connection and
+   * the session are what stay warm — those are the expensive parts and they are
+   * what the anti-bot posture depends on. The TAB is per-request: opened, used,
+   * closed. That makes the page state deterministic by construction rather than by
+   * a hand-maintained list of things to clear, and it stops the tabs, contexts and
+   * renderers from accumulating for the lifetime of a long-lived Chrome.
+   *
+   * The cost is one navigation per request, which is real, and it is the price
+   * for "the next request starts from a state this code actually understands".
+   */
   async release(worker: PoolWorker): Promise<void> {
     worker.busy = false;
     worker.busySince = undefined;
@@ -550,6 +576,19 @@ export class ChatPool {
       await worker.driver.close();
       this.drain(worker.profileId);
       return;
+    }
+    // ROUND N+104 — the tab is per-request; the slot survives. Close the PAGE,
+    // keep the BROWSER, so the next request in this slot opens clean while the
+    // warm connection and session — the parts that are expensive and that the
+    // anti-bot posture depends on — stay exactly as they were.
+    // Guarded, because `release` runs on the error path too: a driver without
+    // the method (an older variant, a test double) must not make release THROW,
+    // or the slot is never drained and the queue stalls behind it. Failing to
+    // close a tab is a leak we can observe; throwing here is a hang we cannot.
+    try {
+      await worker.driver.discardPage?.();
+    } catch {
+      /* a wedged tab is the next request's problem, and getPage() rebuilds */
     }
     this.drainWorker(worker);
   }
