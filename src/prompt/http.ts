@@ -46,7 +46,13 @@
 // browser, `min` warmed pages, `max` cap from UI2API_POOL_MAX / free memory) so
 // prompts hit already-loaded pages and can run in parallel.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { ChatPool, POOL_REFUSAL_CODES, type PoolRefusalCode, type PoolStatus } from "./pool.js";
+import {
+  ChatPool,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  POOL_REFUSAL_CODES,
+  type PoolRefusalCode,
+  type PoolStatus,
+} from "./pool.js";
 import { daemonPosture, TOKEN_ENV } from "./posture.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildToolInstruction, parseToolCall, stripToolCall } from "./soft-tools.js";
@@ -488,8 +494,14 @@ export function healthVerdict(
  *
  * `SHUTDOWN_GRACE_MS` = 15s is how long close() waits for in-flight requests
  * before destroying the sockets: long enough for a normal request to finish
- * answering, short enough that a stopped daemon stops. */
-const DEFAULT_REQUEST_TIMEOUT_MS = 300_000;
+ * answering, short enough that a stopped daemon stops.
+ *
+ * `DEFAULT_REQUEST_TIMEOUT_MS` itself is NOT declared here: it is IMPORTED from
+ * ./pool.js (one definition, not two). It is the SAME number the pool derives
+ * its `busyWatchdogMs` from (75% of it), so the daemon's deadline and the
+ * watchdog that reclaims a wedged slot can never drift apart. A second literal
+ * here would silently let the two diverge and re-open the permanent-capacity-loss
+ * bug the watchdog exists to close. */
 const DEFAULT_SHUTDOWN_GRACE_MS = 15_000;
 
 function envMs(name: string, fallback: number): number {
@@ -1320,11 +1332,25 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
     void Promise.race([work.then(() => "done" as const, () => "done" as const), deadline]).then((winner) => {
       if (timer) clearTimeout(timer);
       if (winner !== "deadline") return;
-      // The browser call cannot be cancelled mid-flight, so it keeps running in
-      // the background and the pool is still released by its own handler — but
-      // the client gets a NAMED 504 now, and `send`'s guard means the late
-      // handler cannot write a second response. `connection: close` because the
-      // abandoned request body leaves that socket unusable for keep-alive.
+      // The browser call CANNOT be cancelled mid-flight: this Promise.race only
+      // SENDS the 504, it does not touch the driver, so `driver.ask()` keeps
+      // running to whatever conclusion it reaches on its own. Because that hang
+      // never settles, `pool.release()` is never reached either — the pool slot
+      // is HELD for as long as the page stays busy, and the pool only gets it
+      // back when the `busyWatchdogMs` watchdog reclaims it (pool.ts), which is
+      // derived from this same deadline. So the 504 tells the client now, and
+      // the pool recovers on its own afterwards — but only via that watchdog,
+      // NOT via anything here: this handler releases nothing.
+      //
+      // MEASURED, and this comment used to claim the opposite: believing the
+      // pool was "still released by its own handler" hid a wedged page that held
+      // its slot 1569s across two outage events while the pool SHRANK 4 -> 2 —
+      // permanent capacity loss, not a transient dip. Do not "simplify" this back
+      // into claiming the release happens here.
+      //
+      // `send`'s guard means the late handler cannot write a second response, and
+      // `connection: close` because the abandoned request body leaves that socket
+      // unusable for keep-alive.
       send(
         res,
         504,

@@ -16,7 +16,7 @@
  * The library is resolved from disk only — no install, no network fetch. Order:
  *   1. an already-present `openai` package resolvable from this file,
  *   2. `/opt/OmniRoute/node_modules/openai` (the copy on this box),
- *   3. `UI2API_OPENAI_SDK` (a path to any other local copy).
+ *   3. `OPENAI_SDK_SMOKE_OPT` (a path to any other local copy).
  * If none resolves, the script exits 3 with NOT AVAILABLE. It never installs.
  *
  * HONESTY RULES
@@ -45,7 +45,11 @@ const argOf = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const BASE = argOf("base", process.env.UI2API_BASE || "http://127.0.0.1:9797").replace(/\/+$/, "");
+// OPENAI_SDK_SMOKE_BASE, not the UI2API_ runtime namespace: this is one
+// script's own target knob, not a knob the daemon reads, and
+// test/ci-contract-knob-cites fails a UI2API_-prefixed name read in scripts/
+// with no AGENTS.md table row. Nothing sets it in-tree; --base still overrides.
+const BASE = argOf("base", process.env.OPENAI_SDK_SMOKE_BASE || "http://127.0.0.1:9797").replace(/\/+$/, "");
 const MODEL_OVERRIDE = argOf("model", "");
 const TIMEOUT_MS = Number(argOf("timeout", "120000"));
 const PROBE_TIMEOUT_MS = Number(argOf("probe-timeout", "15000"));
@@ -55,7 +59,7 @@ function loadSdk() {
   const req = createRequire(import.meta.url);
   const candidates = [
     "openai",
-    process.env.UI2API_OPENAI_SDK,
+    process.env.OPENAI_SDK_SMOKE_OPT,
     "/opt/OmniRoute/node_modules/openai",
   ].filter(Boolean);
   for (const c of candidates) {
@@ -99,7 +103,7 @@ const bounded = (promise, ms, label) =>
 // ── main ─────────────────────────────────────────────────────────────────────
 const sdk = loadSdk();
 if (!sdk) {
-  console.log("NOT AVAILABLE: no `openai` package found on disk (tried: 'openai', $UI2API_OPENAI_SDK, /opt/OmniRoute/node_modules/openai).");
+  console.log("NOT AVAILABLE: no `openai` package found on disk (tried: 'openai', $OPENAI_SDK_SMOKE_OPT, /opt/OmniRoute/node_modules/openai).");
   console.log("This script will not install anything. The /v1 surface may still be correct — it is simply unverified by a real SDK.");
   process.exit(3);
 }

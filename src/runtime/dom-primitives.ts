@@ -164,11 +164,43 @@ export function stepAnswerPoll(
 }
 
 /**
- * The full freshness-aware awaitAnswer loop over an injected read function —
- * the same loop the browser path runs, so fixture tests (no browser) exercise
- * the production verdict logic verbatim. Returns the fresh text seen (never
- * the baseline's text), the number of polls, and an honest doneReason:
- * "stable" / "timeout" / "empty" / "stale" (see the interface comment).
+ * GOAL 156 - "BOUND THE READ, NOT THE LOOP".
+ *
+ * Bounding only the `while` clock does NOT bound the ask: the awaited `read()`
+ * is `readAnswerRegionFromPage(p, selector)` -> `page.evaluate(...)`, an RPC to
+ * the browser's CDP endpoint, and nothing in src/ sets a Playwright default
+ * timeout (`setDefaultTimeout` has zero hits). One read that never returns
+ * therefore parked the loop forever; `driver.ask()` never settled, so
+ * `pool.release()` was never reached (the release-on-THROW paths are fine - a
+ * hang cannot throw) and the pool slot was lost PERMANENTLY (measured live:
+ * busyMs 282s -> 333s -> 1569s, pool 4 -> 2). `UI2API_REQUEST_TIMEOUT_MS` is
+ * only a `Promise.race` on the HTTP response, so it turned a visible hang into
+ * silent permanent slot loss.
+ *
+ * So every read is raced against the REMAINING budget. A read that does not
+ * come back inside it ends the ask with the last text we actually READ (never
+ * text we did not read - a fabricated answer is forbidden) and the existing
+ * honest "timeout" verdict, whose documented meaning already covers this
+ * exactly: "grew but never settled". The return contract
+ * `{ text, chunkCount, doneReason }` and the `AnswerDoneReason` union are
+ * UNCHANGED on purpose - the type can express "we ran out of budget before the
+ * fresh text settled", so no new member is invented (and no `doneReason`
+ * consumer in src/ or test/ has to change). Note for a follow-up: under this
+ * union the caller cannot tell an unresponsive CDP from a merely slow stream;
+ * widening the union is a deliberate, consumer-routed change, not a local one.
+ *
+ * HAZARD REASONING - an abandoned read resolving late:
+ *   A timed-out read is settled ONCE. The `settled` latch drops the late
+ *   `.then` callback's value on the floor: it is never fed to `stepAnswerPoll`,
+ *   so it can never mutate `state`, `state.maxFresh`, or the returned `text` of
+ *   this ask. And `base` is snapshotted exactly once, at entry, from a value
+ *   this call awaited BEFORE the loop started - so no late read can write into
+ *   a SUBSEQUENT ask's freshness baseline either, because the next ask builds
+ *   its own `base` from its own first read; nothing is shared between calls
+ *   (no module-level mutable state on this path). The only residue is the
+ *   browser-side `page.evaluate` still running; the loop stops issuing further
+ *   reads the moment one times out (it breaks, it does not re-poll), so at most
+ *   ONE read per ask is ever abandoned.
  */
 export async function awaitAnswerFromReads(
   read: () => Promise<AnswerRegionRead>,
@@ -177,11 +209,59 @@ export async function awaitAnswerFromReads(
 ): Promise<{ text: string; chunkCount: number; doneReason: AnswerDoneReason }> {
   const { timeoutMs = 30000, stableMs = 1800, pollMs = 400 } = opts;
   const t0 = Date.now();
-  const base = snapshotBaseline(baseline ?? (await read()));
+
+  // One bounded read. `null` means "did not come back inside the remaining
+  // budget". A REJECTION is not swallowed - it propagates exactly as before,
+  // so an honest page/target error is never laundered into a "timeout".
+  const readBounded = (): Promise<AnswerRegionRead | null> => {
+    const remaining = timeoutMs - (Date.now() - t0);
+    if (remaining <= 0) return Promise.resolve(null);
+    return new Promise<AnswerRegionRead | null>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      }, remaining);
+      read().then(
+        (r) => {
+          if (settled) return; // late arrival after our deadline - dropped
+          settled = true;
+          clearTimeout(timer);
+          resolve(r);
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        }
+      );
+    });
+  };
+
+  // The freshness baseline is the stale-echo guard. If it cannot be read there
+  // is no honest verdict available: an EMPTY baseline would make the previous
+  // answer's elements count as "fresh" and get served as this prompt's answer -
+  // the exact fabrication class this guard exists to prevent. Refuse loudly.
+  const baseRegion = baseline ?? (await readBounded());
+  if (!baseRegion) {
+    throw new Error(
+      `answer-read-timeout: could not read the pre-ask answer region within ${timeoutMs}ms - ` +
+        `no freshness baseline, so the previous answer could not be told apart from this one. ` +
+        `(the page read never returned; the browser/CDP endpoint is unresponsive)`
+    );
+  }
+  const base = snapshotBaseline(baseRegion);
+
   let state = initAnswerPollState(t0);
   let stable = false;
   while (!stable && Date.now() - t0 < timeoutMs) {
-    const region = await read();
+    const region = await readBounded();
+    // The read itself timed out -> end the ask NOW with the last text we really
+    // read. Do not keep polling: every further read is unbounded work against a
+    // page that has already stopped answering.
+    if (!region) break;
     state = stepAnswerPoll(state, region, base, Date.now(), stableMs);
     stable = state.doneReason === "stable";
     if (!stable) await new Promise((r) => setTimeout(r, pollMs));
@@ -190,9 +270,9 @@ export async function awaitAnswerFromReads(
   let doneReason = state.doneReason;
   if (doneReason === "timeout" && !text) {
     // Nothing fresh ever appeared: "stale" means pre-existing content (the old
-    // answer) was present the whole time and the read never changed — the true
+    // answer) was present the whole time and the read never changed - the true
     // stale-echo signal, reported honestly instead of echoing that content;
-    // a baseline that was already empty is a plain "empty" (no answer at all).
+    // a baseline that is already empty is a plain "empty" (no answer at all).
     doneReason = state.madeProgress ? "empty" : base.maxText ? "stale" : "empty";
   }
   return { text, chunkCount: state.chunkCount, doneReason };
@@ -329,7 +409,18 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
       // each read is a tiny anonymous leaf evaluation (no named functions —
       // esbuild's __name helper is invalid inside a page).
       const res = await awaitAnswerFromReads(read, opts, baseline);
-      const meta = (await p.evaluate(() => ({ url: location.href, title: document.title }))) as { url: string; title: string };
+      // Same unbound-read hazard as the poll reads (GOAL 156): this trailing
+      // `p.evaluate` is another unbounded CDP RPC, and it runs AFTER the loop
+      // has already produced its answer — a hang here would lose the pool slot
+      // for an answer we already hold. It is pure metadata, so it is bounded
+      // and degrades to empty strings rather than taking the whole ask down.
+      const metaCapMs = Math.max(500, Math.min(opts.timeoutMs ?? 30000, 5000));
+      const meta = (await Promise.race([
+        p.evaluate(() => ({ url: location.href, title: document.title })),
+        new Promise<{ url: string; title: string }>((r) =>
+          setTimeout(() => r({ url: "", title: "" }), metaCapMs)
+        ),
+      ])) as { url: string; title: string };
       return { ...res, url: meta.url, title: meta.title };
     },
     async status(sel) {

@@ -86,8 +86,105 @@ function uncommented(text: string): string {
 }
 
 /* ------------------------------------------------------------------ *
- * 1. The three units exist, are boot-enabled, and Restart=always.
+ * 1. The three units exist, are boot-enabled, and carry the Restart
+ *    policy their OWN contract demands — which is not the same for all
+ *    three.
  * ------------------------------------------------------------------ */
+
+/**
+ * EXPECTED RESTART POLICY, per unit. This is the per-unit contract, not a
+ * uniform aspiration.
+ *
+ * DISCLOSURE — WHAT CHANGED, AND WHY EDITING THIS GATE IS THE HONEST
+ * DIRECTION. This table REPLACED a blanket pin that demanded `Restart=always`
+ * on all three units. The shipped `ui2api-chrome.service` does not satisfy
+ * that, and should not. The chrome exemption is DELIBERATE. A future reader
+ * must be able to RE-CHECK the premise instead of assuming the pin is
+ * arbitrary, so here it is in full:
+ *
+ *   * `ui2api chrome stop` is a documented, first-class operator command
+ *     (AGENTS.md; docs/CHROME_POINT_OF_USE.md) — not an internal detail.
+ *   * It is NOT `systemctl stop`. `stopChromeDaemon()` in
+ *     `src/runtime/chrome-daemon.ts` sends a DIRECT
+ *     `process.kill(state.pid, "SIGTERM")` (measured at line 369; that file
+ *     contains no `systemctl` call at all).
+ *   * systemd's "an operator stop is never restarted" rule covers an
+ *     operator-initiated `systemctl stop` — NOT an external SIGTERM. A death
+ *     by external signal is a restart-triggering exit. So under
+ *     `Restart=always`, systemd brings the browser back a second later,
+ *     silently undoing a stop the operator just asked for.
+ *   * The old pin's own stated reason — "a crash-looping or OOM-killed
+ *     service would stay down forever" — is ALREADY met by `on-failure`,
+ *     which restarts on a nonzero exit, on a fatal signal (SIGSEGV / SIGKILL /
+ *     OOM), on TimeoutStopSec, and on the watchdog. `always` differs from
+ *     `on-failure` in exactly one respect: it ALSO restarts a CLEAN exit.
+ *     Here the clean exit IS the requested stop. So `always` buys no
+ *     crash-loop self-healing that `on-failure` does not already give, and it
+ *     costs a working operator workflow.
+ *
+ * So the contract this file now pins is the real one: SELF-HEALING, plus a
+ * deliberate `chrome stop` must STICK. Both halves are pinned positively and
+ * proven load-bearing in both directions in the anti-vacuity block below — a
+ * flip of the chrome unit to `always` must fail LOUDLY, naming the reason.
+ *
+ * SIDE NOTE on these unit files, so a reader does not go looking for a knob
+ * that is not there: they are NOT parameterized by `$CHROME_USER` /
+ * `$XVFB_DISPLAY`. Since the single-source refactor into `scripts/ops/units/`,
+ * each unit hardcodes its own values as literals — `UI2API_CHROME_USER=ui2api`
+ * and `DISPLAY=:99`.
+ */
+const RESTART_POLICY = {
+  // The display must come back on its own. Nothing an operator drives ever
+  // stops it, and if DISPLAY is gone every other unit is a casualty.
+  "ui2api-xvfb": "always",
+  // The HTTP surface other programs call must self-heal, clean exit included.
+  "ui2api-api": "always",
+  // Self-heals a crash / OOM / fatal signal, but MUST NOT resurrect a
+  // deliberate `ui2api chrome stop`. Premise measured above — re-check it at
+  // src/runtime/chrome-daemon.ts before weakening this pin.
+  "ui2api-chrome": "on-failure",
+} as const;
+
+type UnitName = keyof typeof RESTART_POLICY;
+
+/** The failure message for a Restart mismatch, carrying the per-unit reason. */
+function restartFailureMessage(name: string, expected: string, actual: string | null): string {
+  const got =
+    actual === null
+      ? "ABSENT (=no, the systemd default — no self-healing at all)"
+      : actual;
+  const head = `${name}.service Restart is ${got}, expected "${expected}"`;
+  if (name === "ui2api-chrome") {
+    return (
+      head +
+      " — NOT a style preference, and not an oversight. `ui2api chrome stop` is a " +
+      "documented operator command (AGENTS.md, docs/CHROME_POINT_OF_USE.md) and it is " +
+      "NOT `systemctl stop`: stopChromeDaemon() in src/runtime/chrome-daemon.ts sends a " +
+      "direct process.kill(state.pid, SIGTERM) (line 369; no systemctl anywhere in that " +
+      "file). systemd exempts an operator-initiated `systemctl stop` from restarting, but " +
+      "an EXTERNAL SIGTERM is a restart-triggering exit — so Restart=always resurrects " +
+      "the browser a second later and silently undoes the stop the operator asked for. " +
+      "on-failure still self-heals the whole crash surface: nonzero exit, " +
+      "SIGSEGV/SIGKILL/OOM, TimeoutStopSec, watchdog. It differs from always in exactly " +
+      "one way — it does not restart a CLEAN exit — and here the clean exit IS the " +
+      "requested stop. Re-check that premise at src/runtime/chrome-daemon.ts before " +
+      "loosening this pin."
+    );
+  }
+  return `${head} — a crash-looping or OOM-killed service would stay down forever`;
+}
+
+/**
+ * THE predicate. Both the real gate below and the anti-vacuity mutations call
+ * this, so a mutation that passes here would really have passed the real gate
+ * and vice versa — that is what makes the anti-vacuity block a proof rather
+ * than a parallel reimplementation that could drift.
+ */
+function assertRestartPolicy(name: string, text: string): void {
+  const expected = (RESTART_POLICY as Record<string, string>)[name]!;
+  const actual = directive(uncommented(text), "Restart");
+  assert.equal(actual, expected, restartFailureMessage(name, expected, actual));
+}
 
 t("prod supervision: all three unit files exist", () => {
   const missing = UNITS.filter((u) => !existsSync(unitPath(u)));
@@ -115,19 +212,38 @@ for (const name of UNITS) {
     );
   });
 
-  t(`prod supervision: ${name} has Restart=always (uncommented)`, () => {
-    const text = uncommented(readUnit(name));
-    const restart = directive(text, "Restart");
-    // A unit with NO Restart= is Restart=no — the default. So absent fails here
-    // too, and it fails for the right reason: no self-healing.
-    assert.equal(
-      restart,
-      "always",
-      `${name}.service Restart is ${restart === null ? "ABSENT (=no, the systemd default)" : restart}, ` +
-        `expected "always" — a crash-looping or OOM-killed service would stay down forever`,
-    );
+  // PER-UNIT, not uniform: the expected value comes from RESTART_POLICY, so a
+  // unit that lost its policy, or gained the WRONG one, fails here. A unit
+  // with NO Restart= is Restart=no — the default — so absent fails too, and it
+  // fails for the right reason: no self-healing.
+  t(`prod supervision: ${name} has Restart=${RESTART_POLICY[name as UnitName]} (uncommented)`, () => {
+    assertRestartPolicy(name, readUnit(name));
   });
 }
+
+t("prod supervision: ui2api-chrome is on-failure, and explicitly NOT always", () => {
+  // Requirement (2): this is a contract in its own right, not the mere absence
+  // of a check. Stated on its own so that flipping chrome to `always` fails
+  // LOUDLY on a test whose entire subject is that flip — the failure message
+  // carries the whole `chrome stop` / direct-SIGTERM reasoning.
+  const restart = directive(uncommented(readUnit("ui2api-chrome")), "Restart");
+  assert.equal(
+    restart,
+    "on-failure",
+    `ui2api-chrome.service Restart is ${restart ?? "ABSENT"}, expected "on-failure" — ` +
+      `see the per-unit table above: on-failure already self-heals a crash, an OOM ` +
+      `kill, and any fatal signal, and it is the ONLY value that does not resurrect ` +
+      `the browser after a deliberate \`ui2api chrome stop\``,
+  );
+  assert.notEqual(
+    restart,
+    "always",
+    "ui2api-chrome.service is Restart=always — systemd will bring the browser back a " +
+      "second after the operator's `ui2api chrome stop` (a direct SIGTERM from " +
+      "stopChromeDaemon(), not a `systemctl stop`, so the operator-stop exemption " +
+      "does not apply), silently undoing a documented command",
+  );
+});
 
 t("prod supervision: the api unit pins a real RestartSec, so 'always' is not a hot loop", () => {
   // Restart=always with RestartSec=0 is a fork bomb. The pin is that the value
@@ -138,6 +254,24 @@ t("prod supervision: the api unit pins a real RestartSec, so 'always' is not a h
   assert.ok(
     Number.isFinite(asNum) && asNum > 0,
     `ui2api-api.service RestartSec=${sec} is not a positive duration`,
+  );
+});
+
+t("prod supervision: the chrome unit pins a real RestartSec, so on-failure is not a hot loop", () => {
+  // Same property as the api unit, and it matters just as much here: a
+  // `Restart=on-failure` with RestartSec=0 is still a fork bomb on a unit that
+  // fails instantly. `on-failure` is a RESTART policy, not a no-restart policy —
+  // the exemption in RESTART_POLICY is about the clean exit, not about pacing.
+  const sec = directive(uncommented(readUnit("ui2api-chrome")), "RestartSec");
+  assert.ok(
+    sec,
+    "ui2api-chrome.service has no RestartSec — Restart=on-failure would hot-loop on an " +
+      "instant failure",
+  );
+  const asNum = sec!.endsWith("ms") ? Number(sec!.slice(0, -2)) : Number(sec!);
+  assert.ok(
+    Number.isFinite(asNum) && asNum > 0,
+    `ui2api-chrome.service RestartSec=${sec} is not a positive duration`,
   );
 });
 
@@ -376,6 +510,16 @@ t("anti-vacuity: the Restart gate REJECT Restart=on-failure and Restart=no", () 
       "always",
       `a unit with Restart=${bad} satisfied the "always" pin — the gate is vacuous`,
     );
+    // ADAPTED (not dropped): route the mutation through the REAL predicate as
+    // well, so this proves `assertRestartPolicy` itself rejects it and not just
+    // a parallel expression that could drift from it. The `on-failure` case
+    // matters more now that on-failure is a LEGAL value — for the chrome unit,
+    // not for this one.
+    assert.throws(
+      () => assertRestartPolicy("ui2api-api", mutated),
+      new RegExp(`expected "always"`),
+      `a unit with Restart=${bad} passed the real per-unit gate — the gate is vacuous`,
+    );
   }
 });
 
@@ -386,6 +530,76 @@ t("anti-vacuity: the Restart gate REJECT an ABSENT Restart (systemd default is n
     null,
     "an absent Restart still read as 'always' — the gate would pass a unit that " +
       "never restarts (systemd's default Restart=no)",
+  );
+});
+
+t("anti-vacuity: the per-unit gate REJECT Restart=always on ui2api-chrome (resurrection hazard)", () => {
+  // The other direction, and the one this file's per-unit table exists for. The
+  // api-direction mutations above all move AWAY from `always`; this one moves
+  // TOWARD it, so it is the only mutation that can catch a future edit flipping
+  // the chrome unit back to `always` — the edit that silently resurrects the
+  // browser after a deliberate `ui2api chrome stop`.
+  const original = uncommented(readUnit("ui2api-chrome"));
+  const mutated = original.replace(/^Restart=.*$/m, "Restart=always");
+  // MUTATION APPLIED? A no-op mutation would make every assertion below pass
+  // trivially and prove nothing, so check the text actually changed first.
+  assert.equal(
+    directive(mutated, "Restart"),
+    "always",
+    "mutation setup failed — the anti-vacuity test would prove nothing (the replace " +
+      "did not take, or a second Restart= line won the last-occurrence read)",
+  );
+  assert.notEqual(
+    directive(mutated, "Restart"),
+    directive(original, "Restart"),
+    "mutation setup failed — mutating ui2api-chrome to Restart=always changed nothing, " +
+      "so the rejection below would be vacuous",
+  );
+  // And the REAL gate rejects it, with the reason in the message — a flip to
+  // `always` must fail loudly, not silently pass.
+  assert.throws(
+    () => assertRestartPolicy("ui2api-chrome", mutated),
+    /chrome stop/,
+    "a chrome unit set to Restart=always PASSED the real per-unit gate — the gate is " +
+      "vacuous, and the `ui2api chrome stop` resurrection hazard is unguarded",
+  );
+  // POSITIVE CONTROL: the real shipped unit passes the SAME predicate the
+  // mutation just failed, so this is a gate that discriminates, not one that is
+  // simply always-red (which would "pass" anti-vacuity while testing nothing).
+  assert.doesNotThrow(
+    () => assertRestartPolicy("ui2api-chrome", original),
+    "POSITIVE CONTROL FAILED — the real ui2api-chrome.service does not satisfy the same " +
+      "predicate the mutation was rejected by, so the rejection above proves nothing " +
+      "(the gate is always-red rather than discriminating)",
+  );
+});
+
+t("anti-vacuity: the per-unit gate REJECT an ABSENT Restart on ui2api-chrome", () => {
+  // A chrome unit with no Restart= at all is Restart=no — systemd's default —
+  // so the browser would NOT come back after a crash, an OOM kill, or a
+  // segfault. This is the other half of the on-failure contract: exempt from
+  // the clean exit, still self-healing on every fault. Dropping the line is
+  // therefore a real regression, and it must not slip through the exemption.
+  const original = uncommented(readUnit("ui2api-chrome"));
+  const mutated = original.replace(/^Restart=.*$/m, "");
+  assert.equal(
+    directive(mutated, "Restart"),
+    null,
+    "mutation setup failed — the absent-Restart mutation did not apply, so the " +
+      "rejection below would prove nothing",
+  );
+  assert.throws(
+    () => assertRestartPolicy("ui2api-chrome", mutated),
+    /ABSENT/,
+    "a chrome unit with an ABSENT Restart= passed the real per-unit gate — the gate " +
+      "would ship a browser that stays down forever after a crash, an OOM kill, or a " +
+      "segfault (systemd's default Restart=no)",
+  );
+  // Positive control again, same predicate.
+  assert.doesNotThrow(
+    () => assertRestartPolicy("ui2api-chrome", original),
+    "POSITIVE CONTROL FAILED — the real ui2api-chrome.service does not satisfy the same " +
+      "predicate, so the rejection above proves nothing",
   );
 });
 

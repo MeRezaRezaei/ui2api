@@ -1,0 +1,179 @@
+{
+  "schema": "ui2api/model-verification/1",
+  "generatedAt": "2026-09-29T00:00:00Z",
+  "recordPath": "capabilities/model-verification.json",
+  "gate": "test/model-verification-consistent.test.ts",
+  "stalenessWindowDays": 30,
+  "measuredAtPrecision": "DATE-ONLY",
+  "honestyRule": "A record may only carry class ANSWERS when a real measured round trip through the deployed service returned HTTP 200 with real answer text. Every other class means exactly what its name says. CONTENDED-TIMEOUT is a measurement of the POOL, not of the model. UNMEASURED means the sweep never reached the model. Nothing in this file is an inference, a projection, or a claim about a model that was not measured.",
+  "source": {
+    "audit": "scripts/audit/model-answers-audit.md",
+    "harness": "scripts/audit/measure-models.mjs",
+    "target": "http://127.0.0.1:9797 (deployed promptd)",
+    "auditDate": "2026-09-29"
+  },
+  "measuredAtNote": "measuredAt is the audit's own stated Date line (date-only, '2026-09-29'), because the audit's per-row table records no per-request timestamp. It is deliberately NOT given second precision: inventing a clock time the sweep did not print is the same defect this file exists to kill. The gate accepts a parseable date and reports the precision.",
+  "daemonCommitNote": "The audit did NOT record which commit the deployed promptd binary was built from, so daemonCommit is null for every record here and daemonCommitUnknown carries the reason. The repo HEAD at record-writing time is 02577572eefcc0dc6a566fd4ccd54a2c354d86b2 — that is evidence about the WORKING TREE, not about the running daemon, and it is not written into the per-model field for that reason.",
+  "daemonCommitUnknown": {
+    "reason": "the 2026-09-29 audit did not record the deployed binary's commit",
+    "checkedInHeadAtRecordTime": "02577572eefcc0dc6a566fd4ccd54a2c354d86b2"
+  },
+  "sourceDiscrepancy": "The audit's §1 count table says TIMEOUT=11 and NOT MEASURED=8, but its own §2 row table lists 10 TIMEOUT rows and its §1/§7 NOT MEASURED prose names 11 models one of which (v0) is ALSO a TIMEOUT row. The counts do not close (10+3+10=23 against an advertised 22). This file follows the §2 ROW TABLE, which is the only place the per-model data actually is, and therefore records 1 ANSWERS + 2 SIGN-OUT + 10 CONTENDED-TIMEOUT + 9 UNMEASURED = 22. The audit's own headline numbers are NOT reconciled here and no model was reclassified to make them close.",
+  "classes": {
+    "ANSWERS": "a real measured round trip returned HTTP 200 with real answer text from the model's own site",
+    "SIGN-OUT": "the server returned a NAMED 502/4xx whose own message says sign-in is required (a real, actionable, per-model failure)",
+    "CONTENDED-TIMEOUT": "a request was issued and got no response (HTTP 000, client abort) while the pool was NOT idle — a measurement of queue contention, NOT a property of the model",
+    "UNMEASURED": "the sweep never reached this model; nothing is known about it from this run"
+  },
+  "records": [
+    {
+      "model": "gemini",
+      "measuredAt": "2026-09-29",
+      "class": "ANSWERS",
+      "evidence": "POST /v1/chat/completions {model:gemini} -> HTTP 200, 28940ms, pool 0/1 idle at request time, answer text 'Gemini said PONG' (audit §2 row table, measure-models.mjs classify() -> ANSWERS)",
+      "method": "live-v1-chat",
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "kimi",
+      "measuredAt": "2026-09-29",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:kimi} -> HTTP 502, 70977ms, pool 3/4, server's own message: \"no answer appeared on kimi within 60000ms. This site requires sign-in. sign in once via ui2api analyse https://www.kimi.ai --login — sessions live in localStorage (access_token/refresh_token/msh_user_id) replayed as 'Authorization: Bearer <access_token>' against https://notilo.kimi.com/apiv2\"",
+      "method": "live-v1-chat",
+      "prereq": "sign-in required (named by the server): kimi.ai localStorage access_token",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "copilot-m365",
+      "measuredAt": "2026-09-29",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:copilot-m365} -> HTTP 502, 157283ms, pool 2/4, server's own message: \"no answer appeared on copilot-m365 within 60000ms. This site requires sign-in. Entra ID (Microsoft Entra) sign-in only — MSA/consumer accounts are blocked (blockMsaFed:true)\"",
+      "method": "live-v1-chat",
+      "prereq": "sign-in required (named by the server): Microsoft Entra ID only",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "chatgpt",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200042ms (client abort, no response) at pool 3/4 — queued behind wedged work, so this is a pool measurement, NOT a chatgpt property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 3, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "claude",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — the pool was FULLY WEDGED, so this is a pool measurement, NOT a claude property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "copilot",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200005ms (client abort, no response) at pool 4/4 — cross-site head-of-line blocking (audit Cause B) put copilot behind wedged kimi work; NOT a copilot property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "deepseek",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200008ms (client abort, no response) at pool 3/4 — the audit states this was Cause B (cross-site queueing), explicitly NOT a deepseek property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 3, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "tencent-aistudio",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — pool fully wedged; this run says nothing about tencent-aistudio",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "duckduckgo",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200009ms (client abort, no response) at pool 3/4. THE CONTROL: the operator measured this same model OK minutes earlier, so a demonstrably-working model timing out here is what proves the class is contention and not a model defect",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 3, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "grok",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200005ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a grok property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "poe",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200040ms (client abort, no response) at pool 3/4 — queued behind wedged work; NOT a poe property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 3, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "t3chat",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a t3chat property",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    {
+      "model": "v0",
+      "measuredAt": "2026-09-29",
+      "class": "CONTENDED-TIMEOUT",
+      "evidence": "HTTP 000 after 200006ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a v0 property. DISCLOSED: the audit ALSO lists v0 among its NOT-MEARED prose names, so v0 is double-listed there; the §2 row table is followed (v0 was requested and timed out)",
+      "method": "live-v1-chat",
+      "poolAtRequest": { "busy": 4, "total": 4 },
+      "prereq": "not recorded by the audit",
+      "daemonCommit": null,
+      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+    },
+    { "model": "perplexity", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "huggingchat", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "hunyuan", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "blackbox", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "codex", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "inner-ai", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "manus", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "notion", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
+    { "model": "venice", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommitUnknown": "not measured" }
+  ]
+}

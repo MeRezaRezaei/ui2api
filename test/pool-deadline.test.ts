@@ -20,7 +20,7 @@ import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ChatPool, type PoolOptions, type PoolWorker } from "../src/prompt/pool.js";
+import { ChatPool, siteRateLimitMs, type PoolOptions, type PoolWorker } from "../src/prompt/pool.js";
 import { startPromptd } from "../src/prompt/http.js";
 
 // Resolve/observe a promise with a wall-clock bound. `settled:false` is the
@@ -310,5 +310,62 @@ test("GOAL83: the real /v1 surface is byte-compatible on the happy path (models 
   } finally {
     await svc.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── (6) the pacing/queue boundary — the anti-vacuity pin ─────────────────────
+//
+// WHY THIS EXISTS. `acquire()` used to open with `await this.paceSite(siteId)`.
+// That put an async boundary ABOVE every capacity and queue decision, and it
+// silently broke four GOAL 83 pins here plus two GOAL 87 pins in
+// test/status-honesty.test.ts — all at the DEFAULT 1500ms site floor, all while
+// the pool was doing nothing wrong. The visible symptom was always a NUMBER
+// (`queued` 0 !== 1, or `pool_queue_timeout` where `pool_saturated` was
+// promised), which is why it read as a flaky test rather than a broken contract.
+//
+// The property under test is BEHAVIOUR: a request that must park is PARKED IN
+// THE SAME TURN the caller asked for it, and a full queue refuses with
+// `pool_saturated` rather than waiting out the site floor first. Both are
+// asserted here against a pool whose pacing floor is deliberately the DEFAULT
+// (no env override, no `paced:false` escape hatch) — so if the floor is ever
+// hoisted back above the queue registration, this goes RED instead of rotting.
+test("the pacing floor must not sit above queue registration (saturation stays visible)", async () => {
+  // No env override and no opt-out: this must hold at whatever the operator's
+  // real floor is, which is exactly the condition the GOAL 83 pins broke under.
+  assert.ok(
+    siteRateLimitMs("gemini") > 0,
+    "this pin is only meaningful with a NON-ZERO site floor — if the floor is 0 the bug cannot reproduce"
+  );
+  const { pool } = saturatedPool({ max: 1, maxWaiters: 1, waiterTimeoutMs: 60_000 });
+  try {
+    // (a) The parked request is visible SYNCHRONOUSLY — no tick, no await.
+    // `observe` (not a bare call) so the eventual close-rejection of this
+    // promise is CONSUMED rather than surfacing as an unhandledRejection that
+    // node escalates to a file-level failure after the test body has ended.
+    const parked = observe(pool.acquire("gemini"));
+    assert.equal(pool.queued, 1, "a parked request must be registered in the SAME TURN acquire() was called");
+
+    // (b) A full queue refuses with the saturation code IMMEDIATELY. If the
+    // floor were above this check, the first waiter's deadline would vacate the
+    // queue before this ran and the answer would be a queue-timeout instead.
+    const refused = await Promise.race([
+      observe(pool.acquire("gemini"), 1000),
+      // Hard backstop: even if the floor is hours, this test must not hang.
+      new Promise<{ settled: boolean }>((r) => setTimeout(() => r({ settled: false }), 1200)),
+    ]);
+    assert.equal(refused.settled, true, "a full queue must refuse without waiting out the pacing floor");
+    assert.match(
+      errorMessage((refused as { error?: unknown }).error),
+      /^pool saturated \(1 waiting, limit 1\)/,
+      "a full queue must answer pool_saturated, never a pacing-delayed queue timeout"
+    );
+
+    // The parked request is settled by close() with the named shutdown cause.
+    await pool.close();
+    const settledParked = await parked;
+    assert.equal(settledParked.settled, true, "close() must settle the parked request, never leave it pending");
+    assert.match(errorMessage(settledParked.error), /^pool closed \(daemon shutdown\)/, errorMessage(settledParked.error));
+  } finally {
+    await pool.close();
   }
 });

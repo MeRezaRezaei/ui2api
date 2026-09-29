@@ -8,10 +8,18 @@
 # fine, headless included, so the ONLY required setup is that this user's Chrome
 # info exists. Writing the Chrome info into that user IS the integration.
 #
-# This script makes that reproducible on a fresh box, and registers both
+# This script makes that reproducible on a fresh box, and registers the three
 # long-lived services with systemd so they survive a reboot:
-#   1. ui2api-chrome.service  the ONE persistent Chrome (CDP on 127.0.0.1:9222)
-#   2. ui2api-api.service     promptd — the HTTP API other programs call
+#   1. ui2api-xvfb.service    the virtual display (without it the daemon is
+#                             silently headless-degraded, and headless is what
+#                             gets challenged)
+#   2. ui2api-chrome.service  the ONE persistent Chrome (CDP on 127.0.0.1:9222)
+#   3. ui2api-api.service     promptd — the HTTP API other programs call
+#
+# IT DOES NOT DEFINE THOSE UNITS. There is exactly one definition of them, in
+# scripts/ops/units/, and exactly one installer that reads it from there,
+# scripts/ops/install-services.sh. This script DELEGATES. See the systemd block
+# below for why that is a correctness rule and not a style preference.
 #
 # IDEMPOTENT by construction: it creates what is missing, never overwrites an
 # existing profile or a live session, and is safe to re-run.
@@ -91,110 +99,61 @@ done
 say "chrome: $CHROME_BIN ($("$CHROME_BIN" --version 2>/dev/null | head -1))"
 
 # ----------------------------------------------------------------- systemd ----
+# DELEGATE. This script does not write a unit file, ever.
+#
+# WHY THE INLINE HEREDOCS ARE GONE (measured, not stylistic). This block used to
+# `cat > "$UNIT_DIR/ui2api-api.service" <<EOF` its OWN copy of all three units,
+# and that copy's api unit ran
+#     ExecStart=/usr/bin/env npx tsx $REPO_DIR/src/cli.ts promptd
+# — the daemon executing out of a GIT CHECKOUT. docs/DEPLOY.md step 1 is exactly
+# this script, so a new operator following the documented first-time bootstrap
+# SILENTLY REVERTED the service to the git-checkout daemon: the precise
+# stale-daemon failure scripts/ops/deploy.sh exists to eliminate,
+# reintroduced by the script the docs tell you to run FIRST. Two definitions of
+# one unit is not redundancy, it is a coin flip, and the wrong side of it is a
+# daemon serving code nobody deployed. The one definition now lives in
+# scripts/ops/units/ and is installed only by scripts/ops/install-services.sh.
+# test/prod-bootstrap-single-source.test.ts gates both halves of that.
 if [[ "$DO_SYSTEMD" -eq 1 ]] && have systemctl; then
-  UNIT_DIR="/etc/systemd/system"
+  UNIT_SRC="$REPO_DIR/scripts/ops/units"
+  INSTALL_SERVICES="$REPO_DIR/scripts/ops/install-services.sh"
 
-  # The VIRTUAL DISPLAY. MEASURED: headless is what gets us blocked — the same
-  # site answers ERR_CHALLENGE headless and returns a real DOM-read answer
-  # headed on Xvfb. So the display is a first-class service, not a convenience.
-  cat > "$UNIT_DIR/ui2api-xvfb.service" <<EOF
-[Unit]
-Description=ui2api virtual display (Xvfb :99) — a headed Chrome needs a real X display
-Before=ui2api-chrome.service
+  if [[ ! -d "$UNIT_SRC" ]]; then
+    echo "[provision] refusing: no unit definitions at $UNIT_SRC" >&2
+    echo "[provision] the units live there and nowhere else; this script will not" >&2
+    echo "[provision] synthesise them. Restore the directory (git checkout) and re-run." >&2
+    exit 1
+  fi
+  if [[ ! -f "$INSTALL_SERVICES" ]]; then
+    echo "[provision] refusing: no installer at $INSTALL_SERVICES" >&2
+    echo "[provision] that installer is the only thing that reads $UNIT_SRC." >&2
+    exit 1
+  fi
 
-[Service]
-Type=simple
-User=$CHROME_USER
-Group=$CHROME_USER
-ExecStart=/usr/bin/Xvfb :$XVFB_DISPLAY -screen 0 1920x1080x24 -nolisten tcp
-Restart=on-failure
-RestartSec=2
-NoNewPrivileges=true
+  # HONEST NOTE ON $CHROME_USER. The shipped units are NOT parameterized by it.
+  # ui2api-api.service hardcodes User=ui2api, ports 9222/9797, DISPLAY=:99 and
+  # UI2API_CHROME_USER=ui2api; install-services.sh hardcodes `id -u ui2api`. So
+  # delegating installs the PRODUCTION units regardless of what CHROME_USER is
+  # here. That is the right outcome — a throwaway test user must not be able to
+  # rewrite the real point of use — but it is not silent, and a reader who set
+  # CHROME_USER expecting the units to follow must be told so out loud rather
+  # than discovering it from a unit running as somebody else.
+  if [[ "$CHROME_USER" != "ui2api" ]]; then
+    say "CHROME_USER=$CHROME_USER is a THROWAWAY test user."
+    say "the shipped units are NOT parameterized by it: they hardcode User=ui2api, CDP :$DAEMON_PORT, promptd :$API_PORT, DISPLAY=:$XVFB_DISPLAY."
+    say "delegating installs the PRODUCTION units for 'ui2api' — that is intended, and the test user is NOT what ends up serving."
+  fi
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # The ONE persistent Chrome, HEADED, on that display. Started once; every
-  # request ATTACHES over CDP.
-  # Restart=on-failure only — a clean stop must NOT resurrect it, or `chrome stop`
-  # would be undone by systemd a second later.
-  cat > "$UNIT_DIR/ui2api-chrome.service" <<EOF
-[Unit]
-Description=ui2api persistent Chrome (the point of use for the $CHROME_USER user)
-Documentation=file://$REPO_DIR/docs/CHROME_POINT_OF_USE.md
-After=ui2api-xvfb.service
-Requires=ui2api-xvfb.service
-
-[Service]
-Type=simple
-User=$CHROME_USER
-Group=$CHROME_USER
-Environment=HOME=$USER_HOME
-Environment=UI2API_CHROME_USER=$CHROME_USER
-Environment=UI2API_DAEMON_PORT=$DAEMON_PORT
-Environment=DISPLAY=:$XVFB_DISPLAY
-ExecStart=$CHROME_BIN \\
-  --no-first-run --no-default-browser-check \\
-  --disable-background-networking --disable-component-update \\
-  --mute-audio --disable-hang-monitor \\
-  --disable-v8-idle-tasks --disable-background-timer-throttling \\
-  --disable-renderer-backgrounding \\
-  --remote-debugging-port=$DAEMON_PORT --remote-debugging-address=127.0.0.1 \\
-  --user-data-dir=$USER_HOME/$CHROME_DIR \\
-  about:blank
-Restart=on-failure
-RestartSec=3
-# One instance per profile is a CHROME rule, not ours: let systemd's stop win.
-KillMode=mixed
-TimeoutStopSec=20
-NoNewPrivileges=true
-PrivateTmp=false
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # The API other programs call. Loopback only: the daemon binds 127.0.0.1 by
-  # design (the package inventory and any token are not LAN-visible).
-  cat > "$UNIT_DIR/ui2api-api.service" <<EOF
-[Unit]
-Description=ui2api API (promptd) — OpenAI-compatible + capability endpoints
-Documentation=file://$REPO_DIR/README.md
-After=network-online.target ui2api-chrome.service
-Wants=ui2api-chrome.service
-
-[Service]
-Type=simple
-User=$CHROME_USER
-Group=$CHROME_USER
-WorkingDirectory=$REPO_DIR
-Environment=HOME=$USER_HOME
-Environment=UI2API_CHROME_USER=$CHROME_USER
-Environment=UI2API_PROMPTD_PORT=$API_PORT
-Environment=UI2API_ATTACH_PORT=$DAEMON_PORT
-Environment=UI2API_HEADED=1
-Environment=DISPLAY=:$XVFB_DISPLAY
-Environment=NODE_ENV=production
-ExecStart=/usr/bin/env npx tsx $REPO_DIR/src/cli.ts promptd
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
-# The browser pool needs a real HOME for the profile; PrivateTmp would hide it.
-PrivateTmp=false
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  say "wrote ui2api-xvfb.service, ui2api-chrome.service and ui2api-api.service"
-  systemctl daemon-reload
-  systemctl enable ui2api-xvfb.service ui2api-chrome.service ui2api-api.service >/dev/null 2>&1 \
-    && say "enabled both units at boot" || say "could not enable (container?) — start them manually"
-  systemctl restart ui2api-chrome.service 2>/dev/null && say "started ui2api-chrome" || say "chrome unit not started here"
-  systemctl restart ui2api-api.service 2>/dev/null && say "started ui2api-api" || say "api unit not started here"
+  # install-services.sh is itself idempotent (install -m 0644 + enable + restart),
+  # so calling it on every run is safe and re-running converges rather than
+  # accumulates. It is invoked as a script (not sourced) so its `set -euo
+  # pipefail` and its own root check apply to it, not to this shell.
+  say "installing the three units from $UNIT_SRC via install-services.sh (the single installer)"
+  bash "$INSTALL_SERVICES"
+  say "units installed from $UNIT_SRC — this script wrote no unit file"
+  say "ui2api-api runs the DEPLOYED tree (/opt/ui2api/dist/cli.js); run scripts/ops/deploy.sh to ship the code and start it"
 else
-  say "skipping systemd (--no-systemd, or systemctl unavailable)"
+  say "skipping systemd (--no-systemd, or systemctl unavailable) — no units installed, and this script never writes one"
 fi
 
 # ------------------------------------------------------------------ report ----

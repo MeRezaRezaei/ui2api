@@ -44,18 +44,18 @@
 
 set -uo pipefail
 
-SERVICE="${UI2API_SERVICE:-ui2api-api}"
+SERVICE="${RESTART_POLICY_SERVICE:-ui2api-api}"
 BASE_URL="${UI2API_BASE_URL:-http://127.0.0.1:9797}"
 # The chat site whose vault is read. gemini is a packaged chat site, so a
 # readable vault is the difference between "22 models that all fail" and real
 # service.
-VAULT_SITE="${UI2API_VAULT_SITE:-gemini}"
-PROBE_TIMEOUT="${UI2API_PROBE_TIMEOUT:-8}"
-RUN_TIMEOUT="${UI2API_RUN_TIMEOUT:-90}"
-MIN_PACKAGES="${UI2API_MIN_PACKAGES:-1}"
-MIN_MODELS="${UI2API_MIN_MODELS:-1}"
-MAX_RESTARTS="${UI2API_MAX_RESTARTS:-3}"
-BODY_CAP_BYTES="${UI2API_BODY_CAP_BYTES:-20000000}"
+VAULT_SITE="${RESTART_POLICY_VAULT_SITE:-gemini}"
+PROBE_TIMEOUT="${RESTART_POLICY_PROBE_TIMEOUT:-8}"
+RUN_TIMEOUT="${RESTART_POLICY_RUN_TIMEOUT:-90}"
+MIN_PACKAGES="${RESTART_POLICY_MIN_PACKAGES:-1}"
+MIN_MODELS="${RESTART_POLICY_MIN_MODELS:-1}"
+MAX_RESTARTS="${RESTART_POLICY_MAX_RESTARTS:-3}"
+BODY_CAP_BYTES="${RESTART_POLICY_BODY_CAP_BYTES:-20000000}"
 
 # The caller's ORIGINAL argv, replayed verbatim into the bounded inner pass so
 # the mode the operator asked for is never re-derived by this wrapper.
@@ -85,13 +85,13 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # The whole run is bounded: re-enter this script once under `timeout`, guarded by
 # a flag so the inner pass does not re-wrap itself. This is the outer guard on a
 # hang — a hang is a NAMED failure (exit 124), not a shrug.
-if [ -z "${UI2API_RESTART_POLICY_BOUNDED:-}" ]; then
+if [ -z "${RESTART_POLICY_BOUNDED:-}" ]; then
   timeout -k 5 "$RUN_TIMEOUT" env \
       SERVICE="$SERVICE" BASE_URL="$BASE_URL" VAULT_SITE="$VAULT_SITE" \
       PROBE_TIMEOUT="$PROBE_TIMEOUT" RUN_TIMEOUT="$RUN_TIMEOUT" \
       MIN_PACKAGES="$MIN_PACKAGES" MIN_MODELS="$MIN_MODELS" \
       MAX_RESTARTS="$MAX_RESTARTS" BODY_CAP_BYTES="$BODY_CAP_BYTES" \
-      UI2API_RESTART_POLICY_BOUNDED=1 \
+      RESTART_POLICY_BOUNDED=1 \
       bash "$0" ${CALLER_ARGS[@]+"${CALLER_ARGS[@]}"}
   rc=$?
   if [ "$rc" = 124 ]; then

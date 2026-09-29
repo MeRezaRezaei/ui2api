@@ -1,0 +1,366 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { defaultChatSurface } from "../src/prompt/registry.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE MODEL-VERIFICATION CONSISTENCY GATE
+//
+// WHAT THIS IS NOT, stated first because the audit is explicit about it: this
+// gate does NOT prove any model ANSWERS. A hermetic "does it answer" test is
+// not buildable here (audit §6: no fake-browser harness, every existing
+// "answer" is a hardcoded stub, and a real daemon is started with the browser
+// deliberately unreachable) and shipping one would fabricate the answer — the
+// exact class test/no-fabricated-traffic.test.ts exists to forbid.
+//
+// WHAT IT DOES PROVE: the dated, checked-in RECORD
+// (capabilities/model-verification.json) is honest and in sync with what the
+// service actually advertises. It converts a prose claim ("proof PASS 13965",
+// which no code parses) into a machine-checked, named, shrinking number.
+//
+// The defect it kills is Cause D of scripts/audit/model-answers-audit.md:
+// `packageStatusOf` (src/prompt/registry.ts) stamps status "verified" from the
+// SHAPE of a metadata.json `verified` object, never from a measurement, and
+// nothing downgrades a model after an ok:false — so a site that breaks
+// tomorrow still advertises "verified" forever.
+//
+// The advertised set is DERIVED, never hand-typed. A hardcoded list of ids is a
+// snapshot and a snapshot in this file would rot the moment a gate tightened;
+// that mistake (11 builtins vs 10 surfaced) was made and fixed repeatedly in
+// AGENTS.md. The gate calls the same `defaultChatSurface()` the daemon calls.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RECORD_PATH = resolve(process.cwd(), "capabilities/model-verification.json");
+
+/** The closed set. A class outside this set is a typo, and a typo is a lie. */
+const CLASSES = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT", "UNMEASURED"] as const;
+type Class = (typeof CLASSES)[number];
+
+/** Classes that assert something about the MODEL, so they must carry proof.
+ *  UNMEASURED is the only class whose whole meaning is "we do not know". */
+const MEASURED_CLASSES: Class[] = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT"];
+
+/** A claim with nothing behind it. The single most important rule here. */
+const EVIDENCE_MIN_CHARS = 24;
+
+interface ModelRecord {
+  model?: unknown;
+  measuredAt?: unknown;
+  class?: unknown;
+  evidence?: unknown;
+  method?: unknown;
+  prereq?: unknown;
+  daemonCommit?: unknown;
+  poolAtRequest?: unknown;
+}
+
+interface RecordFile {
+  schema?: unknown;
+  stalenessWindowDays?: unknown;
+  records?: ModelRecord[];
+}
+
+const nonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+
+// ── the gate's own predicates, exported so the MUTATION proof can feed them ──
+
+/** Advertised ids with NO record. */
+export function missingRecords(advertised: string[], records: ModelRecord[]): string[] {
+  const have = new Set(records.map((r) => (nonEmptyString(r.model) ? r.model : "")));
+  return advertised.filter((id) => !have.has(id)).sort();
+}
+
+/** Records naming a model that is no longer advertised (a stale record). */
+export function staleRecords(advertised: string[], records: ModelRecord[]): string[] {
+  const live = new Set(advertised);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of records) {
+    const m = nonEmptyString(r.model) ? r.model : "<no model field>";
+    if (live.has(m)) continue;
+    if (seen.has(m)) continue; // one name is enough; duplicates are their own rule
+    seen.add(m);
+    out.push(m);
+  }
+  return out.sort();
+}
+
+/** A non-UNMEASURED class missing measuredAt / method / evidence. */
+export function unprovenMeasurements(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (!nonEmptyString(r.class) || r.class === "UNMEASURED") continue;
+    const model = nonEmptyString(r.model) ? r.model : "<no model field>";
+    for (const field of ["measuredAt", "method", "evidence"] as const) {
+      if (!nonEmptyString(r[field])) out.push(`${model}: missing ${field}`);
+    }
+  }
+  return out.sort();
+}
+
+/** A record claiming a class outside the closed set. */
+export function unknownClasses(records: ModelRecord[]): string[] {
+  return records
+    .filter((r) => !nonEmptyString(r.class) || !(CLASSES as readonly string[]).includes(r.class))
+    .map((r) => `${nonEmptyString(r.model) ? r.model : "<no model field>"}: class=${JSON.stringify(r.class)}`)
+    .sort();
+}
+
+/** A duplicate model entry — two records for one id means one of them is fiction. */
+export function duplicateModels(records: ModelRecord[]): string[] {
+  const counts = new Map<string, number>();
+  for (const r of records) if (nonEmptyString(r.model)) counts.set(r.model, (counts.get(r.model) ?? 0) + 1);
+  return [...counts].filter(([, n]) => n > 1).map(([m, n]) => `${m} x${n}`).sort();
+}
+
+/** ANSWERS without real evidence behind it. */
+export function evidenceFreeClaims(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (r.class !== "ANSWERS") continue;
+    const model = nonEmptyString(r.model) ? r.model : "<no model field>";
+    if (!nonEmptyString(r.evidence)) {
+      out.push(`${model}: ANSWERS with NO evidence`);
+      continue;
+    }
+    if (r.evidence.trim().length < EVIDENCE_MIN_CHARS) {
+      out.push(`${model}: ANSWERS with a ${r.evidence.trim().length}-char evidence string`);
+      continue;
+    }
+    // An ANSWERS claim must name a real measured outcome. A record that says
+    // "it answers" without an HTTP status and a duration is a prose claim in
+    // JSON clothing — precisely the defect Cause D describes.
+    const ev = r.evidence;
+    if (!/\b(200|2\d\d)\b/.test(ev)) out.push(`${model}: ANSWERS evidence names no HTTP 2xx`);
+    else if (!/\d+\s*ms\b/.test(ev)) out.push(`${model}: ANSWERS evidence names no measured duration`);
+  }
+  return out.sort();
+}
+
+/** A CONTENDED-TIMEOUT with no pool state — the claim that distinguishes
+ *  "the queue was busy" from "the model is broken" is exactly what goes. */
+export function contentionWithoutPoolState(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (r.class !== "CONTENDED-TIMEOUT") continue;
+    const model = nonEmptyString(r.model) ? r.model : "<no model field>";
+    const p = r.poolAtRequest as { busy?: unknown; total?: unknown } | undefined;
+    if (!p || typeof p.busy !== "number" || typeof p.total !== "number") {
+      out.push(`${model}: CONTENDED-TIMEOUT without poolAtRequest {busy,total}`);
+    } else if (p.busy <= 0) {
+      out.push(`${model}: CONTENDED-TIMEOUT at an IDLE pool (busy=${p.busy}) — that is not contention`);
+    }
+  }
+  return out.sort();
+}
+
+/** Measured records older than the disclosed window, and the window itself. */
+export function staleByAge(records: ModelRecord[], windowDays: number, now: number): { stale: string[]; window: number } {
+  const stale: string[] = [];
+  for (const r of records) {
+    if (r.class === "UNMEASURED") continue;
+    if (!nonEmptyString(r.measuredAt)) continue;
+    const t = Date.parse(r.measuredAt);
+    if (Number.isNaN(t)) {
+      stale.push(`${r.model}: measuredAt ${JSON.stringify(r.measuredAt)} is not a parseable date`);
+      continue;
+    }
+    const days = Math.floor((now - t) / 86_400_000);
+    if (days > windowDays) stale.push(`${r.model}: measured ${days}d ago, window is ${windowDays}d`);
+  }
+  return { stale: stale.sort(), window: windowDays };
+}
+
+// ── the shipped record ───────────────────────────────────────────────────────
+
+function load(): RecordFile {
+  return JSON.parse(readFileSync(RECORD_PATH, "utf8")) as RecordFile;
+}
+
+/** THE ADVERTISED SET — derived, never typed. Same function the daemon calls. */
+export function advertisedIds(): string[] {
+  return defaultChatSurface().map((e) => e.id).sort();
+}
+
+/** The STALENESS BUDGET. Disclosed, counted, must not silently grow.
+ *  It is 1, NOT 0, and that is an honest disclosure rather than a hole: the
+ *  whole record is dated 2026-09-29 and this file's own window is 30 days, so
+ *  the day the gate starts failing on age is the day the record must be
+ *  re-measured. Raising this number to quiet the gate is the move it exists
+ *  to prevent — it is a named constant, in one place, with the reason here. */
+const STALE_BUDGET = 1;
+const STALENESS_WINDOW_DAYS = 30;
+
+const record = load();
+const advertised = advertisedIds();
+const records = Array.isArray(record.records) ? record.records : [];
+
+// ── non-vacuity: everything below would pass on an empty world ───────────────
+
+test("precondition: the advertised set, the record and the class set are all real", () => {
+  assert.ok(
+    advertised.length >= 20,
+    `non-vacuity: expected to DERIVE >=20 advertised ids from defaultChatSurface(), got ${advertised.length} — a smaller set means the derivation broke and every rule below would pass vacuously`,
+  );
+  assert.equal(
+    new Set(advertised).size,
+    advertised.length,
+    "non-vacuity: the derived advertised set contains a duplicate id",
+  );
+  assert.ok(records.length >= advertised.length, `non-vacuity: record carries ${records.length} entries for ${advertised.length} advertised ids`);
+  assert.ok(CLASSES.length === 4, "non-vacuity: the closed class set changed shape");
+  // Every advertised id must really be derivable, and the derivation must be
+  // the registry's — a hardcoded list in this file would defeat the whole gate.
+  assert.ok(advertised.includes("gemini"), "non-vacuity: the derived set must contain a known id (gemini)");
+});
+
+test("the record declares the schema and the staleness window this gate reads", () => {
+  assert.equal(record.schema, "ui2api/model-verification/1", "the record's schema tag changed — the gate's reader is out of date");
+  assert.equal(
+    record.stalenessWindowDays,
+    STALENESS_WINDOW_DAYS,
+    `the record declares stalenessWindowDays=${String(record.stalenessWindowDays)} but the gate enforces ${STALENESS_WINDOW_DAYS} — the two must not disagree`,
+  );
+});
+
+// ── the rules ────────────────────────────────────────────────────────────────
+
+test("RULE 1: every advertised model has a record — an unrecorded model is an unmeasured one a consumer cannot see", () => {
+  const missing = missingRecords(advertised, records);
+  assert.deepEqual(
+    missing,
+    [],
+    `advertised on /v1/models with NO record in capabilities/model-verification.json: ${missing.join(" ")} — a consumer reads this list and has no idea these were never measured`,
+  );
+});
+
+test("RULE 2: no record names a model that is no longer advertised (a stale record rots the gate)", () => {
+  const stale = staleRecords(advertised, records);
+  assert.deepEqual(
+    stale,
+    [],
+    `records for models the surface no longer advertises: ${stale.join(" ")} — delete the record, or fix the model id`,
+  );
+});
+
+test("RULE 3: no duplicate record for one model", () => {
+  const dupes = duplicateModels(records);
+  assert.deepEqual(dupes, [], `two records for one model — one of them is fiction: ${dupes.join(", ")}`);
+});
+
+test("RULE 4: every class is drawn from the closed set", () => {
+  const bad = unknownClasses(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `records whose class is outside {${CLASSES.join(", ")}}: ${bad.join("; ")} — a class the gate cannot interpret is a claim nobody can check`,
+  );
+});
+
+test("RULE 5: a record claiming anything about the model carries measuredAt + method + evidence", () => {
+  const bad = unprovenMeasurements(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `a non-UNMEASURED record missing its proof: ${bad.join("; ")} — only UNMEASURED ("we do not know") may be bare`,
+  );
+});
+
+test("RULE 6: ANSWERS is never claimed without real measured evidence (a 2xx and a duration)", () => {
+  const bad = evidenceFreeClaims(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `ANSWERS claimed with nothing behind it: ${bad.join("; ")} — ANSWERS may only be recorded from a real measured round trip (Cause D: 'proof PASS 13965' is prose no code parses)`,
+  );
+});
+
+test("RULE 7: CONTENDED-TIMEOUT carries the pool state that distinguishes contention from a broken model", () => {
+  const bad = contentionWithoutPoolState(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `contention claims without a busy pool (or at an idle one): ${bad.join("; ")} — a timeout at an idle pool is a model property, and must NOT be filed as contention`,
+  );
+});
+
+test(`RULE 8: measured records older than ${STALENESS_WINDOW_DAYS}d — a NAMED, COUNTED budget that must not silently grow`, (t) => {
+  const { stale, window } = staleByAge(records, window0(), Date.now());
+  assert.ok(
+    stale.length <= STALE_BUDGET,
+    `stale measurements grew past their budget: ${stale.length} > ${STALE_BUDGET} (window ${window}d) — ${stale.join("; ")}. Re-measure, or raise STALE_BUDGET with a named reason; never let it drift.`,
+  );
+  t.diagnostic(`stale measurements: ${stale.length}/${STALE_BUDGET} in use (window ${window}d)` + (stale.length ? ` — ${stale.join("; ")}` : ""));
+});
+
+/** The window the record itself declares is the one the gate uses. */
+function window0(): number {
+  return typeof record.stalenessWindowDays === "number" ? record.stalenessWindowDays : STALENESS_WINDOW_DAYS;
+}
+
+// ── MUTATION PROOF: the gate must be provably capable of failing ─────────────
+// Every predicate above is fed a fabricated or corrupted record and MUST
+// report it. If any of these ever passes, the gate is blind.
+
+test("MUTATION: the gate's own predicates reject a fabricated ANSWERS claim", () => {
+  const advertisedSet = advertisedIds();
+  assert.deepEqual(evidenceFreeClaims(records), [], "precondition: the shipped record must have no evidence-free ANSWERS claim");
+
+  // (a) prose claim in JSON clothing — the exact shape of Cause D.
+  const proseClaim: ModelRecord = {
+    model: "gemini",
+    measuredAt: "2026-09-29",
+    class: "ANSWERS",
+    method: "live-v1-chat",
+    evidence: "proof PASS 13965",
+  };
+  assert.ok(
+    evidenceFreeClaims([proseClaim]).length > 0,
+    "the gate must reject an ANSWERS claim whose evidence is prose with no measured outcome",
+  );
+
+  // (b) the claim deleted entirely.
+  const delisted = records.filter((r) => r.model !== "gemini");
+  assert.ok(
+    missingRecords(advertisedSet, delisted).includes("gemini"),
+    "the gate must notice an advertised model with no record at all",
+  );
+
+  // (c) a record for a model the surface does not advertise.
+  const orphan = [...records, { model: "no-such-model-xyz", class: "UNMEASURED", method: "not-run" }];
+  assert.ok(
+    staleRecords(advertisedSet, orphan).includes("no-such-model-xyz"),
+    "the gate must notice a record for a model that is no longer advertised",
+  );
+
+  // (d) a measured class stripped of its evidence.
+  const stripped: ModelRecord = { model: "gemini", measuredAt: "2026-09-29", class: "SIGN-OUT", method: "live-v1-chat", evidence: "" };
+  assert.ok(
+    unprovenMeasurements([stripped]).some((s) => s.includes("missing evidence")),
+    "the gate must notice a SIGN-OUT record with an empty evidence field",
+  );
+
+  // (e) a class the gate cannot interpret.
+  assert.ok(
+    unknownClasses([{ model: "gemini", class: "PROBABLY-FINE" }]).length > 0,
+    "the gate must notice a class outside the closed set",
+  );
+
+  // (f) contention filed at an IDLE pool — the lie this record exists to kill.
+  assert.ok(
+    contentionWithoutPoolState([{ model: "kimi", class: "CONTENDED-TIMEOUT", poolAtRequest: { busy: 0, total: 4 } }]).length > 0,
+    "the gate must reject a CONTENDED-TIMEOUT claim taken at an idle pool",
+  );
+  assert.ok(
+    contentionWithoutPoolState([{ model: "kimi", class: "CONTENDED-TIMEOUT" }]).length > 0,
+    "the gate must reject a CONTENDED-TIMEOUT claim with no pool state at all",
+  );
+
+  // (g) a measurement aged past the window.
+  const aged = staleByAge([{ model: "gemini", class: "ANSWERS", measuredAt: "2020-01-01" }], window0(), Date.now());
+  assert.ok(aged.stale.length > 0, "the gate must notice a measurement older than the window");
+  const fresh = staleByAge([{ model: "gemini", class: "ANSWERS", measuredAt: new Date().toISOString() }], window0(), Date.now());
+  assert.deepEqual(fresh.stale, [], "and must NOT flag a measurement taken today");
+});

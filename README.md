@@ -200,11 +200,11 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 146 hermetic unit-test files — no browser needed
+npm run test:unit   # 150 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
-The `146` is the real length of the file list in `package.json`'s
+The `150` is the real length of the file list in `package.json`'s
 `scripts["test:unit"]`, not a remembered figure — derive it yourself with
 
 ```bash
@@ -396,10 +396,12 @@ it, fails the suite), so it cannot silently rot.
 | status | `code` | when you get it | what to do |
 | --- | --- | --- | --- |
 | 400 | `invalid_json` | the request body is not a JSON **object** (`null`, an array, a bare string/number) | send a JSON object; a caller mistake is never a 500 |
+| 400 | `unsupported_content_part` | a `messages[].content` array carried a non-text part (`image_url`, `input_image`, `file`, …); the message names the kinds — this surface types text into each site's own composer, so it will not silently drop a picture and answer a question that was never asked | send text only; the sites' real file-upload path is on `POST /capability/<site>`, not on `/v1` |
 | 413 | `payload_too_large` | the request body exceeds 1 MB (10⁶ bytes, `MAX_BODY_BYTES` in `src/prompt/http.ts`) — the upload is refused and the stream destroyed | split the request; the server stops reading immediately |
 | 500 | `internal_error` | a genuine internal fault | retry later; the message is deliberately generic so no internal text, path or hostname leaks |
 | 404 | `not_found` | unknown endpoint, or a model id `GET /v1/models` does not list (a refused/dormant package) | list `GET /v1/models`; do not retry — the id is not servable |
 | 404 | `unknown_model` | the `model` is not a servable chat id (capability-only, dormant, or url-less package) | list `GET /v1/models`; do not retry — the id carries no chat surface |
+| 404 | `model_not_found` | `GET /v1/models/<id>` names a model that does not exist, or a nested path (`/v1/models/a/b`) — only a single model id is addressable | list `GET /v1/models`; ask for one id, not a path |
 | 503 | `pool_saturated` | every warm browser slot is busy | retry with backoff, or raise `UI2API_POOL_MIN` |
 | 503 | `pool_queue_timeout` | the request waited in the pool queue longer than the queue deadline | retry later; sustained means the pool is undersized |
 | 503 | `pool_closed` | the pool is closed (daemon shutting down) | not retryable on this instance; fail over or restart |

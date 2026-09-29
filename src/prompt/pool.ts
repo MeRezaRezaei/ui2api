@@ -39,6 +39,17 @@ export interface PoolOptions {
      UI2API_POOL_WAITER_TIMEOUT_MS. */
   maxWaiters?: number;
   waiterTimeoutMs?: number;
+  /* GOAL 156 A#2 — the per-slot BUSY WATCHDOG bound and the seams the three
+     derivations below read. These are CODE-level seams (constructor options),
+     deliberately NOT `UI2API_*` knobs: this repo machine-pins its knob table
+     (`AGENTS.md` + `test/ci-contract-knob-cites.test.ts`), and a new knob costs
+     a documented row, while a documented-but-unread knob also fails. The three
+     numbers below are DERIVED from `requestTimeoutMs` / `max` so they cannot
+     drift apart; these options exist so a hermetic test can shrink them to
+     milliseconds without touching the real 300s request deadline. */
+  requestTimeoutMs?: number;
+  busyWatchdogMs?: number;
+  perSiteMax?: number;
 }
 
 /* A queued acquire(). It carries BOTH settle handles: `resolve` hands it a
@@ -62,6 +73,106 @@ type PoolWaiter = {
    got a page instead of running into the request-level timeout blind. */
 const DEFAULT_MAX_WAITERS = 16;
 const DEFAULT_WAITER_TIMEOUT_MS = 240_000;
+
+/**
+ * GOAL 156 — the request deadline, and the three bounds DERIVED from it.
+ *
+ * A#2 MEASURED: `sweep()` skipped every busy worker (`if (w.busy) continue`) and
+ * nothing else read `busySince`, so one driver hang — an unbounded
+ * `page.evaluate` that never returns, so `driver.ask()` never settles and
+ * `pool.release()` is never reached — cost the slot FOREVER. Measured
+ * `busyMs` 282s → 333s → 1569s across two wedge events, and the pool SHRANK 4
+ * → 2 during the first: the capacity loss is permanent, not transient. A
+ * THROW cannot leak a slot (release runs in a `finally`); only a HANG can, and
+ * the request-timeout `Promise.race` in http.ts cannot cancel the driver, so
+ * nothing else in the process noticed.
+ *
+ * `DEFAULT_REQUEST_TIMEOUT_MS` is duplicated from http.ts ON PURPOSE at the
+ * moment, because http.ts imports this module (importing it back would be a
+ * cycle). It is the SAME number http.ts uses, and it is exported so http.ts can
+ * import it from here instead of re-typing it (see the cross-slice report).
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 300_000;
+
+/** The daemon's aggregate per-request deadline, as the pool can see it. */
+function resolveRequestTimeoutMs(explicit?: number): number {
+  if (Number.isFinite(explicit) && (explicit as number) > 0) return Math.floor(explicit as number);
+  const raw = Number(process.env.UI2API_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+/**
+ * GOAL 156 A#2 — the BUSY WATCHDOG: how long a page may hold a slot in flight
+ * before the sweep reclaims it.
+ *
+ * POLICY: `floor(requestTimeout * 0.75)` — 225s at the 300s default.
+ *   - STRICTLY BELOW the request deadline, so the wedge is caught BEFORE the
+ *     client is told `request_timeout`: by the time the pool gives the slot
+ *     back, the lost request is ONE request, not the pool's remaining lifetime.
+ *   - ABOVE the worst LEGITIMATE occupancy, which http.ts measures as page.goto
+ *     60s + the profile's captureMs (packaged max 120s) = ~180s, plus one
+ *     realProfileOnly browser respawn. 225s leaves ~45s of headroom over a
+ *     legitimate 180s round-trip, so a slow-but-alive page is never killed —
+ *     the watchdog only ever fires on a page that has already stopped making
+ *     progress.
+ *
+ * It is derived, never a second hand-typed number: raise
+ * `UI2API_REQUEST_TIMEOUT_MS` and the watchdog moves with it.
+ */
+function deriveBusyWatchdogMs(requestTimeoutMs: number, explicit?: number): number {
+  if (Number.isFinite(explicit) && (explicit as number) > 0) return Math.floor(explicit as number);
+  return Math.max(1, Math.floor(requestTimeoutMs * 0.75));
+}
+
+/**
+ * GOAL 156 — the per-site RESERVATION.
+ *
+ * B MEASURED: `max` is a GLOBAL ceiling with no per-site reservation and the
+ * `perSite` map is REPORTING-ONLY, so four wedged workers for one site consumed
+ * the whole pool and turned "4 broken sites" into "22 of 22 unanswerable".
+ *
+ * POLICY: one site may hold at most `max - 1` slots — **at least one slot is
+ * always reservable by a different site**. The smallest honest reservation (1)
+ * rather than half the pool, because the failure it must prevent is TOTAL
+ * cross-site starvation, and a half-pool reservation would halve throughput for
+ * every single-site workload (the common case) to defend against a case the
+ * watchdog already bounds: with the watchdog in place one site cannot hold a
+ * wedge for long anyway, so the reservation only has to survive the burst.
+ * `max(1, …)` keeps `max = 1` working (one page, no reservation possible).
+ *
+ * Derived from `max`, not a knob: the knob table is machine-pinned, and a knob
+ * an operator can set to 0 would turn the fairness off silently.
+ */
+function derivePerSiteMax(max: number, explicit?: number): number {
+  if (Number.isFinite(explicit) && (explicit as number) > 0) return Math.floor(explicit as number);
+  return Math.max(1, max - 1);
+}
+
+/**
+ * GOAL 156 — the queue deadline, kept STRICTLY BELOW the request deadline.
+ *
+ * The old pair was two independent numbers: `waiterTimeoutMs` 240s against a
+ * 300s request timeout, so the queue could not out-refuse the work it waits for
+ * only by luck of the literals. Both are now derived from the same
+ * `requestTimeout`: the default stays 240s at the 300s default (80% of it), and
+ * ANY override — constructor option or `UI2API_POOL_WAITER_TIMEOUT_MS` — is
+ * clamped down to 80% of the request deadline, so the relation holds by
+ * construction under an operator's env too. `0` keeps meaning "no per-waiter
+ * deadline" (the opt-out GOAL 83's tests use), because a disabled axis is not
+ * a violated relation.
+ */
+/* GOAL 156 A#2 — how long the watchdog waits for a wedged driver's `close()`
+   before giving up on it and moving on. Short and fixed: the page is already
+   out of the pool (the slot is returned), so this only bounds how long one dead
+   page delays the REST of the sweep, and a long wait would make the reaper look
+   hung on exactly the pages it exists to rescue. */
+const WATCHDOG_CLOSE_GRACE_MS = 5_000;
+
+function deriveWaiterTimeoutMs(requestTimeoutMs: number, requested: number): number {
+  const ceiling = Math.max(1, Math.floor(requestTimeoutMs * 0.8));
+  if (requested <= 0) return 0;
+  return Math.min(requested, ceiling);
+}
 
 /**
  * GOAL 145: the pool refusal classes, in ONE place.
@@ -131,6 +242,11 @@ export interface PoolWorker {
      per-worker view), with the time it was measured. */
   health?: WorkerHealth;
   checkedAt?: string;
+  /* GOAL 156 A#2 — the busy watchdog took this page back while its request was
+     still in flight. The late `release()` from the abandoned request must then
+     be a no-op for the pool (the page is gone; re-draining or re-queueing it
+     would double-count capacity and hand a closed page to a waiter). */
+  reclaimed?: boolean;
 }
 
 export interface PoolWorkerStatus {
@@ -159,6 +275,16 @@ export interface SweepReport {
   respawnFailed: number;
   sites: string[];
   note: string;
+  /* GOAL 156 A#2 — the BUSY WATCHDOG's own measurements, reported SEPARATELY
+     from the idle-page liveness numbers above so the two are never conflated:
+     `evicted` counts IDLE dead pages, this counts in-flight pages reclaimed
+     after exceeding the busy bound. A sweep that reclaimed a wedged worker and
+     found no dead idle page reads evicted:0 + wedgedReclaimed:1, which is the
+     truth. Additive: every existing field keeps its meaning. */
+  wedgedReclaimed: number;
+  /* Which sites a reclaimed page was serving, so the report names the site whose
+     driver hung rather than only counting it. */
+  wedgedSites: string[];
 }
 
 export type PoolStatus = {
@@ -183,6 +309,13 @@ export type PoolStatus = {
   queued: number;
   maxWaiters: number;
   perSite: Record<string, { idle: number; busy: number; total: number }>;
+  /* GOAL 156 — the bounds /status must be readable against, so a wedged pool is
+     diagnosable without a debugger: the busy watchdog (how long a page may hold
+     a slot) and the per-site reservation (how many slots one site may hold) and
+     the request deadline both numbers come from. Additive. */
+  busyWatchdogMs: number;
+  perSiteMax: number;
+  requestTimeoutMs: number;
   /* GOAL 87: the busy/idle pages with their MEASURED detail, so "busy: 1" says
      which site, for how long, and under which account — no debugger attached. */
   workers: PoolWorkerStatus[];
@@ -251,6 +384,12 @@ export class ChatPool {
   private readonly max: number;
   private readonly maxWaiters: number;
   private readonly waiterTimeoutMs: number;
+  /* GOAL 156 — the three derived bounds, resolved ONCE in the constructor so a
+     running pool's policy cannot change under a request (and so /status reports
+     exactly the numbers acquire() and sweep() enforce). */
+  private readonly requestTimeoutMs: number;
+  private readonly busyWatchdogMs: number;
+  private readonly perSiteMax: number;
   private readonly defaultProfile: string;
   private readonly dataDir: string;
   private readonly attach: boolean;
@@ -268,7 +407,15 @@ export class ChatPool {
     this.min = Math.max(1, min);
     this.max = Math.max(this.min, opts.max ?? resourceMax());
     this.maxWaiters = Math.max(0, opts.maxWaiters ?? envCount("UI2API_POOL_MAX_WAITERS", DEFAULT_MAX_WAITERS));
-    this.waiterTimeoutMs = Math.max(0, opts.waiterTimeoutMs ?? envCount("UI2API_POOL_WAITER_TIMEOUT_MS", DEFAULT_WAITER_TIMEOUT_MS));
+    // GOAL 156: the request deadline first — the waiter deadline is clamped
+    // against it, so the ORDER of these three lines is the invariant.
+    this.requestTimeoutMs = resolveRequestTimeoutMs(opts.requestTimeoutMs);
+    this.busyWatchdogMs = deriveBusyWatchdogMs(this.requestTimeoutMs, opts.busyWatchdogMs);
+    this.perSiteMax = derivePerSiteMax(this.max, opts.perSiteMax);
+    this.waiterTimeoutMs = deriveWaiterTimeoutMs(
+      this.requestTimeoutMs,
+      Math.max(0, opts.waiterTimeoutMs ?? envCount("UI2API_POOL_WAITER_TIMEOUT_MS", DEFAULT_WAITER_TIMEOUT_MS))
+    );
     this.reaperMs = Math.max(0, opts.reaperIntervalMs ?? envCount("UI2API_REAPER_INTERVAL_MS", DEFAULT_REAPER_INTERVAL_MS));
     this.dataDir = opts.dataDir ?? resolveDataDir();
     this.defaultProfile = opts.defaultProfile ?? opts.profiles[0]?.id ?? "";
@@ -341,7 +488,12 @@ export class ChatPool {
       : this.opts.profiles[0]?.id ?? "";
     if (!target) return;
     const needed = this.min - this.idleCount(target);
-    for (let i = 0; i < Math.min(needed, this.max); i++) {
+    // GOAL 156 (B): also bounded by the per-site reservation. `acquire()` past a
+    // site's cap PARKS instead of spawning, and a parked acquire does not throw
+    // — so a loop bounded only by `this.max` would park here forever and hang
+    // daemon startup (`http.ts` awaits `pool.warm()`). The cap is the real
+    // ceiling for a single-site warm-up, which is all this ever is.
+    for (let i = 0; i < Math.min(needed, this.perSiteMax); i++) {
       try {
         const w = await this.acquire(target);
         await this.release(w);
@@ -353,6 +505,14 @@ export class ChatPool {
 
   private idleCount(siteId: string): number {
     return this.workers.filter((w) => w.profileId === siteId && !w.busy).length;
+  }
+
+  /* GOAL 156 (B) — how many slots this site currently HOLDS (idle + busy).
+     Busy pages are counted on purpose: the whole failure is a site whose
+     requests are wedged IN FLIGHT, so counting only idle pages would let a
+     hung site keep adding capacity forever. */
+  private siteWorkerCount(siteId: string): number {
+    return this.workers.filter((w) => w.profileId === siteId).length;
   }
 
   // Borrow a ready page for `siteId`, creating + warming one on demand (subject
@@ -402,10 +562,21 @@ export class ChatPool {
   }
   private readonly lastSendBySite = new Map<string, number>();
 
-  async acquire(siteId: string, account?: string): Promise<PoolWorker> {
-    await this.paceSite(siteId);
+  /** `paceSite` as a plain promise step, for use inside a `.then()` chain. */
+  private paced(siteId: string): Promise<void> {
+    return this.paceSite(siteId);
+  }
+
+  /**
+   * Borrow a ready page for `siteId`.
+   *
+   * NOT `async` on purpose (see the pacing note below): every step up to and
+   * including QUEUE REGISTRATION must run in ONE SYNCHRONOUS TURN, so a caller
+   * that asks for a page and immediately reads `queued` sees the truth.
+   */
+  acquire(siteId: string, account?: string, internal = false): Promise<PoolWorker> {
     if (account && account !== "default") {
-      return this.spawn(siteId, account).then((w) => {
+      return (internal ? Promise.resolve() : this.paced(siteId)).then(() => this.spawn(siteId, account)).then((w) => {
         this.markBusy(w);
         return w;
       });
@@ -415,11 +586,39 @@ export class ChatPool {
       this.markBusy(existing);
       return Promise.resolve(existing);
     }
-    // Atomic ceiling: the reservation is taken BEFORE the await and released in
-    // `finally`, so a failed spawn cannot leak a slot and deadlock the pool.
-    if (this.workers.length + this.spawning < this.max) {
+    /* NOTE — pacing scope, decided deliberately (the GOAL 156 lesson).
+       `paceSite` gates the SPAWN branch below ONLY. It used to be the FIRST
+       statement of `acquire()`, which made every capacity/queue decision happen
+       one microtask LATER than the caller asked for it, and that broke the
+       GOAL 83/87 queue contract in a way nothing had measured: a caller that
+       calls `acquire()` and reads `queued` in the same turn saw 0 for a request
+       that was already parked, and a second request's "is the queue full?" check
+       ran after the first waiter's own 400ms deadline had already vacated the
+       queue — so a genuinely saturated pool answered `pool_queue_timeout`
+       instead of `pool_saturated`. MEASURED at default pacing (1500ms).
+
+       Spawning a NEW page is the one branch that actually puts a browser on a
+       site, so that is the one branch the site floor paces. Idle-page reuse and
+       queue registration are bookkeeping on pages that already exist, and
+       neither sends anything to the site — gating them buys no anti-bot
+       property and costs the queue's visibility. The floor is still honoured on
+       every request that genuinely starts a page. */
+    // Atomic ceiling (GOAL 103): the reservation is taken BEFORE the await and
+    // released in `finally`, so a failed spawn cannot leak a slot and deadlock
+    // the pool.
+    //
+    // GOAL 156 (B) — the per-site RESERVATION, checked on the spawn branch only.
+    // A page that is IDLE for this site was already found above, so this only
+    // ever refuses to ADD capacity to a site that already holds its share. A
+    // site at its cap falls through to the bounded queue below, so its request
+    // parks (and is refused with a named cause at the waiter deadline) rather
+    // than taking a slot that belongs to another site. This is what makes a
+    // wedged site degrade to ITSELF: the reserve stays reachable by everyone
+    // else even while this site is mid-storm.
+    if (this.workers.length + this.spawning < this.max && this.siteWorkerCount(siteId) < this.perSiteMax) {
       this.spawning++;
-      return this.spawn(siteId)
+      return (internal ? Promise.resolve() : this.paced(siteId))
+        .then(() => this.spawn(siteId))
         .then((w) => {
           this.workers.push(w);
           this.markBusy(w);
@@ -628,6 +827,14 @@ export class ChatPool {
    * for "the next request starts from a state this code actually understands".
    */
   async release(worker: PoolWorker): Promise<void> {
+    // GOAL 156 A#2: the LATE release of a request the watchdog already took
+    // back. The page is out of the pool and its driver is closing; draining it
+    // again would hand a dead page to a waiter and double-count the slot.
+    if (worker.reclaimed) {
+      worker.busy = false;
+      worker.busySince = undefined;
+      return;
+    }
     worker.busy = false;
     worker.busySince = undefined;
     if (worker.dedicated) {
@@ -674,6 +881,19 @@ export class ChatPool {
     // else stay idle in the pool
   }
 
+  /**
+   * `internal` (the third `acquire` argument) marks a POOL-INTERNAL re-acquire:
+   * `drain()` handing a just-discarded slot's work to a fresh page.
+   *
+   * Such a hand-off is deliberately NOT paced. It starts no new traffic to the
+   * site — the same slot that was just in use is being re-issued to a request
+   * that is ALREADY parked, so the site floor buys no anti-bot property here.
+   * Pacing it instead DELAYS SETTLEMENT: MEASURED, `drain()`'s re-acquire sat
+   * behind the 1500ms site floor, so the waiter it was supposed to settle with a
+   * named cause did not settle for the whole floor, and GOAL 83's
+   * "drain() settles a queued waiter" pin went red on a wall clock (1000ms)
+   * while the pool was doing nothing wrong.
+   */
   private drain(siteId: string): void {
     const waiting = this.waiters.shift();
     if (!waiting || waiting.settled) return;
@@ -683,7 +903,7 @@ export class ChatPool {
     // handler dropped the error on the floor and left the request pending
     // forever; if the re-acquire itself parks, the waiter's own queue deadline
     // still applies, so nothing stays unbounded.
-    void this.acquire(siteId).then(
+    void this.acquire(siteId, undefined, true).then(
       (w) => waiting.resolve(w),
       (e) => this.settleWaiter(waiting, e instanceof Error ? e : new Error(String(e)))
     );
@@ -720,6 +940,60 @@ export class ChatPool {
     return this.reaperMs;
   }
 
+  /**
+   * GOAL 156 A#2 — the BUSY WATCHDOG, and the only thing that makes a pool
+   * survive a hang.
+   *
+   * A THROW cannot leak a slot: `release()` runs from the caller's `finally`.
+   * A HANG does: `driver.ask()` never settles, so `release()` is never reached,
+   * and the ONLY thing that could notice was the reaper — which explicitly
+   * skipped busy pages ("in use: never evicted mid-request"). Measured: a busy
+   * page's age climbed 282s → 333s → 1569s across two wedge events while the
+   * pool shrank 4 → 2, i.e. the capacity loss was PERMANENT, and the
+   * request-timeout `Promise.race` in http.ts could not help because a race
+   * sends a 504, it does not cancel the driver.
+   *
+   * So: a page busy longer than `busyWatchdogMs` (derived from the request
+   * deadline, see `deriveBusyWatchdogMs`) is taken BACK. Honest about what that
+   * means: the in-flight request is still hung and will still fail — we are not
+   * cancelling it, nothing in Node can — but its slot is returned to the pool,
+   * so the wedge costs exactly ONE request instead of the pool's remaining
+   * lifetime. The page is closed best-effort: `close()` on a driver stuck in
+   * `page.evaluate` can hang too, so it is AWAITED WITH A BOUND and the sweep
+   * continues either way rather than parking the whole reaper behind one
+   * wedged page.
+   *
+   * `reclaimed` is stamped on the worker so the abandoned request's LATE
+   * `release()` cannot double-count: by then the page is out of `this.workers`
+   * and closing it again would hand a dead page to a waiter.
+   */
+  private async reclaimWedgedWorkers(now = Date.now()): Promise<{ count: number; sites: string[] }> {
+    const wedged = this.workers.filter(
+      (w) => w.busy && typeof w.busySince === "number" && now - w.busySince > this.busyWatchdogMs
+    );
+    if (wedged.length === 0) return { count: 0, sites: [] };
+    const sites: string[] = [];
+    for (const w of wedged) {
+      w.reclaimed = true;
+      w.busy = false;
+      w.busySince = undefined;
+      w.health = "dead";
+      w.checkedAt = new Date().toISOString();
+      this.workers = this.workers.filter((x) => x !== w);
+      if (!sites.includes(w.profileId)) sites.push(w.profileId);
+      // Bounded: a close() that never returns must not park the reaper. The
+      // page is already out of the pool, so the slot is returned REGARDLESS of
+      // how this resolves.
+      await Promise.race([
+        Promise.resolve(w.driver.close()).catch(() => undefined),
+        new Promise((r) => setTimeout(r, Math.min(this.busyWatchdogMs, WATCHDOG_CLOSE_GRACE_MS))),
+      ]);
+      // A parked request for this site can now use the returned capacity.
+      this.drain(w.profileId);
+    }
+    return { count: wedged.length, sites };
+  }
+
   /* GOAL 87 — ONE liveness sweep, and the numbers it measured.
 
      Before this existed there was no reaper anywhere in src/prompt/: the only
@@ -729,8 +1003,10 @@ export class ChatPool {
      polling /status therefore never learned anything.
 
      Rules that keep it honest:
-       - a BUSY page is never evicted (it is mid-request; killing it would fail
-         work that is actually running),
+       - an IDLE page that is merely busy is never evicted for being busy (it is
+         mid-request; killing it would fail work that is actually running) —
+         EXCEPT past the GOAL 156 busy watchdog bound, which is the one case
+         where "mid-request" has stopped being a reason to keep it,
        - the sweep NEVER spawns a browser: a timer launching Chrome would be
          fabricated traffic. It re-warms only when the honest probe says the
          browser is up (the dead-page case), and records the refusal otherwise,
@@ -739,7 +1015,7 @@ export class ChatPool {
   async sweep(): Promise<SweepReport> {
     const checkedAt = new Date().toISOString();
     if (this.sweeping) {
-      const busy: SweepReport = { checkedAt, checked: 0, evicted: 0, respawned: 0, respawnFailed: 0, sites: [], note: "a sweep is already running" };
+      const busy: SweepReport = { checkedAt, checked: 0, evicted: 0, respawned: 0, respawnFailed: 0, sites: [], note: "a sweep is already running", wedgedReclaimed: 0, wedgedSites: [] };
       return busy;
     }
     this.sweeping = true;
@@ -747,8 +1023,12 @@ export class ChatPool {
       const sites: string[] = [];
       let checked = 0;
       let evicted = 0;
+      /* GOAL 156 A#2 — the BUSY WATCHDOG, run FIRST so a wedged slot is
+         returned before anything else in this sweep is considered. */
+      const wedgedReclaimed = await this.reclaimWedgedWorkers();
+      const wedgedSites = wedgedReclaimed.sites;
       for (const w of [...this.workers]) {
-        if (w.busy) continue; // in use: never evicted mid-request
+        if (w.busy) continue; // in use: never evicted mid-request (the watchdog above owns that case)
         checked++;
         const usable = await isWorkerUsable(w);
         w.health = usable ? "live" : "dead";
@@ -773,6 +1053,14 @@ export class ChatPool {
           respawnFailed++;
           continue;
         }
+        // GOAL 156 (B): a re-warm must obey the same per-site reservation acquire()
+        // does. Past the cap `acquire()` PARKS rather than throwing, and a parked
+        // acquire awaited HERE would park the whole reaper behind it — so the
+        // sweep declines and records the refusal instead.
+        if (this.siteWorkerCount(siteId) >= this.perSiteMax) {
+          respawnFailed++;
+          continue;
+        }
         if (probe.state !== "up") {
           // No browser to re-warm on (measured, not assumed): the next REQUEST
           // spawns one, exactly as it always did. The sweep stays silent about
@@ -788,6 +1076,10 @@ export class ChatPool {
           respawnFailed++;
         }
       }
+      const wedgedNote =
+        wedgedReclaimed.count === 0
+          ? ""
+          : ` reclaimed ${wedgedReclaimed.count} WEDGED in-flight page(s) busy > ${this.busyWatchdogMs}ms for [${wedgedReclaimed.sites.join(", ")}] (their request was hung; the slot is returned and the page closed)`;
       const report: SweepReport = {
         checkedAt,
         checked,
@@ -795,10 +1087,13 @@ export class ChatPool {
         respawned,
         respawnFailed,
         sites,
+        wedgedReclaimed: wedgedReclaimed.count,
+        wedgedSites: wedgedReclaimed.sites,
         note:
-          evicted === 0
+          wedgedNote +
+          (evicted === 0
             ? `swept ${checked} idle page(s), none dead`
-            : `evicted ${evicted} dead idle page(s) for [${sites.join(", ")}]; respawned ${respawned}, failed ${respawnFailed}${probe.state === "up" ? "" : ` (browser is ${probe.state}: left to the next request to spawn)`}`,
+            : `evicted ${evicted} dead idle page(s) for [${sites.join(", ")}]; respawned ${respawned}, failed ${respawnFailed}${probe.state === "up" ? "" : ` (browser is ${probe.state}: left to the next request to spawn)`}`),
       };
       this.lastSweep = report;
       return report;
@@ -837,6 +1132,9 @@ export class ChatPool {
       queued: this.waiters.length,
       maxWaiters: this.maxWaiters,
       perSite,
+      busyWatchdogMs: this.busyWatchdogMs,
+      perSiteMax: this.perSiteMax,
+      requestTimeoutMs: this.requestTimeoutMs,
       workers: this.workers.map((w) => ({
         site: w.profileId,
         busy: w.busy,

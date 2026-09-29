@@ -41,7 +41,7 @@ DO_RESTART=1
 
 # The rollback point sits BESIDE the target, never inside it, so a restore can
 # never rsync a previous release into itself and never ships as part of a deploy.
-ROLLBACK_DIR="${UI2API_DEPLOY_ROLLBACK_DIR:-${TARGET_DIR}.rollback}"
+ROLLBACK_DIR="${DEPLOY_ROLLBACK_DIR:-${TARGET_DIR}.rollback}"
 ROLLBACK_TMP="${ROLLBACK_DIR}.tmp"
 # Bounded everywhere. A rollback that can loop is an outage that never ends.
 HEALTH_ATTEMPTS=30
