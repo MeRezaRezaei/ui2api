@@ -239,6 +239,20 @@ type Refusal = {
 const CAPTURED = new Map<string, Refusal>();
 const put = (key: string, r: { status: number; body: unknown }, at: string) => {
   const err = (r.body as { error?: { code?: string } | string } | null)?.error;
+  // A captured entry is a REFUSAL, so a body with no `error` field at all means
+  // the request was no longer refused — a real, important change that must be
+  // read, not a TypeError three frames later. This used to crash on
+  // `(err as {code?:string}).code` and the crash named nothing; a test that
+  // dies with `Cannot read properties of undefined` has thrown away the one
+  // fact the reader needs.
+  if (err === undefined || err === null) {
+    throw new Error(
+      `"${key}" was captured as a REFUSAL but the response carried no \`error\` field ` +
+        `(status ${r.status}, body ${JSON.stringify(r.body).slice(0, 200)}). Either that refusal ` +
+        `was removed by design — in which case this entry must be DELETED and the behaviour it ` +
+        `guarded pinned as a positive assertion — or something now answers 200 where it must not.`,
+    );
+  }
   const shape: 1 | 2 = typeof err === "string" ? 1 : 2;
   CAPTURED.set(key, { key, shape, wireCode: shape === 2 ? ((err as { code?: string }).code ?? null) : null, status: r.status, body: r.body, emittedAt: at });
 };
@@ -258,7 +272,14 @@ await withDaemon({ token: "codefor-pin-token" }, async (port) => {
   await cap("capability_required", "http.ts:614", await call(port, "POST", "/capability/deepseek", {}, T));
   await cap("site_required", "http.ts:683", await call(port, "GET", "/accounts", undefined, T));
   await cap("no_capability_package", "http.ts:716", await call(port, "GET", "/capabilities?site=definitely-not-a-package", undefined, T));
-  await cap("site_and_account_required", "http.ts:744", await call(port, "GET", "/capabilities?site=deepseek", undefined, T));
+  // GOAL 157: `site_and_account_required` USED to be captured here — it was the
+  // refusal that made `GET /capabilities?site=<id>` demand a vault account
+  // merely to BROWSE, which leaked the internal concept of a vault identity
+  // into a surface a consumer must be able to read. That refusal was removed on
+  // purpose, so it can no longer be captured as a refusal. It is pinned below
+  // as the POSITIVE behaviour that replaced it, which is the honest way to keep
+  // the property: browsing must work, and the account-scoped read must still
+  // require an account.
   await cap("prompt_required", "http.ts:832", await call(port, "POST", "/prompt", { site: "deepseek", prompt: "   " }, T));
   await cap("not_found", "http.ts:940", await call(port, "GET", "/no-such-route", undefined, T));
   await cap("unknown_site", "http.ts:462 -> SHAPE_MESSAGES", await call(port, "POST", "/prompt", { site: "no-such-site", prompt: "hi" }, T));
@@ -308,6 +329,50 @@ function realMessage(key: string): string {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
+
+test("GOAL 157: browsing a capability surface needs NO vault identity, but the account-scoped read still DOES", async () => {
+  // This is the POSITIVE replacement for the `site_and_account_required`
+  // refusal this file used to capture. Removing a refusal is the easiest way to
+  // make a census green, so the property it guarded is pinned HERE instead —
+  // the two halves, because either alone is wrong:
+  //
+  //   1. BROWSE by `site` alone must SUCCEED. This is the internal-concept leak:
+  //      a consumer of an OpenAI-compatible surface had to speak the vault
+  //      vocabulary just to list what a site can do.
+  //   2. The ACCOUNT-SCOPED read must still REQUIRE an account, and must still
+  //      refuse by name when it is absent. Widening the browse must not have
+  //      quietly turned the account-scoped fingerprint into a silent
+  //      default-account read — that would be a different leak, trading one
+  //      internal concept for a silent wrong answer.
+  //
+  // Both are asserted over a real daemon, because the property IS the wire
+  // behaviour and a stubbed handler would prove nothing about it.
+  await withDaemon({ token: "codefor-pin-token" }, async (port) => {
+    const T = "codefor-pin-token";
+    const browse = await call(port, "GET", "/capabilities?site=deepseek", undefined, T);
+    assert.equal(
+      browse.status,
+      200,
+      `GET /capabilities?site= must BROWSE with no vault identity (it demanded one — that was the leak). Got ${browse.status}: ${JSON.stringify(browse.body).slice(0, 200)}`,
+    );
+    assert.ok(
+      (browse.body as { site?: string })?.site,
+      "a browse must name the site it answered for, so a consumer can tell what it got",
+    );
+
+    const scoped = await call(port, "GET", "/capabilities?site=deepseek&account=ghost-account", undefined, T);
+    assert.equal(
+      scoped.status,
+      400,
+      `an account-scoped read with an account that does not exist must still be REFUSED, not silently answered from a default. Got ${scoped.status}: ${JSON.stringify(scoped.body).slice(0, 200)}`,
+    );
+    const scopedErr = (scoped.body as { error?: { code?: string } | string }).error;
+    assert.ok(
+      scopedErr && (typeof scopedErr === "string" || typeof scopedErr.code === "string"),
+      "the account-scoped refusal must still carry a NAMED reason — a bare status code is not something a caller can act on",
+    );
+  });
+});
 
 test("codeFor: the emitted table is 6 regex entries + 1 exact-match branch, every entry ^-anchored (its published shape)", () => {
   assert.equal(
@@ -406,7 +471,26 @@ test("codeFor: the Shape-1 census — which refusal classes carry a name and whi
   // thing that can name it — and for a class the table does not name, the
   // client's honest answer is `http_<status>` (the docblock's stated intent).
   const shape1 = [...CAPTURED.values()].filter((c) => c.shape === 1);
-  assert.ok(shape1.length >= 9, `expected the whole Shape-1 surface, found ${shape1.length}: ${shape1.map((c) => c.key).join(", ")}`);
+  // The floor is DERIVED from what this daemon really emits, and the two
+  // movements that brought it from 9 to 7 were both IMPROVEMENTS — this
+  // comment exists so a future reader does not read a smaller number as decay:
+  //
+  //   1. `site_and_account_required` left the set by DESIGN. That refusal made
+  //      `GET /capabilities?site=<id>` demand a vault identity merely to
+  //      browse, leaking the internal concept of a vault account to any
+  //      consumer. Browsing now succeeds (pinned positively in the GOAL 157
+  //      test above), so there is no refusal left to classify.
+  //   2. `no_capability_package` left the set because it GAINED A NAME. An
+  //      unknown site on that route is now refused with the machine-readable
+  //      `unknown_site` (Shape 2) instead of falling to a bare Shape-1 string.
+  //      The census exists to record which refusals are NAMED and which honestly
+  //      fall to `http_<status>`, so a refusal acquiring a name is the census
+  //      working, not regressing.
+  //
+  // The floor's job is anti-vacuity — it must not be satisfiable by a nearly
+  // empty census. The `deepEqual` below is the real contract; this is the
+  // "the census is not nearly empty" check.
+  assert.ok(shape1.length >= 7, `expected the whole Shape-1 surface, found ${shape1.length}: ${shape1.map((c) => c.key).join(", ")}`);
 
   const seen = runPhp(shape1.map((c) => ({ body: c.body, status: c.status })));
   const census: Record<string, string> = {};
@@ -426,8 +510,6 @@ test("codeFor: the Shape-1 census — which refusal classes carry a name and whi
       not_in_allowlist: "http_400",
       capability_required: "http_400",
       site_required: "http_400",
-      no_capability_package: "http_400",
-      site_and_account_required: "http_400",
       prompt_required: "http_400",
       not_found: "not_found",
       pool_closed: "pool_closed",
