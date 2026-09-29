@@ -10,9 +10,12 @@ import {
   MODEL_CAPABILITIES_VERSION,
   MODEL_TOOL_SUPPORT_VALUES,
   NATIVE_TOOL_CALL_SUPPORTED,
+  NATIVE_TOOL_READERS,
   OPENAI_TOOL_CALL_FINISH_REASON,
   modelCapabilities,
+  modelToolMechanisms,
   modelToolSupport,
+  nativeToolSites,
   type ModelToolSupport,
 } from "../src/prompt/openai.js";
 import { listProfiles, resolveProfile, type ChatSiteProfile } from "../src/profile/profile.js";
@@ -281,26 +284,50 @@ test("every served capability field is re-derivable from the same resolver the d
     const onSurface = new Map(defaultChatSurface().map((e) => [e.id, { packaged: e.packaged }]));
     // Re-derive with the SAME wiring the daemon actually uses. The daemon now
     // injects the soft-tool layer (http.ts passes softTools into
-    // handleOpenAIRoutes), so the served value is "soft". Deriving with `{}` here
-    // would compare the served surface against a build that does not exist and
-    // report drift that is not there — which is how a gate teaches its reader to
-    // ignore it. The wiring is asserted separately at line ~340, where
-    // `modelToolSupport({})` legitimately must be "none".
-    const expectedToolSupport = modelToolSupport({
-      buildToolInstruction: () => "",
-      parseToolCall: () => null,
-      stripToolCall: (raw: string) => ({ content: raw, parsed: false }),
-    });
+    // handleOpenAIRoutes), so the served value is "soft" for a site with no
+    // native reader. Deriving with `{}` here would compare the served surface
+    // against a build that does not exist and report drift that is not there —
+    // which is how a gate teaches its reader to ignore it. The wiring is
+    // asserted separately below, where `modelToolSupport({})` legitimately must
+    // be "none".
+    //
+    // FIXED HERE (was a pre-existing TYPE error, i.e. red typecheck at HEAD): the
+    // three functions were passed as if they were the OPTIONS object. The real
+    // type is `Pick<OpenAIOptions,"softTools">`, i.e. `{ softTools?: {...} }`, so
+    // `opts.softTools` read back undefined at RUNTIME and this pin was
+    // comparing the served surface against "none" — a gate that could only ever
+    // report drift. Wrapping it in `softTools:` is what the daemon's own wiring
+    // does, and it is what makes the comparison mean anything.
+    const softOptions = {
+      softTools: {
+        buildToolInstruction: () => "",
+        parseToolCall: () => null,
+        stripToolCall: (raw: string) => ({ content: raw, parsed: false }),
+      },
+    };
+    const expectedToolSupport = modelToolSupport(softOptions);
 
     const drift: string[] = [];
     for (const m of data) {
-      const expected = modelCapabilities(resolveProfile(String(m.id)), { toolSupport: expectedToolSupport, onSurface });
-      for (const field of ["tools", "status", "provenance", "streamingMode", "requiresRealBrowser"] as const) {
+      // Per SITE, because `tools` is now a per-site fact: a site with a
+      // measured native reader is honestly "native" while its neighbours are
+      // "soft" on the very same daemon. Deriving it globally would flag that
+      // correct behaviour as drift.
+      const siteId = String(m.id);
+      const expected = modelCapabilities(resolveProfile(siteId), {
+        toolSupport: modelToolSupport(softOptions, siteId),
+        toolMechanisms: modelToolMechanisms(softOptions, siteId),
+        onSurface,
+      });
+      for (const field of ["tools", "status", "provenance", "streamingMode", "requiresRealBrowser", "toolCallProvenanceField"] as const) {
         if (m[field] !== expected[field]) drift.push(`${m.id}.${field} served=${JSON.stringify(m[field])} derived=${JSON.stringify(expected[field])}`);
       }
       if (JSON.stringify(m.verified) !== JSON.stringify(expected.verified)) drift.push(`${m.id}.verified drifted from the package record`);
+      if (JSON.stringify(m.toolMechanisms) !== JSON.stringify(expected.toolMechanisms)) {
+        drift.push(`${m.id}.toolMechanisms served=${JSON.stringify(m.toolMechanisms)} derived=${JSON.stringify(expected.toolMechanisms)}`);
+      }
     }
-    d.diagnostic(`entries=${data.length} drift=${drift.length} derivedToolSupport=${expectedToolSupport}`);
+    d.diagnostic(`entries=${data.length} drift=${drift.length} derivedToolSupport=${expectedToolSupport} nativeSites=${JSON.stringify(nativeToolSites())}`);
     assert.deepEqual(drift, [], "a served capability value that re-deriving from the code does not reproduce — that value is a table, not a derivation");
   });
 });
@@ -376,19 +403,25 @@ test("the tool level follows the wiring, and `native` is never claimed without a
   // with no native path behind it — a consumer trusting that would be misled
   // about whether the function actually ran.
   //
-  // So: the constant must stay false, and the REAL check is that any `tool_calls`
-  // emission in this handler is reached ONLY through the soft seam — never
-  // unconditionally, and never on a path that claims native.
-  assert.equal(NATIVE_TOOL_CALL_SUPPORTED, false, "NATIVE_TOOL_CALL_SUPPORTED must stay false while no native path exists");
+  // So: the constant must be TRUE only while a real native emission path exists
+  // behind it, and the REAL check is the one that actually binds — every model
+  // claiming `tools:"native"` must be a site that HAS a measured reader in
+  // NATIVE_TOOL_READERS. A native claim with no reader is a fabricated claim, and
+  // it is now checkable per site instead of only per daemon.
+  assert.equal(NATIVE_TOOL_CALL_SUPPORTED, true, "NATIVE_TOOL_CALL_SUPPORTED must be true while a native emission path exists in this file");
+  const nativeSites = nativeToolSites();
+  assert.ok(nativeSites.length > 0, "anti-vacuity: a `true` constant with an EMPTY reader registry is the exact lie this pin exists to catch");
+  for (const [site, reader] of Object.entries(NATIVE_TOOL_READERS)) {
+    assert.equal(typeof reader, "function", `NATIVE_TOOL_READERS["${site}"] must be a real reader function, not a placeholder`);
+  }
   assert.match(
     CODE,
     /parsedCall/,
-    "the handler must reach a tool_calls emission only via the parsed soft call, " +
-      "guarded by the seam — an unconditional emission would claim capability that does not exist",
+    "the handler must reach a tool_calls emission only via a parsed soft call or site evidence — " +
+      "an unconditional emission would claim capability that does not exist",
   );
   assert.ok(
-    !/tool_calls\s*:\s*\[/.test(CODE.replace(/tool_calls: \[\{/g, "")) ||
-      /parsedCall/.test(CODE),
+    !/tool_calls\s*:\s*\[/.test(CODE.replace(/tool_calls: \[tc\]/g, "")) || /parsedCall/.test(CODE),
     "any tool_calls emission must be conditional on a parsed call",
   );
   // anti-vacuity: the emission detector must fire on a real emission.
@@ -398,11 +431,26 @@ test("the tool level follows the wiring, and `native` is never claimed without a
   );
   assert.equal(OPENAI_TOOL_CALL_FINISH_REASON, "tool_calls", "the declared tool-call finish_reason must match the OpenAI vocabulary");
 
-  await withDaemon("never-native", undefined, async (base, d) => {
+  await withDaemon("native-has-readers", undefined, async (base, d) => {
     const data = (await getJson(base, "/v1/models")).body.data as ModelEntry[];
-    const natives = data.filter((m) => m.tools === "native").map((m) => m.id);
-    d.diagnostic(`entries=${data.length} claimingNative=${natives.length}`);
-    assert.deepEqual(natives, [], "a model advertises tools:native with no native tool path in this handler");
+    const claimingNative = data.filter((m) => m.tools === "native").map((m) => String(m.id));
+    d.diagnostic(`entries=${data.length} claimingNative=${JSON.stringify(claimingNative)} readers=${JSON.stringify(nativeSites)}`);
+    // The claim must be earned: exactly the sites that HAVE a reader, no others.
+    assert.deepEqual(
+      claimingNative.slice().sort(),
+      nativeSites.slice().sort(),
+      "a model advertises tools:native without a measured native reader behind it — that is the fabricated claim",
+    );
+    for (const m of data) {
+      if (m.tools === "native") {
+        assert.deepEqual(m.toolMechanisms, ["native", "soft"], `${m.id} claims native but does not also report the soft mechanism it really has`);
+      } else {
+        assert.ok(
+          !(m.toolMechanisms as string[]).includes("native"),
+          `${m.id} lists "native" in toolMechanisms while its top-level tools says ${m.tools} — the two fields disagree`,
+        );
+      }
+    }
   });
 });
 
@@ -423,10 +471,30 @@ test("anti-vacuity: the field checker rejects an entry with the capability block
 test("anti-vacuity: the native-claim checks reject a daemon that advertises tools:native with no native path", async () => {
   // The advertised-set half: model the mutation (a native claim served) without
   // touching the source, and prove the same predicate the pin uses rejects it.
-  const claimingNative = [{ id: "site-y", tools: "native" }, { id: "site-z", tools: "none" }];
-  const offenders = claimingNative.filter((m) => m.tools === "native" && NATIVE_TOOL_CALL_SUPPORTED === false).map((m) => m.id);
-  assert.deepEqual(offenders, ["site-y"], "the predicate must flag a native claim while no native path exists — the mutation-red proof for the native pin");
-  // and it must NOT flag the honest entries, so the check is discriminating.
-  const honest = claimingNative.filter((m) => m.tools !== "native").map((m) => m.id);
-  assert.deepEqual(offenders.filter((id) => honest.includes(id)), [], "an honest entry must never be flagged");
+  // The predicate is now PER SITE — a native claim is only legitimate for a site
+  // that has a measured reader — so the mutation is a site with no reader.
+  const claimingNative = [
+    { id: "site-without-reader", tools: "native", readers: [] as string[] },
+    { id: "site-z", tools: "none", readers: [] as string[] },
+  ];
+  const offenders = claimingNative.filter((m) => m.tools === "native" && !m.readers.includes(m.id)).map((m) => m.id);
+  assert.deepEqual(offenders, ["site-without-reader"], "the predicate must flag a native claim with no reader behind it — the mutation-red proof for the native pin");
+  // and it must NOT flag an honest site that genuinely has a reader.
+  const earned = [{ id: "kimi", tools: "native", readers: ["kimi"] }];
+  assert.deepEqual(
+    earned.filter((m) => m.tools === "native" && !m.readers.includes(m.id)).map((m) => m.id),
+    [],
+    "a native claim on a site WITH a measured reader is honest and must never be flagged",
+  );
+  // and the constant direction: a `true` constant with an empty registry is the
+  // lie the pin exists to catch, so the registry is asserted non-empty and the
+  // constant is read through a widened type (a literal `true` would make a
+  // `=== false` comparison a compile error, hiding a real regression behind a
+  // build break).
+  const nativeFlag: boolean = NATIVE_TOOL_CALL_SUPPORTED;
+  assert.equal(
+    nativeFlag,
+    nativeToolSites().length > 0,
+    "NATIVE_TOOL_CALL_SUPPORTED and the reader registry must agree — a true constant with an empty registry claims a path that does not exist"
+  );
 });

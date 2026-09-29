@@ -30,6 +30,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { normalizeToolReadback, type KimiToolEvidenceRaw } from "../capabilities/kimi.js";
+
 export interface OpenAIOptions {
   pool: ChatPool;
   profilesById: Record<string, ChatSiteProfile>;
@@ -86,12 +88,14 @@ export const MODEL_CAPABILITIES_VERSION = 1;
 
 /**
  * Tool-calling support, and the vocabulary a consumer must read:
- *  - "native" — the model/site emits a real tool call through this wire. NOT
- *    claimed by anything today (see NATIVE_TOOL_CALL_SUPPORTED).
+ *  - "native" — the SITE itself invoked its own tool during the turn, and this
+ *    surface read that invocation back off the page and reports it. The
+ *    arguments are the site's own evidence and nothing else (see
+ *    NATIVE_TOOL_READERS).
  *  - "soft"   — the daemon renders the requested tools into the prompt and
  *                parses the reply back into a tool call. Works on any chat site
  *                because it uses only the site's own composer. Enabled by
- *                `opts.softTools` being wired.
+ *                `opts.softTools` being wired. The model has NOT run anything.
  *  - "none"   — no tool layer is wired; a `tools` array in the request is
  *                ignored. Honest, and the default.
  */
@@ -100,23 +104,247 @@ export type ModelToolSupport = "native" | "soft" | "none";
 export const MODEL_TOOL_SUPPORT_VALUES: readonly ModelToolSupport[] = ["native", "soft", "none"];
 
 /**
- * Does THIS handler have a native tool-calling path? MEASURED: no.
+ * Did THIS handler ever emit `tools:"native"`? Read this before believing the
+ * word "native" anywhere in this file.
  *
- * A native path would mean this file emits `message.tool_calls` /
- * `delta.tool_calls` sourced from the SITE's own tool machinery (the site's
- * toolkit panel, its real function-calling wire). Nothing in this handler
- * does: `/v1/chat/completions` reads only `model/messages/stream/new_chat/
- * account` from the body and answers with the rendered answer text. The site's
- * own tool UI (web-search toggles, model pickers, file attach) is driven
- * through `/capability/<site>`, not through this OpenAI wire.
+ * `tools:"native"` is a per-SITE claim, and the site is what runs the tool —
+ * so it is derived per site from NATIVE_TOOL_READERS below, never from this
+ * constant. This constant answers a narrower, still-useful question: does this
+ * handler CONTAIN a native emission path at all? A `true` here with an empty
+ * registry would be a lie, and the registry is the thing that actually
+ * produces calls.
  *
- * So `tools:"native"` is FALSE for every model, and the honest per-model value
- * is derived below. This constant is the single place that fact lives, so the
- * claim is auditable instead of scattered — and
- * `test/model-capability-truth.test.ts` greps THIS file for a `tool_calls`
- * emission and fails if any entry claims "native" while that path is absent.
+ * It is consulted by the gates that read this file as text (a `tool_calls`
+ * emission is only legitimate when it is reachable from here), which is why it
+ * stays a single auditable constant rather than being computed at each use.
  */
-export const NATIVE_TOOL_CALL_SUPPORTED = false;
+export const NATIVE_TOOL_CALL_SUPPORTED = true;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NATIVE TOOL EVIDENCE — the real thing.
+//
+// A native call is NOT one this daemon invents. It is a record that the SITE,
+// through its own UI and its own JavaScript, invoked a tool while answering
+// this turn, and that the site then RENDERED the result of that invocation into
+// the page we are already holding. The evidence is therefore read off that page
+// after the answer settles, using the site's own verified selectors.
+//
+// THE RULE THAT MAKES THIS HONEST: an argument may only ever be built from
+// what the site rendered. There is no path here that turns a model sentence, a
+// prompt instruction, or a soft-parser hit into a native call. When the site
+// rendered nothing, the answer is returned untouched and no call is emitted —
+// see `observed === false` in buildNativeToolCall, which returns null.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The site's own evidence, flattened to exactly the fields a call may carry. */
+export interface NativeToolEvidence {
+  /** The tool as the site labels it, e.g. "web_search". */
+  tool: string;
+  /** TRUE only when the site itself rendered proof the tool ran. */
+  observed: boolean;
+  /** The site's own human-facing tool title, e.g. "Retrieve Tokyo weather via Web Search". */
+  toolTitle: string | null;
+  /** N parsed out of the site's own "Search（N results）" label; null when not rendered. */
+  resultCount: number | null;
+  /** The site's own result label, verbatim. */
+  resultLabel: string | null;
+  /** Real citation URLs the SITE rendered, in page order, deduped. Never synthesized. */
+  citations: string[];
+  /** NAMED reason when observed === false. */
+  reason: string | null;
+}
+
+/** The minimum page surface a reader needs. Structurally typed so a Playwright
+ *  `Page` satisfies it without this file importing a browser type, and so a
+ *  test can supply a stub that returns a fixed raw scrape. */
+export interface NativeReadablePage {
+  evaluate(script: string): Promise<unknown>;
+}
+
+export type NativeToolReader = (page: NativeReadablePage) => Promise<NativeToolEvidence>;
+
+/**
+ * KIMI — the measured native reader.
+ *
+ * Every selector here is VERIFIED against a live kimi.ai account (see the
+ * header comment of src/capabilities/kimi.ts for the measurement): the site's
+ * own fired-search node `div.toolcall-web_search`, the tool-title spans
+ * `span.toolcall-title-name-text` carrying `Search（N results）` with FULLWIDTH
+ * parens, and the citation anchors `a.pua-ref-cite-tag[href]` carrying the real
+ * external URLs.
+ *
+ * The scrape is a STRING evaluate, not a closure: the kimi bundle is
+ * __name-mangled and a named arrow inside page.evaluate hangs or crashes. That
+ * constraint is measured, not stylistic, and it is the same one duckduckgo's
+ * history read-back hit.
+ *
+ * The verdict is NOT made here. This function only collects raw DOM facts and
+ * hands them to the site's own `normalizeToolReadback` — the single fabrication
+ * gate, already exercised by the capability runner. Reusing it rather than
+ * re-implementing it is the point: a second, looser gate in this file would be
+ * a second place to get the fabrication wrong.
+ */
+const kimiNativeReader: NativeToolReader = async (page) => {
+  const raw = (await page.evaluate(`(() => {
+    const txt = (e) => ((e && (e.innerText || e.textContent)) || "").replace(/\\s+/g, " ").trim();
+    const labelNodes = [...document.querySelectorAll("span.toolcall-title-name-text")].map(txt).filter(Boolean);
+    const containers = document.querySelectorAll('div[class*="toolcall-container"][class*="web_search"], div.toolcall-web_search, [class*="toolcall"][class*="web_search"]');
+    const cite = [...document.querySelectorAll('a.pua-ref-cite-tag[href]')].map((a) => (a.getAttribute('href') || '').split('#')[0]).filter((h) => /^https?:\\/\\//.test(h));
+    const resultLabel = labelNodes.find((l) => /Search\\s*[(\\uff08]\\s*\\d+\\s*results?/i.test(l)) || null;
+    return {
+      labels: labelNodes,
+      resultLabel,
+      searchToolContainers: containers.length,
+      referencesAction: [...document.querySelectorAll(".ref-action")].some((e) => txt(e) === "Reference"),
+      citations: [...new Set(cite)],
+      searchEnabled: localStorage.getItem("selectSearch") === "true" ? true : localStorage.getItem("selectSearch") === "false" ? false : null,
+    };
+  })()`)) as KimiToolEvidenceRaw;
+  const rb = normalizeToolReadback(raw);
+  return {
+    tool: rb.tool,
+    observed: rb.observed,
+    toolTitle: rb.toolTitle,
+    resultCount: rb.evidence.resultCount,
+    resultLabel: rb.evidence.resultLabel,
+    citations: rb.evidence.citations,
+    reason: rb.reason,
+  };
+};
+
+/**
+ * Which sites have a MEASURED native reader, keyed by site id.
+ *
+ * This is the single source of every native fact in this file: the /v1/models
+ * `tools` value is derived from its keys, and a native tool call is emitted only
+ * for a site in it. A site with no entry here is `tools:"soft"` or `"none"` and
+ * can never produce a native call — which is the honest state, not a gap: a
+ * reader needs VERIFIED selectors and a live measurement behind it, and adding
+ * one is a measurement, not a declaration.
+ *
+ * Not a capability table: a per-model table of what a model "can do" is the
+ * snapshot-that-rots this file refuses everywhere else. This maps a site to the
+ * CODE that reads that site, and every key is a real, working reader.
+ */
+export const NATIVE_TOOL_READERS: Readonly<Record<string, NativeToolReader>> = { kimi: kimiNativeReader };
+
+/** The site ids that can produce a real, evidence-backed tool call. */
+export function nativeToolSites(): string[] {
+  return Object.keys(NATIVE_TOOL_READERS);
+}
+
+/** How a tool call on this wire was produced. The field a consumer reads to
+ *  tell the two apart without consulting any ui2api document.
+ *  - "native"       — the SITE ran the tool; `executed` is true; the arguments
+ *                     are the site's own evidence.
+ *  - "soft-prompt"  — the MODEL was asked, in prose, to emit a call; `executed`
+ *                     is false and the caller runs the function. Nothing ran. */
+export type ToolCallMechanism = "native" | "soft-prompt";
+
+/** The per-call provenance block, emitted on every choice that carries a call. */
+export interface ToolCallProvenance {
+  mechanism: ToolCallMechanism;
+  /** Did the function actually run? true for native, false for soft. */
+  executed: boolean;
+  /** Which site answered. */
+  site: string;
+  /** The tool as the SITE names it. Null for a soft call (the model named it). */
+  tool: string | null;
+  /** The site's own rendered evidence, verbatim. Null for a soft call. */
+  evidence: {
+    toolTitle: string | null;
+    resultCount: number | null;
+    resultLabel: string | null;
+    citations: string[];
+  } | null;
+  /** True when the model also emitted soft scaffolding that was NOT promoted,
+   *  because the site's real invocation outranks a prompt-driven approximation. */
+  suppressedSoft: boolean;
+}
+
+/** The argument object of a native call. EXACTLY the three measured fields and
+ *  nothing else — no prompt text, no answer text, no inferred query. If the
+ *  site rendered no result count, `resultCount` is `null`, which is the truth. */
+export interface NativeToolArguments {
+  tool: string;
+  tool_title: string | null;
+  result_count: number | null;
+  citations: string[];
+}
+
+/**
+ * Build a native tool call from site evidence, or `null` for NO call.
+ *
+ * `null` is returned in every case that is not a proven invocation, and those
+ * cases are the common ones: the site has no reader, the reader found no page,
+ * the page scrape failed, or `observed` is false. The last of those is the
+ * fabrication gate in its purest form — an unobserved turn produces an ordinary
+ * answer with no `tool_calls` key, because there is no such thing as a tool
+ * call that did not happen.
+ */
+export function buildNativeToolCall(
+  evidence: NativeToolEvidence | null,
+  site: string
+): { call: OpenAIToolCall; arguments: NativeToolArguments; provenance: Omit<ToolCallProvenance, "suppressedSoft"> } | null {
+  if (!evidence) return null;
+  if (evidence.observed !== true) return null;
+  // The function name is DERIVED from the site's own vocabulary with this
+  // repo's established tool-naming rule (`<site>_<capability>`, the same shape
+  // the /registry tool names use), so it cannot drift from the capability the
+  // site actually exposes.
+  const name = `${site}_${evidence.tool}`;
+  const args: NativeToolArguments = {
+    tool: evidence.tool,
+    tool_title: evidence.toolTitle,
+    result_count: evidence.resultCount,
+    citations: evidence.citations,
+  };
+  return {
+    call: {
+      id: `call_native_${site}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    },
+    arguments: args,
+    provenance: {
+      mechanism: "native",
+      executed: true,
+      site,
+      tool: evidence.tool,
+      evidence: {
+        toolTitle: evidence.toolTitle,
+        resultCount: evidence.resultCount,
+        resultLabel: evidence.resultLabel,
+        citations: evidence.citations,
+      },
+    },
+  };
+}
+
+/**
+ * Read the site's own tool evidence off the page this turn was answered on.
+ *
+ * Returns `null` — never a throw, never a partial readback — for a site with no
+ * reader, a driver holding no page, or a scrape that failed. A readback that
+ * cannot be trusted is indistinguishable from no readback, and both mean the
+ * same thing on the wire: no call.
+ */
+async function readNativeEvidence(
+  site: string,
+  driver: unknown
+): Promise<NativeToolEvidence | null> {
+  const reader = NATIVE_TOOL_READERS[site];
+  if (!reader) return null;
+  // Same structural reach pool.ts already uses to health-check a worker: the
+  // page is the driver's own, and it is only readable while the worker is held.
+  const page = (driver as { page?: NativeReadablePage } | null | undefined)?.page;
+  if (!page || typeof page.evaluate !== "function") return null;
+  try {
+    return await reader(page);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Streaming is a property of the SURFACE, not of a site: the SSE branch below
@@ -168,6 +396,13 @@ export interface ModelCapabilityMetadata {
   requiresRealBrowser: boolean;
   /** The tool-call shape a `tools:"soft"` call will come back in. */
   toolCallShape: "openai.function_call" | null;
+  /** EVERY mechanism this site can reach, strongest first. `tools` above names
+   *  the best one; this names the rest, so a site that supports both a native
+   *  read and a prompt-driven `tools` array is not flattened into one of them. */
+  toolMechanisms: ModelToolSupport[];
+  /** The vocabulary a consumer reads on a returned call to know WHICH mechanism
+   *  produced it. Mirrors `ToolCallProvenance.mechanism` on the wire. */
+  toolCallProvenanceField: "choices[0].ui2api.toolCall.mechanism";
 }
 
 /** Where a served profile's authority comes from — DERIVED, never typed.
@@ -222,13 +457,41 @@ function verifiedRecordOf(siteId: string): RegistryVerified | false {
   return false;
 }
 
-/** The tool level this daemon can actually execute, DERIVED from the wiring
- *  (not from a per-site table): native only if this surface ever grows a real
- *  native path, soft when the soft-tool layer is injected, else none. */
-export function modelToolSupport(opts: Pick<OpenAIOptions, "softTools">): ModelToolSupport {
-  if (NATIVE_TOOL_CALL_SUPPORTED) return "native";
+/** The tool levels this daemon can actually execute for ONE site, DERIVED from
+ *  the wiring rather than from a per-site table.
+ *
+ *  - "native" — the site is in NATIVE_TOOL_READERS, so a call can be backed by
+ *    the site's own rendered invocation. This is the strongest level available,
+ *    so it wins when both are possible.
+ *  - "soft"   — no native reader for this site, but the prompt-driven layer is
+ *    injected, so a `tools` array is honoured as an approximation.
+ *  - "none"   — neither. A `tools` array is ignored, and saying so is the point.
+ *
+ * `siteId` is optional so a caller that has no site in hand (an audit, a test)
+ * still gets an honest answer rather than an exception: with no site, no native
+ * reader can apply.
+ */
+export function modelToolSupport(opts: Pick<OpenAIOptions, "softTools">, siteId?: string): ModelToolSupport {
+  if (NATIVE_TOOL_CALL_SUPPORTED && siteId !== undefined && Object.prototype.hasOwnProperty.call(NATIVE_TOOL_READERS, siteId)) {
+    return "native";
+  }
   if (opts.softTools) return "soft";
   return "none";
+}
+
+/** Every mechanism a site can reach, strongest first — so a consumer that wants
+ *  the FULL picture (this site can do native reads AND honour a `tools` array)
+ *  is not misled by a single-value field that can only name one. */
+export function modelToolMechanisms(
+  opts: Pick<OpenAIOptions, "softTools">,
+  siteId?: string
+): ModelToolSupport[] {
+  const out: ModelToolSupport[] = [];
+  if (NATIVE_TOOL_CALL_SUPPORTED && siteId !== undefined && Object.prototype.hasOwnProperty.call(NATIVE_TOOL_READERS, siteId)) {
+    out.push("native");
+  }
+  if (opts.softTools) out.push("soft");
+  return out;
 }
 
 /** Build the enriched, DERIVED capability block for one served profile. */
@@ -237,7 +500,11 @@ export function modelCapabilities(
   ctx: {
     toolSupport: ModelToolSupport;
     onSurface: Map<string, { packaged: boolean }>;
-  },
+    /** The site id's full mechanism list. Derived, never typed; defaults to the
+     *  single `toolSupport` so a caller that does not know about the richer list
+     *  still gets a self-consistent block rather than an empty array. */
+    toolMechanisms?: ModelToolSupport[];
+  }
 ): ModelCapabilityMetadata {
   const soft = ctx.toolSupport !== "none";
   return {
@@ -249,8 +516,11 @@ export function modelCapabilities(
     verified: verifiedRecordOf(profile.id),
     requiresRealBrowser: Boolean((profile as { realProfileOnly?: boolean }).realProfileOnly),
     toolCallShape: soft ? "openai.function_call" : null,
+    toolMechanisms: ctx.toolMechanisms ?? [ctx.toolSupport],
+    toolCallProvenanceField: "choices[0].ui2api.toolCall.mechanism",
   };
 }
+
 
 
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
@@ -351,7 +621,6 @@ export async function handleOpenAIRoutes(
   // consumer would size real requests against).
   if (req.method === "GET" && url === "/v1/models") {
     const onSurface = new Map(defaultChatSurface().map((e) => [e.id, { packaged: e.packaged }]));
-    const toolSupport = modelToolSupport(opts);
     const data = Object.values(profilesById).map((p) => ({
       id: p.id,
       object: "model",
@@ -365,8 +634,15 @@ export async function handleOpenAIRoutes(
       loginRequired: p.loginRequired ?? false,
       // …and the capability block, spread at the TOP level of the entry so a
       // consumer reads `m.tools` / `m.status` without unwrapping a sub-object
-      // whose shape it would have to guess.
-      ...modelCapabilities(p, { toolSupport, onSurface }),
+      // whose shape it would have to guess. `tools` is resolved PER SITE: the
+      // native level is a property of whether this site has a measured reader
+      // (NATIVE_TOOL_READERS), not of the daemon, so kimi and deepseek can
+      // honestly differ on the same running daemon.
+      ...modelCapabilities(p, {
+        toolSupport: modelToolSupport(opts, p.id),
+        toolMechanisms: modelToolMechanisms(opts, p.id),
+        onSurface,
+      }),
     }));
     return sendJson(res, 200, { object: "list", capabilitiesVersion: MODEL_CAPABILITIES_VERSION, data });
   }
@@ -453,6 +729,21 @@ export async function handleOpenAIRoutes(
     const worker = await pool.acquire(profile.id, account);
     try {
       const result = await worker.driver.ask(prompt, { newChat });
+      // ── NATIVE READ-BACK, and the ORDER matters ──────────────────────────────
+      //
+      // It runs HERE, after the answer settled and BEFORE the worker is released,
+      // because the evidence is DOM the SITE rendered onto the driver's own page.
+      // Releasing first would hand that page to the next request, and the read
+      // would race another conversation's markup — a readback that returned
+      // another turn's citations is precisely the fabrication this must not ship.
+      //
+      // It is also skipped for a restriction wall: a paywall/limit/login page is
+      // not a tool invocation, and scraping it for "evidence" would only find
+      // the wall's own DOM.
+      const native =
+        NATIVE_TOOL_CALL_SUPPORTED && result.doneReason !== "restricted"
+          ? await readNativeEvidence(profile.id, worker.driver)
+          : null;
       await pool.release(worker);
       // Parse the reply BEFORE it is rendered. On a hit the scaffolding is
       // stripped so the caller never sees the JSON envelope we asked for, and the
@@ -484,9 +775,44 @@ export async function handleOpenAIRoutes(
               argumentsJson: narrowed.argumentsJson,
             }
           : null;
-      const answer = parsedCall
-        ? (softTools?.stripToolCall(result.answer ?? "").content ?? "")
-        : (result.answer ?? "");
+      // ── WHICH MECHANISM PRODUCED THE CALL ───────────────────────────────────
+      //
+      // A native invocation OUTRANKS a soft one, and the soft one is suppressed
+      // rather than dropped silently: the site really ran a tool, so reporting a
+      // prompt-driven approximation as the answer's call would understate what
+      // happened and hand the caller the weaker evidence. The suppression is
+      // recorded in `suppressedSoft` so nothing is hidden.
+      //
+      // The two can never be conflated in the other direction, which is the one
+      // that matters: a soft hit NEVER becomes native. `buildNativeToolCall` is
+      // the only producer of a native call and it takes site evidence alone.
+      const built = buildNativeToolCall(native, profile.id);
+      const toolCall: OpenAIToolCall | null = built
+        ? built.call
+        : parsedCall
+          ? {
+              id: parsedCall.toolCallId,
+              type: "function" as const,
+              function: { name: parsedCall.name, arguments: parsedCall.argumentsJson },
+            }
+          : null;
+      const provenance: ToolCallProvenance | null = built
+        ? { ...built.provenance, suppressedSoft: parsedCall !== null }
+        : parsedCall
+          ? {
+              mechanism: "soft-prompt",
+              executed: false,
+              site: profile.id,
+              tool: null,
+              evidence: null,
+              suppressedSoft: false,
+            }
+          : null;
+      // The scaffolding is stripped when EITHER mechanism claimed the turn: a
+      // caller told "run this function" must not also receive the prompt
+      // envelope as if it were the model's answer.
+      const answer =
+        toolCall !== null ? (softTools?.stripToolCall(result.answer ?? "").content ?? "") : (result.answer ?? "");
       const id = `chatcmpl-ui2api-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       const created = Math.floor(Date.now() / 1000);
       if (stream) {
@@ -513,10 +839,16 @@ export async function handleOpenAIRoutes(
           return;
         }
         chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] });
-        if (parsedCall) {
+        if (toolCall) {
           // A tool call replaces the content replay: the caller is not being sent
           // prose, it is being told which function to run. Sending both would let
           // a consumer treat the instruction scaffolding as the model's answer.
+          //
+          // The SAME bytes are used for both mechanisms — the OpenAI wire has one
+          // shape for a call. What tells them apart travels on the FINAL chunk,
+          // in `choices[0].ui2api.toolCall`, because that is the one frame a
+          // consumer is guaranteed to read (it carries finish_reason) and the one
+          // a streaming SDK has finished accumulating when it yields the result.
           chunk({
             id,
             object: "chat.completion.chunk",
@@ -529,9 +861,9 @@ export async function handleOpenAIRoutes(
                   tool_calls: [
                     {
                       index: 0,
-                      id: parsedCall.toolCallId,
+                      id: toolCall.id,
                       type: "function" as const,
-                      function: { name: parsedCall.name, arguments: parsedCall.argumentsJson },
+                      function: { name: toolCall.function.name, arguments: toolCall.function.arguments },
                     },
                   ],
                 },
@@ -539,7 +871,13 @@ export async function handleOpenAIRoutes(
               },
             ],
           });
-          chunk({ id, object: "chat.completion.chunk", created, model: profile.id, choices: [{ index: 0, delta: {}, finish_reason: OPENAI_TOOL_CALL_FINISH_REASON }] });
+          chunk({
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model: profile.id,
+            choices: [{ index: 0, delta: {}, finish_reason: OPENAI_TOOL_CALL_FINISH_REASON, ui2api: { toolCall: provenance } }],
+          });
           res.write("data: [DONE]\n\n");
           res.end();
           return;
@@ -565,33 +903,60 @@ export async function handleOpenAIRoutes(
             message: {
               role: "assistant",
               content: answer,
-              // Present ONLY when a call was parsed, so a consumer can branch on
-              // the key's existence rather than on a magic empty value. The
-              // `executed:false` reality is NOT on the wire — OpenAI's schema has
-              // no room for it — so a consumer that treats this as an executed
-              // call is making that assumption itself, deliberately, rather than
-              // being told it happened.
-              ...(parsedCall
-                ? {
-                    tool_calls: [
-                      {
-                        id: parsedCall.toolCallId,
-                        type: "function" as const,
-                        function: { name: parsedCall.name, arguments: parsedCall.argumentsJson },
-                      },
-                    ],
-                  }
-                : {}),
+              // Present ONLY when a call was actually produced, so a consumer can
+              // branch on the key's existence rather than on a magic empty value.
+              // There is no such thing as an empty tool_calls array here: with no
+              // call there is no key at all, and an unobserved native turn is
+              // exactly that case.
+              ...(toolCall ? { tool_calls: [toolCall] } : {}),
               refusal:
                 result.doneReason === "restricted"
                   ? (result.restrictions ?? []).map((r) => `${r.kind}: ${r.matched}`).join("; ") || "restriction wall detected"
                   : null,
             },
-            finish_reason: result.doneReason === "restricted" ? "content_filter" : "stop",
+            // `tool_calls` here is NOT a ui2api invention — it is the OpenAI
+            // protocol's own value, and a consumer that ignores our provenance
+            // field still gets a spec-correct finish_reason. (The SOFT path was
+            // previously reporting "stop" here while carrying tool_calls, which
+            // is a protocol error: OpenAI requires "tool_calls" whenever the
+            // message carries the key. A strict SDK reconciles the stream and
+            // can end up with a message holding calls and a "stop" reason.)
+            finish_reason: result.doneReason === "restricted" ? "content_filter" : toolCall ? OPENAI_TOOL_CALL_FINISH_REASON : "stop",
             logprobs: null,
+            // THE VOCABULARY. A consumer reads this one field to know whether the
+            // site really ran a tool or the model was merely asked to pretend:
+            //   mechanism:"native"      → executed:true,  arguments are the site's
+            //                              own rendered evidence (real citations)
+            //   mechanism:"soft-prompt" → executed:false, nothing ran, the CALLER
+            //                              runs the function
+            // It sits on the CHOICE, next to the call it describes, so it cannot
+            // be missed by a consumer that only looks at `choices[0]`. Absent
+            // entirely when no call was made.
+            ...(provenance ? { ui2api: { toolCall: provenance } } : {}),
           },
         ],
-        ui2api: { site: profile.id, chunkCount: result.chunkCount ?? 0, doneReason: result.doneReason ?? "stop", url: result.url ?? undefined, title: result.title ?? undefined },
+        ui2api: {
+          site: profile.id,
+          chunkCount: result.chunkCount ?? 0,
+          doneReason: result.doneReason ?? "stop",
+          url: result.url ?? undefined,
+          title: result.title ?? undefined,
+          // Why a native read-back produced nothing, when this site has a reader
+          // at all. This is the field that makes a MISSING call diagnosable: the
+          // overwhelmingly common real answer is "the site did not run the tool
+          // on this turn", and without a reason that is indistinguishable from a
+          // broken reader.
+          ...(NATIVE_TOOL_READERS[profile.id]
+            ? {
+                nativeTool: {
+                  site: profile.id,
+                  attempted: NATIVE_TOOL_CALL_SUPPORTED && result.doneReason !== "restricted",
+                  observed: native?.observed === true,
+                  reason: native?.reason ?? (result.doneReason === "restricted" ? "skipped: restriction wall" : native === null ? "no readable page for this turn" : null),
+                },
+              }
+            : {}),
+        },
       });
     } catch (e) {
       await pool.release(worker).catch(() => undefined);
