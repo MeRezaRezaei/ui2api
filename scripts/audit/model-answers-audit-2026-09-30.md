@@ -790,3 +790,140 @@ zero account risk.
 - **It does not claim 5 s is validated.** Only that nothing measured contradicts it and that the sample is thin.
 - **It does not claim the pool is healthy.** `copilot` was `live` with no tab while the sweep reported it respawned.
 - **It re-derives nothing in `model-verification.json`** and edits no profile.
+
+---
+
+# ADDENDUM — GOAL 171, 2026-09-30: the health probe's ATTRIBUTION is fixed in code; the deploy still has not landed
+
+Date: 2026-09-30. Agent: L1 goal-agent for GOAL 171. The work here is the code fix plus the hermetic pin.
+**No live chat request was fired** (budget: 4, used: **0** — §11.2 quotes the two deploy checks that failed, which
+is the gate the goal itself specifies as a precondition for measuring).
+
+## 11.1 The question GOAL 171 asked, answered: NO — a neighbour's page is not an acceptable proxy
+
+The goal offered two acceptable resolutions. This goal took the first: **fix the attribution.**
+
+The decision was not a preference between two true claims. It was that one of the two options keeps a *false*
+claim alive. Concretely, `/status.workers[].health` feeds `warmLive`, and `warmLive` is what an operator or a
+consumer reads to decide a worker can serve. A field that can read `live` while the worker holds nothing is the
+GOAL 157 defect one layer down — a check that measures a repo-shaped proxy instead of the property — and the
+provenance of that defect is visible in this very file, not merely asserted: `probeBrowser()` in the same file
+already refuses to read a `contexts()` count as liveness ("Playwright returns the cached list after a
+disconnect") and reports `unknown` rather than `up` when there is no liveness surface. A worker-health check that
+accepts a SHARED context's page as evidence about a page it does not own is that same error in a different hat,
+and §10.2 of the previous section is the measurement of it doing exactly what the error predicts.
+
+Renaming the field to a weaker claim was rejected for one concrete reason: the weaker claim is still the wrong
+claim about the object. "Some page in this worker's context answered" is not a statement about the worker at all
+— it is a statement about the browser, which `probeBrowser()` already reports on the `browser` field, and
+correctly. Duplicating a browser-level fact into a per-worker field, under a name that reads as a worker verdict,
+buys nothing and costs a routing decision made on a browser-level observation.
+
+**What changed.** The probe asks exactly one object: the driver's own page. `candidates = [page, ...ctx.pages()]`
+and the `.find()` over the shared context are gone, and `ctx.pages()` / `_closed` are no longer consulted at all.
+The trailing `ctx._closed` / `pages().length` checks were dropped deliberately: both are facts about the SHARED
+browser, so they could only ever contradict the worker's own answer, never support it — an own-page round-trip
+that resolves is strictly stronger evidence than either.
+
+**Why the check is now TRUE under every reachable state** — the old two-state result conflated two different
+failures, so the fix splits them into three, using the value this file has carried since GOAL 87 for exactly this
+purpose:
+
+| reachable state | reported | why it is true |
+| --- | --- | --- |
+| own page has a probe surface and answers within the bound | `live` | the only path that sets `live`; attributed to this worker's own CDP target |
+| own page has a probe surface and rejects, or exceeds `WORKER_PROBE_TIMEOUT_MS` | `dead` | MEASURED, so the reaper may evict and `release()` may drop the slot |
+| driver carries no page at all | `dead` | there is provably nothing to probe; the pre-GOAL-169 reading |
+| driver handle exposes no own-page probe surface (a context-only handle) | `unprobed` | NOT measured — kept in the pool, excluded from `warmLive`, never claimed `live` |
+
+The fourth row is the one that used to lie. It previously fell through `candidates.find()` onto a context page and
+read `live`. It now reads `unprobed`: a strictly smaller lie, and the only kind this file is allowed to tell.
+Evicting it instead would be the same fabrication pointed the other way — a capacity loss justified by a
+measurement that was never taken — so it keeps its slot and says `unprobed`, which is what that value has meant
+since GOAL 87 ("a page is only `live` after a real probe").
+
+## 11.2 Deploy gate: NOT LANDED, so the live re-measurement is OUTSTANDING
+
+The goal's own precondition was checked first and it fails on both clauses:
+
+| check | required | actual |
+| --- | --- | --- |
+| `GET /health → liveness.build.commit` | `= 3d3be7c` (HEAD) | **`5168940cf57bdbc679412c5fdb123fa67f5a27c5`** (`shortCommit: 5168940`) |
+| `grep -c WORKER_PROBE_TIMEOUT_MS /opt/ui2api/dist/prompt/pool.js` | `> 0` | **`0`** |
+
+(`git rev-parse --short HEAD` → `3d3be7c`. The live daemon reports `liveness.build.builtAt
+2026-09-30T16:21:12.000Z`, `dirty: true`, i.e. the same stale build §10.1 identified.)
+
+**The live re-measurement is therefore OUTSTANDING, and no measurement of the current running binary is offered
+as evidence for this fix.** The `/status` + CDP disagreement sampled in §10.2 is still what the running build
+does; that is a measurement of `5168940`, not of this change. Reporting it as a before/after pair would be the
+exact fabrication the goal names.
+
+## 11.3 The hermetic pin — own page unreachable AND a neighbour reachable
+
+Three new pins in `test/status-honesty.test.ts`, plus one source pin. RED before, GREEN after, run against the
+unmodified `pool.ts` (`git stash push -- src/prompt/pool.ts`, test file kept):
+
+```
+✖ GOAL171: a driver with NO own-page probe surface reads "unprobed", never "live" and never "dead"
+    AssertionError: an unmeasured worker must say so, not claim live (got live)
+✖ GOAL171: release() does not return an unprobeable page to the warm pool as live
+    AssertionError: a page whose own liveness was never measured must not be reported as a warm live page
+✖ GOAL171: the probe's candidate list no longer reaches into the SHARED context
+    AssertionError: the probe once again walks the SHARED context's page list — a neighbour's page can answer
+                   for this worker
+✔ GOAL171: a NEIGHBOUR's reachable page cannot answer this worker's health probe
+```
+
+Note the one that was already green and why, because it is the honest limit of this pin set: the old `find()`
+did ask the driver's own page FIRST, so a handle whose own page carries a rejecting `evaluate` was already
+caught. The mechanism that let a neighbour answer is the FALLBACK, and that is what the two failing pins kill.
+The first pin is therefore a regression guard for the direction that already worked, not a demonstration of the
+defect.
+
+After the fix: `npx tsx --test test/status-honesty.test.ts` → **25 pass, 0 fail** (was 21; +4 new).
+
+One double was corrected rather than added to, and the correction is load-bearing: `vanishedTargetDriver()` put
+the rejecting `evaluate` only on `ctx.pages()[0]`, which under the new rule models a page that cannot be asked
+anything (`unprobed`, kept) instead of a page whose target is gone (`dead`, evicted). A real Playwright `Page`
+always carries `evaluate` on itself — the file's own `liveDriver()` comment says so. The double now rejects on
+the page itself, and both context-level facts the old check read (`_closed: false`, a non-empty stale `pages()`)
+are kept, so it is still the exact shape GOAL 169 was written against. The GOAL 169 assertions are unchanged and
+still pass.
+
+## 11.4 No regression to GOAL 156 / 157 — the gates, and their counts, unchanged
+
+Every gate below is one whose doubles expose `evaluate` ONLY on `ctx.pages()[0]` (a context-only handle). Under
+the new rule those doubles read `unprobed` — kept, never `live` — so these files were not edited to accommodate
+the fix, and their counts are the same numbers the previous goals recorded:
+
+| gate | result |
+| --- | --- |
+| `npx tsc --noEmit` | exit 0 |
+| `npm run typecheck` (`tsconfig.test.json`) | exit 0 |
+| `npm run build` | exit 0 |
+| `test/pool-deadline.test.ts` | 10 pass / 0 fail |
+| `test/pool-refusal-truth.test.ts` | 3 pass / 0 fail |
+| `test/pool-watchdog-fairness.test.ts` | 14 pass / 0 fail |
+| `test/build-identity-and-health-stuckness.test.ts` | 16 pass / 0 fail |
+| `test/backpressure-auth-truth.test.ts` | 6 pass / 0 fail (pins `const usable = await isWorkerUsable(` and `if (usable) continue;` — both preserved) |
+| `test/status-honesty.test.ts` | 25 pass / 0 fail (was 21) |
+
+A 100%-busy pool still reads healthy: `poolStuckness` counts `busyMs <= bound` regardless of health, and the
+watchdog never evicts a busy page for being idle-unprobeable (`if (w.busy) continue;` is untouched).
+
+## 11.5 What this section does NOT claim
+
+- **It does not claim the disagreement is gone on the wire.** It cannot be: the deploy gate fails (§11.2). The
+  live confirmation is OUTSTANDING and must be taken against a build whose `liveness.build.commit` equals HEAD
+  AND whose deployed `pool.js` contains the marker.
+- **It does not claim `dead`-for-a-vanished-target is now proven live.** It is proven HERMETICALLY only, against
+  a double that reproduces the measured shape. §10's residual (b) stays open until the deploy lands.
+- **It does not claim the `copilot` disagreement was caused by the candidate list.** That is the strongest
+  reading of the code and it is consistent with the measurement, but the alternative — that the copilot worker's
+  own page was a live `about:blank` answering for itself — is not excluded by any observation in §10.2. What is
+  provable from the code alone is the weaker, still-actionable claim: the probe COULD be answered by a page
+  belonging to another worker, and no longer can be.
+- **It does not claim the real `ChatDriver` is ever unprobed.** It is not, in practice: `ChatDriver.page` is a
+  real Playwright `Page` and always carries `evaluate`. The `unprobed` state exists for handles that are not
+  that — the doubles above, and a future driver variant — and is honest about them instead of guessing.

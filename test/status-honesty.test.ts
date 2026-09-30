@@ -21,7 +21,7 @@
 // handle whose state is under the test's control.
 import { strict as assert } from "node:assert";
 import { test, after } from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatPool, type PoolOptions, type PoolWorker, type PoolStatus } from "../src/prompt/pool.js";
@@ -207,6 +207,15 @@ test("GOAL87: a liveness probe that THROWS on a set handle is \"down\", not \"up
 function vanishedTargetDriver(): unknown {
   return {
     page: {
+      // GOAL 171: the rejecting `evaluate` belongs on the PAGE itself, because a
+      // real Playwright Page always carries it — the old double put it only on
+      // `ctx.pages()[0]`, which modelled a page that cannot be asked anything
+      // rather than a page whose TARGET is gone. The two context-level facts the
+      // old check read (`_closed: false`, a non-empty stale `pages()`) are kept
+      // exactly, so the double is still the shape GOAL 169 was written against.
+      evaluate: async () => {
+        throw new Error("Target page, context or browser has been closed");
+      },
       context: () => ({
         pages: () => [
           {
@@ -222,6 +231,124 @@ function vanishedTargetDriver(): unknown {
     ask: async () => ({}),
   };
 }
+
+/* ── (1c) GOAL 171 — a NEIGHBOUR's page may not answer for this worker ────────
+
+   The shape MEASURED live on 2026-09-30: every pool worker shares ONE browser
+   context (measured: 1 context, 4 pages), so `ctx.pages()` is the WHOLE
+   browser's page list. The probe used to be `candidates = [page, ...ctx.pages()]`
+   — the first entry exposing an `evaluate` — so a worker's own page could go
+   unanswered while a NEIGHBOUR answered for it. Observed: `/status` reported
+   `copilot=live` on 12 of 12 samples over ~58 s while CDP listed no copilot
+   target at all, the unattributed `about:blank` answering in 2.4 ms.
+
+   Two directions, because the defect has two faces and both must be pinned:
+
+     (a) the own page HAS a probe surface and does not answer — the neighbour is
+         reachable and must NOT rescue it. This is the copilot shape.
+     (b) the own page carries NO probe surface (a handle that exposes only a
+         context) while the context's pages answer — the old `find()` picked the
+         neighbour here, which is how a `pool-deadline`-style double read `live`
+         with nothing behind it. It must read `unprobed`: kept, never `live`,
+         never counted in `warmLive`. */
+function neighbourAnswersDriver(ownPage: { evaluate?: () => Promise<unknown> }): unknown {
+  return {
+    page: {
+      ...(ownPage.evaluate ? { evaluate: ownPage.evaluate } : {}),
+      context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }),
+    },
+    close: async () => {},
+    ask: async () => ({}),
+  };
+}
+
+test("GOAL171: a NEIGHBOUR's reachable page cannot answer this worker's health probe", async () => {
+  const pool = emptyPool({ reaperIntervalMs: 0 });
+  insertWorker(
+    pool,
+    {
+      profileId: "copilot",
+      driver: neighbourAnswersDriver({
+        evaluate: async () => {
+          throw new Error("Target page, context or browser has been closed");
+        },
+      }),
+      busy: false,
+    } as unknown as PoolWorker,
+  );
+  try {
+    const report = await pool.sweep();
+    assert.equal(report.checked, 1, "the sweep must have checked this idle worker");
+    assert.equal(
+      report.evicted,
+      1,
+      "this worker's OWN page is unreachable, so it is not usable — a reachable page in the shared context is a DIFFERENT worker's page and cannot answer for it",
+    );
+    const st = pool.status;
+    for (const w of st.workers) {
+      assert.notEqual(
+        w.health,
+        "live",
+        `an unreachable own page must never read live via a neighbour's page (got ${w.health})`,
+      );
+    }
+    assert.equal(st.warmLive, 0, "warmLive counts only pages THIS worker's own probe proved live");
+  } finally {
+    await pool.close();
+  }
+});
+
+test("GOAL171: a driver with NO own-page probe surface reads \"unprobed\", never \"live\" and never \"dead\"", async () => {
+  const pool = emptyPool({ reaperIntervalMs: 0 });
+  insertWorker(pool, { profileId: "venice", driver: neighbourAnswersDriver({}), busy: false } as unknown as PoolWorker);
+  try {
+    const report = await pool.sweep();
+    assert.equal(report.checked, 1, "the sweep must have measured this idle worker");
+    assert.equal(
+      report.evicted,
+      0,
+      "a handle that exposes only a context was NOT MEASURED dead — evicting it would be the same fabrication in the opposite direction, and it would cost real capacity",
+    );
+    const st = pool.status;
+    assert.equal(st.total, 1, "an unprobed worker keeps its slot");
+    assert.equal(st.workers[0].health, "unprobed", `an unmeasured worker must say so, not claim live (got ${st.workers[0].health})`);
+    assert.equal(
+      st.warmLive,
+      0,
+      "warmLive counts only pages a probe PROVED live — an unprobed one is not a warm live page",
+    );
+  } finally {
+    await pool.close();
+  }
+});
+
+test("GOAL171: release() does not return an unprobeable page to the warm pool as live", async () => {
+  const pool = emptyPool({ reaperIntervalMs: 0 });
+  const worker = { profileId: "v0", driver: neighbourAnswersDriver({}), busy: true, busySince: Date.now() } as unknown as PoolWorker;
+  insertWorker(pool, worker);
+  try {
+    await pool.release(worker);
+    const st = pool.status;
+    assert.equal(st.warmLive, 0, "a page whose own liveness was never measured must not be reported as a warm live page");
+    assert.equal(st.total, 1, "an unprobed page is not evicted, and not counted as live either");
+  } finally {
+    await pool.close();
+  }
+});
+
+test("GOAL171: the probe's candidate list no longer reaches into the SHARED context", () => {
+  // The behavioural pins above are the real gate — a source pin only records
+  // that the shared-context fallback was not re-introduced as a one-liner.
+  const src = readFileSync("src/prompt/pool.ts", "utf8");
+  assert.doesNotMatch(
+    src,
+    /const candidates = \[page, \.\.\.ctx\.pages\(\)\]/,
+    "the probe once again walks the SHARED context's page list — a neighbour's page can answer for this worker",
+  );
+  const probe = src.slice(src.indexOf("async function probeWorkerHealth"), src.indexOf("async function isWorkerUsable"));
+  assert.doesNotMatch(probe, /ctx\.pages\(\)|_closed/, "the probe consults shared-context facts instead of the worker's own page");
+  assert.match(probe, /page\.evaluate/, "the probe must ask the driver's OWN page");
+});
 
 test("GOAL169: a worker whose CDP target is ABSENT is never reported \"live\"", async () => {
   const pool = emptyPool({ reaperIntervalMs: 0 });

@@ -223,7 +223,20 @@ export interface BrowserProbe {
 
 /* GOAL 87 — per-worker health as last MEASURED. "unprobed" is the honest
    default: a page is only "live" after a real probe, and "dead" only after a
-   probe failed (or the reaper evicted it). */
+   probe failed (or the reaper evicted it).
+
+   GOAL 171 — what each value PROVES, per worker, about that worker's OWN page:
+     - "live"     — the driver's own page answered a CDP round-trip just now.
+                    Nothing else can set it: not the context, not another
+                    worker's page. This is the only value a consumer may read as
+                    "this worker can serve".
+     - "dead"     — the own page has a probe surface and did not answer within
+                    the bound, or there is no page at all. MEASURED, so the
+                    reaper may evict it.
+     - "unprobed" — the handle exposes no own-page probe surface, so liveness
+                    was NOT measured. It keeps its slot (evicting on an
+                    unmeasured handle would be the same fabrication pointed the
+                    other way) and is excluded from `warmLive`. */
 export type WorkerHealth = "live" | "dead" | "unprobed";
 
 export interface PoolWorker {
@@ -892,7 +905,6 @@ export class ChatPool {
       return;
     }
     const usable = await isWorkerUsable(worker);
-    worker.health = usable ? "live" : "dead";
     worker.checkedAt = new Date().toISOString();
     if (!usable) {
       this.workers = this.workers.filter((w) => w !== worker);
@@ -1080,7 +1092,6 @@ export class ChatPool {
         if (w.busy) continue; // in use: never evicted mid-request (the watchdog above owns that case)
         checked++;
         const usable = await isWorkerUsable(w);
-        w.health = usable ? "live" : "dead";
         w.checkedAt = new Date().toISOString();
         if (usable) continue;
         evicted++;
@@ -1335,23 +1346,63 @@ const WORKER_PROBE_TIMEOUT_MS = 5_000;
        that GOAL 169 was written against (v0, `live` with no v0 tab) has now
        been reproduced on a different site, and it reproduces in the same shape.
 
-   (b) NOT PROVEN AT ALL: that the new probe reports `dead` for that case. That
+       (b) NOT PROVEN AT ALL: that the new probe reports `dead` for that case. That
        requires the new build, and (a) predicts it would still report `live`.
-       Treat "a vanished target now reads dead" as UNPROVEN, not as delivered. */
-async function isWorkerUsable(w: PoolWorker): Promise<boolean> {
+       Treat "a vanished target now reads dead" as UNPROVEN, not as delivered.
+
+   GOAL 171 — (a) IS NOW CLOSED, AND THE RESOLUTION IS ATTRIBUTION.
+
+   The answer to the question GOAL 171 asked — "when the driver's own page cannot
+   answer, is a neighbour's page an acceptable proxy?" — is NO, and the reason is
+   already in this file: `probeBrowser()` refuses to read a `contexts()` COUNT as
+   liveness because Playwright serves a cached list after a disconnect, and it
+   reports "unknown" rather than "up" when there is no liveness surface at all. A
+   second worker-health check that accepts a SHARED context's page as evidence
+   about a page it does not own is that same error in a different hat, and it was
+   measured doing exactly what the error predicts: 12/12 samples of
+   `copilot=live` with no copilot target in CDP, the unattributed `about:blank`
+   answering in 2.4 ms. The alternative — accept the proxy and rename the claim —
+   was rejected because the consumers of this field make a routing decision from
+   it, and a field that can be green while the worker holds nothing is the GOAL
+   157 defect one layer down, not a documentation problem.
+
+   So the probe asks ONE object: the driver's OWN page. There is no candidate
+   list, and `ctx.pages()` is no longer consulted for the answer at all.
+
+   Two things that were previously conflated are now three states, and the third
+   is the honest one:
+
+     - the own page has a probe surface and ANSWERS  → "live"   (attributed)
+     - the own page has a probe surface and does not → "dead"   (measured)
+     - the own page carries NO probe surface at all → "unprobed"
+
+   The third case is a driver handle that exposes only a context, not a page. It
+   is NOT reported "live" (nothing was measured, so nothing may be claimed) and it
+   is NOT reported "dead" either — evicting a worker because we could not ask it
+   is the same fabrication in the opposite direction, and it would cost real
+   capacity. It keeps its slot, reports "unprobed" (a value this file has carried
+   since GOAL 87 precisely for "not measured"), and is excluded from `warmLive`,
+   which counts only pages a probe PROVED live. The GOAL 87 comment on
+   `WorkerHealth` already says it: a page is only "live" after a real probe.
+
+   The two shared-context facts the old tail also checked (`_closed`,
+   `pages().length`) are gone, and deliberately: both are facts about the
+   SHARED browser, not about this worker's page, so they could only ever
+   contradict the worker's own answer, never support it. An own-page round-trip
+   that resolves is strictly stronger evidence than either.
+
+   The measured consequence, and the honest limit: a page whose CDP target is
+   gone now reads `dead`, and a worker holding nothing can no longer be `live`.
+   A handle with no probe surface is now VISIBLY unprobed instead of silently
+   borrowing a neighbour's answer — which is a strictly smaller lie, and the
+   only one this file is allowed to tell. */
+async function probeWorkerHealth(w: PoolWorker): Promise<WorkerHealth> {
   try {
     const page: Page | undefined = (w.driver as unknown as { page?: Page }).page;
-    if (!page) return false;
-    const ctx = page.context();
-    // Ask the driver's OWN page first — pages()[0] may be a different tab — and
-    // fall back to the context's first page when the own page exposes no probe
-    // (a driver handle that carries only a context). Whichever is asked, the
-    // ANSWER decides: this is the change that makes `live` mean connected.
-    const candidates = [page, ...ctx.pages()];
-    const probe = candidates.find((p): p is Page => typeof (p as Page).evaluate === "function");
-    if (!probe) return false;
+    if (!page) return "dead";
+    if (typeof (page as Page).evaluate !== "function") return "unprobed";
     const answered = await Promise.race([
-      probe.evaluate(() => 1).then(
+      page.evaluate(() => 1).then(
         () => true,
         () => false,
       ),
@@ -1360,11 +1411,18 @@ async function isWorkerUsable(w: PoolWorker): Promise<boolean> {
         t.unref?.();
       }),
     ]);
-    if (!answered) return false;
-    // Both still checked, and both still narrow: a closed context or an emptied
-    // page list is not a usable worker even if some other page answered.
-    return !(ctx as unknown as { _closed?: boolean })._closed && (ctx.pages().length ?? 0) > 0;
+    return answered ? "live" : "dead";
   } catch {
-    return false;
+    return "unprobed";
   }
+}
+
+/* `isWorkerUsable` keeps its name and its boolean contract for the two callers
+   ("must this worker keep its slot?"), and RECORDS the measured verdict on the
+   worker as it goes — a boolean cannot carry "measured dead" apart from "not
+   probeable", and the difference is exactly what a reader of /status needs. */
+async function isWorkerUsable(w: PoolWorker): Promise<boolean> {
+  const health = await probeWorkerHealth(w);
+  w.health = health;
+  return health !== "dead";
 }
