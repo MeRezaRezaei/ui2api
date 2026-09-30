@@ -1244,7 +1244,52 @@ export class ChatPool {
 
 /* How long this worker's own page gets to answer the round-trip below. A page
    that cannot answer inside this bound is not slow, it is unreachable, and an
-   unbounded wait would let one wedged page wedge the whole reaper sweep. */
+   unbounded wait would let one wedged page wedge the whole reaper sweep.
+
+   GOAL 170 — the number's justification status, which was previously UNSTATED.
+
+   It was chosen to match `pageAlive(ms = 5000)` in `src/prompt/driver.ts`. That
+   is a CONSISTENCY argument, and it was presented as if it were a correctness
+   one. Recorded honestly, as measured on this box on 2026-09-30:
+
+     `page.evaluate(() => 1)` round-trip, 10 samples per page over 4 real CDP
+     pages (the pages the pool was actually holding, plus the other pages in the
+     shared context):
+       about:blank                            86.2, 2.7, 3.2, 2.5, 2.6, 2.5,
+                                              2.5, 2.5, 2.4, 2.4   (n=10)
+       claude.ai/login (sign-out wall)        32.4, 4.2, 2.5, 2.5, 2.6, 2.6,
+                                              3.7, 2.9, 2.8, 2.7   (n=10)
+       kimi.ai                                24.0, 2.6, 7.2, 6.0, 4.0, 3.2,
+                                              3.6, 2.5, 2.7, 2.9   (n=10)
+       venice.ai/chat/agent/E3nQ9oY (POOL)    7.0, 3.1, 2.9, 3.1, 3.3, 2.5,
+                                              2.3, 2.5, 4.3, 5.5   (n=10)
+
+     Worst observed sample: 86.2 ms (a cold first evaluate on a target). Steady
+     state 2.3–7.2 ms. Highest: 86.2 ms. NOTHING approached 5 000 ms; the margin
+     to the bound is ~58x on the worst sample.
+
+   What that MEANS, and what it does NOT:
+
+     - PARTIALLY JUSTIFIED. No measurement contradicts the bound, and the
+       eviction cost the goal worried about — a merely-slow page evicted from the
+       warm pool — was NOT observed: 0 evictions attributable to probe timeout in
+       that window, 40/40 evaluates answered, 0 errors.
+     - NOT FULLY JUSTIFIED, and deliberately not overclaimed here. The sample is
+       THIN and it is the wrong shape for a guarantee: ONE pool-held site page
+       (venice), 10 idle samples each, on a warm browser, with no BUSY page
+       sampled and no breadth across the 22 chat models. A page under active
+       request — the only state where an eviction would actually cost capacity —
+       was never measured. A busy page is also the one state the sweep is
+       explicitly forbidden from evicting (the busy watchdog owns that case), so
+       the exposure is smaller than it looks, but it is not zero and it is
+       UNMEASURED, not measured-and-fine.
+
+   So: the number STAYS at 5 000 (nothing measured argues for raising it, and
+   the cap exists to stop one wedged page wedging the sweep), but it is recorded
+   here as a CONSISTENCY-MATCHED bound with partial, thin, idle-page evidence —
+   NOT as a validated one. Anyone tightening or raising this should re-measure on
+   a BUSY pool across several sites first; the raw sample above is the baseline
+   to compare against. */
 const WORKER_PROBE_TIMEOUT_MS = 5_000;
 
 /* GOAL 169 — what a worker's health has to be MEASURED against.
@@ -1267,7 +1312,32 @@ const WORKER_PROBE_TIMEOUT_MS = 5_000;
    every release; this makes its answer count instead of discarding it, so the
    check costs exactly what it always cost and is true. It is not a louder
    check: no new field, no new probe, no extra work, only the existing
-   measurement is finally read. A page that cannot be reached is not live. */
+   measurement is finally read. A page that cannot be reached is not live.
+
+   GOAL 170 — TWO RESIDUALS IN THIS FIX, both measured live on 2026-09-30 and
+   both still open (this fix was NOT yet deployed when they were observed; see
+   the audit file for the pipeline evidence).
+
+   (a) THE FALLBACK CANDIDATE SET WEAKENS THE FIX. `candidates` is
+       `[page, ...ctx.pages()]` and the probe is the FIRST entry that has an
+       `evaluate`. All pool workers share ONE context (measured: 1 context, 4
+       pages — about:blank, claude.ai, www.kimi.ai, venice.ai), so
+       `ctx.pages()` is the WHOLE browser's page list. A worker whose own page is
+       blank, wrong, or unproven can therefore be declared `live` because a
+       NEIGHBOUR's page answered for it. This is provable from the code alone
+       and is not hypothetical.
+
+       Observed live: the pool reported two workers, `venice` and `copilot`,
+       both `health:"live"` on 12/12 samples over ~58 s, while CDP listed NO
+       copilot target at all in any sample. The only unattributed page in the
+       context was `about:blank`, which answers `evaluate` in 2.4 ms — so the
+       round-trip can be answered by a page that is not the site. The finding
+       that GOAL 169 was written against (v0, `live` with no v0 tab) has now
+       been reproduced on a different site, and it reproduces in the same shape.
+
+   (b) NOT PROVEN AT ALL: that the new probe reports `dead` for that case. That
+       requires the new build, and (a) predicts it would still report `live`.
+       Treat "a vanished target now reads dead" as UNPROVEN, not as delivered. */
 async function isWorkerUsable(w: PoolWorker): Promise<boolean> {
   try {
     const page: Page | undefined = (w.driver as unknown as { page?: Page }).page;

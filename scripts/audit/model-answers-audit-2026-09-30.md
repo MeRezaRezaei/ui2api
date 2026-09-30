@@ -661,3 +661,132 @@ judge to fit the measurement is the exact thing this goal exists to catch. `RULE
 - **It makes no claim about the other 20 models.** They keep their own `daemonCommit`, correctly not overwritten.
 - **It cannot say which node carried venice's reasoning**, because no DOM existed containing the served text.
 - **Live requests: 7** against a ~6 budget, one over, entirely on v0 and disclosed above.
+
+---
+
+## 10. GOAL 170 — worker-health: the deploy did not land, and the disagreement is real
+
+Date: 2026-09-30. Agent: L1 goal-agent for GOAL 170. This section is observation only. **No live chat request was
+fired in this goal** (budget: 3, used: **0** — see §10.1 for why that is the honest number, not a shortcut).
+
+### 10.1 LEAD FINDING — the GOAL 169 fix is NOT deployed, so the goal's first half is UNPROVEN
+
+The goal required the deploy to be confirmed *before* measuring, and to stop rather than measure an old binary.
+It did not deploy:
+
+- `glab api "projects/5/pipelines?ref=main&per_page=1"` → pipeline **823**, sha `74f7f1a55d…` = HEAD,
+  **status `failed`**.
+- Jobs: **2370 `build` → `failed`** (25.2 s), 2371 `verify` → `skipped`, 2372 `deploy` → **`skipped`**.
+- The failure is INFRASTRUCTURE, not code: the job died in `get_sources`, before any build step —
+  `fatal: unable to access 'https://gitlab.pubg-sell.ir/…': TLS connect error: … unexpected eof while reading`
+  → `ERROR: Job failed: exit code 128`. A TLS drop on the runner's own clone step.
+
+So `deploy` never ran, and the running binary is still the previous build:
+
+| probe | expected | actual |
+| --- | --- | --- |
+| `GET /health → liveness.build.commit` | `74f7f1a` (HEAD) | **`5168940cf57bdbc679412c5fdb123fa67f5a27c5`** |
+| `grep -c WORKER_PROBE_TIMEOUT_MS /opt/ui2api/dist/prompt/pool.js` | `> 0` | **`0`** (exit 1) |
+| `liveness.build.builtAt` | — | `2026-09-30T16:21:12.000Z`, `dirty: true` |
+
+**Therefore: no live proof exists that the new probe reads `dead` for a vanished target.** The GOAL 169 change is
+in the tree at `74f7f1a` but is not running anywhere. Per the goal's own instruction, measurement of the old
+binary is not a result for this fix, and none is offered below.
+
+### 10.2 Part (1) — the health signal DISAGREES with CDP reality (observed on the OLD build)
+
+This part needed no request to observe: the defect is present in the idle pool at rest. `GET /status` and
+`http://127.0.0.1:9222/json/list` were sampled concurrently, 12 times, ~5 s apart, ~58 s total:
+
+```
+17:02:19 | STATUS: venice=live copilot=live | busy=0
+17:02:19 | CDP   : venice.ai/chat/agent/E3nQ9oY ;; kimi.ai ;; claude.ai/login ;; about:blank
+17:02:25 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:30 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:35 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:40 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:46 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:51 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:02:56 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:03:02 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:03:07 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:03:12 | STATUS: venice=live copilot=live | busy=0   | CDP: (same four pages)
+17:03:18 | STATUS: venice=live copilot=live | busy=0   | CDP: (two about:blank + same four)
+```
+
+**12/12 samples: the pool calls `copilot` `live` while NO copilot target exists in CDP in any sample.** The finding
+that GOAL 169 was written against (v0, 4 requests, `live` with no v0 tab) has now been reproduced on a different
+site, in the same shape, without spending a single request. `/status` also showed the sweep had just done
+`evicted 2 dead idle page(s) for [venice, copilot]; respawned 2, failed 0` — copilot was evicted as dead and
+respawned, and then read `live` again with no tab.
+
+**The pages are all in ONE context.** Measured via CDP: `contexts: 1`, `ctx[0] pages=4` —
+`about:blank`, `claude.ai`, `www.kimi.ai`, `venice.ai`.
+
+That is the load-bearing fact, and it is a SECOND, independent defect in the fix as written. `isWorkerUsable`
+builds `candidates = [page, ...ctx.pages()]` and probes the **first entry that has an `evaluate`**. Because every
+worker shares one context, `ctx.pages()` is the whole browser's page list. So a worker whose own page is blank or
+wrong can be declared `live` because a **neighbour's** page answered for it — here, `about:blank`, which answers in
+2.4 ms. This is provable from the code alone and needs no request to demonstrate.
+
+**Honest limit:** which page belongs to the `copilot` worker could not be attributed from CDP alone. `about:blank`
+is the only unattributed page and therefore the likely owner, but that is an inference, and it is recorded as
+one. What is *measured*, not inferred, is: no copilot tab, 12/12, health `live`.
+
+**Consequence for the goal:** part (1) does **not** show the new probe reading `dead`, and on the code as
+written it would probably still read `live` for this worker because of the fallback. "A vanished target now reads
+`dead`" is **UNPROVEN**, not delivered. Recorded in `src/prompt/pool.ts` next to the probe.
+
+### 10.3 Part (2) — measured `page.evaluate(() => 1)` round-trip (this DOES stand; it measures the sites, not the build)
+
+10 samples per page over the 4 real CDP pages, via `connectOverCDP`, milliseconds:
+
+| page | samples (ms) | max |
+| --- | --- | --- |
+| `about:blank` | 86.2, 2.7, 3.2, 2.5, 2.6, 2.5, 2.5, 2.5, 2.4, 2.4 | 86.2 |
+| `claude.ai/login` (sign-out wall) | 32.4, 4.2, 2.5, 2.5, 2.6, 2.6, 3.7, 2.9, 2.8, 2.7 | 32.4 |
+| `kimi.ai` | 24.0, 2.6, 7.2, 6.0, 4.0, 3.2, 3.6, 2.5, 2.7, 2.9 | 24.0 |
+| `venice.ai/chat/agent/E3nQ9oY` (pool-held) | 7.0, 3.1, 2.9, 3.1, 3.3, 2.5, 2.3, 2.5, 4.3, 5.5 | 7.0 |
+
+**n = 40 samples, 0 errors.** Steady state 2.3–7.2 ms; worst single sample 86.2 ms (a cold first evaluate).
+
+**The narrow question — does any real site exceed 5 s on a trivial evaluate? NO.** Nothing came within ~58x of
+the bound. The capacity regression the goal feared (a merely-slow page evicted from the warm pool) was **not
+observed**: no probe-timeout evictions in that window, 40/40 answered.
+
+**But it is not a full justification, and is not recorded as one.** The sample is thin and the wrong shape: ONE
+pool-held site page (venice), 10 idle samples each, warm browser, **no BUSY page sampled**, and no breadth across
+the 22 chat models. A page under active request is the only state where an eviction would really cost capacity —
+and the sweep is explicitly forbidden from evicting busy pages (the busy watchdog owns that case), so the
+exposure is smaller than it looks, but it is **unmeasured**, not measured-and-fine.
+
+### 10.4 What was done about the 5 s bound
+
+The number **stays at `5_000`**: nothing measured argues for raising it, and the cap exists so one wedged page
+cannot wedge the whole reaper sweep. What changed is its **stated justification**, which was previously unstated
+and was in truth a consistency argument with `driver.ts`'s `pageAlive(ms = 5000)`:
+
+- `src/prompt/pool.ts` now carries the full sample table above, states the bound is **PARTIALLY JUSTIFIED**
+  (nothing contradicts it; eviction cost not observed) and explicitly **NOT fully justified** (thin, idle, one
+  pool site, no busy page, no breadth), and names what must be re-measured before anyone tightens or raises it.
+- The same file now also carries the two residuals from §10.2: the shared-context fallback that lets a neighbour's
+  page answer for a worker, and the explicit statement that `dead`-for-a-vanished-target is unproven.
+
+No behaviour changed. `capabilities/model-verification.json` was not touched — nothing here re-classifies a row.
+
+### 10.5 Live requests used
+
+**0 of 3.** Deliberate, and it is the honest number rather than a shortcut: the deploy gate failed (§10.1), so a
+`v0` request would have measured `5168940` — the old binary — and reporting that as evidence about the new probe
+is exactly the fabrication the goal forbids. The disagreement in §10.2 was reproduced at rest, in an idle pool, at
+zero account risk.
+
+### 10.6 What this section does NOT claim
+
+- **It does not claim GOAL 169's fix works.** Undeployed (`grep -c` = 0) and, on the code as written, predicted by
+  §10.2 to still read `live` for the measured case.
+- **It does not claim the health signal is fixed.** On the running build it demonstrably still says `live` for a
+  worker with no tab, 12/12.
+- **It does not claim 5 s is validated.** Only that nothing measured contradicts it and that the sample is thin.
+- **It does not claim the pool is healthy.** `copilot` was `live` with no tab while the sweep reported it respawned.
+- **It re-derives nothing in `model-verification.json`** and edits no profile.
