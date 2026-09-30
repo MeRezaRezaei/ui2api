@@ -12,14 +12,18 @@
     "kind": "keyEnter"
   },
   "answer": [
-    "[data-testid=\"message\"][role=\"listitem\"] [data-message-content]",
-    "[data-message-content]"
+    "[data-testid=\"message\"][role=\"listitem\"] [data-message-content]"
   ],
   "newChat": "[data-slot=\"new-chat-button\"], [aria-label=\"Start new chat\"]",
   "captureMs": 90000,
   "stableMs": 2500,
-  "note": "Selectors FLAGGED \"unverified — confirm on first live capture\". Derived from JS-bundle DOM evidence only (no browser launched): the composer is a ProseMirror editor node (.ProseMirror with contenteditable=true; bundle sets t.contenteditable=String(e.editable)); assistant rows render with data-testid='message' + role='listitem' and the content wrapper carries data-message-content (also used by [&>[data-message-content]>p:first-child]); user-message ids render as id=user-message-${id}; new-chat button has data-slot='new-chat-button'; Enter-to-send confirmed by a bundle keydown handler ('Enter'===e.key?preventDefault+submit). Wire facts (POST /chat/api/chat NDJSON stream, __vercel_session cookie per provider-catalog, /api/auth/login?next redirects) come from JS-bundle analysis. Live DOM may differ inside the post-login /chat SPA.",
+  "note": "Selectors FLAGGED \"unverified — confirm on first live capture\". Derived from JS-bundle DOM evidence only (no browser launched): the composer is a ProseMirror editor node (.ProseMirror with contenteditable=true; bundle sets t.contenteditable=String(e.editable)); assistant rows render with data-testid='message' + role='listitem' and the content wrapper carries data-message-content (also used by [&>[data-message-content]>p:first-child]); user-message ids render as id=user-message-${id}; new-chat button has data-slot='new-chat-button'; Enter-to-send confirmed by a bundle keydown handler ('Enter'===e.key?preventDefault+submit). Wire facts (POST /chat/api/chat NDJSON stream, __vercel_session cookie per provider-catalog, /api/auth/login?next redirects) come from JS-bundle analysis. Live DOM may differ inside the post-login /chat SPA. GOAL 160: the bare `[data-message-content]` fallback was REMOVED from `answer` — it matched any node carrying that attribute anywhere on the page, so a status region could win the longest-element read and be served as the answer (MEASURED 2026-09-30: HTTP 200 with `Cooking…`). The answer selector is now scoped to the assistant message row. `capability.nonAnswerSelectors` names the status/thinking regions as a site-declared signal; that list is DERIVED-NOT-LIVE-VERIFIED and is pinned hermetically (test/readback-freshness.test.ts) so it cannot be silently widened back. A live round trip is still required before v0 can be called answering.",
   "capability": {
+    "nonAnswerSelectors": [
+      "[data-slot*=\"status\"]",
+      "[class*=\"status\"]",
+      "[data-state=\"streaming\"]:not([data-message-content])"
+    ],
     "restrictionMarkers": [
       {
         "kind": "limit",

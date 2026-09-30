@@ -13,9 +13,8 @@
     "kind": "keyEnter"
   },
   "answer": [
-    "[class*=\"message\"]",
-    "[class*=\"prose\"]",
-    "[class*=\"markdown\"]"
+    "[data-message-author-role=\"assistant\"] [class*=\"prose\"]",
+    "[class*=\"message\"] [class*=\"prose\"]"
   ],
   "newChat": "[aria-label*=\"New chat\"], [aria-label*=\"new chat\"]",
   "dismiss": [
@@ -25,8 +24,15 @@
   ],
   "captureMs": 60000,
   "stableMs": 2000,
-  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic textarea/contenteditable composer, common answer containers). Tune each against a real browser after the first live capture (data/venice.ai/.session). Auth per provider-catalog.md: cookie 'session'. Venice's private-mode / model-picker / image-gen surfaces may exist but are NOT catalogued — do not assume; re-verify on first live capture.",
+  "note": "SCAFFOLD — selectors are UNVERIFIED candidate guesses (generic textarea/contenteditable composer, common answer containers). Tune each against a real browser after the first live capture (data/venice.ai/.session). Auth per provider-catalog.md: cookie 'session'. Venice's private-mode / model-picker / image-gen surfaces may exist but are NOT catalogued — do not assume; re-verify on first live capture. GOAL 160: `answer` was the bare class-substring selector `[class*=\"message\"]`, which matches the ASSISTANT MESSAGE CONTAINER — and that container also holds the model's reasoning/preamble block. The readback takes the LONGEST matching element, so when the reasoning block is longer than the eventual answer it is what gets served: MEASURED 2026-09-30, HTTP 200 with `The user wants me to reply with exactly \"PONG\". This` after 41611ms. That is a SELECTOR-PRECISION defect (the selector is not scoped to the answer sub-node), not a model property and not an ignore-list entry. `answer` is now scoped to the prose sub-node and `capability.nonAnswerSelectors` names the reasoning/thinking containers plus the user bubble as site-declared non-answer signals. NOT LIVE-VERIFIED: the narrowed selectors are derived from the failure, not from a fresh capture of venice's DOM, and no live round trip has proved venice now answers — treat as an unverified-candidate until one does.",
   "capability": {
+    "nonAnswerSelectors": [
+      "[class*=\"reasoning\"]",
+      "[class*=\"thinking\"]",
+      "[class*=\"chain-of-thought\"]",
+      "[data-message-author-role=\"user\"]",
+      "[class*=\"user-message\"]"
+    ],
     "restrictionMarkers": [
       {
         "kind": "limit",

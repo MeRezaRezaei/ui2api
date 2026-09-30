@@ -91,6 +91,15 @@ export interface ChatSiteProfile {
       label: string;
       selectedClass?: string;
     }>;
+    // GOAL 160 ANSWER-SHAPE: elements on this site that render INSIDE or ALONGSIDE
+    // the answer but are not the answer — a status region ("Cooking…"), a
+    // thinking/reasoning block, a pre-answer placeholder. Declared here as
+    // SELECTORS (never a regex guess about prose), the readback seam excludes
+    // them from the answer candidate set and, when the settled read was one of
+    // them and nothing answer-shaped ever grew, ends with the named
+    // doneReason "non-answer" instead of serving the status text as the answer.
+    // A profile that declares nothing is judged exactly as before.
+    nonAnswerSelectors?: string[];
   };
 }
 
@@ -839,7 +848,7 @@ function validateCapabilityBlockShape(file: string, cap: Record<string, unknown>
     }
   }
   // tierSelectors / pickerOpen / pickerOption: string[] of parseable selectors.
-  for (const field of ["tierSelectors", "pickerOpen", "pickerOption"] as const) {
+  for (const field of ["tierSelectors", "pickerOpen", "pickerOption", "nonAnswerSelectors"] as const) {
     const v = cap[field];
     if (v === undefined || v === null) continue;
     if (!Array.isArray(v)) {

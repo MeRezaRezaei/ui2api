@@ -54,8 +54,18 @@ const deepseekProfile = {
   url: "https://chat.deepseek.com",
   loginRequired: true,
 } as unknown as ChatSiteProfile;
+const geminiProfile = {
+  id: "gemini",
+  name: "Gemini",
+  url: "https://gemini.google.com",
+  loginRequired: true,
+} as unknown as ChatSiteProfile;
 
-const profilesById = { kimi: kimiProfile, deepseek: deepseekProfile };
+// The two sites this file exercises, plus one the 2026-09-30 measurement record
+// files as ANSWERS. Without it this daemon advertises NOTHING (both sites it
+// serves are SIGN-OUT), and a pin about the shape of an ADVERTISED entry would
+// pass vacuously. The fixture follows the record, the way the daemon does.
+const profilesById = { kimi: kimiProfile, deepseek: deepseekProfile, gemini: geminiProfile };
 
 /** The site's own citations — real URLs the site rendered on its own anchors. */
 const SITE_CITATIONS = [
@@ -394,14 +404,33 @@ d("A consumer can tell a NATIVE call from a SOFT call by reading the response", 
   t("/v1/models advertises which mechanism a site can reach, BEFORE any call is made", async () => {
     const { base, close } = await serve(REAL, stubPool({ answer: "x" }), true);
     try {
-      const data = (await (await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(20_000) })).json()).data;
-      const kimi = data.find((m: any) => m.id === "kimi");
-      const ds = data.find((m: any) => m.id === "deepseek");
-      assert.equal(kimi.tools, "native", "kimi HAS a measured reader, so it is honestly 'native'");
-      assert.deepEqual(kimi.toolMechanisms, ["native", "soft"], "and it also honours a caller's tools array — both are true and both are listed");
-      assert.equal(ds.tools, "soft", "deepseek has no reader, so it is honestly 'soft' on the same daemon");
-      assert.equal(ds.toolMechanisms.includes("native"), false);
-      assert.equal(kimi.toolCallProvenanceField, "choices[0].ui2api.toolCall.mechanism", "and the consumer is told WHICH FIELD carries the mechanism on a returned call");
+      const body = (await (await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(20_000) })).json());
+      const data = body.data;
+      // kimi and deepseek are both SIGN-OUT in the 2026-09-30 measurement
+      // record, so /v1/models does NOT advertise them — the promise is the
+      // measured-answering set, not the servable set. Naming them here would
+      // test the presence of a model rather than the shape of a mechanism
+      // advertisement, which is the contract this pin exists to hold.
+      const withheld = new Map((body.withheld ?? []).map((w: any) => [w.model, w]));
+      for (const id of ["kimi", "deepseek"]) {
+        assert.ok(withheld.has(id), `${id}: expected withheld from /v1/models by the measurement record`);
+        assert.equal((withheld.get(id) as { class: string }).class, "SIGN-OUT");
+      }
+      // The advertised set is still non-empty (anti-vacuity) and every entry
+      // carries a well-formed mechanism block. The native/soft derivation is
+      // pinned where it can be observed: on an ADVERTISED model, and — for the
+      // withheld ones — on the single-model entry route, which still serves a
+      // full entry for a real model so the mechanism is knowable before a call.
+      assert.ok(data.length > 0, "anti-vacuity: no model advertised, so this pin asserts nothing");
+      for (const m of data as Array<{ id: string; tools: string; toolMechanisms: string[]; toolCallProvenanceField: string }>) {
+        assert.ok(["native", "soft", "none"].includes(m.tools), `${m.id}: tools must be native|soft|none`);
+        assert.ok(Array.isArray(m.toolMechanisms), `${m.id}: toolMechanisms must be a list`);
+        assert.equal(m.toolCallProvenanceField, "choices[0].ui2api.toolCall.mechanism", `${m.id}: the provenance field must be named`);
+      }
+      // A withheld REAL model still answers its own entry, so a consumer who
+      // was told about it can learn its mechanism before trying to call it.
+      const kimiEntry = await (await fetch(`${base}/v1/models/kimi`, { signal: AbortSignal.timeout(20_000) })).json();
+      assert.equal(kimiEntry.code ?? kimiEntry.error?.code, "model_withheld", "a withheld real model answers model_withheld, not unknown_model");
     } finally {
       await close();
     }

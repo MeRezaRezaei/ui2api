@@ -32,6 +32,49 @@ a **derived** capability block at the top level:
 | `toolMechanisms[]` | every mechanism this site can reach, strongest first |
 | `toolCallProvenanceField` | the path carrying provenance on a returned call |
 
+### THE LIST IS A PROMISE, AND THE RESPONSE SAYS HOW BIG IT IS
+
+`data` lists only models this daemon has **measured answering** — a real round
+trip returned HTTP 200 with real answer text. The full catalogue of installed
+sites is NOT on this list, and that is deliberate: a consumer that materialised
+one provider per advertised id must not build twenty providers that cannot answer.
+
+So the response also carries the honest count. Read it — it is the difference
+between "this service offers 4" and "this service hides 18":
+
+| field | meaning |
+| --- | --- |
+| `advertisement.offered` | how many models are in `data` |
+| `advertisement.addressable` | how many of this daemon's sites are driveable at all |
+| `advertisement.withheld` | how many are driveable but **not** advertised |
+| `advertisement.withheldByClass` | the measured class of each withheld model |
+| `advertisement.record` / `recordGeneratedAt` / `recordAgeDays` | the dated record the promise is derived from |
+| `withheld[]` | each withheld model: `{ model, class, reason }` |
+
+The classes, and the action each one names:
+
+| class | what was measured | what the action is |
+| --- | --- | --- |
+| `ANSWERS` | HTTP 200 with real answer text | advertised on `/v1/models` |
+| `SIGN-OUT` | a named 502 saying sign-in is required (or the page that landed IS a login page) | a human logs in; not a code fix |
+| `WALL-CHALLENGE` | a named 502 at an idle pool on an anti-bot interstitial (Cloudflare, Vercel checkpoint) | the wigolo bypass tier, never a retry loop |
+| `COMPOSER-DRIFT` | a named 502 at an idle pool on a loaded page with no composer | the site's profile/selector needs a retune |
+| `CONTENDED-TIMEOUT` | no response while the pool was NOT idle | a queue fact, never a property of the model |
+| `NO-RECORD` | the sweep never reached this model | measure it |
+| `UNMEASURED` | no class was established | measure it |
+
+A **withheld** model is not a deleted one. It stays fully reachable:
+`GET /registry`, `GET /sites` and `POST /capability/<site>` all still serve it,
+and on `/registry` it keeps its `tools[]` and `status` while carrying **no**
+`chat` key and a `chatWithheld: { class, reason }` in its place. Asking for it by
+name — `GET /v1/models/<id>` — answers `404` with `error.code === "model_withheld"`
+and the reason, which is deliberately NOT `unknown_model`: the model exists, the
+measurement says it could not answer, and those are different statements.
+
+If the record itself cannot be read, `/v1/models` answers `503`
+`model_verification_unreadable` and advertises nothing. A promise with no
+measurement behind it is worse than no promise.
+
 `model` accepts the site id, `ui2api/<site>`, or `ui2api-<site>` — all resolve to
 the same site. An unknown one is `404` with `error.code === "unknown_model"`.
 
@@ -143,6 +186,8 @@ These are honest failures — the daemon never fabricates an answer.
 | image / file content parts | `400` `error.code === "unsupported_content_part"`, message names the kinds |
 | empty `messages` | `400` with `param:"messages"` and **no** `error.code` |
 | unknown model | `404` `unknown_model` |
+| a real model the record does not call answering | `404` `model_withheld`, `error.withheldClass` = the measured class; the package is still on `/registry` and `/capability/<site>` |
+| the measurement record is missing or unparseable | `503` `model_verification_unreadable` — `/v1/models` advertises nothing rather than promise without evidence |
 | any other `/v1` path | `404` `not_found` |
 | driver threw | `502` `error.code === "ui2api_driver_error"`, message is the driver's own named throw |
 

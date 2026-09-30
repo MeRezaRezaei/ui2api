@@ -163,3 +163,60 @@ was not edited by this sweep.** It is the judge, not the subject.
 - `tencent-aistudio` answering SIGN-OUT is a **regression against this project's own docs**, which record a
   verified headed round-trip on that site. The session behind it is no longer sufficient. That is a finding
   from this measurement, not an inference from the docs.
+
+## 8. GOAL 160 — the readback gate landed hermetically; live re-measurement is OUTSTANDING
+
+Read-only. No request was fired, no service restarted, no `src/**` file written outside the
+GOAL-160 readback seam, and `capabilities/model-verification.json` was not touched (GOAL 158 owns it).
+
+**What was reproduced, hermetically, from the two strings in §3.** Feeding `Cooking…` and
+`The user wants me to reply with exactly "PONG". This` into `awaitAnswerFromReads` — the exact
+loop the browser path runs — the pre-gate code returned both as `doneReason:"stable"`,
+`text` equal to the input, i.e. served as the answer. That is the RED, and it is pinned as a test
+(`test/readback-freshness.test.ts`, "GOAL 160 RED (pinned)") so the defect can never be mistaken
+for something that was always guarded.
+
+**The gate.** `AnswerDoneReason` gained `"non-answer"`, and the page read now excludes a
+profile-DECLARED set of non-answer elements (`capability.nonAnswerSelectors`) from the answer
+candidate set, returning their text as named evidence instead. When nothing answer-shaped ever
+grows and a declared non-answer region was seen, the readback ends `"non-answer"` and the driver
+refuses with `answer-not-an-answer on <site>` — the same throw-shaped honest refusal the stale-echo
+(GOAL 46) and answer-echo (GOAL 114) guards already use. The refused text is never returned as the
+answer. The predicate is element-structural (`judgeAnswerShape` + the excluded-element read); a
+profile that declares nothing is judged exactly as before, so the gate cannot produce a false
+refusal.
+
+**The two causes, diagnosed (not ignored, not suppressed).**
+
+- `v0` — SELECTOR PRECISION, and the defect is legible in the committed profile itself: `answer`
+  carried a bare `[data-message-content]` fallback beside the correctly scoped
+  `[data-testid="message"][role="listitem"] [data-message-content]`. The bare attribute selector
+  matches any node carrying that attribute anywhere on the page, so a status region could win the
+  longest-element read. The fallback is removed; status/thinking regions are declared
+  non-answer. Pinned: a future edit that widens the answer selector back fails the test LOUD.
+- `venice` — SELECTOR PRECISION, same class, opposite direction. `answer` was the bare
+  `[class*="message"]`, which matches the ASSISTANT MESSAGE CONTAINER, and that container also
+  holds the model's reasoning/preamble block. The readback takes the LONGEST matching element, so
+  when the reasoning block exceeds the eventual answer, the reasoning is what gets served. This is
+  a per-site fact about venice's DOM, so the fix is in the profile: `answer` is scoped to the prose
+  sub-node and the reasoning/thinking containers plus the user bubble are declared non-answer. It
+  is NOT on an ignore list and the model is NOT filed as failing in the record.
+
+**Live confirmation: OUTSTANDING, and stated as such.** The deployed service is build `bdee4ac2`
+(builtAt 2026-09-29T22:43:31Z) — the PRE-fix binary, confirmed by reading `/health → liveness.build`
+rather than assumed. Its pool was idle at the time of writing (`busy 0, queued 0, idle 2`). A live
+request now could only re-measure the OLD behaviour, not the fix, and redeploying was out of scope
+for this change, so **no live round trip was fired and none of the four requests in the live-work
+bound was spent**. Therefore:
+
+- `v0` and `venice` are NOT claimed fixed. The hermetic gate proves the seam refuses a declared
+  non-answer region; only a live 200 carrying the real PONG proves either site now answers.
+- The narrowed `nonAnswerSelectors` for both sites are DERIVED from the failure, not from a fresh
+  DOM capture, and are unverified-candidate until a live run confirms them.
+- The next sweep should re-probe these two rows and record, in this file, the request, the HTTP
+  status, the duration and the exact returned text.
+
+**Gates run for this change (all local, all targeted — the full suite is CI's lane).**
+`npx tsc --noEmit` exit 0 · `npm run typecheck` exit 0 · `npm run build` exit 0 ·
+`check:verbatim` OK (P1..P4) · `check:verbatim:goals` OK (P1..P5, 6 citations) ·
+12 targeted test files, 398 tests, 398 pass, 0 fail.

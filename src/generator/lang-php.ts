@@ -614,7 +614,16 @@ function readmeFile(siteId: string, pkg: RegistryPackage): string {
   // A chat example exists only when the registry both stamps `chat` AND a
   // chat-shaped tool is present — exactly the condition mapFile() routes on.
   const chatTool = pkg.tools.find((t) => /_chat$/.test(t.id) || t.id === "chat");
-  const chatMethod = chatTool && pkg.chat ? methodOf(chatTool.id) : null;
+  // A chat method exists whenever the package HAS a chat capability, regardless
+  // of whether the registry PROMISES it. Those are two different questions:
+  // "can this site be driven for a chat" (the tool exists) and "has a measured
+  // round trip returned an answer" (the promise). GOAL 159 withholds the
+  // promise for 18 of 22 addressable models, and a withheld model still has a
+  // real, servable chat method routed through /capability. Dropping its example
+  // and printing "This package exposes NO chat model" would be a NEW false
+  // claim — the mirror image of the one GOAL 159 killed.
+  const chatMethod = chatTool ? methodOf(chatTool.id) : null;
+  const chatPromise = pkg.chat;
   const convoTool = toolByBare("list_conversations");
   const searchTool = toolByBare("web_search");
   const chatBlock = chatMethod
@@ -623,11 +632,17 @@ function readmeFile(siteId: string, pkg: RegistryPackage): string {
     # -> {content: '...', role: 'assistant', refusal: null,
     #     ui2api: {site, doneReason: 'stop'|'restricted'|..., chunkCount}, done_reason: '...'}
     $answer = $map->${chatMethod}('hello', true);
+${
+  chatPromise
+    ? ""
+    : `    # NOTE: this site's chat is NOT advertised on /v1/models — the measurement record
+    # files it as ${pkg.chatWithheld?.class ?? "withheld"} (${pkg.chatWithheld?.reason ?? "no answerable record"}).
+    # The method above still works, via the /capability route.`
+}
 `
     : `
-    # This package exposes NO chat model — the registry stamps no chat for
-    # '${siteId}', so the daemon serves it only through /capability. Use the
-    # capabilities listed below.
+    # This package exposes NO chat capability at all — no ${siteId}_chat tool — so the
+    # daemon serves it only through its other capabilities. Use the list below.
 `;
   const otherLines: string[] = [];
   if (convoTool) otherLines.push(`    $map->${methodOf(convoTool.id)}(20);          # reads the live sidebar`);

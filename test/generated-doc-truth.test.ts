@@ -91,10 +91,14 @@ test("GOAL 141: a CHATLESS package is told so, instead of being shown a chat exa
       `youtube is chatless but its README still shows $map->${absent}()`
     );
   }
-  // The honest alternative is stated, not silently omitted.
+  // The honest alternative is stated, not silently omitted. "No chat model" here
+  // means no chat CAPABILITY — youtube genuinely has no chat tool, so its map
+  // defines no chat method and calling one would be a fatal. A package that HAS
+  // a chat method but whose /v1 promise is withheld is a different case, and it
+  // is documented as the withheld case, not as a chatless one.
   assert.ok(
-    /exposes NO chat model/i.test(readme),
-    "a chatless package's README must SAY it has no chat model, not just omit the example"
+    /exposes NO chat capability/i.test(readme),
+    "a chatless package's README must SAY it has no chat capability, not just omit the example"
   );
   // And its real capabilities are still documented. The example section only
   // shows chat/conversation/search METHODS (the quick-start), so the real

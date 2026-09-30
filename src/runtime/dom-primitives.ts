@@ -35,7 +35,7 @@ export interface DomPrimitives {
   // the baseline; the text field is "" in that case, never the old echo).
   awaitAnswer(
     selector: string,
-    opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number },
+    opts?: { timeoutMs?: number; stableMs?: number; pollMs?: number; nonAnswerSelector?: string },
     baseline?: AnswerRegionRead
   ): Promise<{
     text: string;
@@ -43,11 +43,14 @@ export interface DomPrimitives {
     url: string;
     title: string;
     doneReason: AnswerDoneReason;
+    nonAnswer?: { text: string; selector: string };
   }>;
   // Read the current answer region: every selector-matching element's trimmed
   // innerText (DOM order) + the longest — the per-ask freshness baseline and
-  // the newChat reset signal both come from this.
-  readAnswerRegion(selector: string): Promise<AnswerRegionRead>;
+  // the newChat reset signal both come from this. `nonAnswerSelector` names the
+  // per-site elements that are NOT the answer (thinking/reasoning/status
+  // regions); elements matching it are excluded from the candidate set.
+  readAnswerRegion(selector: string, nonAnswerSelector?: string): Promise<AnswerRegionRead>;
   status(selector?: string): Promise<unknown>;
 }
 
@@ -63,12 +66,77 @@ export interface DomPrimitives {
 // present in the baseline region) — judgement runs on the fresh text, never on
 // the pre-ask longest.
 
+// --- GOAL 160: the ANSWER-SHAPE gate ---------------------------------------
+// The freshness core above judges WHERE the text came from (a new element),
+// never WHAT it is. A status region ("Cooking…"), a thinking block, or a
+// pre-answer placeholder is a NEW element, so it goes "stable" and is served
+// as the answer — HTTP 200, plausible prose, no error. That is the class this
+// gate exists to kill.
+//
+// The predicate is ELEMENT-STRUCTURAL, never a guess about English prose: the
+// per-site profile declares the elements that are not the answer
+// (`capability.nonAnswerSelectors`) and the site itself marks them. A site that
+// declares nothing is judged exactly as before — the gate never invents a
+// signal, so a profile with no declaration cannot regress into a false
+// refusal. A refusal always names WHICH declared signal fired.
+
+/** Named refusals the readback seam can end with (GOAL 160). */
+export type NonAnswerReason = "non-answer-region";
+
+export interface NonAnswerVerdict {
+  /** True when the settled text is real answer text. */
+  answerShaped: boolean;
+  /** Set only when `answerShaped` is false. */
+  reason?: NonAnswerReason;
+  /** The declared selector that matched — the evidence for the refusal. */
+  matchedSelector?: string;
+  /** The refused text, kept for the refusal message so a reader can see WHAT
+   *  was wrong. It is never returned as the answer. */
+  refusedText?: string;
+}
+
+/**
+ * Decide whether settled readback text is answer text.
+ *
+ * `readNonAnswerMatches` is the evidence the caller collected in-page: for each
+ * declared non-answer selector, the text of the elements it matched. When the
+ * settled text IS one of those (exactly, or as the leading text of a region the
+ * non-answer element fully contains) the read landed on a non-answer region.
+ */
+export function judgeAnswerShape(
+  settledText: string,
+  readNonAnswerMatches: Array<{ selector: string; texts: string[] }>
+): NonAnswerVerdict {
+  const t = settledText.trim();
+  if (!t) return { answerShaped: true };
+  for (const m of readNonAnswerMatches) {
+    for (const raw of m.texts) {
+      const n = (raw ?? "").trim();
+      if (!n) continue;
+      if (n === t) return { answerShaped: false, reason: "non-answer-region", matchedSelector: m.selector, refusedText: t };
+      // The non-answer element's own text sits at the head of a larger region
+      // that also contains real answer text — the status line plus the answer
+      // in one container. The head match is the signal that the container
+      // opened with a non-answer region; only the prefix is judged, so an
+      // answer that merely repeats a status word later is not refused.
+      if (t.length > n.length && t.startsWith(n)) {
+        return { answerShaped: false, reason: "non-answer-region", matchedSelector: m.selector, refusedText: t };
+      }
+    }
+  }
+  return { answerShaped: true };
+}
+
 export interface AnswerRegionRead {
   /** Longest matching element's trimmed innerText (never used for the verdict —
    *  kept so callers see the region as a browser would). */
   text: string;
   /** Every matching element's trimmed innerText in DOM order (the region set). */
   elementTexts: string[];
+  /** GOAL 160: texts of the elements the profile DECLARED as non-answer
+   *  (thinking/reasoning/status regions). Collected in the same page read, and
+   *  already excluded from `elementTexts` — they are evidence, not candidates. */
+  nonAnswerMatches?: Array<{ selector: string; texts: string[] }>;
 }
 
 export interface AnswerBaseline {
@@ -76,7 +144,14 @@ export interface AnswerBaseline {
   maxText: string;
 }
 
-export type AnswerDoneReason = "stable" | "timeout" | "empty" | "stale";
+export type AnswerDoneReason = "stable" | "timeout" | "empty" | "stale" | "non-answer";
+
+// GOAL 160: `"non-answer"` means the readback settled on a region the profile
+// DECLARED non-answer (a status/thinking element) and no answer-shaped text
+// ever appeared. It is a distinct member rather than `"empty"` because the
+// caller needs to act differently: "the page rendered something and it was the
+// wrong thing" is a selector/profile defect to re-tune, while "empty" is the
+// page not answering at all.
 
 export interface AnswerPollState {
   last: string;
@@ -85,6 +160,10 @@ export interface AnswerPollState {
   chunkCount: number;
   madeProgress: boolean;
   doneReason: AnswerDoneReason;
+  /** GOAL 160: the freshest text seen in a DECLARED non-answer region, and the
+   *  selector that produced it — the evidence for a "non-answer" verdict. */
+  nonAnswerFresh: string;
+  nonAnswerSelector: string;
 }
 
 /** Snapshot the pre-ask region into a freshness baseline. */
@@ -103,7 +182,7 @@ export function snapshotBaseline(region: AnswerRegionRead): AnswerBaseline {
 export function freshRegion(
   region: AnswerRegionRead,
   baseline: AnswerBaseline
-): { fresh: string; changed: boolean } {
+): { fresh: string; changed: boolean; nonAnswer: { text: string; selector: string } | null } {
   const baseTexts = new Set(baseline.elementTexts);
   let fresh = "";
   for (let i = 0; i < region.elementTexts.length; i++) {
@@ -117,11 +196,23 @@ export function freshRegion(
   const changed =
     region.elementTexts.length !== baseline.elementTexts.length ||
     region.text !== baseline.maxText;
-  return { fresh: fresh.trim(), changed };
+  // GOAL 160: the longest NEW text in a declared non-answer region. Judged
+  // against the baseline the same way, so a status line that was already on the
+  // page before the ask is not evidence.
+  let nonAnswer: { text: string; selector: string } | null = null;
+  for (const m of region.nonAnswerMatches ?? []) {
+    for (const raw of m.texts) {
+      const t = (raw ?? "").trim();
+      if (!t) continue;
+      if (baseline.elementTexts.includes(t) || baseline.maxText === t) continue;
+      if (!nonAnswer || t.length > nonAnswer.text.length) nonAnswer = { text: t, selector: m.selector };
+    }
+  }
+  return { fresh: fresh.trim(), changed, nonAnswer };
 }
 
 export function initAnswerPollState(nowMs: number): AnswerPollState {
-  return { last: "", lastChange: nowMs, maxFresh: "", chunkCount: 0, madeProgress: false, doneReason: "timeout" };
+  return { last: "", lastChange: nowMs, maxFresh: "", chunkCount: 0, madeProgress: false, doneReason: "timeout", nonAnswerFresh: "", nonAnswerSelector: "" };
 }
 
 /**
@@ -137,11 +228,15 @@ export function stepAnswerPoll(
   nowMs: number,
   stableMs: number
 ): AnswerPollState {
-  const { fresh, changed } = freshRegion(region, baseline);
+  const { fresh, changed, nonAnswer } = freshRegion(region, baseline);
   const next: AnswerPollState = {
     ...state,
     chunkCount: state.chunkCount + 1,
   };
+  if (nonAnswer && nonAnswer.text.length > state.nonAnswerFresh.length) {
+    next.nonAnswerFresh = nonAnswer.text;
+    next.nonAnswerSelector = nonAnswer.selector;
+  }
   if (changed && !state.madeProgress) {
     // First evidence the ask produced something: start judging on the fresh
     // text. Until this fires, the read is EXACTLY the pre-ask region (the old
@@ -189,6 +284,14 @@ export function stepAnswerPoll(
  * union the caller cannot tell an unresponsive CDP from a merely slow stream;
  * widening the union is a deliberate, consumer-routed change, not a local one.
  *
+ * GOAL 160 did that widening deliberately, to the consumer: `AnswerDoneReason`
+ * gained `"non-answer"`, because the caller genuinely must distinguish "the page
+ * rendered a status region and we read it" from "the page rendered nothing at
+ * all". Only the driver (`src/prompt/driver.ts`) and its readback tests consume
+ * this union, so the widening is contained. The returned object also gained an
+ * OPTIONAL `nonAnswer` evidence field, present only when a declared non-answer
+ * region was actually seen.
+ *
  * HAZARD REASONING - an abandoned read resolving late:
  *   A timed-out read is settled ONCE. The `settled` latch drops the late
  *   `.then` callback's value on the floor: it is never fed to `stepAnswerPoll`,
@@ -206,7 +309,12 @@ export async function awaitAnswerFromReads(
   read: () => Promise<AnswerRegionRead>,
   opts: { timeoutMs?: number; stableMs?: number; pollMs?: number } = {},
   baseline?: AnswerRegionRead
-): Promise<{ text: string; chunkCount: number; doneReason: AnswerDoneReason }> {
+): Promise<{
+  text: string;
+  chunkCount: number;
+  doneReason: AnswerDoneReason;
+  nonAnswer?: { text: string; selector: string };
+}> {
   const { timeoutMs = 30000, stableMs = 1800, pollMs = 400 } = opts;
   const t0 = Date.now();
 
@@ -268,6 +376,13 @@ export async function awaitAnswerFromReads(
   }
   const text = state.maxFresh.trim();
   let doneReason = state.doneReason;
+  // GOAL 160: the answer-shape gate. When the read settled on a region the
+  // profile declared NON-answer and no answer-shaped text ever grew, the
+  // settled text is not the answer and must not be served as one. The declared
+  // text is returned as EVIDENCE, never as the answer.
+  if (doneReason !== "stable" && !text && state.nonAnswerFresh) {
+    doneReason = "non-answer";
+  }
   if (doneReason === "timeout" && !text) {
     // Nothing fresh ever appeared: "stale" means pre-existing content (the old
     // answer) was present the whole time and the read never changed - the true
@@ -275,7 +390,14 @@ export async function awaitAnswerFromReads(
     // a baseline that is already empty is a plain "empty" (no answer at all).
     doneReason = state.madeProgress ? "empty" : base.maxText ? "stale" : "empty";
   }
-  return { text, chunkCount: state.chunkCount, doneReason };
+  return {
+    text,
+    chunkCount: state.chunkCount,
+    doneReason,
+    ...(state.nonAnswerFresh
+      ? { nonAnswer: { text: state.nonAnswerFresh, selector: state.nonAnswerSelector } }
+      : {}),
+  };
 }
 
 export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
@@ -395,13 +517,14 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
     },
     // Read the answer region (every matching element's trimmed innerText + the
     // longest) — the per-ask freshness baseline and the newChat reset signal.
-    async readAnswerRegion(selector) {
+    async readAnswerRegion(selector, nonAnswerSelector) {
       const p = await pageFn();
-      return readAnswerRegionFromPage(p, selector);
+      return readAnswerRegionFromPage(p, selector, nonAnswerSelector);
     },
     async awaitAnswer(selector, opts = {}, baseline) {
       const p = await pageFn();
-      const read = (): Promise<AnswerRegionRead> => readAnswerRegionFromPage(p, selector);
+      const read = (): Promise<AnswerRegionRead> =>
+        readAnswerRegionFromPage(p, selector, opts.nonAnswerSelector);
       // Per-ask FRESHNESS BASELINE (GOAL 46): when the caller (ChatDriver)
       // captured the pre-ask region before composing, require growth from a NEW
       // element; without one, snapshot at entry — either way the pre-existing
@@ -443,17 +566,47 @@ export function makeDomPrimitives(getPage: () => Promise<any>): DomPrimitives {
 }
 
 /** In-page answer-region read shared by readAnswerRegion/awaitAnswer
- *  (anonymous leaf function — no named helpers inside the page). */
-async function readAnswerRegionFromPage(p: any, selector: string): Promise<AnswerRegionRead> {
-  return (await p.evaluate((sel: string) => {
-    const els = document.querySelectorAll(sel);
-    const list: string[] = [];
-    let best = "";
-    for (const el of els) {
-      const t = ((el as HTMLElement).innerText ?? "").trim();
-      list.push(t);
-      if (t.length > best.length) best = t;
-    }
-    return { text: best, elementTexts: list };
-  }, selector)) as AnswerRegionRead;
+ *  (anonymous leaf function — no named helpers inside the page).
+ *
+ *  GOAL 160: `nonAnswerSelector` is the profile's DECLARED set of elements that
+ *  are not the answer (thinking/reasoning/status regions). Matching elements are
+ *  removed from the candidate set — so a status region can never win the
+ *  longest-element read in the first place — and their text is returned
+ *  separately as the evidence a `"non-answer"` refusal names. Excluding them
+ *  (rather than filtering the text afterwards) is the selector-precision fix:
+ *  the answer selector can no longer be widened back onto a status node without
+ *  the profile having declared that node non-answer. */
+async function readAnswerRegionFromPage(
+  p: any,
+  selector: string,
+  nonAnswerSelector?: string
+): Promise<AnswerRegionRead> {
+  return (await p.evaluate(
+    ({ sel, nonSel }: { sel: string; nonSel?: string }) => {
+      const excluded = new Set<Element>();
+      const nonAnswerMatches: Array<{ selector: string; texts: string[] }> = [];
+      if (nonSel) {
+        for (const part of nonSel.split(",").map((s) => s.trim()).filter(Boolean)) {
+          const texts: string[] = [];
+          for (const el of document.querySelectorAll(part)) {
+            excluded.add(el);
+            const t = ((el as HTMLElement).innerText ?? "").trim();
+            if (t) texts.push(t);
+          }
+          if (texts.length) nonAnswerMatches.push({ selector: part, texts });
+        }
+      }
+      const els = document.querySelectorAll(sel);
+      const list: string[] = [];
+      let best = "";
+      for (const el of els) {
+        if (excluded.has(el)) continue;
+        const t = ((el as HTMLElement).innerText ?? "").trim();
+        list.push(t);
+        if (t.length > best.length) best = t;
+      }
+      return { text: best, elementTexts: list, nonAnswerMatches };
+    },
+    { sel: selector, nonSel: nonAnswerSelector }
+  )) as AnswerRegionRead;
 }

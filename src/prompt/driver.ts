@@ -488,9 +488,15 @@ export class ChatDriver {
     // awaitAnswer's longest-element read would go "stable" on it, returning
     // prompt A's text as prompt B's answer — plausible success, wrong thing.
     const answerSel = this.profile.answer.join(", ") || "body";
+    // GOAL 160 ANSWER-SHAPE: the profile's DECLARED non-answer regions (a
+    // status / thinking / reasoning element). They are excluded from the answer
+    // candidate set in the page read, and if the read settles on one of them and
+    // nothing answer-shaped ever grew, the ask refuses with the named
+    // doneReason "non-answer" instead of serving that text as the answer.
+    const nonAnswerSel = (this.profile.capability?.nonAnswerSelectors ?? []).join(", ");
     let baseline: AnswerRegionRead | undefined;
     try {
-      baseline = await this.dom.readAnswerRegion(answerSel);
+      baseline = await this.dom.readAnswerRegion(answerSel, nonAnswerSel || undefined);
     } catch {
       baseline = undefined; // unreadable region — awaitAnswer snapshots at entry
     }
@@ -557,11 +563,29 @@ export class ChatDriver {
       {
         timeoutMs: opts.timeoutMs ?? this.profile.captureMs,
         stableMs: opts.stableMs ?? this.profile.stableMs,
+        ...(nonAnswerSel ? { nonAnswerSelector: nonAnswerSel } : {}),
       },
       baseline
     );
     const answer = (observed.text ?? "").trim();
     const doneReason = observed.doneReason;
+    if (doneReason === "non-answer") {
+      // GOAL 160: the read settled on an element this profile DECLARED
+      // non-answer (a status region, a thinking block, a pre-answer
+      // placeholder) and no answer-shaped text ever grew. Serving that text
+      // would be a 200 carrying a plausible-looking non-answer into a caller's
+      // context as fact, which is the class this gate exists to kill. Refuse
+      // with the evidence, exactly as the stale-echo and answer-echo guards
+      // below refuse: never a partial answer, never a fabrication.
+      throw new Error(
+        `answer-not-an-answer on ${this.profile.id}: the readback settled on a region this profile ` +
+          `declares NON-answer and no answer-shaped text ever appeared, so the request is refused ` +
+          `rather than answered with a status line (read ${JSON.stringify(observed.nonAnswer?.selector)}, ` +
+          `text ${JSON.stringify(observed.nonAnswer?.text)} — never returned as the answer). ` +
+          `Re-tune the profile: narrow \`answer\` to the real answer container and/or add the status/thinking ` +
+          `element to \`capability.nonAnswerSelectors\`.`
+      );
+    }
     if (doneReason === "stale") {
       // Honest verdict, never the old echo: the region NEVER changed from the
       // pre-ask baseline — the previous answer stayed mounted the whole time
