@@ -53,7 +53,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ChatPool } from "./pool.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
-import { chatSurfaceStatus, defaultChatSurface, type ChatSurfaceStatus, type RegistryVerified } from "./registry.js";
+import {
+  chatSurfaceStatus,
+  defaultChatSurface,
+  answerableChatSurface,
+  readModelVerification,
+  withheldChatModels,
+  modelAdvertisementSummary,
+  type ChatSurfaceStatus,
+  type RegistryVerified,
+} from "./registry.js";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -826,6 +835,24 @@ export async function handleOpenAIRoutes(
   // the list entry.
   if (req.method === "GET" && (path === "/v1/models" || path.startsWith("/v1/models/"))) {
     const onSurface = new Map(defaultChatSurface().map((e) => [e.id, { packaged: e.packaged }]));
+    // GOAL 159: /v1/models is a PROMISE surface — a consumer materialises one
+    // provider per id it finds here. It is therefore gated on the measured
+    // record (class ANSWERS), not on the addressable surface alone: an id whose
+    // selectors parse but which no live round trip ever answered is not
+    // advertised. The full catalogue stays reachable on /registry, /sites and
+    // /capability/<id>, and the honest split travels with this response so a
+    // consumer can tell "offers 4" from "hides 18".
+    const verification = readModelVerification();
+    if (verification.refusal !== null) {
+      return sendJson(res, 503, {
+        error: {
+          message: verification.refusal,
+          type: "service_unavailable",
+          code: "model_verification_unreadable",
+        },
+      });
+    }
+    const offered = new Set(answerableChatSurface(verification).map((e) => e.id));
     const entryFor = (p: ChatSiteProfile) => ({
       id: p.id,
       object: "model",
@@ -856,6 +883,18 @@ export async function handleOpenAIRoutes(
       const first = single.split("/")[0];
       const id = siteIdFromModel(safeDecode(first), "");
       const profile = profilesById[id];
+      const withheld = withheldChatModels(verification).find((w) => w.model === id);
+      if (profile && !offered.has(id) && withheld) {
+        return sendJson(res, 404, {
+          error: {
+            message: `the model \`${single}\` is not advertised: ${withheld.reason}. Its package is still on /registry, /sites and POST /capability/${id}. GET /v1/models lists only the models this daemon has measured as answering.`,
+            type: "invalid_request_error",
+            code: "model_withheld",
+            param: "id",
+            withheldClass: withheld.class,
+          },
+        });
+      }
       if (!profile || single.includes("/")) {
         return sendJson(res, 404, {
           error: {
@@ -868,8 +907,18 @@ export async function handleOpenAIRoutes(
       }
       return sendJson(res, 200, { ...entryFor(profile), capabilitiesVersion: MODEL_CAPABILITIES_VERSION });
     }
-    const data = Object.values(profilesById).map(entryFor);
-    return sendJson(res, 200, { object: "list", capabilitiesVersion: MODEL_CAPABILITIES_VERSION, data });
+    const data = Object.values(profilesById)
+      .filter((p) => offered.has(p.id))
+      .map(entryFor);
+    return sendJson(res, 200, {
+      object: "list",
+      capabilitiesVersion: MODEL_CAPABILITIES_VERSION,
+      // The honest count, not a hidden one: how many are offered, how many of
+      // the addressable catalogue are withheld, and under which measured class.
+      advertisement: modelAdvertisementSummary(verification),
+      withheld: withheldChatModels(verification),
+      data,
+    });
   }
 
   if (req.method === "POST" && url === "/v1/chat/completions") {

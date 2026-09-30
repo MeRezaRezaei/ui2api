@@ -126,6 +126,15 @@ export interface RegistryPackage {
    * treat absence as "no chat" (key on `pkg.chat?.model`, never `pkg.chat.model`).
    */
   chat?: RegistryChat;
+  /**
+   * GOAL 159: why this addressable package carries NO `chat` key. Present only
+   * when the id is on the addressable surface (GOAL 34) but its measured record
+   * class is not ANSWERS. A consumer keying on `pkg.chat` therefore never
+   * materialises a provider for a model the record says cannot answer, and a
+   * consumer reading the catalogue can still see the package and read exactly
+   * what is missing.
+   */
+  chatWithheld?: { class: string; reason: string };
   tools: RegistryTool[];
   /**
    * The identity-keyed vault accounts stored for this site — the SAME source
@@ -541,6 +550,255 @@ export function defaultChatProfiles(): ChatSiteProfile[] {
   return defaultChatSurface().map((e) => e.profile);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE MEASUREMENT GATE — "does it answer" (GOAL 159)
+//
+// `defaultChatSurface()` above answers ONE question: can this daemon ADDRESS
+// this id — does the profile carry a url, a composer and an answer, and do those
+// selectors parse. That is a routing/selector-shape question, and it is the
+// GOAL 34 gate. It is NOT the question a consumer cares about, which is whether
+// a prompt sent to the id comes back as an answer. The two were conflated into
+// one boolean, so /v1/models advertised 22 models on a service where the
+// measured record (capabilities/model-verification.json) says 4 of them return a
+// real 200 with real answer text and 18 do not.
+//
+// They are now two separately-named gates that both feed the served surface:
+//   defaultChatSurface()  = ADDRESSABLE (selector shape)  — the full catalogue
+//   answerableChatSurface() = ANSWERS (measured round trip) — the promise
+// The promise is the intersection. Neither gate is allowed to stand in for the
+// other: a model can be addressable and unmeasured (a human must sign in), and a
+// model with a parsed selector can still 502 on a live round trip.
+//
+// The restriction reads the RECORD ONLY. It never infers, upgrades, or predicts
+// a class — a class this module does not recognise withholds the model, because
+// an uninterpretable class is a claim no code can check. And a MISSING record
+// withholds too: an unmeasured model is not a promise, it is an absence. Both
+// halves are reported, so a consumer can tell "this service offers 4" from
+// "this service hides 18 and says why".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The record's own schema tag. A different tag means a reader this gate does
+ *  not implement, so the honest move is a named refusal, not a guess. */
+export const MODEL_VERIFICATION_SCHEMA = "ui2api/model-verification/1";
+
+/** The class that means "a real measured round trip returned real answer text".
+ *  It is the ONLY class that earns an advertisement. */
+export const MODEL_ANSWER_CLASS = "ANSWERS";
+
+/** The closed class vocabulary this reader can interpret. */
+export const MODEL_ANSWER_CLASSES = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT", "UNMEASURED"] as const;
+
+export type ModelAnswerClass = (typeof MODEL_ANSWER_CLASSES)[number];
+
+export interface WithheldModel {
+  model: string;
+  /** The record's class, or "NO-RECORD" / "UNREADABLE" when it is not one. */
+  class: string;
+  /** Why this id is not advertised, in words a consumer can act on. */
+  reason: string;
+}
+
+export interface ModelVerification {
+  /** Repo-relative path of the record this was read from. */
+  recordPath: string;
+  schema: string | null;
+  generatedAt: string | null;
+  /** Whole days between generatedAt and now, or null when undatable. */
+  ageDays: number | null;
+  /** Ids whose record class is ANSWERS. Sorted. */
+  answers: string[];
+  /** Every other classified id, with the named reason it is withheld. Sorted. */
+  withheld: WithheldModel[];
+  /**
+   * NAMED refusal, or null when the record was read. NON-NULL means the record
+   * is missing, unparseable, or shaped unlike anything this reader knows — and
+   * the advertisement must REFUSE rather than serve everything (the old lie) or
+   * serve nothing (an unexplained zero).
+   */
+  refusal: string | null;
+}
+
+/** Repo-relative location of the record. Walked up like findPackageDir so it
+ *  resolves the same way from src/ and from the build output. */
+function modelVerificationPath(): string {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  for (const up of [2, 3]) {
+    let p = here;
+    for (let i = 0; i < up; i++) p = dirname(p);
+    const candidate = resolve(p, "capabilities", "model-verification.json");
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(process.cwd(), "capabilities", "model-verification.json");
+}
+
+/** The class's own meaning, quoted from the record's own vocabulary where the
+ *  record supplies it — the reader never writes its own definition of a class. */
+function classMeaning(classes: Record<string, unknown>, cls: string): string {
+  const m = classes[cls];
+  return typeof m === "string" && m.trim() !== "" ? m.trim() : `the record classes this id as ${cls}`;
+}
+
+function withheldReason(cls: string, meaning: string): string {
+  switch (cls) {
+    case "SIGN-OUT":
+      return "the record measured this id and it refused the request: sign-in is required, which is a human login action this build does not attempt";
+    case "CONTENDED-TIMEOUT":
+      return "the record measured a queue timeout, not an answer — a measurement of the pool rather than a property of the model, and no ANSWERS class was established";
+    case "UNMEASURED":
+      return "the record established no class about this model, so no promise can be made for it";
+    default:
+      return meaning;
+  }
+}
+
+/**
+ * Read the dated measurement record. Pure fs, no browser, no network, and never
+ * throws: every failure mode becomes a NAMED `refusal` the caller surfaces,
+ * because a record that cannot be read must be visible rather than silently
+ * treated as "advertise everything".
+ */
+export function readModelVerification(): ModelVerification {
+  const abs = modelVerificationPath();
+  const recordPath = "capabilities/model-verification.json";
+  const base: ModelVerification = {
+    recordPath,
+    schema: null,
+    generatedAt: null,
+    ageDays: null,
+    answers: [],
+    withheld: [],
+    refusal: null,
+  };
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch (e) {
+    return {
+      ...base,
+      refusal: `model-verification record unreadable at ${recordPath} (${(e as Error).message}) — /v1/models refuses rather than advertise a promise no measurement backs`,
+    };
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (e) {
+    return {
+      ...base,
+      refusal: `model-verification record at ${recordPath} is not parseable JSON (${(e as Error).message}) — /v1/models refuses rather than advertise a promise no measurement backs`,
+    };
+  }
+  const schema = typeof parsed.schema === "string" ? parsed.schema : null;
+  if (schema !== MODEL_VERIFICATION_SCHEMA) {
+    return {
+      ...base,
+      schema,
+      refusal: `model-verification record declares schema ${JSON.stringify(schema)}, not ${MODEL_VERIFICATION_SCHEMA} — /v1/models refuses rather than guess at a record shape it does not implement`,
+    };
+  }
+  const records = Array.isArray(parsed.records) ? (parsed.records as Record<string, unknown>[]) : null;
+  if (!records) {
+    return {
+      ...base,
+      schema,
+      refusal: `model-verification record at ${recordPath} carries no records array — /v1/models refuses rather than advertise a promise no measurement backs`,
+    };
+  }
+  const classes =
+    typeof parsed.classes === "object" && parsed.classes !== null && !Array.isArray(parsed.classes)
+      ? (parsed.classes as Record<string, unknown>)
+      : {};
+  const answers: string[] = [];
+  const withheld: WithheldModel[] = [];
+  for (const r of records) {
+    const model = typeof r?.model === "string" ? r.model.trim() : "";
+    if (model === "") continue;
+    const cls = typeof r?.class === "string" ? r.class.trim() : "";
+    if (cls === MODEL_ANSWER_CLASS) {
+      answers.push(model);
+      continue;
+    }
+    const named = cls === "" ? "NO-RECORD" : cls;
+    withheld.push({ model, class: named, reason: withheldReason(named, classMeaning(classes, named)) });
+  }
+  const generatedAt = typeof parsed.generatedAt === "string" ? parsed.generatedAt : null;
+  const parsedAt = generatedAt === null ? NaN : Date.parse(generatedAt);
+  return {
+    recordPath,
+    schema,
+    generatedAt,
+    ageDays: Number.isNaN(parsedAt) ? null : Math.max(0, Math.floor((Date.now() - parsedAt) / 86_400_000)),
+    answers: [...new Set(answers)].sort(),
+    withheld: withheld.sort((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0)),
+    refusal: null,
+  };
+}
+
+/**
+ * THE ANSWERING GATE. An id is advertised only when it is addressable AND its
+ * record class is ANSWERS. An id on the addressable surface with no record, or
+ * with any other class, is withheld with the record's own reason — it stays
+ * fully reachable on /registry, /sites and /capability/<id>, because discovery
+ * and promise are different surfaces and a withheld model must stay discoverable.
+ */
+export function answerableChatSurface(verification = readModelVerification()): ChatSurfaceEntry[] {
+  if (verification.refusal !== null) return [];
+  const answering = new Set(verification.answers);
+  return defaultChatSurface().filter((e) => answering.has(e.id));
+}
+
+/** Every addressable id that is NOT advertised, each with its named reason —
+ *  including the ids the record never mentions, which are withheld for a
+ *  different reason (nothing measured) than a class that was measured. */
+export function withheldChatModels(verification = readModelVerification()): WithheldModel[] {
+  const answering = new Set(verification.answers);
+  const out = verification.withheld.filter((w) => !answering.has(w.model));
+  const recorded = new Set([...verification.answers, ...out.map((w) => w.model)]);
+  for (const e of defaultChatSurface()) {
+    if (recorded.has(e.id)) continue;
+    out.push({
+      model: e.id,
+      class: "NO-RECORD",
+      reason: "the record carries no entry for this model, so nothing was ever measured about it and no promise can be made",
+    });
+  }
+  return out.sort((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
+}
+
+/** The honest split a consumer needs: how many are offered, how many are held
+ *  back, and under which measured classes. This is the block /v1/models and
+ *  /health both carry, so "this service offers 4" is never confused with
+ *  "this service hides 18". */
+export interface ModelAdvertisementSummary {
+  offered: number;
+  addressable: number;
+  withheld: number;
+  withheldByClass: Record<string, number>;
+  record: string;
+  recordGeneratedAt: string | null;
+  recordAgeDays: number | null;
+  rule: string;
+  catalogueEndpoints: string[];
+  refusal: string | null;
+}
+
+export function modelAdvertisementSummary(verification = readModelVerification()): ModelAdvertisementSummary {
+  const withheld = withheldChatModels(verification);
+  const withheldByClass: Record<string, number> = {};
+  for (const w of withheld) withheldByClass[w.class] = (withheldByClass[w.class] ?? 0) + 1;
+  return {
+    offered: answerableChatSurface(verification).length,
+    addressable: defaultChatSurface().length,
+    withheld: withheld.length,
+    withheldByClass,
+    record: verification.recordPath,
+    recordGeneratedAt: verification.generatedAt,
+    recordAgeDays: verification.ageDays,
+    rule: "only ids whose record class is ANSWERS are advertised; every other addressable id is withheld with its named reason and stays discoverable on the catalogue endpoints",
+    catalogueEndpoints: ["/registry", "/sites", "/capability/{site}"],
+    refusal: verification.refusal,
+  };
+}
+
 /** Build the registry 'packages' array from the installed capability packages. */
 /**
  * GOAL 61: crash-proofing filter for manifest capability entries. A malformed
@@ -646,6 +904,15 @@ export function buildRegistryPackages(): RegistryPackage[] {
   // chat iff its id is on this surface (GOAL 34 truth-gate): registry chat
   // claims must never exceed what /v1/chat/completions can actually answer.
   const chatSurfaceIds = new Set(defaultChatSurface().map((e) => e.id));
+  // GOAL 159: the chat key is a PROMISE, so it follows the MEASURED gate, not
+  // the addressable one. A package whose record class is not ANSWERS gets no
+  // `chat` key — a consumer materialising one provider per `pkg.chat` must not
+  // build 18 providers that cannot answer — while the package itself stays
+  // fully listed with its tools, status and metadata. The reason it carries no
+  // chat key is named in `chatWithheld`, so the catalogue explains its own
+  // omission instead of leaving the consumer to guess.
+  const answerableIds = new Set(answerableChatSurface().map((e) => e.id));
+  const withheldBy = new Map(withheldChatModels().map((w) => [w.model, w]));
   for (const siteId of ids) {
     // Only packages the daemon can actually serve (has a packaged ChatSiteProfile).
     const profile = resolvePackagedProfile(siteId);
@@ -747,7 +1014,25 @@ export function buildRegistryPackages(): RegistryPackage[] {
       authRequired: manifest?.auth?.required !== false,
       status,
       verified,
-      ...(chatSurfaceIds.has(siteId) ? { chat: { model: siteId, streaming: true } } : {}),
+      // GOAL 159: the chat key is a PROMISE, so it follows the MEASURED gate, not
+      // the addressable one. An addressable id the record does not call ANSWERS
+      // gets NO `chat` key — a consumer materialising one provider per `pkg.chat`
+      // must not build 18 providers that cannot answer — while the package itself
+      // stays fully listed with its tools, status and metadata, and the reason for
+      // the missing key is named in `chatWithheld` below.
+      ...(chatSurfaceIds.has(siteId) && answerableIds.has(siteId)
+        ? { chat: { model: siteId, streaming: true } }
+        : {}),
+      // GOAL 159: present only when the id is addressable but NOT advertised,
+      // and it always says why — the measured class and the reason in words.
+      ...(chatSurfaceIds.has(siteId) && !answerableIds.has(siteId) && withheldBy.has(siteId)
+        ? {
+            chatWithheld: {
+              class: withheldBy.get(siteId)!.class,
+              reason: withheldBy.get(siteId)!.reason,
+            },
+          }
+        : {}),
       tools,
       ...(accounts !== undefined ? { accounts } : {}),
       ...(accountsSummary !== undefined ? { accountsSummary } : {}),

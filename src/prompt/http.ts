@@ -58,7 +58,7 @@ import { buildIdentity, type BuildIdentity } from "../runtime/build-info.js";
 import { handleOpenAIRoutes } from "./openai.js";
 import { buildToolInstruction, parseToolCall, stripToolCall } from "./soft-tools.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, type CapabilityRunner } from "./capability-dispatch.js";
-import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, type RegistryPackage } from "./registry.js";
+import { buildRegistryPackages, buildRegistryContract, defaultChatProfiles, chatSurfaceStatus, readModelVerification, modelAdvertisementSummary, type RegistryPackage } from "./registry.js";
 import { checkRequirements, requirementPackagesFor } from "../runtime/requirements.js";
 import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedProfileFile, type ChatSiteProfile } from "../profile/profile.js";
 import { readdirSync } from "node:fs";
@@ -1238,11 +1238,20 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // every worker wedged is not a serving daemon, and /health used to say
         // `ok:true` for exactly that.
         const stuckness = poolStuckness(st);
+        // GOAL 159: the SAME honest split /v1/models reports, read from the same
+        // record through the same reader. `counts.chatModels` above is the
+        // ADDRESSABLE count (what profilesById can be asked for, and what
+        // healthOk reasons about) and stays that; a health payload that only
+        // carried it would describe a 22-model promise the record says 4 of
+        // them keep. The refusal is carried too — an unreadable record must
+        // be visible here, not just on /v1/models.
+        const verification = readModelVerification();
         return send(res, 200, {
           ...healthVerdict(vault, chatModels, registryPackages, stuckness),
           defaultSite: defaultSiteId(),
           sites: Object.keys(profilesById),
           counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },
+          advertisement: modelAdvertisementSummary(verification),
           vault,
           pool: st,
           posture: daemonPosture(process.env, bindAddr),

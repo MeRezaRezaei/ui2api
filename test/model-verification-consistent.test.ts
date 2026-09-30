@@ -4,6 +4,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { defaultChatSurface } from "../src/prompt/registry.js";
+import {
+  CLASS_PRECONDITIONS,
+  VERIFICATION_CLASSES,
+  classifyOutcome,
+  classPrecondition,
+  unmeasuredAfterMeasuredResponse,
+  type ObservedPage,
+  type VerificationClass,
+} from "../src/prompt/verification-class.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE MODEL-VERIFICATION CONSISTENCY GATE
@@ -34,13 +43,26 @@ import { defaultChatSurface } from "../src/prompt/registry.js";
 
 const RECORD_PATH = resolve(process.cwd(), "capabilities/model-verification.json");
 
-/** The closed set. A class outside this set is a typo, and a typo is a lie. */
-const CLASSES = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT", "UNMEASURED"] as const;
-type Class = (typeof CLASSES)[number];
+/** The closed set. A class outside this set is a typo, and a typo is a lie.
+ *  The set is NOT typed here: it is exported by src/prompt/verification-class.ts,
+ *  the module that OWNS the classification rule, so the vocabulary and the rule
+ *  that fills it cannot drift apart. Before GOAL 158 this was a local literal of
+ *  four names, and the rule lived in a throwaway driver in /tmp — so a measured,
+ *  per-model condition with its own remedy had nowhere to go and 7 rows were
+ *  filed under the meaningless UNMEASURED. */
+const CLASSES = VERIFICATION_CLASSES;
+type Class = VerificationClass;
 
 /** Classes that assert something about the MODEL, so they must carry proof.
- *  UNMEASURED is the only class whose whole meaning is "we do not know". */
-const MEASURED_CLASSES: Class[] = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT"];
+ *  UNMEASURED is the only class whose whole meaning is "we do not know" — and
+ *  RULE 9 is what keeps that claim true rather than rhetorical. */
+const MEASURED_CLASSES: Class[] = [
+  "ANSWERS",
+  "SIGN-OUT",
+  "CONTENDED-TIMEOUT",
+  "WALL-CHALLENGE",
+  "COMPOSER-DRIFT",
+];
 
 /** A claim with nothing behind it. The single most important rule here. */
 const EVIDENCE_MIN_CHARS = 24;
@@ -54,6 +76,8 @@ interface ModelRecord {
   prereq?: unknown;
   daemonCommit?: unknown;
   poolAtRequest?: unknown;
+  observedPage?: unknown;
+  httpStatus?: unknown;
 }
 
 interface RecordFile {
@@ -156,6 +180,78 @@ export function contentionWithoutPoolState(records: ModelRecord[]): string[] {
   return out.sort();
 }
 
+/** RULE 5 generalised over the closed set: each class declares its own
+ *  machine-checkable precondition in the classification module, so a new class
+ *  cannot land without stating what a record must carry for the claim to mean
+ *  anything. This is what stops a new class from becoming a free-text escape
+ *  hatch — it would have to declare a precondition, and the gate enforces it. */
+export function preconditionViolations(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (!nonEmptyString(r.class) || !(CLASSES as readonly string[]).includes(r.class)) continue;
+    const pre = classPrecondition(r.class as VerificationClass);
+    const model = nonEmptyString(r.model) ? r.model : "<no model field>";
+    for (const field of pre.requiredFields) {
+      const v = r[field as keyof ModelRecord];
+      if (field === "observedPage") {
+        const p = v as ObservedPage | undefined;
+        if (!p || !nonEmptyString(p.title) || !nonEmptyString(p.url)) out.push(`${model}: ${r.class} missing observedPage{title,url} the server reported`);
+        continue;
+      }
+      if (!nonEmptyString(v)) out.push(`${model}: ${r.class} missing ${field}`);
+    }
+    if (pre.requiresPoolState) {
+      const p = r.poolAtRequest as { busy?: unknown; total?: unknown } | undefined;
+      if (!p || typeof p.busy !== "number" || typeof p.total !== "number") {
+        out.push(`${model}: ${r.class} missing poolAtRequest {busy,total}`);
+      }
+    }
+    if (pre.requiresIdlePool) {
+      const p = r.poolAtRequest as { busy?: unknown; queued?: unknown } | undefined;
+      if (p && typeof p.busy === "number" && p.busy > 0) {
+        out.push(`${model}: ${r.class} filed at a BUSY pool (busy=${p.busy}) — a model property must be measured at an idle pool`);
+      }
+    }
+  }
+  return out.sort();
+}
+
+/** RULE 9: a row may not say "nothing was established" while quoting a measured
+ *  HTTP status. UNMEASURED's strict meaning is "never reached"; a real response
+ *  WAS reached on every one of the 7 rows this goal re-files, so the class was
+ *  true-but-misleading by omission. The predicate is the module's, and it is
+ *  mutation-proven below against the exact legacy row shape. */
+export function unmeasuredAfterMeasured(records: ModelRecord[]): string[] {
+  return unmeasuredAfterMeasuredResponse(records);
+}
+
+/** A row whose filed class disagrees with what the CLASSIFIER derives from the
+ *  page the server itself reported. This is the rule that was previously a
+ *  throwaway driver in /tmp: the same 502, the same idle pool and the same
+ *  "no composer" message can only land in one class, and which one is a
+ *  function of the reported page, not of an operator's judgement at 2am. */
+export function classDisagreements(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (!nonEmptyString(r.class) || !(CLASSES as readonly string[]).includes(r.class)) continue;
+    if (r.class === "UNMEASURED") continue; // nothing measured, nothing to re-derive
+    const p = r.observedPage as ObservedPage | undefined;
+    if (!p || !nonEmptyString(p.title) || !nonEmptyString(p.url)) continue; // no page reported; nothing to re-derive from
+    const model = nonEmptyString(r.model) ? r.model : "<no model field>";
+    const status = typeof r.httpStatus === "number" ? r.httpStatus : 0;
+    const derived = classifyOutcome({
+      httpStatus: status,
+      message: nonEmptyString(r.evidence) ? r.evidence : "",
+      page: { title: p.title, url: p.url },
+      poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown } | undefined,
+    });
+    if (derived.cls !== r.class) {
+      out.push(`${model}: filed ${r.class} but the classifier derives ${derived.cls} from the reported page "${p.title}" (${p.url}) — ${derived.reason}`);
+    }
+  }
+  return out.sort();
+}
+
 /** Measured records older than the disclosed window, and the window itself. */
 export function staleByAge(records: ModelRecord[], windowDays: number, now: number): { stale: string[]; window: number } {
   const stale: string[] = [];
@@ -210,7 +306,7 @@ test("precondition: the advertised set, the record and the class set are all rea
     "non-vacuity: the derived advertised set contains a duplicate id",
   );
   assert.ok(records.length >= advertised.length, `non-vacuity: record carries ${records.length} entries for ${advertised.length} advertised ids`);
-  assert.ok(CLASSES.length === 4, "non-vacuity: the closed class set changed shape");
+  assert.ok(CLASSES.length === 6, "non-vacuity: the closed class set changed shape — a class was added or removed without updating this gate");
   // Every advertised id must really be derivable, and the derivation must be
   // the registry's — a hardcoded list in this file would defeat the whole gate.
   assert.ok(advertised.includes("gemini"), "non-vacuity: the derived set must contain a known id (gemini)");
@@ -283,6 +379,33 @@ test("RULE 7: CONTENDED-TIMEOUT carries the pool state that distinguishes conten
     bad,
     [],
     `contention claims without a busy pool (or at an idle one): ${bad.join("; ")} — a timeout at an idle pool is a model property, and must NOT be filed as contention`,
+  );
+});
+
+test("RULE 9: a row may not be UNMEASURED while quoting a measured HTTP status — UNMEASURED means NEVER REACHED", () => {
+  const bad = unmeasuredAfterMeasured(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `rows that claim "nothing was established" beside a real measured status: ${bad.join("; ")} — the response WAS reached, so it is classified (classifyOutcome in src/prompt/verification-class.ts); UNMEASURED's honest meaning is "never reached"`,
+  );
+});
+
+test(`RULE 10: every class's declared precondition holds — a new class cannot be a free-text escape hatch`, () => {
+  const bad = preconditionViolations(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `class preconditions violated: ${bad.join("; ")} — each class's precondition is declared in src/prompt/verification-class.ts (CLASS_PRECONDITIONS) and enforced here, so a class that can hold anything fails`,
+  );
+});
+
+test("RULE 11: a row's filed class agrees with what the classifier derives from the page the server reported", () => {
+  const bad = classDisagreements(records);
+  assert.deepEqual(
+    bad,
+    [],
+    `filed class disagrees with the classifier: ${bad.join("; ")} — the rule is CODE (src/prompt/verification-class.ts), not a sweep convention; if a row is wrong, fix the row or widen the rule on purpose, never by hand`,
   );
 });
 
@@ -363,4 +486,63 @@ test("MUTATION: the gate's own predicates reject a fabricated ANSWERS claim", ()
   assert.ok(aged.stale.length > 0, "the gate must notice a measurement older than the window");
   const fresh = staleByAge([{ model: "gemini", class: "ANSWERS", measuredAt: new Date().toISOString() }], window0(), Date.now());
   assert.deepEqual(fresh.stale, [], "and must NOT flag a measurement taken today");
+
+  // (h) the exact legacy row shape: UNMEASURED beside a real measured 502. This
+  // is the shape the 2026-09-30 record actually contained for 7 rows, and it is
+  // why RULE 9 exists.
+  const legacy = records.find((r) => r.class === "WALL-CHALLENGE");
+  assert.ok(legacy, "precondition: the re-filed WALL-CHALLENGE row must exist to mutate");
+  const reverted = { ...legacy, class: "UNMEASURED" };
+  assert.ok(
+    unmeasuredAfterMeasured([reverted]).length > 0,
+    "the gate must reject an UNMEASURED row whose evidence quotes a measured HTTP 502",
+  );
+
+  // (i) a new class that is a free-text escape hatch: WALL-CHALLENGE filed
+  // without the server-reported page it is DEFINED by.
+  const wallNoPage: ModelRecord = {
+    model: "grok",
+    measuredAt: "2026-09-30T00:36:43.534Z",
+    class: "WALL-CHALLENGE",
+    method: "live-v1-chat",
+    evidence: "HTTP 502, something went wrong at the wall, trust me",
+    poolAtRequest: { busy: 0, total: 3, queued: 0 },
+  };
+  assert.ok(
+    preconditionViolations([wallNoPage]).some((s) => s.includes("missing observedPage")),
+    "the gate must reject a WALL-CHALLENGE with no observedPage — a class that can hold anything re-creates the original defect",
+  );
+  const wallBusy: ModelRecord = {
+    ...wallNoPage,
+    observedPage: { title: "Just a moment...", url: "https://x.test/" },
+    poolAtRequest: { busy: 3, total: 4, queued: 2 },
+  };
+  assert.ok(
+    preconditionViolations([wallBusy]).some((s) => s.includes("BUSY pool")),
+    "the gate must reject a model-property class measured at a BUSY pool",
+  );
+
+  // (j) the wrong class for the same reported page. The classifier is code, so
+  // a hand-filing is caught: a Cloudflare interstitial mis-filed as COMPOSER-DRIFT
+  // would license a selector retune, which cannot fix a bot wall.
+  const misfiled: ModelRecord = {
+    ...legacy,
+    class: "COMPOSER-DRIFT",
+  };
+  assert.ok(
+    classDisagreements([misfiled]).length > 0,
+    "the gate must reject a Cloudflare-challenge page filed as COMPOSER-DRIFT",
+  );
+  const misfiled2: ModelRecord = { ...legacy, class: "SIGN-OUT" };
+  assert.ok(
+    classDisagreements([misfiled2]).length > 0,
+    "the gate must reject a Cloudflare-challenge page filed as SIGN-OUT — that asserts a credential problem the evidence does not show",
+  );
+  // and the classifier's own refusal: a measured response it cannot honestly
+  // file is UNCLASSIFIED, not a class.
+  assert.equal(
+    classifyOutcome({ httpStatus: 503, message: "upstream unavailable", poolAtRequest: { busy: 0, total: 4, queued: 0 } }).cls,
+    "UNCLASSIFIED",
+    "a measured response matching no named condition must classify as UNCLASSIFIED rather than hide in UNMEASURED",
+  );
 });
