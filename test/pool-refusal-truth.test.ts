@@ -139,6 +139,43 @@ async function withDaemon(start: Start, opts: Record<string, unknown>, fn: (port
 
 const realStart: Start = (opts) => startPromptd(opts as unknown as Parameters<typeof startPromptd>[0]);
 
+/** A daemon started from a COPY of the tree. The copy is a repo root of its own
+ *  (the registry and profile loaders derive ROOT from the module path), so the
+ *  manifests and package.json must come with it, and bare imports resolve
+ *  through a symlink to the real node_modules. `dropRecord` removes
+ *  capabilities/model-verification.json, which is the only way to drive the
+ *  `model_verification_unreadable` branch honestly. */
+async function withDaemonFromCopy(
+  start: Start,
+  opts: { dropRecord: boolean },
+  fn: (port: number) => Promise<void>,
+): Promise<void> {
+  const tmp = mkdtempSync(join(tmpdir(), "u2a-refusal-copy-"));
+  try {
+    cpSync(join(ROOT, "src"), join(tmp, "src"), { recursive: true });
+    cpSync(join(ROOT, "capabilities"), join(tmp, "capabilities"), { recursive: true });
+    cpSync(join(ROOT, "package.json"), join(tmp, "package.json"));
+    symlinkSync(join(ROOT, "node_modules"), join(tmp, "node_modules"), "dir");
+    if (opts.dropRecord) rmSync(join(tmp, "capabilities", "model-verification.json"), { force: true });
+    const mod = (await import(pathToFileURL(join(tmp, "src", "prompt", "http.js")).href)) as {
+      startPromptd: (o: Record<string, unknown>) => Promise<{ port: number; close: () => Promise<void> }>;
+    };
+    // The reader's LAST resort is `process.cwd()/capabilities/...`, so a copy
+    // that keeps the real cwd would silently find the REAL record and the
+    // "unreadable" probe would measure a healthy daemon. Chdir into the copy.
+    const cwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const svc = await mod.startPromptd({ port: 0, host: "127.0.0.1", dataDir: mkdtempSync(join(tmpdir(), "u2a-refusal-vault-")) });
+      try { await fn(svc.port); } finally { await svc.close(); }
+    } finally {
+      process.chdir(cwd);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 /* ── the probes: one per DECLARED code, each driving a real daemon ─────────── */
 
 /**
@@ -182,6 +219,23 @@ async function runEveryProbe(start: Start): Promise<Probe[]> {
     rec("unknown_model", "POST /v1/chat/completions with a bogus model", await call(port, "POST", "/v1/chat/completions", { model: "no-such-model", messages: [{ role: "user", content: "hi" }] }));
     rec("unknown_capability", "POST /capability/deepseek with a bogus capability", await call(port, "POST", "/capability/deepseek", { capability: "no-such-capability" }));
     rec("no_stored_account", "POST /capability/deepseek with an account not in the vault", await call(port, "POST", "/capability/deepseek", { capability: "deepseek_chat", account: "ghost-account" }));
+    // GOAL 159: a REAL site the measurement record does not call answering is
+    // `model_withheld`, deliberately NOT `unknown_model` — the model exists, the
+    // measurement says it could not answer. deepseek is one of the 11 SIGN-OUT
+    // rows, and this daemon allow-lists it, so the single-id GET reaches the
+    // withholding branch with a profile present.
+    rec("model_withheld", "GET /v1/models/<a served site the record does not call answering>", await call(port, "GET", "/v1/models/deepseek"));
+  });
+
+  // `model_verification_unreadable` can only be produced by a daemon whose
+  // measurement record is missing or unparseable — which no probe against the
+  // real tree can arrange, because the record is right there and correct. So
+  // this one is driven from a COPY of the tree with the record removed: the
+  // record is an INPUT, and a code that fires on a bad input needs the bad
+  // input to be reachable. Copying is the same mechanism the mutation proof
+  // below already uses, so it is not a new mechanism in this file.
+  await withDaemonFromCopy(start, { dropRecord: true }, async (port) => {
+    rec("model_verification_unreadable", "GET /v1/models on a daemon whose measurement record is missing", await call(port, "GET", "/v1/models"));
   });
 
   // site_not_dispatched needs a DEFAULT daemon: with an explicit allow-list the
