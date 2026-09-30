@@ -9,6 +9,7 @@ import {
   VERIFICATION_CLASSES,
   classifyOutcome,
   classPrecondition,
+  nonAnswerTextIn,
   unmeasuredAfterMeasuredResponse,
   type ObservedPage,
   type VerificationClass,
@@ -78,6 +79,7 @@ interface ModelRecord {
   poolAtRequest?: unknown;
   observedPage?: unknown;
   httpStatus?: unknown;
+  answerText?: unknown;
 }
 
 interface RecordFile {
@@ -225,29 +227,106 @@ export function unmeasuredAfterMeasured(records: ModelRecord[]): string[] {
   return unmeasuredAfterMeasuredResponse(records);
 }
 
+/** The page the server reported, when the row actually carries one. */
+function reportedPage(r: ModelRecord): ObservedPage | undefined {
+  const p = r.observedPage as ObservedPage | undefined;
+  if (!p || !nonEmptyString(p.title) || !nonEmptyString(p.url)) return undefined;
+  return { title: p.title, url: p.url };
+}
+
+/** The service's own message is the record's evidence string; that is the field
+ *  RULE 11 feeds the classifier's text conditions (a non-answer body, an
+ *  unmatched answer selector, a named sign-in requirement) — those conditions
+ *  are read from the measurement, never from a field invented to make a row
+ *  fileable. */
+function serviceMessage(r: ModelRecord): string {
+  return nonEmptyString(r.evidence) ? r.evidence : "";
+}
+
+/** The model output a row quotes, lifted from the service's own evidence. The
+ *  classifier answers ANSWERS only for a 2xx carrying real output, so without
+ *  this the two ANSWERS rows would derive UNCLASSIFIED — and answering with
+ *  UNCLASSIFIED is the classifier's refusal, not a second opinion. A row MAY
+ *  carry the text as its own field; otherwise the only honest source is the
+ *  quote the measurement already made. */
+const QUOTED_ANSWER = /answer text '([^']+)'/i;
+
+function quotedAnswerText(r: ModelRecord): string | undefined {
+  if (nonEmptyString(r.answerText)) return r.answerText;
+  const message = serviceMessage(r);
+  // A NON-ANSWER-READ row also QUOTES text — the activity placeholder it caught
+  // instead of an answer — and handing that quote over as the model's output
+  // would make the classifier answer ANSWERS, which is precisely the false claim
+  // the class exists to prevent. The service's own statement that the served
+  // text is not the answer is the fact that decides this, so ask the classifier
+  // module rather than re-deciding it here.
+  if (nonAnswerTextIn(message)) return undefined;
+  const m = message.match(QUOTED_ANSWER);
+  return m ? m[1] : undefined;
+}
+
+/** The pool state the request started into, when the row records it. */
+function poolState(r: ModelRecord): { busy?: unknown; total?: unknown; queued?: unknown } | undefined {
+  const p = r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown } | undefined;
+  return p && typeof p.busy === "number" ? p : undefined;
+}
+
+/** The observations RULE 11 can feed the classifier. Before GOAL 166 the rule
+ *  demanded an observedPage and skipped everything else, which meant the two
+ *  answer-side classes GOAL 163 added — which DELIBERATELY do not require a
+ *  reported page, because requiring one would make them unreachable rather than
+ *  stricter — were never re-derived by the gate that exists to re-derive them.
+ *  A row is now derivable from any measurement it actually carries, and a row
+ *  carrying none is REPORTED, not passed over. */
+export function derivationFacts(r: ModelRecord): string[] {
+  const facts: string[] = [];
+  if (typeof r.httpStatus === "number") facts.push("httpStatus");
+  if (nonEmptyString(r.evidence)) facts.push("evidence");
+  if (reportedPage(r)) facts.push("observedPage");
+  if (poolState(r)) facts.push("poolAtRequest");
+  return facts;
+}
+
 /** A row whose filed class disagrees with what the CLASSIFIER derives from the
- *  page the server itself reported. This is the rule that was previously a
- *  throwaway driver in /tmp: the same 502, the same idle pool and the same
- *  "no composer" message can only land in one class, and which one is a
- *  function of the reported page, not of an operator's judgement at 2am. */
+ *  observations the row itself carries. This is the rule that was previously a
+ *  throwaway driver in /tmp: the same status, the same idle pool and the same
+ *  service message can only land in one class, and which one is a function of
+ *  the measurement, not of an operator's judgement at 2am. */
 export function classDisagreements(records: ModelRecord[]): string[] {
   const out: string[] = [];
   for (const r of records) {
     if (!nonEmptyString(r.class) || !(CLASSES as readonly string[]).includes(r.class)) continue;
     if (r.class === "UNMEASURED") continue; // nothing measured, nothing to re-derive
-    const p = r.observedPage as ObservedPage | undefined;
-    if (!p || !nonEmptyString(p.title) || !nonEmptyString(p.url)) continue; // no page reported; nothing to re-derive from
+    if (derivationFacts(r).length === 0) continue; // nothing to derive from; named by underivedRows
     const model = nonEmptyString(r.model) ? r.model : "<no model field>";
-    const status = typeof r.httpStatus === "number" ? r.httpStatus : 0;
+    const page = reportedPage(r);
     const derived = classifyOutcome({
-      httpStatus: status,
-      message: nonEmptyString(r.evidence) ? r.evidence : "",
-      page: { title: p.title, url: p.url },
-      poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown } | undefined,
+      httpStatus: typeof r.httpStatus === "number" ? r.httpStatus : 0,
+      message: serviceMessage(r),
+      page,
+      poolAtRequest: poolState(r),
+      answerText: quotedAnswerText(r),
     });
     if (derived.cls !== r.class) {
-      out.push(`${model}: filed ${r.class} but the classifier derives ${derived.cls} from the reported page "${p.title}" (${p.url}) — ${derived.reason}`);
+      const from = page ? ` the reported page "${page.title}" (${page.url})` : " the observations this row carries";
+      out.push(`${model}: filed ${r.class} but the classifier derives ${derived.cls} from${from} — ${derived.reason}`);
     }
+  }
+  return out.sort();
+}
+
+/** Rows RULE 11 could NOT re-derive, each named. "The gate could not check this
+ *  row" is information a reader needs, so it is emitted rather than skipped in
+ *  silence — but it is a DISCLOSED, COUNTED budget, not a silent pass and not a
+ *  blanket failure, because a row measured by some other instrument must still
+ *  be allowed to ship once the record says what it is. */
+export function underivedRows(records: ModelRecord[]): string[] {
+  const out: string[] = [];
+  for (const r of records) {
+    if (!nonEmptyString(r.class) || !(CLASSES as readonly string[]).includes(r.class)) continue;
+    if (r.class === "UNMEASURED") continue;
+    if (derivationFacts(r).length > 0) continue;
+    out.push(`${nonEmptyString(r.model) ? r.model : "<no model field>"}: filed ${r.class} but carries no httpStatus, no evidence, no observedPage and no poolAtRequest — RULE 11 could not re-derive it`);
   }
   return out.sort();
 }
@@ -426,12 +505,29 @@ test(`RULE 10: every class's declared precondition holds — a new class cannot 
   );
 });
 
-test("RULE 11: a row's filed class agrees with what the classifier derives from the page the server reported", () => {
+/** Rows RULE 11 cannot re-derive, allowed by a NAMED, COUNTED budget. It is 0
+ *  and the honest disclosure is why: the day it must rise is the day a row is
+ *  filed with no measurement behind it at all, and that row belongs in the
+ *  record's own terms rather than being made fileable by a widened gate. */
+const UNDERIVED_BUDGET = 0;
+
+test("RULE 11: a row's filed class agrees with what the classifier derives from the observations the row carries", (t) => {
   const bad = classDisagreements(records);
   assert.deepEqual(
     bad,
     [],
     `filed class disagrees with the classifier: ${bad.join("; ")} — the rule is CODE (src/prompt/verification-class.ts), not a sweep convention; if a row is wrong, fix the row or widen the rule on purpose, never by hand`,
+  );
+  const measured = records.filter((r) => nonEmptyString(r.class) && r.class !== "UNMEASURED");
+  t.diagnostic(`RULE 11 re-derived ${measured.length} measured rows`);
+});
+
+test("RULE 11b: a row the gate cannot re-derive is REPORTED, never passed over", (t) => {
+  const un = underivedRows(records);
+  t.diagnostic(`rows RULE 11 could not re-derive: ${un.length}/${UNDERIVED_BUDGET} in use` + (un.length ? ` — ${un.join("; ")}` : ""));
+  assert.ok(
+    un.length <= UNDERIVED_BUDGET,
+    `RULE 11 could not re-derive ${un.length} row(s) past a budget of ${UNDERIVED_BUDGET}: ${un.join("; ")} — a row carrying no httpStatus, no evidence, no observedPage and no poolAtRequest is a class nobody can re-derive; record the measurement, or raise UNDERIVED_BUDGET with a named reason. Never resolve it by making the gate skip more.`,
   );
 });
 
@@ -570,5 +666,72 @@ test("MUTATION: the gate's own predicates reject a fabricated ANSWERS claim", ()
     classifyOutcome({ httpStatus: 503, message: "upstream unavailable", poolAtRequest: { busy: 0, total: 4, queued: 0 } }).cls,
     "UNCLASSIFIED",
     "a measured response matching no named condition must classify as UNCLASSIFIED rather than hide in UNMEASURED",
+  );
+
+  // (k) THE GOAL-166 PROOF: the two answer-side classes carry NO observedPage on
+  // purpose, so before this goal the rule that re-derives a filed class skipped
+  // exactly them and a flip in either was invisible to the gate. These are
+  // FABRICATED rows in the real measured shapes rather than the shipped ones, so
+  // the proof does not rot when a sibling lane rewrites the record.
+  const idlePool = { busy: 0, total: 3, queued: 0 };
+  const nonAnswerRead: ModelRecord = {
+    model: "fabricated-non-answer",
+    measuredAt: "2026-09-30T15:31:32.680Z",
+    class: "NON-ANSWER-READ",
+    method: "live-v1-chat",
+    evidence: "HTTP 200 in 13543ms at pool 0/3 IDLE, the body carried the answer text 'Exploring ideas...' which is the activity-region placeholder and is not the model's answer",
+    poolAtRequest: idlePool,
+    httpStatus: 200,
+  };
+  const answerUnreadable: ModelRecord = {
+    model: "fabricated-unreadable",
+    measuredAt: "2026-09-30T15:31:46.237Z",
+    class: "ANSWER-UNREADABLE",
+    method: "live-v1-chat",
+    evidence: "HTTP 502 in 134250ms at pool 0/1 IDLE: the answer selectors match ZERO nodes in the page's real DOM, so the driver cannot read this model",
+    poolAtRequest: { busy: 0, total: 1, queued: 0 },
+    httpStatus: 502,
+  };
+
+  // The precondition is what makes the derivation a derivation: each of these
+  // rows really is re-derived by RULE 11 rather than passed over, which is the
+  // claim the flip below then falsifies.
+  for (const [row, cls] of [[nonAnswerRead, "NON-ANSWER-READ"], [answerUnreadable, "ANSWER-UNREADABLE"]] as const) {
+    assert.deepEqual(
+      classDisagreements([row]),
+      [],
+      `precondition: a correctly filed ${cls} row must re-derive to itself`,
+    );
+    assert.deepEqual(
+      underivedRows([row]),
+      [],
+      `precondition: a ${cls} row carrying its measurement must not be reported as un-verifiable`,
+    );
+  }
+
+  assert.ok(
+    classDisagreements([{ ...nonAnswerRead, class: "ANSWERS" }]).length > 0,
+    "the gate must reject a NON-ANSWER-READ whose 2xx carried non-answer text, filed as ANSWERS — that advertises a model that serves the activity placeholder as though it answered",
+  );
+  assert.ok(
+    classDisagreements([{ ...answerUnreadable, class: "ANSWERS" }]).length > 0,
+    "the gate must reject an ANSWER-UNREADABLE filed as ANSWERS — the driver read nothing, so nothing was answered",
+  );
+  assert.ok(
+    classDisagreements([{ ...answerUnreadable, class: "SIGN-OUT" }]).length > 0,
+    "the gate must reject an ANSWER-UNREADABLE filed as SIGN-OUT — no sign-in condition is present in that measurement, and the named remedy would be a credential capture that cannot fix a selector",
+  );
+
+  // (l) a row the gate genuinely cannot re-derive is NAMED, not skipped.
+  assert.ok(
+    underivedRows([
+      { model: "fabricated-empty", class: "SIGN-OUT", measuredAt: "2026-09-30", method: "hand-note" },
+    ]).length > 0,
+    "the gate must REPORT a row that carries no measurement it could re-derive from, rather than passing over it unread",
+  );
+  assert.deepEqual(
+    underivedRows([nonAnswerRead, answerUnreadable]),
+    [],
+    "and must NOT report a row that does carry a measurement",
   );
 });
