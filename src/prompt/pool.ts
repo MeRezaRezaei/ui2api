@@ -1242,12 +1242,57 @@ export class ChatPool {
   }
 }
 
+/* How long this worker's own page gets to answer the round-trip below. A page
+   that cannot answer inside this bound is not slow, it is unreachable, and an
+   unbounded wait would let one wedged page wedge the whole reaper sweep. */
+const WORKER_PROBE_TIMEOUT_MS = 5_000;
+
+/* GOAL 169 — what a worker's health has to be MEASURED against.
+
+   The previous check performed a real round-trip and then DISCARDED its answer
+   (`await ...evaluate(() => 1).catch(() => {})`, the resolved value unused),
+   and returned `_closed === false && pages().length > 0`. Both of those are
+   facts about the CONTEXT OBJECT, not about the page's CDP target: a page whose
+   target has been closed still leaves a context that reports itself open and
+   still lists the stale page entry. So `live` was, in practice, the claim "this
+   driver was not closed" wearing the name of a connection check.
+
+   That is exactly the defect GOAL 157 named one layer up, and it was MEASURED on
+   2026-09-30: `/status` reported a v0 worker `health:"live"` while CDP listed 17
+   targets and none on v0.app, and the request behind it timed out with a named
+   502.
+
+   `live` now means what it says — the driver's OWN page answered a round-trip
+   over CDP just now. The probe was already being paid for on every sweep and
+   every release; this makes its answer count instead of discarding it, so the
+   check costs exactly what it always cost and is true. It is not a louder
+   check: no new field, no new probe, no extra work, only the existing
+   measurement is finally read. A page that cannot be reached is not live. */
 async function isWorkerUsable(w: PoolWorker): Promise<boolean> {
   try {
     const page: Page | undefined = (w.driver as unknown as { page?: Page }).page;
-    const ctx = page?.context();
-    if (!ctx) return false;
-    await ctx.pages()[0]?.evaluate(() => 1).catch(() => {});
+    if (!page) return false;
+    const ctx = page.context();
+    // Ask the driver's OWN page first — pages()[0] may be a different tab — and
+    // fall back to the context's first page when the own page exposes no probe
+    // (a driver handle that carries only a context). Whichever is asked, the
+    // ANSWER decides: this is the change that makes `live` mean connected.
+    const candidates = [page, ...ctx.pages()];
+    const probe = candidates.find((p): p is Page => typeof (p as Page).evaluate === "function");
+    if (!probe) return false;
+    const answered = await Promise.race([
+      probe.evaluate(() => 1).then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        const t = setTimeout(() => resolve(false), WORKER_PROBE_TIMEOUT_MS);
+        t.unref?.();
+      }),
+    ]);
+    if (!answered) return false;
+    // Both still checked, and both still narrow: a closed context or an emptied
+    // page list is not a usable worker even if some other page answered.
     return !(ctx as unknown as { _closed?: boolean })._closed && (ctx.pages().length ?? 0) > 0;
   } catch {
     return false;

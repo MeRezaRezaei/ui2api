@@ -62,10 +62,13 @@ function setBrowser(pool: ChatPool, handle: unknown): void {
   (pool as unknown as { browser?: unknown }).browser = handle;
 }
 
-// A driver whose page/context probe PASSES (a live idle page).
+// A driver whose page/context probe PASSES (a live idle page). A real Playwright
+// Page carries `evaluate` on ITSELF — the GOAL 169 check probes the driver's own
+// page, so the double must model that too, or it would model a page that cannot
+// be asked anything.
 function liveDriver(): unknown {
   return {
-    page: { context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }) },
+    page: { evaluate: async () => 1, context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }) },
     close: async () => {},
     ask: async () => ({}),
   };
@@ -90,7 +93,7 @@ function deadDriver(): unknown {
 // the pool's shutdown is not left holding a promise that can never settle.
 function wedgedDriver(): unknown {
   return {
-    page: { context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }) },
+    page: { evaluate: async () => 1, context: () => ({ pages: () => [{ evaluate: async () => 1 }], _closed: false }) },
     close: async () => {},
     ask: () => new Promise<never>(() => {}),
   };
@@ -183,6 +186,81 @@ test("GOAL87: a liveness probe that THROWS on a set handle is \"down\", not \"up
     assert.notEqual(st.browser, "up", "a probe that throws must never be read as up");
     assert.equal(st.browser, "down");
     assert.match(st.browserProbe, /liveness probe threw/);
+  } finally {
+    await pool.close();
+  }
+});
+
+// ── (1b) GOAL 169 — a worker whose CDP target is GONE is not "live" ───────────
+
+// The shape MEASURED live on 2026-09-30: `/status` reported a v0 worker
+// `health:"live"` while CDP listed 17 targets and none on v0.app, and a poller
+// running beside the request captured zero snapshots.
+//
+// It is deliberately NOT `deadDriver()` (no page at all, which the reaper
+// already caught). The context object is still there and still reports itself
+// open — that is exactly why the old check passed — but the PAGE'S TARGET IS
+// GONE, so the only probe that could tell the truth (an `evaluate` round-trip
+// over CDP) REJECTS. `ctx.pages()` still returns the stale entry and `_closed`
+// is still false: two facts that are true and that prove nothing about a
+// target the browser no longer has.
+function vanishedTargetDriver(): unknown {
+  return {
+    page: {
+      context: () => ({
+        pages: () => [
+          {
+            evaluate: async () => {
+              throw new Error("Target page, context or browser has been closed");
+            },
+          },
+        ],
+        _closed: false,
+      }),
+    },
+    close: async () => {},
+    ask: async () => ({}),
+  };
+}
+
+test("GOAL169: a worker whose CDP target is ABSENT is never reported \"live\"", async () => {
+  const pool = emptyPool({ reaperIntervalMs: 0 });
+  insertWorker(pool, { profileId: "v0", driver: vanishedTargetDriver(), busy: false } as unknown as PoolWorker);
+  try {
+    const report = await pool.sweep();
+    assert.equal(report.checked, 1, "the sweep must have checked this idle worker");
+    assert.equal(report.evicted, 1, "a page whose target is gone must be evicted, not kept as capacity");
+    const st = pool.status;
+    for (const w of st.workers) {
+      assert.notEqual(
+        w.health,
+        "live",
+        `a page whose CDP target is gone must not read as live — the old check consulted only ctx._closed and ctx.pages().length, both of which still read healthy here (got ${w.health})`,
+      );
+    }
+    assert.equal(
+      st.warmLive,
+      0,
+      "warmLive counts only pages a real probe PROVED live — a page that cannot be reached is not one of them",
+    );
+  } finally {
+    await pool.close();
+  }
+});
+
+test("GOAL169: release() does not return a target-less page to the warm pool", async () => {
+  const pool = emptyPool({ reaperIntervalMs: 0 });
+  const worker = { profileId: "v0", driver: vanishedTargetDriver(), busy: true, busySince: Date.now() } as unknown as PoolWorker;
+  insertWorker(pool, worker);
+  try {
+    await pool.release(worker);
+    const st = pool.status;
+    assert.equal(
+      st.warmLive,
+      0,
+      "a page released back into the pool must have answered a real probe first; one whose target is gone is closed, not warmed",
+    );
+    assert.equal(st.total, 0, "the target-less page must not sit in the pool counting as capacity");
   } finally {
     await pool.close();
   }
