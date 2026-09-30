@@ -196,9 +196,12 @@ export function unmatchedSelectorIn(message: string): string | null {
   return UNMATCHED_SELECTOR_PATTERNS.find((re) => re.test(message))?.source ?? null;
 }
 
-/** The closed, ordered decision. Order is the whole honesty argument: a
- *  challenge is checked BEFORE a login, because a challenge interstitials a
- *  login page too and "capture a session" is the wrong action for a bot wall. */
+/** The closed, ordered decision. Order is the whole honesty argument, in two
+ * places: a challenge is checked BEFORE a login, because a challenge
+ * interstitials a login page too and "capture a session" is the wrong action for
+ * a bot wall; and a 2xx the service reports as carrying a non-answer is checked
+ * BEFORE ANSWERS, because ANSWERS fires on any non-empty answerText and would
+ * otherwise claim a read that returned the wrong node. */
 export function classifyOutcome(o: Outcome): Classification {
   if (o.noResponse || o.httpStatus === 0) {
     if (!idle(o.poolAtRequest)) {
@@ -207,20 +210,25 @@ export function classifyOutcome(o: Outcome): Classification {
     return { cls: "UNCLASSIFIED", reason: `no HTTP response at an IDLE pool (busy=${String(o.poolAtRequest?.busy)}) — a model property with no named cause; widen a class on purpose or record the finding` };
   }
 
-  if (o.answerText && o.answerText.trim().length > 0 && o.httpStatus < 400) {
-    return { cls: "ANSWERS", reason: `HTTP ${o.httpStatus} with real model output` };
-  }
-
   // A 2xx that carried text is the sharpest hazard in this set, because every
-  // other rule keys on a failure and this one arrives looking like success. It
-  // is checked BEFORE the ANSWERS branch can fire on any answerText, and it
-  // requires the pool to have been idle: a non-answer served under contention
-  // is a measurement of the queue, not of the model.
+  // other rule keys on a failure and this one arrives looking like success — so
+  // it is settled BEFORE the ANSWERS branch, which would otherwise swallow it:
+  // ANSWERS fires on any non-empty answerText below 400, and the shape this rule
+  // exists for (a 2xx whose served text the service itself names as not-the-
+  // answer) always carries text, so placing this after ANSWERS made the branch
+  // unreachable for every input it names. It requires the pool to have been
+  // idle: a non-answer served under contention is a measurement of the queue,
+  // not of the model, so a busy pool is refused here as UNCLASSIFIED rather
+  // than answered in either direction.
   if (o.httpStatus >= 200 && o.httpStatus < 300 && nonAnswerTextIn(o.message)) {
     if (!idle(o.poolAtRequest)) {
       return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) carried text the service itself names as not-an-answer — not a settled measurement` };
     }
-    return { cls: "NON-ANSWER-READ", reason: `HTTP ${o.httpStatus} at an IDLE pool carried text the service itself reports is not the answer ("${nonAnswerTextIn(o.message)}") — the answer selector resolved inside a region the site marks as activity/status, so the read SUCCEEDED and the text was still not an answer; the action is a profile/selector retune (declare that region non-answer), never ANSWERS` };
+    return { cls: "NON-ANSWER-READ", reason: `HTTP ${o.httpStatus} at an IDLE pool carried text the service itself reports is not the answer ("${nonAnswerTextIn(o.message)}") — the read SUCCEEDED and the text was still not an answer; the action is to find which node the site served that text from and retune the profile against a capture, never ANSWERS` };
+  }
+
+  if (o.answerText && o.answerText.trim().length > 0 && o.httpStatus < 400) {
+    return { cls: "ANSWERS", reason: `HTTP ${o.httpStatus} with real model output` };
   }
 
   // The selector matched nothing at all. This is NOT a sign of a model that

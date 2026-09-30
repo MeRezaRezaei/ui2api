@@ -255,8 +255,50 @@ const VENICE_EVIDENCE =
 test("NON-ANSWER-READ: a 2xx at an idle pool carrying text that is not the answer", () => {
   const c = classifyOutcome({ httpStatus: 200, message: V0_EVIDENCE, poolAtRequest: IDLE });
   assert.equal(c.cls, "NON-ANSWER-READ", `expected NON-ANSWER-READ, got ${c.cls}: ${c.reason}`);
-  assert.match(c.reason, /profile\/selector retune/);
+  assert.match(c.reason, /never ANSWERS/);
   assert.notEqual(c.cls, "ANSWERS", "a 2xx carrying a non-answer must never be filed as ANSWERS");
+});
+
+// GOAL 167: the pin above passed while the branch was DEAD. It omitted
+// answerText, and the ANSWERS branch is gated on a non-empty answerText — so
+// with no answerText present that input could not reach the ANSWERS branch even
+// when it sat in front of it, and the green test proved nothing about the
+// ordering. The shape the class actually exists for is a 2xx that DID return
+// text (the service served it, so the driver has it) which the service itself
+// says is not the answer; that is what the next pin feeds, and it is the input
+// that returned ANSWERS before the branch was moved ahead of it.
+
+test("REACHABILITY: a 2xx that DID return text the service names as a non-answer is NON-ANSWER-READ, not ANSWERS", () => {
+  const served = "Exploring ideas...";
+  const c = classifyOutcome({
+    httpStatus: 200,
+    answerText: served,
+    message: V0_EVIDENCE,
+    poolAtRequest: IDLE,
+  });
+  assert.equal(c.cls, "NON-ANSWER-READ", `the branch is still unreachable for the shape it names — got ${c.cls}: ${c.reason}`);
+  assert.notEqual(c.cls, "ANSWERS", "a read that returned a node the service itself names as a non-answer is not ANSWERS");
+});
+
+test("ANTI-VACUITY: the reordering must not steal a real answer — a 2xx carrying ordinary output is still ANSWERS", () => {
+  const real = classifyOutcome({
+    httpStatus: 200,
+    answerText: "PONG",
+    message: "HTTP 200 in 24204ms at pool 0/4 idle; body carried answer text 'PONG'",
+    poolAtRequest: IDLE,
+  });
+  assert.equal(real.cls, "ANSWERS", `a genuine answer was stolen by the non-answer rule — got ${real.cls}: ${real.reason}`);
+
+  // …and at a BUSY pool the marker-bearing 2xx is still refused rather than
+  // answered in either direction, because under contention it is a measurement
+  // of the queue.
+  const contended = classifyOutcome({
+    httpStatus: 200,
+    answerText: "Exploring ideas...",
+    message: V0_EVIDENCE,
+    poolAtRequest: BUSY,
+  });
+  assert.equal(contended.cls, "UNCLASSIFIED", "a non-answer 2xx under contention must be refused, not filed in either direction");
 });
 
 test("ANSWER-UNREADABLE: an answer selector that matched nothing, at an idle pool", () => {
@@ -365,44 +407,51 @@ const rowFor = (model: string): ShippedRow => {
   return r as ShippedRow;
 };
 
-test("the shipped v0 row is re-filed NON-ANSWER-READ and the classifier AGREES from the record's own evidence", () => {
+test("the shipped v0 row re-derives UNCLASSIFIED, and the record says so — the gate naming it is reported, not silenced", () => {
   const r = rowFor("v0");
-  assert.equal(r.class, "NON-ANSWER-READ");
   const derived = classifyOutcome({
     httpStatus: r.httpStatus as number,
     message: r.evidence as string,
     poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown },
   });
-  assert.equal(derived.cls, r.class, `the classifier derives ${derived.cls} from the shipped v0 evidence — RULE 11's rule would reject this row`);
-  // The measured values are the ones the 2026-09-30 GOAL-163 sweep printed.
-  assert.equal(r.measuredAt, "2026-09-30T15:31:32.680Z");
-  assert.equal(r.httpStatus, 200);
+  // The measured values are the ones the 2026-09-30 GOAL-165 sweep printed: four
+  // serial attempts at an idle pool, every one the SAME named 502 no-answer
+  // timeout. No member of the closed set names that condition, so the honest
+  // derivation is the classifier's refusal token and the row carries it.
+  assert.equal(r.httpStatus, 502);
   assert.deepEqual(r.poolAtRequest, { busy: 0, total: 3, queued: 0 });
-  assert.match(r.evidence as string, /13543ms/);
-  assert.match(r.evidence as string, /Exploring ideas\.\.\./);
-  assert.notEqual(r.class, "ANSWERS", "v0 returned a status string, not an answer; upgrading it would be a fabrication");
+  assert.equal(derived.cls, "UNCLASSIFIED");
+  assert.equal(r.class, "UNCLASSIFIED", "the row must carry what the classifier derives, not what would look better");
+  assert.notEqual(r.class, "ANSWERS", "v0 never returned an answer; upgrading it would be a fabrication");
+  assert.notEqual(r.class, "CONTENDED-TIMEOUT", "the pool was IDLE, so this is not a measurement of the queue");
+  assert.notEqual(r.class, "SIGN-OUT", "the message mentions a possible sign-in wall but names no sign-in requirement");
 });
 
-test("the shipped venice row is re-filed ANSWER-UNREADABLE and the classifier AGREES from the record's own evidence", () => {
+test("the shipped venice row re-derives NON-ANSWER-READ, and the classifier AGREES from the record's own evidence", () => {
   const r = rowFor("venice");
-  assert.equal(r.class, "ANSWER-UNREADABLE");
   const derived = classifyOutcome({
     httpStatus: r.httpStatus as number,
     message: r.evidence as string,
     poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown },
   });
-  assert.equal(derived.cls, r.class, `the classifier derives ${derived.cls} from the shipped venice evidence — RULE 11's rule would reject this row`);
-  assert.equal(r.measuredAt, "2026-09-30T15:31:46.237Z");
-  assert.equal(r.httpStatus, 502);
-  assert.deepEqual(r.poolAtRequest, { busy: 0, total: 4, queued: 0 });
-  assert.match(r.evidence as string, /109302ms/);
-  assert.match(r.evidence as string, /match ZERO nodes/);
-  assert.notEqual(r.class, "ANSWERS", "the driver never read venice's answer; the site answered, the profile could not see it");
+  assert.equal(derived.cls, "NON-ANSWER-READ", `expected NON-ANSWER-READ from the shipped venice evidence, got ${derived.cls}: ${derived.reason}`);
+  assert.equal(r.class, derived.cls, "the row must carry the derived class — RULE 11 re-derives every measured row");
+  assert.equal(r.measuredAt, "2026-09-30T16:33:30Z");
+  assert.equal(r.httpStatus, 200);
+  assert.deepEqual(r.poolAtRequest, { busy: 0, total: 3, queued: 0 });
+  assert.match(r.evidence as string, /41793ms/);
+  assert.match(r.evidence as string, /NOT the requested token/);
+  assert.notEqual(r.class, "ANSWERS", "the 200 served the model's intermediate reasoning, not the requested token");
 });
 
 test("the ANSWERS set did not grow — re-filing is not promoting", () => {
   const answering = SHIPPED.filter((r) => r.class === "ANSWERS").map((r) => r.model).sort();
   assert.deepEqual(answering, ["duckduckgo", "gemini"], `the ANSWERS set changed: ${answering.join(", ")} — v0 and venice must not be promoted to ANSWERS by a widened vocabulary`);
-  assert.equal(SHIPPED.filter((r) => r.class === "UNCLASSIFIED").length, 0, "no row may be left in the classifier's refusal token");
+  // v0 stays UNCLASSIFIED on purpose: the closed set has no member for a named
+  // 502 no-answer timeout at an idle pool, and inventing one here would be the
+  // widening RULE 4 exists to force a human to make. RULE 4 is RED naming v0 and
+  // that is the honest report, not a failure to file.
+  const unclassified = SHIPPED.filter((r) => r.class === "UNCLASSIFIED").map((r) => r.model).sort();
+  assert.deepEqual(unclassified, ["v0"], `only v0 may remain UNCLASSIFIED, got ${unclassified.join(", ")}`);
 });
 
