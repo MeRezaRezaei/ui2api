@@ -218,6 +218,98 @@ github_release:
       - .release/
     expire_in: 30 days
 
+# --------------------------------------------------------------- mirrors ----
+#
+# THE OPERATOR'S TWO ARTIFACTS, and the reason there are two:
+#
+#   ui2api-full  PRIVATE. The complete history, .brain and all, every original
+#                commit hash intact. This is the durability record — the whole
+#                point is that deleting the self-hosted GitLab VPS must cost
+#                nothing.
+#   ui2api       PUBLIC.  The same project with any kind of brain removed from
+#                its HISTORY. A public repository's history cannot be
+#                unpublished, only rewritten, with forks outrunning the rewrite,
+#                so the strip has to be right the FIRST time.
+#
+# BOTH ARE BUILT BY make-public-repo.sh, which produces the two halves and
+# verifies them before anything is pushed. The script exits non-zero unless every
+# verification class passes, so a dirty public copy never reaches GitHub.
+#
+# The split is history-preserving on purpose: the operator's stated reason is
+# "they should have same ancestor to let us later on make the full repo again".
+# Measured on main: 587 commits become 523 (code, .brain absent from ALL history)
+# plus 140 (brain, nothing but .brain), and the union is exactly 587 — every
+# commit pruned from one half is present in the other. git-filter-repo's
+# commit-map carries the same original-sha column in both halves and is the join
+# key that makes reconstruction possible, so it is committed into both repos.
+#
+# WHY THE PUBLIC PUSH IS THE ONE FORCE PUSH IN THIS FILE. The sanitized history
+# is a deliberate derivative, not a fast-forward: it is the same commits with the
+# brain paths removed, which necessarily rewrites every hash. The mirror's
+# no-force rule exists so an UNEXPECTED divergence stops a human — but here the
+# divergence is the intended operation. Scoped to this one job, to these two
+# repos, and only after the verification above has passed.
+public_mirror:
+  stage: deploy
+  image: node:24-bookworm
+  tags: ["ui2api"]
+  timeout: 40 minutes
+  interruptible: false
+  needs: ["verify"]
+  dependencies: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  environment:
+    name: agent-write
+    action: prepare
+    auto_stop_in: 1 day
+  script:
+    - export HOME=/tmp/.opencode-home && mkdir -p "$HOME"
+    - apt-get update -qq && apt-get install -y -qq curl git jq python3 >/dev/null
+    - 'command -v jq >/dev/null || { echo "FATAL jq missing"; exit 1; }'
+    # filter-repo is the tool that makes the split possible. It is NOT a
+    # dependency of this image, and a job that silently lacks it would publish
+    # an UNSANITIZED copy, so it is asserted rather than assumed.
+    - pip3 install --quiet --break-system-packages git-filter-repo || pip3 install --quiet git-filter-repo
+    - 'git filter-repo --version >/dev/null 2>&1 || { echo "FATAL git-filter-repo unavailable - refusing to publish"; exit 1; }'
+    - git config --global user.email "mirror@${CI_SERVER_HOST}"
+    - git config --global user.name "GitLab Mirror"
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    # Build AND verify both halves. Non-zero exit here means DO NOT PUBLISH, and
+    # the push lines below never run.
+    - ./scripts/ci/make-public-repo.sh --work "$CI_PROJECT_DIR/.mirror" --keep
+    - |
+      set -uo pipefail
+      [ -n "${GH_TOKEN:-}" ] || { echo "MIRROR-SKIP: no GH_TOKEN in scope. Nothing was pushed."; exit 0; }
+      PRIV="$CI_PROJECT_DIR/.mirror/private-full"
+      PUB="$CI_PROJECT_DIR/.mirror/public-sanitized"
+      MAPS="$CI_PROJECT_DIR/.mirror/maps"
+      # The token goes in an Authorization header or a credential-free URL only
+      # via git's askpass. It is never echoed and never written to a file.
+      export GIT_ASKPASS=/tmp/.askpass.sh
+      printf '#!/bin/sh\necho "$GH_TOKEN"\n' > "$GIT_ASKPASS" && chmod 700 "$GIT_ASKPASS"
+
+      echo "== PRIVATE FULL -> github/$GITHUB_FULL_REPO =="
+      git -C "$PRIV" remote remove origin 2>/dev/null || true
+      git -C "$PRIV" remote add origin "https://github.com/$GITHUB_FULL_REPO.git"
+      timeout -k 10 1200 git -C "$PRIV" push --mirror origin \
+        || { echo "MIRROR-FAIL: private-full push refused — a human must look"; exit 1; }
+
+      echo "== PUBLIC SANITIZED -> github/$GITHUB_REPO =="
+      git -C "$PUB" remote remove origin 2>/dev/null || true
+      git -C "$PUB" remote add origin "https://github.com/$GITHUB_REPO.git"
+      # Force, and ONLY here: a sanitized history is a deliberate rewrite. The
+      # commit-maps travel with it so the full repo can be reconstructed later.
+      timeout -k 10 1200 git -C "$PUB" push --mirror --force origin \
+        || { echo "MIRROR-FAIL: public-sanitized push refused"; exit 1; }
+      rm -f "$GIT_ASKPASS"
+      echo "MIRROR-OK: private-full -> $GITHUB_FULL_REPO ; public-sanitized -> $GITHUB_REPO"
+  artifacts:
+    paths:
+      - .mirror/maps/
+    expire_in: 90 days
+    when: always
+
 # >>> opencode-agent (opencode-ci kit) >>>
 # ---------------------------------------------------------------------------
 # OpenCode agent job (OpenCode + OmniRoute)
