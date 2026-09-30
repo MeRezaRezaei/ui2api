@@ -28,6 +28,8 @@ import {
   handleOpenAIRoutes,
   buildNativeToolCall,
   modelToolSupport,
+  modelToolMechanisms,
+  modelCapabilities,
   nativeToolSites,
   NATIVE_TOOL_READERS,
   MODEL_STREAMING_MODE,
@@ -44,6 +46,12 @@ const profile = (id: string, name: string, url: string) =>
 const PROFILES: Record<string, ChatSiteProfile> = {
   deepseek: profile("deepseek", "DeepSeek", "https://chat.deepseek.com"),
   kimi: profile("kimi", "Kimi", "https://www.kimi.ai"),
+  // gemini is here because it is one of the ids the 2026-09-30 measurement
+  // record calls ANSWERS. The two ids above are both SIGN-OUT, so a daemon
+  // serving only them advertises nothing — correctly, and uselessly for a
+  // pin about the shape of an ADVERTISED entry. The fixture follows the record,
+  // the same way the daemon does.
+  gemini: profile("gemini", "Gemini", "https://gemini.google.com"),
 };
 
 type AskResult = {
@@ -501,18 +509,37 @@ function assertModelsContract(body: ModelsBody, where: string): void {
 }
 
 test("§4 /v1/models advertises streamingMode:\"replay\" and a native|soft|none tools value on EVERY entry", async () => {
+  // The tool level is a property of the ENTRY BUILDER, so it is asserted over
+  // every ADVERTISED entry (the promise surface) rather than over two
+  // hand-picked site ids. Those ids used to be kimi and deepseek; the 2026-09-30
+  // measurement record files both as SIGN-OUT, so GOAL 159 withheld them from
+  // /v1/models, and a pin that names them now tests the absence of a model
+  // rather than the shape of an entry. Which ids are advertised is a MEASURED
+  // fact that moves with the record; the shape of each entry is a CONTRACT.
   const withSoft = await serve({ pool: stubPool(CLEAN), softTools: true });
   try {
     const b = (await getModels(withSoft.port)).json;
     assertModelsContract(b, "models (soft wired)");
-    const kimi = b.data.find((m) => m.id === "kimi")!;
-    const deepseek = b.data.find((m) => m.id === "deepseek")!;
-    // Derived, not typed: kimi HAS a measured read-back path, deepseek does not.
-    assert.equal(kimi.tools, "native", "kimi has a measured native reader and must be advertised as native");
-    assert.deepEqual(kimi.toolMechanisms, ["native", "soft"]);
-    assert.equal(deepseek.tools, "soft", "a site with no reader but a wired soft layer is soft");
-    assert.equal(deepseek.toolCallShape, "openai.function_call");
-    assert.equal(kimi.toolCallProvenanceField, "choices[0].ui2api.toolCall.mechanism");
+    // Every advertised entry carries a well-formed tool block. The native
+    // branch is exercised BELOW against the entry builder directly, because the
+    // measured native readers (kimi, deepseek) are both SIGN-OUT in the
+    // 2026-09-30 record and therefore withheld from /v1/models — a fact about
+    // which models answer, not about the entry shape.
+    for (const m of b.data) {
+      assert.ok(
+        m.tools === "native" || m.tools === "soft" || m.tools === "none",
+        `${m.id}: advertised tools value "${m.tools}" is not one of native|soft|none`,
+      );
+      // With the soft layer wired, a site is never "none": a `tools` array
+      // would be IGNORED, so claiming none would be a lie.
+      assert.ok(
+        m.tools !== "none",
+        `${m.id}: a site with a wired soft layer cannot be advertised as tools:"none" — a tools array would be ignored`,
+      );
+      if (m.tools === "soft") {
+        assert.equal(m.toolCallShape, "openai.function_call", `${m.id}: a soft site declares the OpenAI call shape`);
+      }
+    }
   } finally {
     withSoft.close();
   }
@@ -521,14 +548,57 @@ test("§4 /v1/models advertises streamingMode:\"replay\" and a native|soft|none 
   try {
     const b = (await getModels(bare.port)).json;
     assertModelsContract(b, "models (no tool layer)");
-    // With no tool layer wired, a site with a reader is still native and a site
-    // without one is honestly "none" — a `tools` array would be IGNORED.
-    assert.equal(b.data.find((m) => m.id === "kimi")!.tools, "native");
-    assert.equal(b.data.find((m) => m.id === "deepseek")!.tools, "none");
-    assert.equal(b.data.find((m) => m.id === "deepseek")!.toolCallShape, null);
+    for (const m of b.data) {
+      const expected = Object.prototype.hasOwnProperty.call(NATIVE_TOOL_READERS, m.id) ? "native" : "none";
+      assert.equal(m.tools, expected, `${m.id}: the advertised tool level is DERIVED from NATIVE_TOOL_READERS`);
+      if (expected === "none") assert.equal(m.toolCallShape, null, `${m.id}: tools:"none" declares no call shape`);
+    }
   } finally {
     bare.close();
   }
+
+  // The DERIVATION itself, asserted on the entry builder over EVERY site the
+  // record could advertise — including the ones currently withheld. This is the
+  // half that would rot if the wire set moved: a hand-written ["kimi"] somewhere
+  // would satisfy a weaker pin and rot silently, so the native/soft/none
+  // mapping is checked against NATIVE_TOOL_READERS membership in both
+  // directions, for a reader site and for a site with none.
+  const nativeSite = Object.keys(NATIVE_TOOL_READERS)[0];
+  assert.ok(nativeSite, "anti-vacuity: NATIVE_TOOL_READERS is empty, so the native branch is unexercised");
+  // The DERIVATION lives in modelToolSupport / modelToolMechanisms, which read
+  // NATIVE_TOOL_READERS — never in a hand-written list. Asserted here, over a
+  // reader site and a site with none, in both the wired and unwired cases, so a
+  // future edit that types a literal id fails here rather than passing on a set
+  // of advertised ids that happens to agree today.
+  assert.equal(modelToolSupport({ softTools: true, softEngine: undefined } as never, nativeSite), "native", "a measured reader is native when the soft layer is wired");
+  assert.equal(modelToolSupport({ softTools: false, softEngine: undefined } as never, nativeSite), "native", "a measured reader is native with no soft layer");
+  assert.equal(modelToolSupport({ softTools: true, softEngine: undefined } as never, "no-reader-site"), "soft", "no reader + wired soft layer is soft");
+  assert.equal(modelToolSupport({ softTools: false, softEngine: undefined } as never, "no-reader-site"), "none", "no reader + no soft layer is honestly none");
+  assert.deepEqual(
+    modelToolMechanisms({ softTools: true, softEngine: undefined } as never, nativeSite),
+    ["native", "soft"],
+    "a native site advertises BOTH mechanisms — a single-value field would hide the soft layer",
+  );
+  assert.deepEqual(
+    modelToolMechanisms({ softTools: false, softEngine: undefined } as never, nativeSite),
+    ["native"],
+    "with no soft layer a native site advertises native alone",
+  );
+  // …and the entry builder renders whatever the derivation returned, unchanged.
+  const entry = (id: string, soft: boolean) =>
+    modelCapabilities(profile(id, id, `https://${id}.example`), {
+      toolSupport: modelToolSupport({ softTools: soft, softEngine: undefined } as never, id),
+      toolMechanisms: modelToolMechanisms({ softTools: soft, softEngine: undefined } as never, id),
+      onSurface: new Map<string, { packaged: boolean }>(),
+    });
+  assert.equal(entry(nativeSite, true).toolCallShape, "openai.function_call", "a wired site declares the OpenAI call shape");
+  assert.equal(
+    entry(nativeSite, true).toolCallProvenanceField,
+    "choices[0].ui2api.toolCall.mechanism",
+    "a native tool call must say where its provenance comes from",
+  );
+  assert.equal(entry("no-reader-site", false).toolCallShape, null, "no soft layer means no call shape is declared");
+  assert.equal(entry("no-reader-site", false).toolCallProvenanceField.length > 0, true, "the provenance field is always named, so a consumer can branch on it");
 });
 
 test("§4 the advertised tool level is DERIVED from the read-back registry, never from a literal list", () => {

@@ -132,14 +132,33 @@ function stubPool(answer: string) {
   };
 }
 
-test("GET /v1/models lists configured sites", async () => {
+test("GET /v1/models advertises only the MEASURED-answering ids, and names the rest", async () => {
   const { server, port } = await startTestServer(stubPool("x"));
   try {
     const res = await fetch(`http://127.0.0.1:${port}/v1/models`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { object: string; data: Array<{ id: string }> };
+    const body = (await res.json()) as {
+      object: string;
+      data: Array<{ id: string }>;
+      withheld?: Array<{ model: string; class: string; reason: string }>;
+      advertisement?: { offered: number; withheld: number; addressable: number };
+    };
     assert.equal(body.object, "list");
-    assert.deepEqual(body.data.map((d) => d.id), ["deepseek", "kimi"]);
+    // This daemon serves deepseek and kimi, and the 2026-09-30 measurement
+    // record files BOTH as SIGN-OUT — so the honest advertisement is empty and
+    // both are withheld by name. The pin used to assert the opposite ("both are
+    // listed"), which was the promise the record contradicts.
+    assert.deepEqual(body.data.map((d) => d.id), []);
+    const withheld = new Map((body.withheld ?? []).map((w) => [w.model, w]));
+    for (const id of ["deepseek", "kimi"]) {
+      const w = withheld.get(id);
+      assert.ok(w, `${id}: not advertised and not named as withheld — the omission is silent`);
+      assert.equal(w.class, "SIGN-OUT");
+      assert.ok(w.reason.length > 20, `${id}: the omission carries no readable reason`);
+    }
+    assert.equal(body.advertisement?.addressable, 2, "both served ids are addressable");
+    assert.equal(body.advertisement?.offered, 0, "neither was measured answering");
+    assert.equal(body.advertisement?.withheld, 2);
   } finally {
     server.close();
   }

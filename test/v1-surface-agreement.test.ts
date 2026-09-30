@@ -172,6 +172,8 @@ interface Measured {
   registryChatIds: string[];
   surfaceIds: string[];
   allowListIds: string[];
+  /** The ids /v1/models NAMES as withheld, with the reason it gives for each. */
+  raw?: { withheld?: Array<{ model: string; reason?: string }> };
 }
 
 async function measure(base: string, allowListIds: string[]): Promise<Measured> {
@@ -187,6 +189,7 @@ async function measure(base: string, allowListIds: string[]): Promise<Measured> 
       .sort(),
     surfaceIds: defaultChatSurface().map((e) => e.id),
     allowListIds,
+    raw: models.body as Measured["raw"],
   };
 }
 
@@ -222,25 +225,47 @@ test("/v1: /v1/models and the servable set are EQUAL in both directions — noth
     }
     assert.deepEqual(listedButUnservable, [], "an id on /v1/models that /v1/chat/completions will not serve");
 
-    // reverse: servable ⇒ listed. The half that matters probes ids OUTSIDE the
-    // advertised set — every installed package the daemon did not list, plus a
-    // nonsense id — and requires that NONE of them is servable. (Probing the
-    // driveable surface instead would be vacuous on a default daemon: the
-    // surface IS profilesById, so every member is listed by construction and
-    // the loop can never find a difference.)
+    // reverse: an id the daemon CAN serve but does not advertise is allowed only
+    // when the daemon NAMES the omission (GOAL 159). The old rule here was
+    // "servable ⇒ listed", which was the promise the measurement record now
+    // contradicts: 22 addressable models were advertised while 20 of 22 could
+    // not answer. The contract is now two-sided and honest —
+    //   listed ⇒ servable                       (a promise kept), and
+    //   servable-but-unlisted ⇒ NAMED omission  (a promise withdrawn in words).
+    // An unlisted id that is servable AND unnamed is the defect: a consumer
+    // would never find it. A withheld model stays DRIVEABLE — the daemon can
+    // still serve it, the surface just does not promise it — so the omission is
+    // disclosed on the catalogue, not enforced by refusing the call.
+    const listed_ = await measure(base, []);
+    assert.deepEqual(listed_.modelIds, m.modelIds, "the advertised set moved between two reads of a static daemon");
+    const advertised = new Map((m.raw?.withheld ?? []) .map((w) => [w.model, w]));
     const outside = [...buildRegistryPackages().map((p) => p.id), "no-such-model-xyz"].filter(
       (id) => !listed.has(id),
     );
     assert.ok(outside.length > 0, "anti-vacuity: expected ids outside the advertised set to probe");
-    const servableButUnlisted: string[] = [];
+    const servableButUnnamed: string[] = [];
+    const namedOmissions: string[] = [];
     for (const id of outside) {
       const r = await askModel(base, id);
-      if (r.status === 200) servableButUnlisted.push(id);
+      if (r.status !== 200) continue;
+      const w = advertised.get(id);
+      if (w && typeof w.reason === "string" && w.reason.trim().length > 0) namedOmissions.push(id);
+      else servableButUnnamed.push(id);
     }
     d.diagnostic(
-      `listed=${m.modelIds.length} probed-outside=${outside.length} forward-diffs=${listedButUnservable.length} reverse-diffs=${servableButUnlisted.length}`,
+      `listed=${m.modelIds.length} probed-outside=${outside.length} forward-diffs=${listedButUnservable.length} named-omissions=${namedOmissions.length} unnamed-servable=${servableButUnnamed.length}`,
     );
-    assert.deepEqual(servableButUnlisted, [], "an id /v1/chat/completions serves that /v1/models does not advertise (a consumer would never find it)");
+    assert.deepEqual(
+      servableButUnnamed,
+      [],
+      "an id /v1/chat/completions serves that /v1/models neither lists nor names in its withheld block — a consumer would never find it, and the omission is silent",
+    );
+    // Every NAMED omission must be reachable for the consumer who was told
+    // about it: the catalogue keeps the model discoverable.
+    for (const id of namedOmissions) {
+      const pkg = buildRegistryPackages().find((p) => p.id === id);
+      assert.ok(pkg, `${id}: withheld from /v1/models but also gone from /registry — withdrawn, not disclosed`);
+    }
   });
 });
 
@@ -255,7 +280,15 @@ test("/v1: an id NOT on /v1/models gets the named unknown_model refusal — not 
     // working as packages come and go.
     const installedIds = buildRegistryPackages().map((p) => p.id).filter((id) => !listed.has(id));
     assert.ok(installedIds.length > 0, "anti-vacuity: expected installed packages that are not chat models");
-    const probes = [...installedIds, "no-such-model-xyz", "ui2api/no-such-model-xyz", "ui2api-no-such-model-xyz"];
+    // Two different reasons an id is absent from /v1/models, and they get two
+    // different refusals (GOAL 159). An id the record WITHHELDS is a real model
+    // the daemon did not promise — asking for it by name gets `model_withheld`
+    // with the measured class and the reason, never "unknown model", which
+    // would be a false statement about a model that exists. An id that is
+    // genuinely absent gets `unknown_model`.
+    const withheldIds = new Set((m.raw?.withheld ?? []).map((w) => w.model));
+    const unknownIds = installedIds.filter((id) => !withheldIds.has(id));
+    const probes = [...unknownIds, "no-such-model-xyz", "ui2api/no-such-model-xyz", "ui2api-no-such-model-xyz"];
 
     const bad: string[] = [];
     for (const id of probes) {
@@ -270,11 +303,33 @@ test("/v1: an id NOT on /v1/models gets the named unknown_model refusal — not 
         bad.push(`${id}: HTTP ${r.status} code=${ref.code} type=${ref.type} param=${ref.param}`);
       }
     }
-    d.diagnostic(`probed ${probes.length} unlisted ids, non-conforming refusals: ${bad.length}`);
+    // A withheld model asked for BY NAME must be told what it is, not that it
+    // does not exist: the record says this model was measured and could not
+    // answer, which is a statement about a real model.
+    const withheldBad: string[] = [];
+    for (const id of withheldIds) {
+      if (listed.has(id)) continue;
+      const ref = refusalOf((await getJson(base, `/v1/models/${id}`)).body);
+      if (ref.code !== "model_withheld" || ref.type !== "invalid_request_error") {
+        withheldBad.push(`${id}: code=${ref.code} type=${ref.type}`);
+        continue;
+      }
+      if (!/registry/.test(ref.message)) {
+        withheldBad.push(`${id}: the refusal names no route where the model is still reachable`);
+      }
+    }
+    d.diagnostic(
+      `probed ${probes.length} unknown ids (${bad.length} non-conforming) and ${withheldIds.size} withheld ids (${withheldBad.length} non-conforming)`,
+    );
     assert.deepEqual(
       bad,
       [],
       "an unknown model must be the NAMED refusal (404 + code unknown_model + type invalid_request_error + param model)",
+    );
+    assert.deepEqual(
+      withheldBad,
+      [],
+      "a withheld model asked for by name must answer model_withheld and name the route where it is still reachable — `unknown_model` would assert the model does not exist, which the record contradicts",
     );
     // …and the generic terminal 404 must never be what an unknown model gets.
     const one = refusalOf((await askModel(base, "no-such-model-xyz")).body);

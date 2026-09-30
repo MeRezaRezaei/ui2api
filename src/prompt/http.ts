@@ -1251,7 +1251,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           defaultSite: defaultSiteId(),
           sites: Object.keys(profilesById),
           counts: { chatModels, registryPackages, vaultAccounts: vault.accounts, vaultUsable: vault.usable },
-          advertisement: modelAdvertisementSummary(verification),
+          advertisement: modelAdvertisementSummary(verification, Object.keys(profilesById)),
           vault,
           pool: st,
           posture: daemonPosture(process.env, bindAddr),

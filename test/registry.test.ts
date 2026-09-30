@@ -10,6 +10,7 @@ import {
   listInstalledPackageIds,
   resolveDataDir,
   validManifestCapability,
+  readModelVerification,
 } from "../src/prompt/registry.js";
 import { listAccounts } from "../src/runtime/session-store.js";
 import { resolvePackagedProfile } from "../src/profile/profile.js";
@@ -68,6 +69,8 @@ describe("prompt registry", () => {
   it("builds registry packages from installed capability packages (served sites only)", () => {
     const packages = buildRegistryPackages();
     const surfaceIds = new Set(defaultChatSurface().map((e) => e.id));
+    // The MEASURED gate, read from the same record the registry build reads.
+    const answerableIds = new Set(readModelVerification().answers);
     assert.ok(Array.isArray(packages));
     // ALL-33 regression: every installed package with a packaged profile is
     // listed — /registry IS the package registry; hiding packages is not the
@@ -81,8 +84,20 @@ describe("prompt registry", () => {
       // (a) chat-surface ids keep the chat claim (chat.model === id);
       // (b) everything else carries NO chat claim at all — status/tools/
       //     accounts are kept, chat is not advertised for /v1-unservable ids.
-      if (surfaceIds.has(pkg.id)) {
-        assert.equal(pkg.chat?.model, pkg.id, `${pkg.id}: servable chat surface id must carry chat.model === id`);
+      // Three states, not two (GOAL 159). /registry is the CATALOGUE, so a
+      // package is never hidden from it; what changes is the chat PROMISE.
+      //   advertised  → `chat` present, `chat` === id  (measured answering)
+      //   withheld    → NO `chat` key + `chatWithheld` naming class and reason
+      //   not on the surface → no `chat` key and nothing to say (GOAL 34)
+      if (surfaceIds.has(pkg.id) && answerableIds.has(pkg.id)) {
+        assert.equal(pkg.chat?.model, pkg.id, `${pkg.id}: an advertised chat id must carry chat.model === id`);
+        assert.equal(pkg.chatWithheld, undefined, `${pkg.id}: advertised AND withheld at once — the catalogue contradicts itself`);
+      } else if (surfaceIds.has(pkg.id)) {
+        assert.equal(pkg.chat, undefined, `${pkg.id}: addressable but not measured answering — the chat claim must be withheld`);
+        assert.ok(
+          pkg.chatWithheld !== undefined && pkg.chatWithheld.reason.trim().length > 0,
+          `${pkg.id}: the chat claim is withheld with no named reason — the catalogue cannot explain its own omission`,
+        );
       } else {
         assert.equal(pkg.chat, undefined, `${pkg.id}: non-servable package must NOT claim chat (GOAL 34)`);
         // The WIRE shape is what consumers read: the emitted JSON has no chat
@@ -119,21 +134,44 @@ describe("prompt registry", () => {
     const surfaceIds = new Set(defaultChatSurface().map((e) => e.id));
     const installed = new Set(listInstalledPackageIds());
     const byId = new Map(packages.map((p) => [p.id, p]));
-    // direction 1: every registry chat claim is /v1-servable.
+    // direction 1: every registry chat claim is /v1-servable AND measured
+    // answering. Both, not either — the chat key is a PROMISE, and a claim the
+    // measurement record does not back is the claim GOAL 159 withdrew.
+    const answerable = new Set(readModelVerification().answers);
     for (const pkg of packages) {
       if (pkg.chat) {
         assert.ok(surfaceIds.has(pkg.id), `${pkg.id}: registry chat claim must be on the /v1 servable surface`);
+        assert.ok(
+          answerable.has(pkg.id),
+          `${pkg.id}: registry advertises a chat claim the measurement record does not call ANSWERS — a consumer would build a provider that cannot answer`,
+        );
         assert.equal(pkg.chat.model, pkg.id, `${pkg.id}: chat.model must be the site id /v1 accepts`);
       }
     }
-    // direction 2: every servable id that is an installed package carries the
-    // registry chat claim — a servable package is never left chat-less.
+    // direction 2: every MEASURED-answering id that is an installed package
+    // carries the registry chat claim — a promised model is never left
+    // chat-less. A servable-but-unmeasured id carries NO claim and a NAMED
+    // `chatWithheld` instead, which direction 3 checks.
     for (const id of surfaceIds) {
-      if (installed.has(id)) {
+      if (installed.has(id) && answerable.has(id)) {
         const pkg = byId.get(id);
-        assert.ok(pkg, `${id}: servable surfaced id must be listed on /registry`);
-        assert.ok(pkg.chat && pkg.chat.model === id, `${id}: every servable installed id must carry chat.model on /registry`);
+        assert.ok(pkg, `${id}: a measured-answering surfaced id must be listed on /registry`);
+        assert.ok(pkg.chat && pkg.chat.model === id, `${id}: a measured-answering id must carry chat.model on /registry`);
       }
+    }
+    // direction 3: an installed servable id that is NOT measured answering is
+    // withheld in WORDS, never silently dropped — the catalogue must be able to
+    // explain its own omission.
+    const withheldIds = [...surfaceIds].filter((id) => installed.has(id) && !answerable.has(id));
+    assert.ok(withheldIds.length > 0, "anti-vacuity: expected installed chat ids the record does not call ANSWERS");
+    for (const id of withheldIds) {
+      const pkg = byId.get(id);
+      assert.ok(pkg, `${id}: withheld from the chat promise but also missing from /registry`);
+      assert.equal(pkg.chat, undefined, `${id}: not measured answering, so the chat claim must be withheld`);
+      assert.ok(
+        pkg.chatWithheld && pkg.chatWithheld.reason.trim().length > 20,
+        `${id}: the withheld chat claim carries no named reason`,
+      );
     }
   });
 

@@ -781,13 +781,25 @@ export interface ModelAdvertisementSummary {
   refusal: string | null;
 }
 
-export function modelAdvertisementSummary(verification = readModelVerification()): ModelAdvertisementSummary {
-  const withheld = withheldChatModels(verification);
+export function modelAdvertisementSummary(
+  verification = readModelVerification(),
+  servedIds?: Iterable<string>,
+): ModelAdvertisementSummary {
+  // The counts are about THIS DAEMON'S served surface, not the repo's. A daemon
+  // started with `--site deepseek` serves one id; reporting the repo-wide 4/22/18
+  // there would tell the consumer a number that is not true of the process it is
+  // talking to — the honest count and an inflated count are the same defect.
+  const served = servedIds === undefined ? null : new Set(servedIds);
+  const inScope = (id: string) => served === null || served.has(id);
+  const addressable = defaultChatSurface().filter((e) => inScope(e.id));
+  const answering = new Set(verification.answers);
+  const offered = addressable.filter((e) => answering.has(e.id)).length;
+  const withheld = withheldChatModels(verification).filter((w) => inScope(w.model));
   const withheldByClass: Record<string, number> = {};
   for (const w of withheld) withheldByClass[w.class] = (withheldByClass[w.class] ?? 0) + 1;
   return {
-    offered: answerableChatSurface(verification).length,
-    addressable: defaultChatSurface().length,
+    offered,
+    addressable: addressable.length,
     withheld: withheld.length,
     withheldByClass,
     record: verification.recordPath,

@@ -915,8 +915,8 @@ export async function handleOpenAIRoutes(
       capabilitiesVersion: MODEL_CAPABILITIES_VERSION,
       // The honest count, not a hidden one: how many are offered, how many of
       // the addressable catalogue are withheld, and under which measured class.
-      advertisement: modelAdvertisementSummary(verification),
-      withheld: withheldChatModels(verification),
+      advertisement: modelAdvertisementSummary(verification, Object.keys(profilesById)),
+      withheld: withheldChatModels(verification).filter((w) => w.model in profilesById),
       data,
     });
   }
