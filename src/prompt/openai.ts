@@ -52,6 +52,7 @@
 // surface covers the chat core (the router's main call path).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ChatPool } from "./pool.js";
+import { redactInternalError } from "./error-redaction.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import {
   chatSurfaceStatus,
@@ -1339,8 +1340,14 @@ export async function handleOpenAIRoutes(
       });
     } catch (e) {
       await pool.release(worker).catch(() => undefined);
-      const msg = e instanceof Error ? e.message : String(e);
-      return sendJson(res, 502, { error: { message: msg, type: "server_error", code: "ui2api_driver_error", param: null } });
+      return sendJson(res, 502, {
+        error: {
+          message: redactInternalError(e, { site, account: typeof body.account === "string" ? body.account : undefined }),
+          type: "server_error",
+          code: "ui2api_driver_error",
+          param: null,
+        },
+      });
     }
   }
 

@@ -642,15 +642,74 @@ export function verifyStoredAccount(
   return { usable: true, cookies, localStorage, exists: true };
 }
 
+/**
+ * ── THE WIRE PROJECTION OF A ROW ────────────────────────────────────────────
+ * A `StoredAccount` is an INTERNAL record: it names a host filesystem path
+ * (`profileDir`), this codebase's import vocabulary (`source`), the full
+ * identity, and a reconciler verdict whose prose names the credential stores
+ * examined and an internal gate number. None of that is actionable by a
+ * consumer of an OpenAI-compatible socket, and all of it is published by
+ * every route that serialises a row.
+ *
+ * So the row carries its own consumer shape in `toJSON`: JSON.stringify (the
+ * only way a row leaves this process) yields the CONSUMER shape, while every
+ * in-process reader — `a.slug`, `a.identity`, `a.reason` — still sees the full
+ * record. That placement is deliberate: a projection applied by each route is a
+ * projection a route can forget, and a route that forgets is how the leak
+ * returns after a fix nobody touched. `toJSON` is non-enumerable, so a spread,
+ * a `deepEqual`, and the accounts.json write path (which builds fresh objects)
+ * are all unaffected — only serialisation for a consumer changes.
+ *
+ * The projection is an ALLOW list, never a denylist: a diagnostic field the
+ * reconciler adds later is not published until somebody deliberately adds it
+ * to `CONSUMER_ACCOUNT_FIELDS`, and the gate in
+ * `test/consumer-abstraction-gate.test.ts` asserts that exact list.
+ */
+export const CONSUMER_ACCOUNT_FIELDS = ["account", "capturedAt", "usable"] as const;
+
+export interface ConsumerAccount {
+  /** The handle a consumer passes back as `account=` — named for the request
+   *  field the caller already used, not for this repo's internal word. */
+  account: string;
+  /** When the session was captured. Actionable: age is a real cause of a
+   *  refusal, and an age the caller can read is one it can act on. */
+  capturedAt: string;
+  /** Whether this row can actually drive a request, as an honest boolean. */
+  usable?: boolean;
+}
+
+export function consumerAccount(row: StoredAccount): ConsumerAccount {
+  return {
+    account: row.slug,
+    capturedAt: row.capturedAt,
+    ...(row.usable === undefined ? {} : { usable: row.usable }),
+  };
+}
+
+export function consumerAccounts(rows: readonly StoredAccount[] | undefined): ConsumerAccount[] {
+  return (rows ?? []).map(consumerAccount);
+}
+
+function defineWireProjection(row: StoredAccount): StoredAccount {
+  Object.defineProperty(row, "toJSON", {
+    value: () => consumerAccount(row),
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return row;
+}
+
 /** Attach a verdict to an index row: `usable` always, the NAMED reason only
  *  when unusable. Any stale verdict already on the row is DROPPED first, so a
- *  re-reconciled row can never carry a leftover reason from an earlier pass. */
+ *  re-reconciled row can never carry a leftover reason from an earlier pass.
+ *  The returned row carries the consumer wire projection (above). */
 export function withAccountVerdict(row: StoredAccount, verdict: AccountVerdict): StoredAccount {
   const base = toIndexRow(row);
   const out: StoredAccount = { ...base, usable: verdict.usable };
   if (verdict.reason) out.reason = verdict.reason;
   if (verdict.detail) out.reasonDetail = verdict.detail;
-  return out;
+  return defineWireProjection(out);
 }
 
 /** The ON-DISK index row shape — every DERIVED verdict field is stripped. A

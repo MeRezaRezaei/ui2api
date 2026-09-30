@@ -188,13 +188,48 @@ test("/v1/models advertises exactly the driveable chat set, in BOTH directions",
       (id) => !listed.includes(id),
     );
     assert.ok(outside.length > 0, "anti-vacuity: expected known-but-unadvertised ids to probe");
+    // A servable model that /v1/models does not advertise is only allowed when
+    // the daemon NAMES the omission (GOAL 159). The old rule here was "servable
+    // ⇒ listed", which is the promise the measurement record contradicts: 22
+    // addressable models were advertised while 20 of 22 could not answer. The
+    // contract is now two-sided — listed ⇒ servable (a promise kept), and
+    // servable-but-unlisted ⇒ a NAMED omission (a promise withdrawn in words).
+    // A withheld model stays DRIVEABLE; the disclosure lives on the catalogue.
+    const withheld = new Set(
+      ((res.body as { withheld?: Array<{ model: string; reason?: string }> }).withheld ?? [])
+        .filter((w) => typeof w.reason === "string" && w.reason.trim().length > 0)
+        .map((w) => w.model),
+    );
     const servableButUnlisted: string[] = [];
-    for (const id of outside) if ((await askModel(base, id)) === 200) servableButUnlisted.push(id);
-    d.diagnostic(`listed=${listed.length} surface=${surface.length} probed-outside=${outside.length}`);
-    assert.deepEqual(servableButUnlisted, [], "a servable model /v1/models does not advertise — a consumer would never find it");
+    for (const id of outside) {
+      if ((await askModel(base, id)) !== 200) continue;
+      if (withheld.has(id)) continue;
+      servableButUnlisted.push(id);
+    }
+    d.diagnostic(
+      `listed=${listed.length} surface=${surface.length} probed-outside=${outside.length} named-omissions=${withheld.size} unnamed-servable=${servableButUnlisted.length}`,
+    );
+    assert.deepEqual(
+      servableButUnlisted,
+      [],
+      "a servable model that /v1/models neither lists nor names in its withheld block — a consumer would never find it, and the omission is silent",
+    );
 
-    // the set relation, stated symmetrically (no direction, no literal, no count)
-    assert.deepEqual(sorted(listed), sorted(surface), "the advertised set and the driveable chat set must be the same set");
+    // The set relation, stated as the MEASURED subset — advertised is the
+    // intersection of addressable and measured-answering, so it can NARROW
+    // below the driveable surface but must never exceed it or fall outside it.
+    assert.ok(
+      surface.every((id) => listed.includes(id) || withheld.has(id)),
+      "every driveable chat id is either advertised or named as withheld",
+    );
+    assert.ok(
+      listed.every((id) => surface.includes(id)),
+      "an advertised id is outside the driveable chat surface",
+    );
+    assert.ok(
+      listed.length < surface.length,
+      `anti-vacuity: the advertised set (${listed.length}) equals the whole driveable surface (${surface.length}) — the measurement gate narrowed nothing, so this pin is not exercising the gate`,
+    );
   });
 });
 
@@ -432,24 +467,50 @@ test("the tool level follows the wiring, and `native` is never claimed without a
   assert.equal(OPENAI_TOOL_CALL_FINISH_REASON, "tool_calls", "the declared tool-call finish_reason must match the OpenAI vocabulary");
 
   await withDaemon("native-has-readers", undefined, async (base, d) => {
-    const data = (await getJson(base, "/v1/models")).body.data as ModelEntry[];
+    const body = (await getJson(base, "/v1/models")).body;
+    const data = body.data as ModelEntry[];
     const claimingNative = data.filter((m) => m.tools === "native").map((m) => String(m.id));
     d.diagnostic(`entries=${data.length} claimingNative=${JSON.stringify(claimingNative)} readers=${JSON.stringify(nativeSites)}`);
-    // The claim must be earned: exactly the sites that HAVE a reader, no others.
+    // The claim must be earned: every model claiming `native` is a site that
+    // HAS a reader, and no advertised model claims a reader it lacks. The two
+    // directions are separate on purpose. The pin used to assert set EQUALITY
+    // with the reader list, which was true only while every reader happened to
+    // be advertised — kimi has a measured reader but the 2026-09-30 record
+    // files it SIGN-OUT, so it is withheld and the equality was asserting that
+    // coincidence. A withheld model is not a fabricated claim; a model
+    // claiming `native` with no reader behind it is.
+    const readers = new Set(nativeSites);
+    const unearned = claimingNative.filter((id) => !readers.has(id));
     assert.deepEqual(
-      claimingNative.slice().sort(),
-      nativeSites.slice().sort(),
+      unearned,
+      [],
       "a model advertises tools:native without a measured native reader behind it — that is the fabricated claim",
     );
     for (const m of data) {
       if (m.tools === "native") {
         assert.deepEqual(m.toolMechanisms, ["native", "soft"], `${m.id} claims native but does not also report the soft mechanism it really has`);
+        assert.ok(
+          readers.has(String(m.id)),
+          `${m.id} claims tools:native — and it does have a reader (${JSON.stringify(nativeSites)})`,
+        );
       } else {
         assert.ok(
           !(m.toolMechanisms as string[]).includes("native"),
           `${m.id} lists "native" in toolMechanisms while its top-level tools says ${m.tools} — the two fields disagree`,
         );
       }
+    }
+    // Anti-vacuity, stated from the record rather than from a literal: if every
+    // reader were withheld, the check above would have nothing to reject and
+    // would be a pin nobody reads.
+    const withheldIds = (body.withheld ?? []) as Array<{ model: string }>;
+    const readersWithheld = withheldIds.filter((w) => readers.has(w.model)).map((w) => w.model);
+    d.diagnostic(`readersWithheld=${JSON.stringify(readersWithheld)}`);
+    if (claimingNative.length === 0) {
+      assert.ok(
+        readersWithheld.length > 0,
+        "anti-vacuity: nothing advertised claims native AND no reader is withheld — either the surface is empty or the pin is not exercising the derivation",
+      );
     }
   });
 });

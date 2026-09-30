@@ -36,6 +36,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, verifyStoredAccount, withAccountVerdict, type StoredAccount } from "../runtime/session-store.js";
+import { consumerAccountsSummary, consumerProse, consumerVerifiedRecord, type ConsumerAccountsSummary } from "./consumer-surface.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -154,15 +155,7 @@ export interface RegistryPackage {
    * visible as such and not merely look like an empty choice set: `usable: 0`
    * with the NAMED reasons listed. ABSENT when the package has no accounts.
    */
-  accountsSummary?: RegistryAccountsSummary;
-}
-
-export interface RegistryAccountsSummary {
-  total: number;
-  usable: number;
-  unusable: number;
-  /** Deduped NAMED reasons behind the unusable rows (empty when all usable). */
-  reasons: string[];
+  accountsSummary?: ConsumerAccountsSummary;
 }
 
 export interface RegistryVerified {
@@ -170,7 +163,15 @@ export interface RegistryVerified {
   since: string;
   /** Human-readable proof pointer (proof id / live-qualified check). */
   evidence: string;
-  /** How it was verified (session-locked vault replay, attached real Chrome, …). */
+  /**
+   * How it was verified. On the WIRE this is deliberately the mechanism-free
+   * class: the operator's own record names the mechanism (a replayed session,
+   * an attached browser, a virtual display, the site's anti-bot vendor, a
+   * localStorage key, a request header) and the registry republishes this
+   * object verbatim to every consumer, so the free prose used to be handed out
+   * whole. A consumer cannot act on it and cannot avoid branching on it; the
+   * dated, scoped fact below is what it needs.
+   */
   via: string;
   /** Optional honesty note: which capabilities the verification covers. */
   scope?: string;
@@ -950,7 +951,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       // trust the field.
       const v = meta.verified;
       if (v && typeof v === "object" && typeof v.since === "string" && typeof v.evidence === "string" && typeof v.via === "string") {
-        verified = { since: v.since, evidence: v.evidence, via: v.via, scope: v.scope ?? undefined };
+        verified = { since: v.since, ...consumerVerifiedRecord(v) };
       }
     } catch {
       // metadata.json absent → scaffold/experimental package, status stays "unknown"
@@ -962,7 +963,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       return {
         name: `${siteId}_${bareCapabilityId(siteId, c.id)}`,
         id: c.id,
-        description: c.description || c.name || c.id,
+        description: consumerProse(c.description) || c.name || c.id,
         method: c.method || "ui-path",
         workType: c.method === "js-function" ? "js-function" : "ui-path",
         reloadAfterSuccess: true,
@@ -996,21 +997,18 @@ export function buildRegistryPackages(): RegistryPackage[] {
     // stored row the user may want to see and delete), and the host-level
     // rollup makes an all-unusable host visible instead of silently empty.
     let accounts: StoredAccount[] | undefined;
-    let accountsSummary: RegistryAccountsSummary | undefined;
+    let accountsSummary: ConsumerAccountsSummary | undefined;
     const profileUrl = profile.url;
     if (profileUrl) {
       try {
         const host = new URL(profileUrl).host;
         accounts = listAccounts(dataDir, host).map((a) => withAccountVerdict(a, verifyStoredAccount(dataDir, host, a)));
-        if (accounts.length > 0) {
-          const reasons = [...new Set(accounts.filter((a) => a.usable === false).map((a) => a.reason ?? "unknown"))];
-          accountsSummary = {
-            total: accounts.length,
-            usable: accounts.filter((a) => a.usable !== false).length,
-            unusable: accounts.filter((a) => a.usable === false).length,
-            reasons,
-          };
-        }
+        // The rollup is published from CONSUMER reason classes, never the
+        // reconciler's own strings: those name the credential stores it
+        // examined and an internal gate number, and the registry is the only
+        // info source a consumer has, so a reason it cannot act on is a
+        // reason that teaches it our internals without helping it.
+        accountsSummary = consumerAccountsSummary(accounts);
       } catch {
         accounts = undefined;
         accountsSummary = undefined;
@@ -1020,7 +1018,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
       id: siteId,
       name: manifest?.name || profile.name || siteId,
       url: manifest?.url || profile.url || "",
-      description: manifest?.description || "",
+      description: consumerProse(manifest?.description),
       version: manifest?.version || "",
       site: manifest?.site || "",
       authRequired: manifest?.auth?.required !== false,

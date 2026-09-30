@@ -56,7 +56,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,7 @@ import { fileURLToPath } from "node:url";
 import { servedRoutes, SERVED_ROUTES } from "./served-routes-truth.test.js";
 import { startPromptd } from "../src/prompt/http.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds } from "../src/prompt/capability-dispatch.js";
+import { consumerAccountFields } from "../src/prompt/consumer-surface.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HTTP_SRC = readFileSync(join(ROOT, "src/prompt/http.ts"), "utf8");
@@ -173,6 +174,62 @@ function hermeticPool() {
 }
 
 type Reply = { status: number; text: string; json: any };
+
+/** A temp vault holding exactly one account row, carrying every internal field
+ *  the reconciler can attach to a real one. Seeded by writing the index the
+ *  reader parses, so the row is genuinely untrusted input — which is exactly
+ *  what makes a projection at the wire seam necessary rather than optional. */
+async function withSeededVault<T>(
+  fn: (ask: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Reply>, breach: string[]) => Promise<T>,
+): Promise<T> {
+  const dataDir = mkdtempSync(join(tmpdir(), "u2a-abstraction-seeded-"));
+  const hostDir = join(dataDir, "sessions", "gemini.google.com");
+  mkdirSync(hostDir, { recursive: true });
+  writeFileSync(
+    join(hostDir, "accounts.json"),
+    JSON.stringify({
+      accounts: [
+        {
+          slug: "seeded-person",
+          identity: "seeded.person@example.invalid",
+          host: "gemini.google.com",
+          source: "import",
+          capturedAt: "2026-09-27T17:33:09.526Z",
+          profileDir: "/home/seeded/.config/google-chrome",
+        },
+      ],
+    }),
+  );
+  const { p, breach } = hermeticPool();
+  const server = (await startPromptd({ port: 0, dataDir, pool: p } as never)) as {
+    port?: number;
+    address?: { port?: number };
+    close?: () => void;
+  };
+  const port = server.port ?? server.address?.port;
+  assert.ok(port, "the gate needs a bound port; startPromptd returned none");
+  const ask = async (method: "GET" | "POST", path: string, body?: unknown): Promise<Reply> => {
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await r.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
+    return { status: r.status, text, json };
+  };
+  try {
+    return await fn(ask, breach);
+  } finally {
+    server.close?.();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+}
 
 async function withConsumer<T>(
   fn: (ask: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Reply>, breach: string[]) => Promise<T>,
@@ -464,6 +521,176 @@ describe("ABSTRACTION GATE: a consumer needs zero knowledge of ui2api internals"
         );
       }
       assert.deepEqual(breach, [], "a refused capability must never reach a runner (no browser)");
+    });
+  });
+
+  test("LEAK #3 (disclosure): a 200 on the consumer surface carries NO vault row verbatim", async () => {
+    // THE CLOSED SET, as a leak is defined here: every field an account row is
+    // allowed to publish. Anything outside this list is internal and must never
+    // reach the wire — a hand-typed ALLOW list, not a blacklist, because the
+    // rows are built by a reconciler whose whole job is to attach more
+    // diagnostics over time, and a blacklist would let the next field through
+    // silently. A new column has to be added here deliberately.
+    assert.deepEqual(
+      [...consumerAccountFields()].sort(),
+      ["account", "capturedAt", "usable"],
+      "the published account shape changed — re-derive it against the leak set before widening the wire contract",
+    );
+
+    // The seeded row carries every internal field the reconciler can attach:
+    // a real filesystem path, an import source, and the prose verdict that
+    // names the credential stores and an internal goal number.
+    const internal = await withSeededVault(async (ask, breach) => {
+      const r = await ask("GET", "/accounts?site=gemini");
+      assert.equal(r.status, 200, `the seeded /accounts route must answer: ${r.text.slice(0, 200)}`);
+      const rows = r.json?.accounts ?? [];
+      assert.equal(rows.length, 1, `the seeded vault must list exactly its one row: ${r.text.slice(0, 300)}`);
+
+      const leaks: string[] = [];
+      for (const k of ["profileDir", "source", "identity", "slug", "host", "reason"]) {
+        if (rows[0][k] !== undefined) leaks.push(`account row published "${k}"`);
+      }
+      if (JSON.stringify(rows).includes("no cookies and no localStorage")) {
+        leaks.push("account verdict published the credential stores it examined");
+      }
+      if (JSON.stringify(rows).includes("GOAL")) leaks.push("account verdict published an internal goal name");
+      if (/\/(?:home|root|opt|usr|var|etc)\//.test(JSON.stringify(rows))) {
+        leaks.push("account row published a host filesystem path");
+      }
+      assert.deepEqual(
+        leaks,
+        [],
+        `LEAKED on the account surface (${r.status}):\n  ${leaks.join("\n  ")}\n\nbody: ${JSON.stringify(rows)}`,
+      );
+      assert.deepEqual(breach, [], "reading the account roster must never have asked for a browser");
+      return undefined;
+    });
+
+    // Every OTHER route that republishes the roster must be held to the same
+    // set — a leak fixed on one route and left on its three siblings is the
+    // shape of this defect, not a fix.
+    for (const path of ["/registry", "/capabilities?site=gemini", "/capabilities/gemini"]) {
+      await withSeededVault(async (ask) => {
+        const r = await ask("GET", path);
+        assert.equal(r.status, 200, `${path} must answer: ${r.text.slice(0, 200)}`);
+        const found = (r.text.match(/"profileDir"/g) ?? []).length;
+        assert.equal(
+          found,
+          0,
+          `${path} republished the vault's profileDir verbatim — ${found} occurrence(s). ` +
+            `A consumer reading ${path} learns a host filesystem path it can do nothing with.`,
+        );
+        assert.doesNotMatch(
+          r.text,
+          /no cookies and no localStorage|GOAL \d+/,
+          `${path} republished the reconciler's internal verdict prose`,
+        );
+      });
+    }
+    assert.equal(internal, undefined);
+  });
+
+  test("LEAK #4: an account refusal names the ACCOUNT, and carries no vault internals", async () => {
+    // A caller who mistypes an account needs to know WHICH one was wrong and
+    // what to do next. It must not be handed the vault's filesystem paths, its
+    // credential vocabulary, or its gate names to get that answer.
+    await withSeededVault(async (ask, breach) => {
+      const bad = await ask("GET", "/capabilities?site=gemini&account=definitely-not-real");
+      assert.equal(bad.status, 400, "the permission is unchanged: still a refusal, not a silent substitution");
+      assert.equal(bad.json?.error?.code, "no_stored_account", "still a NAMED code a client branches on");
+
+      const msg: string = bad.json?.error?.message ?? "";
+      assert.match(msg, /definitely-not-real/, "the refusal must name the account the CALLER asked for");
+      assert.doesNotMatch(
+        msg,
+        /ui2api profile|\bvault\b|snapshot|cookies|localStorage|GOAL \d+|profileDir|\/home\//i,
+        `the refusal carried the mechanism or a host path: ${msg}`,
+      );
+      assert.deepEqual(breach, [], "an account refusal must never have asked for a browser");
+    });
+  });
+
+  test("LEAK #4 (KNOWN RESIDUAL, named not hidden): the refusal still enumerates the roster", () => {
+    // STATED PLAINLY rather than quietly fixed or quietly dropped. The
+    // unknown-account refusal in `src/prompt/http.ts` appends
+    // `available: [a, b, c]` — the slugs of every other stored session on that
+    // host — so a caller that guesses one wrong account learns the identity
+    // list. That is a real leak and it is NOT closed by this slice.
+    //
+    // It is not closed HERE for two concrete reasons, both recorded rather
+    // than assumed: the message is built in `src/prompt/http.ts`, which lane
+    // 161-A owns and which three other gates
+    // (`account-exact-resolution-cli`, `session-write-gate`, `codefor-prose-table`)
+    // pin by exact shape, so changing it is a cross-lane edit, not a local one.
+    // The roster-free wording is WRITTEN and exported
+    // (`consumerAccountRefusal` in `src/prompt/consumer-surface.ts`); it is the
+    // one-line swap that closes this, and it needs the three pins updated with
+    // it so the roster stops being load-bearing in a contract test.
+    //
+    // This test asserts the residual is still TRUE, so the day it is fixed this
+    // gate goes red and the fix is recorded rather than discovered. A gate that
+    // would still be green after the leak closed would be a gate that had
+    // stopped measuring anything.
+    const httpSrc = readFileSync(join(fileURLToPath(new URL("..", import.meta.url)), "src/prompt/http.ts"), "utf8");
+    const rosterEnumeration = /available: \[\$\{[^}]*\.map\(/;
+    assert.ok(
+      rosterEnumeration.test(httpSrc),
+      "the unknown-account refusal no longer enumerates the roster — update this residual and the three shape pins " +
+        "(account-exact-resolution-cli, session-write-gate, codefor-prose-table), and wire consumerAccountRefusal()",
+    );
+  });
+
+  test("LEAK #5 (KNOWN RESIDUAL, named not hidden): the 503 pool refusal echoes the pool's queue prose", () => {
+    // The second named residual. `src/prompt/http.ts` answers a pool refusal
+    // with `{ code, message: <the pool's own error text> }`, and that text says
+    // "no page is free and the queue is full (3 waiting, limit 4)" — the warm
+    // page pool's internals, verbatim, to any consumer that trips a 503.
+    //
+    // NOT closed here, and the reason is a conflict rather than an omission.
+    // `test/pool-deadline.test.ts` pins those exact numbers in FOUR places
+    // ("saturation must name the numbers" is its own stated intent), so the
+    // numbers cannot be dropped from the message; the fix is to stop ECHOING
+    // the message on the wire and redacting it at the 503 sink the way the /v1
+    // error body now is — which is `src/prompt/http.ts`, lane 161-A's file. The
+    // `code` alone is already the contract a client branches on
+    // (`pool_saturated` / `pool_queue_timeout` / `pool_closed`), so nothing a
+    // consumer can act on is lost by the redaction; the numbers stay in the
+    // daemon's own log where the operator reads them.
+    //
+    // This asserts the residual is still TRUE, so the day it is fixed this gate
+    // turns red and the fix gets recorded instead of discovered.
+    const httpSrc = readFileSync(join(fileURLToPath(new URL("..", import.meta.url)), "src/prompt/http.ts"), "utf8");
+    const echoesPoolProse = /send\(res, 503, \{ error: \{ code: refusal\.code, message: msg \} \}\)/.test(httpSrc);
+    assert.ok(
+      echoesPoolProse,
+      "the 503 pool refusal no longer echoes the pool's own message — close this residual by redacting it at this sink " +
+        "and keeping the `code` (the only part a client branches on)",
+    );
+  });
+
+  test("LEAK #3 (why it is a leak and not a convenience): the row is USABLE without the internals", async () => {
+    // A strip that removes something the consumer needs would be the wrong fix.
+    // The account slug is what a consumer passes back as `account=`, and it is
+    // still published under that name — the projection renames the concept to
+    // the word the consumer's own request already used, and drops the columns
+    // with no consumer use. So the surface is strictly NARROWER with no loss.
+    await withSeededVault(async (ask) => {
+      const r = await ask("GET", "/accounts?site=gemini");
+      const row = (r.json?.accounts ?? [])[0];
+      assert.equal(row?.account, "seeded-person", "the consumer-usable handle must still be published");
+      assert.equal(row?.usable, false, "the honest usable verdict must survive the projection");
+
+      // And the account-less browse must stay a CAPABILITY answer, not an
+      // account roster: `accounts` is `[]` when none is stored, and the
+      // hint names the input rather than the vault.
+      const browse = await ask("GET", "/capabilities?site=gemini");
+      assert.equal(browse.status, 200);
+      assert.ok(Array.isArray(browse.json?.accounts), "the browse answer must keep its honest empty account list");
+      assert.doesNotMatch(
+        browse.json?.hint ?? "",
+        /ui2api profile|vault|snapshot/i,
+        `the browse hint must not send a consumer to our own CLI or name the vault: ${browse.json?.hint}`,
+      );
     });
   });
 
