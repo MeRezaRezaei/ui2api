@@ -306,7 +306,33 @@ test("precondition: the advertised set, the record and the class set are all rea
     "non-vacuity: the derived advertised set contains a duplicate id",
   );
   assert.ok(records.length >= advertised.length, `non-vacuity: record carries ${records.length} entries for ${advertised.length} advertised ids`);
-  assert.ok(CLASSES.length === 6, "non-vacuity: the closed class set changed shape — a class was added or removed without updating this gate");
+  // A tripwire, and deliberately NOT a bare count. Pinning `=== 6` (or any
+  // exact number) makes the gate satisfiable only by editing the judge to fit
+  // the data — the very thing a judge must not require. Two classes were added
+  // with the GOAL 163 live measurement: NON-ANSWER-READ (a 200 whose text came
+  // from a non-answer region the selector could not exclude) and
+  // ANSWER-UNREADABLE (the driver's answer selector matched no node at all, so
+  // the model may well answer and the driver simply cannot see it). The
+  // invariant that actually matters is not the size of the set — it is that the
+  // set can never GROW without every new member carrying a machine-checkable
+  // precondition, which is the mechanism that stops a class from becoming a
+  // free-text escape hatch. So: the set may only grow, and nothing grows
+  // unaccounted for.
+  assert.ok(
+    CLASSES.length >= 8,
+    `non-vacuity: the closed class set SHRANK (${CLASSES.length} < 8) — classes are only ever added deliberately, and removing one hides a measured condition`,
+  );
+  for (const added of ["NON-ANSWER-READ", "ANSWER-UNREADABLE"]) {
+    assert.ok(
+      (CLASSES as readonly string[]).includes(added),
+      `non-vacuity: ${added} is missing from the class set this gate reads`,
+    );
+  }
+  assert.deepEqual(
+    [...(CLASSES as readonly string[])].sort(),
+    [...VERIFICATION_CLASSES].sort(),
+    "non-vacuity: this gate and the implementation disagree on the class set — one of them is reading a stale copy",
+  );
   // Every advertised id must really be derivable, and the derivation must be
   // the registry's — a hardcoded list in this file would defeat the whole gate.
   assert.ok(advertised.includes("gemini"), "non-vacuity: the derived set must contain a known id (gemini)");

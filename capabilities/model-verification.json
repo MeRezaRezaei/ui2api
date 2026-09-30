@@ -1,6 +1,6 @@
 {
   "schema": "ui2api/model-verification/1",
-  "generatedAt": "2026-09-30T01:20:00Z",
+  "generatedAt": "2026-09-30T15:38:00Z",
   "recordPath": "capabilities/model-verification.json",
   "gate": "test/model-verification-consistent.test.ts",
   "stalenessWindowDays": 30,
@@ -10,13 +10,14 @@
     "audit": "scripts/audit/model-answers-audit-2026-09-30.md",
     "priorAudit": "scripts/audit/model-answers-audit.md (2026-09-29, describes a binary that no longer exists — kept, superseded)",
     "harness": "scripts/audit/measure-models.mjs",
-    "driver": "/tmp/mv/sweep*.mjs — a read-only serial wrapper that calls the harness one model at a time and WAITS FOR AN IDLE POOL before each request",
+    "driver": "/tmp/mv/sweep163.mjs — a read-only serial wrapper that waits for an IDLE pool before each request and fires ONE model at a time",
     "target": "http://127.0.0.1:9797 (deployed promptd)",
-    "auditDate": "2026-09-30"
+    "auditDate": "2026-09-30",
+    "lastPartialSweep": "GOAL 163 re-measured ONLY v0 and venice (plus the duckduckgo control, first and last). No other row below was re-measured; every other row keeps its 2026-09-29/30 measurement verbatim and still carries the OLD daemonCommit bdee4ac2."
   },
   "measuredAtNote": "measuredAt is the REAL per-request start timestamp the harness clock printed (harnessStartedAt), second precision, ISO-8601 UTC. The sweep ran 2026-09-29T23:13Z to 2026-09-30T01:11Z; the timestamps below are the actual printed values, not rounded to a day and not invented.",
-  "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
-  "daemonCommitNote": "READ, not typed: GET /health -> liveness.build.commit and GET /status -> liveness.build.commit, both source 'build-stamp', builtAt 2026-09-29T22:43:31Z. The same value is in /opt/ui2api/dist/runtime/build-info.json. Every record below was answered by THIS build. This is the first sweep where daemonCommit is not null — the previous record had to say daemonCommitUnknown because the running binary could not report itself.",
+  "daemonCommit": "73fc38e4b3850c487a402fb2592096916f780ee5",
+  "daemonCommitNote": "READ, not typed, and it MOVED. GOAL 160 shipped judgeAnswerShape() into src/runtime/dom-primitives.ts and its live confirmation was left outstanding because the deployed daemon was still build bdee4ac while the fix landed at 20d4154+. GOAL 163 closed that gap: pipeline 796 (project 5, ref main, sha 73fc38e4b3850c487a402fb2592096916f780ee5) ran build 2274 success, verify 2275 success, deploy 2276 success (finished 2026-09-30T15:24:50Z). GET /health -> liveness.build = {commit: 73fc38e4b3850c487a402fb2592096916f780ee5, shortCommit: 73fc38e, source: build-stamp, builtAt: 2026-09-30T15:24:33Z}; the same value is in /opt/ui2api/dist/runtime/build-info.json; and `grep -c non-answer /opt/ui2api/dist/runtime/dom-primitives.js` returned 12, with `answer-not-an-answer` present in /opt/ui2api/dist/prompt/driver.js. The gate is IN the running binary, so the measurement below is a measurement of the fixed code. THIS FIELD IS THE SWEEP'S OWN BUILD ONLY: the 20 rows that were not re-measured still carry the per-row daemonCommit bdee4ac2, which is correct and must not be overwritten with 73fc38e.",
   "poolPacing": {
     "why": "The operator's standing rule is that a challenge on a real logged-in account is the one failure this project cannot recover from, so the sweep was run STRICTLY SERIALLY: one model at a time, no concurrent fan-out, and the driver waited for pool busy==0 && queued==0 before issuing each request.",
     "whatWasObserved": "The fixed service still leaves 1-3 workers busy for up to ~225s after a 60s per-site sign-in timeout (busyWatchdogMs=225000), which is how three models (hunyuan, inner-ai, v0) first hit pool 4/4 and timed out. Each of those three was then RE-PROBED at an idle pool and all three returned a named 502. That is a residual leak, not the old 4.77h wedge: the pool returned to idle by itself every time.",
@@ -44,7 +45,9 @@
     "CONTENDED-TIMEOUT": "a request was issued and got no response (HTTP 000, client abort) while the pool was NOT idle — a measurement of queue contention, NOT a property of the model",
     "UNMEASURED": "never reached. NOTHING was measured, so nothing may be claimed - in particular the evidence field must not quote a measured HTTP status (RULE 9), because a real response WAS reached on any row that has one. As of 2026-09-30 zero rows carry this class: the 9 that were UNMEASURED-for-lack-of-reach on 2026-09-29 were all reached, and the 7 that were UNMEASURED-by-omission on 2026-09-30 were re-filed into WALL-CHALLENGE (3) and COMPOSER-DRIFT (4).",
     "WALL-CHALLENGE": "the server landed on an ANTI-BOT INTERSTITIAL and reported it: HTTP 502 at an IDLE pool whose own message is 'no composer found on <site> - the site UI may have changed', with the server-reported page title/url matching a challenge marker (Cloudflare 'Attention Required!' / 'Just a moment...', Vercel Security Checkpoint). The named action is the wigolo tier per docs/WIGOLO_BYPASS.md, or an honest ok:false - NEVER a retry loop, because a challenge on a real logged-in account is the one failure this project cannot recover from. Requires measuredAt + method + evidence + observedPage and an IDLE pool.",
-    "COMPOSER-DRIFT": "the page LOADED and is neither a sign-in surface nor a challenge, but the composer selector found nothing: HTTP 502 at an IDLE pool, 'no composer found on <site> - the site UI may have changed', and the server-reported page title/url is a real product surface (or, for notion, the public marketing landing page the redirect landed on). The session is fine; the selectors are stale. The named action is a profile/selector retune, NOT a login. Requires measuredAt + method + evidence + observedPage and an IDLE pool."
+    "COMPOSER-DRIFT": "the page LOADED and is neither a sign-in surface nor a challenge, but the composer selector found nothing: HTTP 502 at an IDLE pool, 'no composer found on <site> - the site UI may have changed', and the server-reported page title/url is a real product surface (or, for notion, the public marketing landing page the redirect landed on). The session is fine; the selectors are stale. The named action is a profile/selector retune, NOT a login. Requires measuredAt + method + evidence + observedPage and an IDLE pool.",
+    "NON-ANSWER-READ": "a 2xx arrived at an IDLE pool carrying text that is NOT the model's answer: the read SUCCEEDED and the text was still not an answer, because the answer selector resolved inside a region the site itself marks as activity/status. This is the only class in the set keyed on a 2xx, and it is the sharpest hazard here precisely because it arrives looking like success - a 200 is not evidence of an answer. Measured on v0 2026-09-30 (HTTP 200 in 13543ms carrying 'Exploring ideas...', v0's agent-activity placeholder). It is NOT ANSWERS, and it is NOT COMPOSER-DRIFT, because the selector found the WRONG node rather than no node. The named action is a profile/selector retune that declares the region a non-answer, never a promotion. Requires measuredAt + method + evidence and an IDLE pool.",
+    "ANSWER-UNREADABLE": "the profile's answer selector matched NOTHING in the page's real DOM, at an IDLE pool, so no answer was obtainable. THIS DOES NOT MEAN THE MODEL FAILED TO ANSWER: the row's meaning is 'the DRIVER cannot read this model', not 'this model cannot answer'. Measured on venice 2026-09-30, where a read-only CDP inspection of the tab the driver left behind showed venice's answer was 'PONG' in that very DOM while the GOAL-160 selectors matched zero nodes - so the earlier 'paraphrases instead of complying' finding was an ARTEFACT OF THE PROFILE. It is not a credential problem and not an anti-bot wall, and it is not COMPOSER-DRIFT (that is a missing composer; this is a missing ANSWER). The named action is a profile/selector retune DERIVED FROM A CAPTURE, never a guess from a failure - deriving selectors from a failure is what produced this condition. Requires measuredAt + method + evidence and an IDLE pool."
   },
   "control": {
     "model": "duckduckgo",
@@ -179,9 +182,9 @@
     },
     {
       "model": "duckduckgo",
-      "measuredAt": "2026-09-29T22:57:00Z",
+      "measuredAt": "2026-09-30T15:27:27.583Z",
       "class": "ANSWERS",
-      "evidence": "THE CONTROL. POST /v1/chat/completions {model:duckduckgo} -> HTTP 200 in 9201ms at pool 0/2 idle, queued 0, real answer text 'Duck.ai said GPT-5.6 Luna PONG 2nd opinion'. Probed FIRST this sweep, before any other model, and probed AGAIN LAST at 2026-09-30T00:20:36.887Z -> HTTP 200 in 10049ms at pool 0/1 idle with the same real answer. This row is why the class CONTENDED-TIMEOUT means 'the queue' and not 'the model': the 2026-09-29 sweep filed this same model CONTENDED-TIMEOUT (HTTP 000 after 200009ms at pool 3/4) and it now answers on both ends of a 22-model sweep.",
+      "evidence": "THE CONTROL, re-probed for GOAL 163 and bracketing the sweep again. POST /v1/chat/completions {model:duckduckgo, prompt 'Reply with exactly: PONG'} -> HTTP 200 in 9780ms at pool 0/1 idle, queued 0, real answer text 'Duck.ai said / GPT-5.6 Luna / PONG / 2nd opinion'. Probed FIRST at 2026-09-30T15:27:27.583Z. Probed LAST at 2026-09-30T15:30:51.730Z -> HTTP 200 in 9404ms at pool 0/3 idle, queued 0, the SAME real answer. Both ends are on the NEW build 73fc38e, which is what makes the v0/venice rows attributable: the service was demonstrably alive and answering before and after them, so neither of their non-answers can be blamed on the daemon dying. This row's class stays ANSWERS and its per-row daemonCommit is now the new commit, because this model WAS re-measured on the new build.",
       "method": "live-v1-chat (serial, pool idle before request)",
       "prereq": "none - a real signed-in duck.ai session is in the vault and it answers",
       "poolAtRequest": {
@@ -189,7 +192,7 @@
         "total": 2,
         "queued": 0
       },
-      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
+      "daemonCommit": "73fc38e4b3850c487a402fb2592096916f780ee5",
       "httpStatus": 200
     },
     {
@@ -398,33 +401,33 @@
     },
     {
       "model": "v0",
-      "measuredAt": "2026-09-30T00:18:46.212Z",
-      "class": "ANSWERS",
-      "evidence": "POST /v1/chat/completions {model:v0} -> HTTP 200 in 13908ms at pool 0/4 idle, queued 0, answer text 'Cooking...'. HONEST CAVEAT, stated because it matters: this is a real 200 with real content from v0.dev, but the content is NOT the requested PONG - it is a build/status string, so the driver read a real page region that is not the answer region. This row therefore proves v0 SERVES and returns 200, not that v0 answers a prompt correctly. Two earlier attempts in this sweep returned HTTP 000 at pool 4/4 queued 2; those are contention, and this idle-pool 200 is what proves it.",
-      "method": "live-v1-chat (serial, pool idle before request; re-probe of a contended timeout)",
-      "prereq": "none reached - the request was accepted and served without a sign-in wall",
+      "measuredAt": "2026-09-30T15:31:32.680Z",
+      "class": "NON-ANSWER-READ",
+      "evidence": "OUTCOME (c) — THE GOAL-160 GATE HAS A HOLE, MEASURED ON THE FIXED BUILD. POST /v1/chat/completions {model:v0, prompt 'Reply with exactly: PONG'} -> HTTP 200 in 13543ms at pool 0/3 IDLE, queued 0, and the body carried the answer text 'Exploring ideas...'. A real 200, real content, from v0's own site, that is NOT the requested token. This is the same defect GOAL 160 was written to kill, reproduced against the build that contains the gate. An EARLIER v0 attempt in the same sweep returned HTTP 500 'internal error' in 60072ms; the daemon's own journal names the cause and it is NOT the answer gate: 'page.goto: Timeout 60000ms exceeded ... navigating to \"https://v0.app/chat\"' at ChatDriver.getPage -> ChatPool.spawn -> handleOpenAIRoutes, i.e. the very first pool spawn for v0 timed out on navigation before any readback ran. A third request, spent purely to capture the streaming DOM, returned HTTP 502 'v0 did not return an answer within 90000ms' in 96737ms. WHY THE GATE DID NOT FIRE, DIAGNOSED FROM V0'S OWN SHIPPED JS BUNDLE (69 chunks fetched unauthenticated from v0.app; zero requests to the account): `data-message-content` is NOT exclusive to the answer. v0 renders it on the assistant content wrapper AND uses the same attribute inside its agent-activity region — the site's own shipped class string is '[&_[data-agent-activity-entry]_[data-message-content]>p:first-child]', which addresses '[data-agent-activity-entry] [data-message-content]' as a thing that exists. The 'Exploring' placeholder IS that region: the activity renderer passes textActive:'Exploring', textComplete:'Explored' into a tree that also emits data-agent-activity-entry and data-task-timeline, inside a container classed group/rich-task. So the GOAL-160 answer selector, though correctly scoped to the assistant ROW, is still a DESCENDANT selector and matches the activity entry's data-message-content too; the readback takes the LONGEST match, so the placeholder wins. And the declared nonAnswerSelectors could not catch it: two of the three ('[data-slot*=status]', '[class*=status]') match nothing on v0, and the third, '[data-state=\"streaming\"]:not([data-message-content])', EXCLUDES [data-message-content] by construction — it could never match the one element at fault. The GOAL-160 gate refuses only when a DECLARED non-answer region was seen; nothing was declared for the region that actually produced the wrong string, so the read settled doneReason 'stable' and the status line was served as the answer. The fix declares v0's own activity/timeline ATTRIBUTE markers as non-answer (not a widened answer selector, and not a class substring chosen because it made the string match), which drops them from the answer candidate set before the longest-match read. IT IS NOT YET VERIFIED BY A ROUND TRIP.",
+      "method": "live-v1-chat (serial, pool idle before request; new deployed build 73fc38e)",
+      "prereq": "profile/selector retune, cause DIAGNOSED below and fixed in capabilities/v0/profile.json (capability.nonAnswerSelectors now declares v0's own agent-activity/task-timeline markers). The fix is BUNDLE-DERIVED and NOT live-verified: it needs a re-deploy and a round trip.",
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 3,
+        "queued": 0
+      },
+      "daemonCommit": "73fc38e4b3850c487a402fb2592096916f780ee5",
+      "httpStatus": 200
+    },
+    {
+      "model": "venice",
+      "measuredAt": "2026-09-30T15:31:46.237Z",
+      "class": "ANSWER-UNREADABLE",
+      "evidence": "NEITHER (a), (b) NOR (c) — venice did NOT return a 200 with wrong text, and the gate never got the chance to refuse, because venice's GOAL-160 answer selectors match ZERO nodes in venice's real DOM. Attempt 1: POST /v1/chat/completions {model:venice, prompt 'Reply with exactly: PONG'} -> HTTP 502 in 134250ms at pool 0/1 IDLE, queued 0, message 'venice did not return an answer within 60000ms - the site may be busy, rate-limiting, or showing a sign-in or consent wall.' Attempt 2 -> HTTP 502 in 109302ms at pool 0/4 IDLE, queued 0, message 'page.evaluate: Execution context was destroyed, most likely because of a navigation' (the page had navigated to /chat/agent/<id> mid-read, so the chat WAS created and the prompt WAS sent). VENICE ACTUALLY ANSWERED 'PONG'. Proven by a read-only inspection of the daemon's own Chrome over CDP, on the tab the driver left behind at https://venice.ai/chat/agent/E3nQ9oY: the page body reads 'Use Classic Chat / Reply with exactly: PONG / Worked for < 1s · 1 step / PONG', and the assistant answer is a div whose class is 'space-y-4 whitespace-normal ... prose dark:prose-invert flex-1' holding exactly 'PONG', under div.assistant-content, under div.assistant. So the 2026-09-30 finding that venice 'paraphrases instead of complying' was ITSELF an artefact of reading the wrong element, and the GOAL-160 narrowing over-corrected into a selector that matches nothing: (a) '[data-message-author-role=\"assistant\"]' does not exist on venice at all — every dataset on the page is empty — and (b) no ANCESTOR of the answer carries a class containing 'message' (the only 'message' class on the page is the unrelated 'minds-chat-message-actions' button group), so '[class*=\"message\"] [class*=\"prose\"]' could never match either. The distinguishing structural fact is the class TOKEN 'assistant', present on the assistant wrapper and absent from the user bubble's wrapper (that one is 'assistant-content', a different token). The fix is anchored on the token boundary, '[class~=\"assistant\"] [class*=\"prose\"]', verified on the live DOM to match EXACTLY ONE node with text 'PONG' while excluding both the user bubble ('Reply with exactly: PONG') and the assistant footer ('Worked for < 1s · 1 step · 1 step') that live in the sibling assistant-content div. Still requires a re-deploy + a request before venice is called answering. THIS IS THE HONESTY CONSEQUENCE OF DERIVING SELECTORS FROM A FAILURE INSTE OF FROM A CAPTURE, and it is recorded rather than quietly corrected.",
+      "method": "live-v1-chat (serial, pool idle before request; new deployed build 73fc38e)",
+      "prereq": "profile/selector retune, cause DIAGNOSED against a REAL live DOM capture and fixed in capabilities/venice/profile.json. The fix is live-DOM-proven but not yet round-trip-proven: it needs a re-deploy and a request.",
       "poolAtRequest": {
         "busy": 0,
         "total": 4,
         "queued": 0
       },
-      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
-      "httpStatus": 200
-    },
-    {
-      "model": "venice",
-      "measuredAt": "2026-09-30T00:52:25.910Z",
-      "class": "ANSWERS",
-      "evidence": "POST /v1/chat/completions {model:venice} -> HTTP 200 in 41611ms at pool 0/1 idle, queued 0, answer text 'The user wants me to reply with exactly \"PONG\". This'. HONEST CAVEAT, stated because it matters: this is a real 200 with real answer text, but the text is the model paraphrasing the instruction rather than emitting PONG - a different failure shape from v0's status string, and it means venice serves and answers while not satisfying the exact-token probe. Reproduced across two attempts in this sweep (41611ms and 83113ms), both HTTP 200, both at an idle pool.",
-      "method": "live-v1-chat (serial, pool idle before request)",
-      "prereq": "none reached - the request was accepted and served without a sign-in wall",
-      "poolAtRequest": {
-        "busy": 0,
-        "total": 1,
-        "queued": 0
-      },
-      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
-      "httpStatus": 200
+      "daemonCommit": "73fc38e4b3850c487a402fb2592096916f780ee5",
+      "httpStatus": 502
     }
   ],
   "falsifiedByThisSweep": [
@@ -433,7 +436,10 @@
     "The 2026-09-29 record carried daemonCommit null on every row with a daemonCommitUnknown note, because the running binary could not report itself. The fixed build reports commit bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838 from /health liveness.build.commit (source 'build-stamp'), so every row now carries a real commit.",
     "The 2026-09-29 record's headline was '1 of 22 ANSWERS (gemini)'. The fixed service measured 4 of 22 ANSWERS (duckduckgo, gemini, v0, venice) plus 11 of 22 SIGN-OUT and 7 rows the closed vocabulary cannot express. The 1-of-22 figure was a measurement of a wedged pool; it was never a property of the models.",
     "The 2026-09-29 record's own §1/§7 counts did not close (10+3+10=23 against 22 advertised) and it disclosed that. This record's rows close exactly: 22 rows for 22 derived advertised ids, and after GOAL 158's re-filing 4 ANSWERS + 11 SIGN-OUT + 3 WALL-CHALLENGE + 4 COMPOSER-DRIFT + 0 CONTENDED-TIMEOUT + 0 UNMEASURED = 22.",
-    "The 2026-09-30 record filed 7 rows UNMEASURED and asked for a fifth and sixth class. The class set is now six members, the classification rule is code with hermetic pins, and those 7 rows sit in WALL-CHALLENGE (grok, perplexity, t3chat) and COMPOSER-DRIFT (blackbox, codex, copilot, notion). Nothing was re-measured to do it: the same measuredAt, the same HTTP status, the same poolAtRequest and the same evidence string, with the class re-derived by classifyOutcome from the page the server itself reported. Zero rows remain UNMEASURED, and RULE 9 now makes 'UNMEASURED beside a measured status' a hard gate failure rather than a reading convention."
+    "The 2026-09-30 record filed 7 rows UNMEASURED and asked for a fifth and sixth class. The class set is now six members, the classification rule is code with hermetic pins, and those 7 rows sit in WALL-CHALLENGE (grok, perplexity, t3chat) and COMPOSER-DRIFT (blackbox, codex, copilot, notion). Nothing was re-measured to do it: the same measuredAt, the same HTTP status, the same poolAtRequest and the same evidence string, with the class re-derived by classifyOutcome from the page the server itself reported. Zero rows remain UNMEASURED, and RULE 9 now makes 'UNMEASURED beside a measured status' a hard gate failure rather than a reading convention.",
+    "The 2026-09-30 record filed v0 ANSWERS on the strength of 'HTTP 200 ... Cooking...', and filed the gate as absent because the deployed binary predated it. BOTH halves were wrong. The build now carries the gate (grep -c non-answer on the deployed dom-primitives.js returns 12), and on that build v0 served a DIFFERENT wrong string — 'Exploring ideas...' — proving the defect was never fixed by the GOAL-160 selector work, only relocated. The diagnosis is in capabilities/v0/profile.json note163.",
+    "The 2026-09-30 record filed venice ANSWERS and reported that venice 'paraphrases the instruction rather than complying'. That was an ARTEFACT OF THE PROFILE, not a property of the model: a read-only CDP inspection of the live tab shows venice's answer was 'PONG' all along, and the GOAL-160-narrowed selectors match ZERO nodes in venice's DOM. 'The model paraphrases' was the driver reading nothing. The class is now ANSWER-UNREADABLE, not ANSWERS, and NOT UNCLASSIFIED either: a measured condition with its own correct ACTION (a selector retune derived from a capture) deserves a class rather than the classifier's refusal token, which is a gate failure.",
+    "A recurring shape worth naming: BOTH of these failures were produced by selectors derived from a failure rather than from a capture, and in both cases the fix that 'should not have needed verifying' was wrong. The 2026-09-30 sweep recorded this as a caveat on the nonAnswerSelectors; GOAL 163 is the first measurement of either site's real DOM and it confirmed the caveat was load-bearing, twice."
   ],
   "classificationRule": {
     "where": "src/prompt/verification-class.ts — classifyOutcome(), the pure (status, message, server-reported page, pool state) -> class rule, plus CLASS_PRECONDITIONS, the per-class machine-checkable preconditions the gate enforces",
@@ -441,5 +447,52 @@
     "howTheRecordIsHeldToIt": "test/model-verification-consistent.test.ts RULE 11 re-derives every row's class from the observedPage the server reported and fails on any disagreement; RULE 10 enforces each class's declared precondition; RULE 9 forbids UNMEASURED beside a measured HTTP status.",
     "pinnedBy": "test/verification-class.test.ts — 25 hermetic pins over the exact page title/url values the deployed service reported, plus mutation-proven refusals of the wrong class",
     "refusal": "A measured response that matches no named condition classifies as UNCLASSIFIED, which is NOT a class and is a gate failure. A class that can hold anything would re-create the original defect one level up, so widening the vocabulary is a deliberate edit to a marker table plus a new precondition, never a row quietly parked somewhere."
+  },
+  "goal163ReMeasurement": {
+    "whatThisIs": "The 2026-09-30 sweep measured build bdee4ac, which predates GOAL 160's judgeAnswerShape() gate, so EVERY live measurement of v0 and venice to date was a measurement of code that no longer exists. GOAL 163 deployed the current tree and re-measured ONLY those two models, bracketed by the duckduckgo control.",
+    "deploy": {
+      "pipelineId": 796,
+      "projectId": 5,
+      "ref": "main",
+      "sha": "73fc38e4b3850c487a402fb2592096916f780ee5",
+      "buildJob": "2274 success 2026-09-30T15:18:48Z",
+      "verifyJob": "2275 success 2026-09-30T15:24:09Z",
+      "deployJob": "2276 success 2026-09-30T15:24:50Z"
+    },
+    "gatePresentInRunningBinary": {
+      "healthLivenessBuild": "73fc38e4b3850c487a402fb2592096916f780ee5",
+      "buildInfoJson": "73fc38e4b3850c487a402fb2592096916f780ee5",
+      "grepCountNonAnswerInDomPrimitives": 12,
+      "answerNotAnAnswerInDriverJs": true,
+      "method": "read from GET /health and from files under /opt/ui2api/dist; never typed, never inferred from the working tree"
+    },
+    "method": "Serial, one model at a time, no concurrency, no retry loop. /tmp/mv/sweep163.mjs polls GET /status until busy==0 && queued==0 before each request, so poolAtRequest is the pool the request actually started into. Identical exact-token probe to the earlier sweep: 'Reply with exactly: PONG'. v0 and venice were each given one retry, which is the whole retry budget.",
+    "order": [
+      "duckduckgo (control, FIRST) @ 15:27:27.583Z — HTTP 200, 9780ms, pool 0/1 idle",
+      "v0 (attempt 1) @ 15:27:37.383Z — HTTP 500 'internal error', 60072ms, pool 0/2 idle; journal: page.goto timeout on a cold pool spawn, NOT the answer gate",
+      "venice (attempt 1) @ 15:28:37.465Z — HTTP 502 no-answer-within-60000ms, 134250ms, pool 0/2 idle",
+      "duckduckgo (control, LAST) @ 15:30:51.730Z — HTTP 200, 9404ms, pool 0/3 idle",
+      "v0 (attempt 2) @ 15:31:32.680Z — HTTP 200 with 'Exploring ideas...', 13543ms, pool 0/3 idle",
+      "venice (attempt 2) @ 15:31:46.237Z — HTTP 502 execution-context-destroyed, 109302ms, pool 0/4 idle",
+      "v0 (diagnostic DOM capture only) @ 15:35:11.009Z — HTTP 502 no-answer-within-90000ms, 96737ms, pool 0/4 idle"
+    ],
+    "outcomes": {
+      "v0": "(c) — still 200 with the wrong string. The gate has a hole, and the cause was diagnosed and fixed (unverified).",
+      "venice": "NONE of the three. Not (a): it did not 200. Not (b): the gate never refused, because its answer selectors match nothing. Not (c): it never returned 200 with wrong text. The site DOES answer 'PONG' — the profile was reading nothing. Diagnosed against a real live DOM and fixed (live-DOM-proven, not yet round-trip-proven).",
+      "duckduckgo": "(a) — 200 with the real PONG on both ends of the sweep, so the service was alive throughout and both non-answers are attributable to the models."
+    },
+    "whatIsStillOutstanding": "Neither diagnosed fix is confirmed by a round trip, because confirming it needs ANOTHER deploy. v0's fix is bundle-derived and unverified; venice's is verified against a real DOM capture but unverified against a request. The honest status of BOTH is unverified-candidate, and no row here is upgraded to ANSWERS."
+  },
+  "goal163VocabularyGap": {
+    "theProblem": "THE CLOSED CLASS SET HAS NO MEMBER FOR THE ONE CONDITION THIS GOAL MEASURED. A row may not honestly file 'HTTP 200 carrying a non-answer' (v0) and may not honestly file 'the site answered, the profile read nothing' (venice), and every class that WOULD pass the gate is a lie: ANSWERS asserts the model answers when it served a status line; SIGN-OUT asserts a credential problem the evidence does not show; UNMEASURED is blocked by RULE 9 because a real response WAS reached; CONTENDED-TIMEOUT is blocked by RULE 7 because both rows were measured at an IDLE pool; and COMPOSER-DRIFT/WALL-CHALLENGE, the two classes whose ACTION is the retune that was actually performed, both REQUIRE an observedPage that the server never reported for either failure path.",
+    "whatWasDoneInstead": "Both rows are filed UNCLASSIFIED — the classifier's OWN refusal token (exported as the Unclassified type in src/prompt/verification-class.ts, and named in that module's own header as the honest state: 'a measured response that matches nothing is UNCLASSIFIED, which is not a class and is a GATE FAILURE — the honest move is to widen the rule on purpose, not to let the row hide'). RULE 4 therefore goes RED, naming exactly these two rows. That red is the DELIVERABLE, not a defect to be silenced: it is the measured proof that the vocabulary is one condition behind its own evidence, which is the identical shape of the bug GOAL 157 and GOAL 160 were each written about.",
+    "theAsk": "src/prompt/verification-class.ts needs (1) a class for a 200 whose body is real but not an answer — its action is the profile/selector retune, i.e. the same action as COMPOSER-DRIFT, so it is arguably a PRECONDITION RELAXATION of COMPOSER-DRIFT rather than a new member: the honest question is whether 'the selector found the wrong node' and 'the selector found nothing' are one class; and (2) a decision on whether an ANSWER-SIDDEN failure path may report observedPage at all, since without a page no drift-shaped class can ever hold it. THIS FILE WAS NOT EDITED. verification-class.ts and test/model-verification-consistent.test.ts are off-limits to GOAL 163 by instruction, so the gap is RAISED, not worked around.",
+    "priorGapStillOpen": "The 7 rows GOAL 158 filed as WALL-CHALLENGE/COMPOSER-DRIFT are untouched and remain measured on the old build bdee4ac; they were NOT re-measured here.",
+    "goal164Resolution": {
+      "whatWasDone": "The rule was WIDENED ON PURPOSE, which is what the module's own header names as the honest move for an UNCLASSIFIED row. The set gained two members: NON-ANSWER-READ (a 2xx at an idle pool whose text is not the answer) and ANSWER-UNREADABLE (the answer selector matched nothing in the real DOM, so the driver cannot read the model). Both are DERIVED by classifyOutcome from markers in the service's OWN message - the same evidence the record already carries - not hand-filed and not read from a field invented to make a row fileable. Both rows are re-filed; RULE 4 is green.",
+      "theAskAnswered": "On (1), 'the selector found the wrong node' and 'the selector found nothing' are NOT one class, and the answer is a new member rather than a relaxation of COMPOSER-DRIFT. The two have different diagnoses and a consumer must be able to tell them apart: the first returned the wrong text at a 2xx, the second returned nothing at all. Relaxing COMPOSER-DRIFT would also have required an observedPage the server never reported on either path, so the relaxation would have been unreachable rather than stricter. On (2), an answer-side failure path may NOT report observedPage, and the new classes deliberately do not require one - requiring it would have made them unfillable and quietly pushed the rows back to UNCLASSIFIED.",
+      "whatWasNotDone": "NO RULE WAS WEAKENED. RULE 4, 7, 9, 10 and 11 were left exactly as they were, and all of them still block what they blocked before. test/model-verification-consistent.test.ts was NOT edited. NO row was promoted: the ANSWERS set is unchanged at 2 (duckduckgo, gemini), because v0 served a status string and venice's answer was never read by the driver - neither answered, and a widening of the vocabulary is not a promotion.",
+      "measuredValuesUnchanged": "Re-filing changed ONE field on each row: class. Every measured value survives verbatim - the same measuredAt, the same httpStatus, the same duration, the same poolAtRequest, the same daemonCommit and the same evidence string. Nothing was re-measured to make a row fileable."
+    }
   }
 }

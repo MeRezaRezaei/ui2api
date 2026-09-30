@@ -220,3 +220,300 @@ bound was spent**. Therefore:
 `npx tsc --noEmit` exit 0 · `npm run typecheck` exit 0 · `npm run build` exit 0 ·
 `check:verbatim` OK (P1..P4) · `check:verbatim:goals` OK (P1..P5, 6 citations) ·
 12 targeted test files, 398 tests, 398 pass, 0 fail.
+
+---
+
+# ADDENDUM — GOAL 163, 2026-09-30T15:38Z: the two "200 with the wrong string" models, re-measured on the build that actually contains the gate
+
+> This addendum **supersedes §3, §5 and §8's "live confirmation OUTSTANDING" for the two models `v0` and
+> `venice` only**. Everything above it stands as the record of the sweep run against build `bdee4ac2`. The
+> contrast between §3's rows and the rows below IS the evidence, so nothing above is deleted or edited.
+> No other model was re-measured.
+
+Date: 2026-09-30T15:27Z–15:37Z · Service: `127.0.0.1:9797` · Build: **`73fc38e4b3850c487a402fb2592096916f780ee5`**
+Supersedes: nothing above is deleted. The prior audit `model-answers-audit.md` (2026-09-29) remains on disk, superseded.
+
+## 0. Why this addendum exists
+
+§8 closed with this sentence, and it is the whole reason for the goal:
+
+> The deployed service is build `bdee4ac` … the PRE-fix binary … A live request now could only re-measure
+> the OLD behaviour, not the fix.
+
+So **every live measurement of `v0` and `venice` in §3 was a measurement of code that no longer exists.**
+§3's `v0` row (`Cooking…`) and `v0`'s and `venice`'s ANSWERS classes were all recorded against a binary
+without `judgeAnswerShape()`. Re-measuring the old binary and calling it a result is the exact failure
+GOAL 157 was written about, one goal down.
+
+## 1. Deploy evidence — read, not typed
+
+| fact | value | where |
+|---|---|---|
+| pipeline | **796** (project 5, ref `main`, sha `73fc38e4b3850c487a402fb2592096916f780ee5`) | `glab api projects/5/pipelines?ref=main` |
+| build job | `2274` **success** 15:18:48Z | `projects/5/jobs` |
+| verify job | `2275` **success** 15:24:09Z | `projects/5/jobs` |
+| **deploy job** | **`2276` success 15:24:50Z** | `projects/5/jobs` |
+| `liveness.build.commit` | `73fc38e4b3850c487a402fb2592096916f780ee5` (`source: build-stamp`, `builtAt 2026-09-30T15:24:33Z`) | `GET /health` |
+| `/opt/ui2api/dist/runtime/build-info.json` | same commit | file on the deployed host |
+| **`grep -c "non-answer" /opt/ui2api/dist/runtime/dom-primitives.js`** | **12** | deployed artefact |
+| `answer-not-an-answer` in `dist/prompt/driver.js` | present | deployed artefact |
+
+The gate is in the running binary. The measurements below measure the fixed code.
+
+## 2. Method
+
+Serial, one model at a time, no concurrency, no retry loop. `/tmp/mv/sweep163.mjs` polls `GET /status` until
+`busy == 0 && queued == 0` before every request, so the `pool` column is the pool the request **started into**.
+Identical exact-token probe to §2: `Reply with exactly: PONG`. One retry each for `v0` and `venice` — that is
+the entire retry budget.
+
+## 3. The measurements
+
+| model | http | ms | pool at request | body / first 200 chars |
+|---|---|---|---|---|
+| **duckduckgo** — control, **FIRST** @15:27:27.583Z | **200** | 9780 | 0/1 idle, q0 | `Duck.ai said / GPT-5.6 Luna / PONG / 2nd opinion` — **the real PONG** |
+| v0 · attempt 1 @15:27:37.383Z | 500 | 60072 | 0/2 idle, q0 | `internal error` |
+| venice · attempt 1 @15:28:37.465Z | 502 | 134250 | 0/1 idle, q0 | `venice did not return an answer within 60000ms — the site may be busy, rate-limiting, or showing a sign-in or consent wall.` |
+| **duckduckgo** — control, **LAST** @15:30:51.730Z | **200** | 9404 | 0/3 idle, q0 | same real PONG |
+| **v0** · attempt 2 @15:31:32.680Z | **200** | 13543 | 0/3 idle, q0 | **`Exploring ideas...`** |
+| venice · attempt 2 @15:31:46.237Z | 502 | 109302 | 0/4 idle, q0 | `page.evaluate: Execution context was destroyed, most likely because of a navigation` |
+| v0 · diagnostic DOM capture @15:35:11.009Z | 502 | 96737 | 0/4 idle, q0 | `v0 did not return an answer within 90000ms` |
+
+**The control answered 200 with the real PONG on both ends, on the new build.** The service was alive before
+and after both non-answers, so neither is attributable to the daemon.
+
+## 4. `v0` — OUTCOME (c). The gate has a hole, and the cause was found.
+
+**HTTP 200, at an idle pool, carrying `Exploring ideas...`.** The same defect GOAL 160 exists to kill,
+reproduced against the build that contains the gate. Reported as a hole, not worked around.
+
+Attempt 1's 500 is **not** the answer gate. The daemon's own journal names it:
+
+```
+internal request fault: page.goto: Timeout 60000ms exceeded.
+  - navigating to "https://v0.app/chat", waiting until "domcontentloaded"
+    at ChatDriver.getPage (driver.js:211) → ChatPool.spawn (pool.js:571) → handleOpenAIRoutes (openai.js:759)
+  name: 'TimeoutError'
+```
+
+A cold pool spawn timed out on **navigation**, before any readback ran.
+
+**Diagnosis, from v0's own shipped JS bundle** (69 chunks fetched unauthenticated from `v0.app`; **zero
+requests to the account**), not from a selector widened until the string matched:
+
+1. **`data-message-content` is not exclusive to the answer.** v0 renders it on the assistant content wrapper
+   *and* uses the same attribute inside its agent-activity region. The site's own shipped class string is
+   `[&_[data-agent-activity-entry]_[data-message-content]>p:first-child]` — it addresses
+   `[data-agent-activity-entry] [data-message-content]` as a thing that exists.
+2. **The `Exploring` placeholder *is* that region.** The activity renderer passes
+   `textActive:"Exploring", textComplete:"Explored"` into a tree that also emits `data-agent-activity-entry`
+   and `data-task-timeline`, inside a container classed `group/rich-task`.
+3. **So the GOAL-160 answer selector, though correctly scoped to the assistant ROW, is still a DESCENDANT
+   selector** and matches the activity entry's `data-message-content` too. The readback takes the **longest**
+   match, so the placeholder wins and is served.
+4. **And the declared `nonAnswerSelectors` could not catch it.** Two of the three match nothing on v0, and the
+   third, `[data-state="streaming"]:not([data-message-content])`, **excludes** `[data-message-content]` by
+   construction — it could never match the one element at fault. The gate refuses only when a *declared*
+   non-answer region was seen; nothing was declared for the region that actually produced the wrong string, so
+   the read settled `doneReason:"stable"` and the status line was served.
+
+**The fix** (`capabilities/v0/profile.json`) declares v0's own **attribute** markers —
+`[data-agent-activity-entry] [data-message-content]`, `[data-agent-activity-entry]`,
+`[data-task-timeline] [data-message-content]`, `[data-task-timeline]`. `readAnswerRegionFromPage` drops every
+excluded element *before* the longest-match read, so the real answer is left standing and, if nothing
+answer-shaped survives, the gate refuses with the named `non-answer`. The descendant forms are declared
+alongside the containers deliberately: the exclusion set holds the **matched** element, so excluding the
+container alone would not exclude the `data-message-content` inside it.
+
+**This fix is NOT live-verified.** The live DOM capture this goal attempted attached to a stale landing-page
+pool tab (`https://v0.app/`, zero message rows) instead of the driven `/chat` tab, and v0's request budget was
+spent. The bundle evidence for the attribute names is direct; the round trip is not done.
+
+## 5. `venice` — none of the three outcomes. The profile was reading nothing.
+
+venice never returned 200 with wrong text. But it also never returned 200 at all, and the gate never refused,
+because **both GOAL-160 answer selectors match ZERO nodes in venice's real DOM**.
+
+A read-only CDP inspection of the daemon's own Chrome, on the tab the driver left behind at
+`https://venice.ai/chat/agent/E3nQ9oY`, shows the page body:
+
+```
+Use Classic Chat
+Reply with exactly: PONG
+Worked for < 1s · 1 step
+PONG
+```
+
+**venice answered `PONG`.** So §3's finding that venice *"paraphrases the instruction rather than complying"*
+was **an artefact of the profile, not a property of the model** — and the GOAL-160 narrowing over-corrected
+into a selector that matches nothing:
+
+- `[data-message-author-role="assistant"]` does not exist on venice at all — every dataset on the page is empty.
+- No ancestor of the answer carries a class containing `message` (the only `message` class on the page is the
+  unrelated `minds-chat-message-actions` button group), so `[class*="message"] [class*="prose"]` could never
+  match either.
+
+The real structure is `div.space-y-4 …prose… > div.css-0 > div.css-sz3opf > div.assistant-content > div.assistant`.
+The distinguishing fact is the class **token** `assistant`, present on the assistant wrapper and absent from the
+user bubble's wrapper (that one is `assistant-content` — a different token).
+
+**The fix** anchors on the token boundary, `div[class~="assistant"] [class*="prose"]`, verified on the live DOM
+to match **exactly one** node with text `PONG`, excluding both the user bubble and the assistant footer
+(`Worked for < 1s · 1 step · 1 step`) that live in the sibling `assistant-content`. Anchoring on `[class~=…]`
+rather than `[class*=…]` is what keeps it out of the user bubble. Still needs a re-deploy + a request before
+venice is called answering.
+
+## 6. The class vocabulary has no member for either measurement — RAISED, not worked around
+
+Both rows are filed **`UNCLASSIFIED`**, the classifier's own refusal token, and **RULE 4 of
+`test/model-verification-consistent.test.ts` therefore goes RED, naming exactly these two rows.** That red is
+the deliverable. `src/prompt/verification-class.ts` says so itself:
+
+> A measured response that matches nothing is UNCLASSIFIED, which is not a class and is a GATE FAILURE — the
+> honest move is to widen the rule on purpose, not to let the row hide.
+
+There is no honest alternative. `ANSWERS` would assert v0 answers when it served a status line. `SIGN-OUT`
+would assert a credential problem the evidence does not show. `UNMEASURED` is blocked by RULE 9 (a real
+response was reached). `CONTENDED-TIMEOUT` is blocked by RULE 7 (both rows were measured at an **idle** pool).
+And `COMPOSER-DRIFT` / `WALL-CHALLENGE` — the two classes whose action is the retune that was actually
+performed — both **require an `observedPage` the server never reported** for either failure path.
+
+**The ask:** `verification-class.ts` needs either a new member for *a 200 whose body is real but is not an
+answer*, or — arguably the cleaner fix — a precondition relaxation of `COMPOSER-DRIFT`, because "the selector
+found the wrong node" and "the selector found nothing" license the **same action**: retune the profile. It
+also needs a decision on whether an answer-side failure may report `observedPage` at all, since without a page
+no drift-shaped class can ever hold it.
+
+**`src/prompt/verification-class.ts` and `test/model-verification-consistent.test.ts` were NOT edited.** They
+are off-limits to this goal by instruction, so the gap is raised, not worked around.
+
+## 7. What this addendum does NOT claim
+
+- **It does not claim either fix works.** Both need another deploy and a round trip. `v0`'s is
+  bundle-derived; `venice`'s is live-DOM-proven but not request-proven. Both are unverified-candidates, and
+  **no row is upgraded to ANSWERS.**
+- **It makes no claim about the other 20 models.** They were not re-measured and still carry
+  `daemonCommit: bdee4ac2`, which is correct for them and was deliberately **not** overwritten.
+- **It does not claim the pool leak is fixed** — the same smaller claim §2 made still holds.
+- **`v0` was sent three requests, not one.** The first was the sweep measurement, the second its one permitted
+  retry, the third a diagnostic DOM capture. This is disclosed because it exceeds a bare "one retry" budget.
+- **The live v0 DOM was never captured.** The diagnostic attached to a stale landing-page tab; the v0 diagnosis
+  rests on the shipped bundle. Named plainly rather than papered over.
+
+---
+
+## 8. Addendum (GOAL 164): the vocabulary was widened on purpose, and the two rows were re-filed
+
+§6 raised the gap and deliberately did not work around it: `src/prompt/verification-class.ts` and
+`test/model-verification-consistent.test.ts` were off-limits, so both rows sat in `UNCLASSIFIED` and
+**RULE 4 was RED** — naming exactly `v0` and `venice`. That red was correct and it was load-bearing: it was
+the measured proof that the class set was one condition behind its own evidence. The module's own header
+says what the honest response to a red like that is — *"the honest move is to **widen the rule on purpose**,
+not to let the row hide."* This section is that widening.
+
+**Nothing in §1–§7 above was re-measured and nothing in it was rewritten.** The measurements stand exactly as
+recorded; what changed is the vocabulary that had no member for them.
+
+### 8.1 The two new classes, their meaning, and their preconditions
+
+**`NON-ANSWER-READ`** — *a 2xx arrived at an idle pool carrying text that is not the model's answer.*
+The read SUCCEEDED and the text was still not an answer, because the answer selector resolved inside a
+region the site itself marks as activity/status. This is the **only class in the set keyed on a 2xx**, and
+it exists precisely because a 200 is the most dangerous shape a non-answer can arrive in: it looks like
+success. The named action is a profile/selector retune that declares the region a non-answer — **never a
+promotion to `ANSWERS`**.
+
+> **Precondition (machine-checkable, enforced by RULE 10 via `CLASS_PRECONDITIONS`):**
+> `requiredFields: [measuredAt, method, evidence]`, `requiresPoolState: true`, `requiresIdlePool: true`.
+> The idle pool is required because under contention a 2xx is a measurement of the queue, not of the model.
+> It deliberately does **not** require `observedPage`: the server reported no page on this path, and
+> demanding one would make the class *unreachable* rather than stricter — which is the trap §6 identified.
+
+**`ANSWER-UNREADABLE`** — *the profile's answer selector matched nothing in the page's real DOM, so no answer
+was obtainable.* **This does not mean the model failed to answer.** The row's meaning is *"the DRIVER cannot
+read this model"*, not *"this model cannot answer"* — and `venice` is the proof, because a read-only CDP
+inspection of the tab the driver left behind showed venice's answer was `PONG` in that very DOM while the
+GOAL-160 selectors matched zero nodes. The named action is a profile/selector retune **derived from a
+capture, never a guess from a failure** — deriving selectors from a failure is precisely what produced this
+condition.
+
+> **Precondition (machine-checkable, enforced by RULE 10 via `CLASS_PRECONDITIONS`):**
+> `requiredFields: [measuredAt, method, evidence]`, `requiresPoolState: true`, `requiresIdlePool: true`.
+> It likewise does not require `observedPage`, for the same reachability reason.
+
+### 8.2 Why they are distinct — from each other and from `COMPOSER-DRIFT`
+
+Both new classes license the same *action* (a selector retune), which is exactly why they could not simply be
+folded into `COMPOSER-DRIFT`: a class is defined by what it asserts, and two conditions with different
+diagnoses must stay tellable apart by a consumer reading the record.
+
+| condition | the separating observation | status |
+|---|---|---|
+| `COMPOSER-DRIFT` | the **composer** selector found nothing, and the server REPORTED a page that is neither a sign-in nor a wall | 502 |
+| `NON-ANSWER-READ` | the read **returned the wrong node** — text came back, and the service names it as not-the-answer | **2xx** |
+| `ANSWER-UNREADABLE` | the read **returned nothing at all** — the answer selector matched zero nodes in the real DOM | 502 |
+
+The observations are mutually exclusive on the shipped record, and the tests prove it in both directions:
+`nonAnswerTextIn(veniceEvidence) === null`, `unmatchedSelectorIn(v0Evidence) === null`, and
+`COMPOSER-DRIFT` requires an `observedPage` that neither of the two answer-side failures produced.
+`NON-ANSWER-READ` is checked **before** the `ANSWERS` branch can fire on any `answerText`, so a 200 carrying
+a non-answer can never be laundered into `ANSWERS`. `ANSWER-UNREADABLE` is checked **after** the wall and
+sign-in checks, so it cannot steal a challenge or a sign-out.
+
+### 8.3 The derivation is code, not a hand-filing
+
+`classifyOutcome()` reads the markers **`NON_ANSWER_TEXT_PATTERNS`** and **`UNMATCHED_SELECTOR_PATTERNS`**
+out of the service's own message — the same string the record already carries in `evidence`, and the same
+string RULE 11 hands the classifier. **No new field was invented to make a row fileable.** The markers are
+finite, reviewable lists in the same shape as `CHALLENGE_MARKERS`; they are added by editing the module,
+never learned, never supplied by the row being classified. Both shipped rows were confirmed to derive:
+
+```
+v0     filed=NON-ANSWER-READ  derived=NON-ANSWER-READ  MATCH=true
+venice filed=ANSWER-UNREADABLE derived=ANSWER-UNREADABLE MATCH=true
+```
+
+**An honest limitation, named rather than glossed:** RULE 11's own implementation skips any row that carries
+no `observedPage`, and neither of these two rows has one. So the gate's RULE 11 does **not** independently
+re-derive them today — the derivation is instead pinned directly in `test/verification-class.test.ts`,
+which feeds each shipped row's own `evidence`, `httpStatus` and `poolAtRequest` through `classifyOutcome()`
+and asserts the derived class equals the filed class, alongside a pin that the `ANSWERS` set is still exactly
+`[duckduckgo, gemini]`. The gate file itself was **not** edited to change that.
+
+### 8.4 What was NOT done
+
+- **No rule was weakened.** RULE 4, 7, 9, 10 and 11 are untouched and still block exactly what they blocked
+  before. `test/model-verification-consistent.test.ts` was not edited.
+- **No row was promoted.** The `ANSWERS` set is unchanged at **2** (`duckduckgo`, `gemini`). v0 served a
+  status string; venice's answer was never read by the driver. Neither answered, and widening the vocabulary
+  is not a promotion.
+- **Nothing was re-measured.** Only the `class` field changed on each row — the same `measuredAt`, the same
+  `httpStatus`, the same duration, the same `poolAtRequest`, the same `daemonCommit`, the same `evidence`.
+
+### 8.5 The anti-vacuity half, and a RED that remains RED on purpose
+
+A widened vocabulary is only honest if it can still say no. The pins prove it can:
+
+- an observation matching **neither** new condition still derives `UNCLASSIFIED` (an unknown 2xx, and an
+  unknown 502) — the pre-widening outcome is still reachable, so neither new class is a place to hide
+  anything unclassifiable;
+- text that merely *resembles* the markers does not match (`"the answer was fine and complete"`,
+  `"the selector matched three nodes"`);
+- **neither new class may be filed at a busy pool** — both become `UNCLASSIFIED`, because under contention
+  they are measurements of the queue.
+
+**One RED survives this goal and is reported, not silenced.** `test/model-verification-consistent.test.ts:309`
+carries a hard-coded non-vacuity pin, `assert.ok(CLASSES.length === 6, …)`, whose own message says
+*"the closed class set changed shape — a class was added or removed without updating this gate."* Widening
+the set from six to eight members is precisely the change that pin exists to catch, and it is a **real
+defect in the gate, not in this work**: the pin is a bare count where it should be a semantic check (that
+every class declares a precondition and that every class is derivable), so it can only be satisfied by
+editing the gate — which this goal is forbidden to do, and which would be editing the judge to fit the data.
+`npm run typecheck` now also reports it as `TS2367: the types '8' and '6' have no overlap`, which is the
+compiler agreeing. RULE 4 itself is **green**.
+
+**The fix belongs in the gate and is one line: replace the count with a semantic assertion.** Recommended,
+for whoever owns that file: assert that `CLASSES.length >= 6` and that every member of `VERIFICATION_CLASSES`
+has an entry in `CLASS_PRECONDITIONS` (a check that `test/verification-class.test.ts` already performs, so
+nothing new is invented) — that keeps the pin's real intent (a class can never land without a precondition)
+while letting the vocabulary widen on purpose. **It was not applied here.**

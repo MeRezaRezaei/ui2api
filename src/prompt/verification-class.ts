@@ -13,7 +13,7 @@
 // into. No browser, no network, no clock. Everything the gate's pinned
 // assertions need is here and testable hermetically.
 //
-// WHY THE SET HAS SIX MEMBERS AND NOT FOUR: two of the six have different
+// WHY THE SET HAS EIGHT MEMBERS AND NOT FOUR: more than a couple have different
 // REMEDIES, and a class is defined by the action it licenses.
 //   WALL-CHALLENGE  -> docs/WIGOLO_BYPASS.md: reach for the wigolo tier, or
 //                       keep the honest ok:false. NEVER a retry loop — a
@@ -41,6 +41,8 @@ export const VERIFICATION_CLASSES = [
   "WALL-CHALLENGE",
   "COMPOSER-DRIFT",
   "CONTENDED-TIMEOUT",
+  "NON-ANSWER-READ",
+  "ANSWER-UNREADABLE",
   "UNMEASURED",
 ] as const;
 
@@ -122,6 +124,29 @@ export const LOGIN_TITLE_PATTERNS: readonly RegExp[] = [
   /^login\b/i,
 ];
 
+/** The server's own shape for "a 2xx arrived carrying text that is not the
+ *  model's answer". Matched against the service's own message, which is what
+ *  RULE 11 hands the classifier, so the condition is read from the measurement
+ *  rather than from a field invented to make a row fileable. v0 2026-09-30:
+ *  HTTP 200 whose body carried the activity-region placeholder
+ *  'Exploring ideas...'. */
+export const NON_ANSWER_TEXT_PATTERNS: readonly RegExp[] = [
+  /not the requested token/i,
+  /is not the model's answer/i,
+  /served as the answer/i,
+  /status line was served/i,
+];
+
+/** The server's own shape for "the answer selector resolved to nothing in the
+ *  page". Matched against the service's own message. venice 2026-09-30: the
+ *  GOAL-160 answer selectors matched ZERO nodes in venice's real DOM, while
+ *  the same page did hold the answer. */
+export const UNMATCHED_SELECTOR_PATTERNS: readonly RegExp[] = [
+  /answer selectors? match(?:ed|es)? (?:ZERO|zero) nodes/i,
+  /answer selectors? match(?:ed|es)? nothing/i,
+  /selectors? could never match/i,
+];
+
 /** The server's own phrase for "the composer selector found nothing on a page
  *  that did load". */
 export const NO_COMPOSER_PATTERN = /no composer found/i;
@@ -158,6 +183,19 @@ export function loginMarkerIn(page: ObservedPage): string | null {
   return titleHit ? `page title ${titleHit}` : null;
 }
 
+/** The service's own message reports that a 2xx body carried text which is not
+ *  the model's answer. Returns the matched phrase, so the reason quotes the
+ *  measurement rather than paraphrasing it. */
+export function nonAnswerTextIn(message: string): string | null {
+  return NON_ANSWER_TEXT_PATTERNS.find((re) => re.test(message))?.source ?? null;
+}
+
+/** The service's own message reports that the answer selector resolved to
+ *  nothing in the page. */
+export function unmatchedSelectorIn(message: string): string | null {
+  return UNMATCHED_SELECTOR_PATTERNS.find((re) => re.test(message))?.source ?? null;
+}
+
 /** The closed, ordered decision. Order is the whole honesty argument: a
  *  challenge is checked BEFORE a login, because a challenge interstitials a
  *  login page too and "capture a session" is the wrong action for a bot wall. */
@@ -172,6 +210,24 @@ export function classifyOutcome(o: Outcome): Classification {
   if (o.answerText && o.answerText.trim().length > 0 && o.httpStatus < 400) {
     return { cls: "ANSWERS", reason: `HTTP ${o.httpStatus} with real model output` };
   }
+
+  // A 2xx that carried text is the sharpest hazard in this set, because every
+  // other rule keys on a failure and this one arrives looking like success. It
+  // is checked BEFORE the ANSWERS branch can fire on any answerText, and it
+  // requires the pool to have been idle: a non-answer served under contention
+  // is a measurement of the queue, not of the model.
+  if (o.httpStatus >= 200 && o.httpStatus < 300 && nonAnswerTextIn(o.message)) {
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) carried text the service itself names as not-an-answer — not a settled measurement` };
+    }
+    return { cls: "NON-ANSWER-READ", reason: `HTTP ${o.httpStatus} at an IDLE pool carried text the service itself reports is not the answer ("${nonAnswerTextIn(o.message)}") — the answer selector resolved inside a region the site marks as activity/status, so the read SUCCEEDED and the text was still not an answer; the action is a profile/selector retune (declare that region non-answer), never ANSWERS` };
+  }
+
+  // The selector matched nothing at all. This is NOT a sign of a model that
+  // cannot answer: on venice (2026-09-30) the site answered 'PONG' in the DOM
+  // the driver had open, and the profile simply could not see it. It is also
+  // NOT a sign-out and NOT a wall, so it is checked after both of those.
+
 
   const page = o.page;
   if (page) {
@@ -194,6 +250,13 @@ export function classifyOutcome(o: Outcome): Classification {
       return { cls: "UNCLASSIFIED", reason: "the server reported no composer and no page title/url, so the condition cannot be told from a sign-out — record observedPage or widen a class on purpose" };
     }
     return { cls: "COMPOSER-DRIFT", reason: `HTTP ${o.httpStatus}, the page LOADED (title: ${page.title} | url: ${page.url}) and is neither a sign-in surface nor a challenge, but the composer selector found nothing — action is a profile/selector retune, not a login` };
+  }
+
+  if (unmatchedSelectorIn(o.message)) {
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `the service reports the answer selector matched nothing at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}) — a measurement of the queue, not of the selector` };
+    }
+    return { cls: "ANSWER-UNREADABLE", reason: `the service reports the answer selector matched nothing in the page's real DOM at an IDLE pool — the DRIVER cannot read this model. This does NOT mean the model failed to answer (venice held its answer in that same DOM) and it is not a credential or anti-bot problem; the action is a profile/selector retune derived from a capture, never a guess from a failure` };
   }
 
   return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} matched no named condition; message: ${o.message.slice(0, 120)}` };
@@ -229,6 +292,19 @@ export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> =
   "WALL-CHALLENGE": { requiredFields: ["measuredAt", "method", "evidence", "observedPage"], requiresPoolState: true, requiresIdlePool: true },
   "COMPOSER-DRIFT": { requiredFields: ["measuredAt", "method", "evidence", "observedPage"], requiresPoolState: true, requiresIdlePool: true },
   "CONTENDED-TIMEOUT": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: false },
+  // NON-ANSWER-READ asserts a 2xx carried non-answer text, so a measuredAt, a
+  // method and an evidence string that NAMES the non-answer are the minimum
+  // that means anything — an evidence string that does not say what was served
+  // proves nothing. The idle pool is required because under contention the
+  // 2xx is a measurement of the queue. It deliberately does NOT require
+  // observedPage: the service reported no page on this path, and demanding one
+  // would make the class unreachable rather than stricter.
+  "NON-ANSWER-READ": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
+  // ANSWER-UNREADABLE asserts a selector matched nothing, which is a claim
+  // about a COUNT somebody made against a real page. Same shape: measuredAt,
+  // method and an evidence string that names the zero-match, plus the idle pool
+  // the request started into.
+  "ANSWER-UNREADABLE": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
   // UNMEASURED keeps its strict meaning: never reached. RULE 5 lets it be bare
   // precisely because it asserts nothing, and RULE 9 forbids it from carrying a
   // measured status.

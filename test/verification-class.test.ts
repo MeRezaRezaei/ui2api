@@ -4,13 +4,19 @@ import { test } from "node:test";
 import {
   CHALLENGE_MARKERS,
   CLASS_PRECONDITIONS,
+  NON_ANSWER_TEXT_PATTERNS,
+  UNMATCHED_SELECTOR_PATTERNS,
   VERIFICATION_CLASSES,
   challengeMarkerIn,
   classifyOutcome,
   classPrecondition,
   loginMarkerIn,
+  nonAnswerTextIn,
+  unmatchedSelectorIn,
   unmeasuredAfterMeasuredResponse,
 } from "../src/prompt/verification-class.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // The classifier is pure, so every pin below is hermetic: no browser, no
 // network, no clock. The inputs are the values the DEPLOYED service actually
@@ -230,3 +236,173 @@ test("unmeasuredAfterMeasuredResponse: a bare UNMEASURED row with no evidence is
 test("CLASS_PRECONDITIONS covers exactly the closed set — no orphan, no gap", () => {
   assert.deepEqual(Object.keys(CLASS_PRECONDITIONS).sort(), [...VERIFICATION_CLASSES].sort());
 });
+
+// ── the two conditions GOAL 164 added a class for ───────────────────────────
+//
+// v0 returned HTTP 200 at an idle pool carrying 'Exploring ideas...' — a status
+// string from the site's own agent-activity region, not the answer. venice
+// never returned 200 at all: its answer selectors matched ZERO nodes while the
+// page held the answer. Neither row could be filed honestly under any existing
+// member, so the set was widened ON PURPOSE, and every pin below holds the
+// widening to the same standard the six original classes were held to.
+
+const V0_EVIDENCE =
+  "POST /v1/chat/completions {model:v0, prompt 'Reply with exactly: PONG'} -> HTTP 200 in 13543ms at pool 0/3 IDLE, queued 0, and the body carried the answer text 'Exploring ideas...'. A real 200, real content, from v0's own site, that is NOT the requested token.";
+
+const VENICE_EVIDENCE =
+  "POST /v1/chat/completions {model:venice} -> HTTP 502 in 109302ms at pool 0/4 IDLE, queued 0, message 'page.evaluate: Execution context was destroyed'. VENICE ACTUALLY ANSWERED 'PONG' — the GOAL-160 answer selectors match ZERO nodes in venice's real DOM, so no ANCESTOR of the answer matches either and the selectors could never match.";
+
+test("NON-ANSWER-READ: a 2xx at an idle pool carrying text that is not the answer", () => {
+  const c = classifyOutcome({ httpStatus: 200, message: V0_EVIDENCE, poolAtRequest: IDLE });
+  assert.equal(c.cls, "NON-ANSWER-READ", `expected NON-ANSWER-READ, got ${c.cls}: ${c.reason}`);
+  assert.match(c.reason, /profile\/selector retune/);
+  assert.notEqual(c.cls, "ANSWERS", "a 2xx carrying a non-answer must never be filed as ANSWERS");
+});
+
+test("ANSWER-UNREADABLE: an answer selector that matched nothing, at an idle pool", () => {
+  const c = classifyOutcome({ httpStatus: 502, message: VENICE_EVIDENCE, poolAtRequest: IDLE });
+  assert.equal(c.cls, "ANSWER-UNREADABLE", `expected ANSWER-UNREADABLE, got ${c.cls}: ${c.reason}`);
+  assert.match(c.reason, /DRIVER cannot read this model/);
+  assert.match(c.reason, /does NOT mean the model failed to answer/);
+});
+
+test("the two new classes are DISTINCT — a read that returned the wrong node is not a read that returned nothing", () => {
+  const unread = classifyOutcome({ httpStatus: 502, message: VENICE_EVIDENCE, poolAtRequest: IDLE });
+  const nonAnswer = classifyOutcome({ httpStatus: 200, message: V0_EVIDENCE, poolAtRequest: IDLE });
+  assert.notEqual(unread.cls, nonAnswer.cls);
+  // The separating observation: v0's body carried text and the service named it
+  // as not-the-answer; venice's carried no answer text at all and the service
+  // named a zero-node selector match. Neither marker appears in the other row.
+  assert.equal(nonAnswerTextIn(VENICE_EVIDENCE), null, "venice's evidence must not claim a non-answer 2xx");
+  assert.equal(unmatchedSelectorIn(V0_EVIDENCE), null, "v0's evidence must not claim a zero-node match");
+  // …and venice really did answer, so a consumer must not read this as a model
+  // that cannot answer. The class says the DRIVER could not read it.
+  assert.notEqual(unread.cls, "ANSWERS");
+  assert.notEqual(unread.cls, "SIGN-OUT");
+  assert.notEqual(unread.cls, "WALL-CHALLENGE");
+});
+
+test("both new classes are distinct from COMPOSER-DRIFT — a composer that found nothing is a third condition", () => {
+  const drift = classifyOutcome({
+    httpStatus: 502,
+    message: NO_COMPOSER("blackbox"),
+    page: { title: "Blackbox: The high-trust platform for frontier inference", url: "https://www.blackbox.ai/" },
+    poolAtRequest: IDLE,
+  });
+  assert.equal(drift.cls, "COMPOSER-DRIFT");
+  assert.notEqual(drift.cls, "NON-ANSWER-READ", "a missing composer is not a read that served a non-answer");
+  assert.notEqual(drift.cls, "ANSWER-UNREADABLE", "a missing composer is not a zero-node answer-selector match");
+  // The separating observation: COMPOSER-DRIFT requires the server to have
+  // REPORTED a page and named a missing composer; the new two do not, and
+  // v0's status is a 2xx where every COMPOSER-DRIFT row is a 502.
+  assert.equal(classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("x"), poolAtRequest: IDLE }).cls, "UNCLASSIFIED");
+});
+
+// ── the anti-vacuity half: the widening must not become an escape hatch ──────
+
+test("ANTI-VACUITY: an observation matching NEITHER new condition is still UNCLASSIFIED, never a class", () => {
+  // A 200 that carried a real answer, and a 502 that named neither condition.
+  // Before the widening this was the only possible outcome for a row the rules
+  // cannot explain; it must remain possible afterwards, or the two new classes
+  // have become a place to hide anything unclassifiable.
+  const unknown200 = classifyOutcome({ httpStatus: 200, message: "HTTP 200 in 9000ms, body carried some text", poolAtRequest: IDLE });
+  assert.equal(unknown200.cls, "UNCLASSIFIED", "a 2xx with no non-answer claim must not become NON-ANSWER-READ");
+
+  const unknown502 = classifyOutcome({ httpStatus: 502, message: "something went wrong", poolAtRequest: IDLE });
+  assert.equal(unknown502.cls, "UNCLASSIFIED", "a 502 with no zero-match claim must not become ANSWER-UNREADABLE");
+
+  // And the two markers are not free-text: they are finite, reviewable lists,
+  // and text that merely resembles them is not a match.
+  assert.equal(nonAnswerTextIn("the answer was fine and complete"), null);
+  assert.equal(unmatchedSelectorIn("the selector matched three nodes"), null);
+  assert.ok(NON_ANSWER_TEXT_PATTERNS.length > 0 && UNMATCHED_SELECTOR_PATTERNS.length > 0);
+});
+
+test("ANTI-VACUITY: neither new class may be filed at a BUSY pool — that is contention, not a model property", () => {
+  assert.equal(
+    classifyOutcome({ httpStatus: 200, message: V0_EVIDENCE, poolAtRequest: BUSY }).cls,
+    "UNCLASSIFIED",
+    "a non-answer 2xx measured under contention is a measurement of the queue",
+  );
+  assert.equal(
+    classifyOutcome({ httpStatus: 502, message: VENICE_EVIDENCE, poolAtRequest: BUSY }).cls,
+    "UNCLASSIFIED",
+    "a zero-node selector match measured under contention is a measurement of the queue",
+  );
+});
+
+test("both new classes declare a machine-checkable precondition and it is stricter than UNMEASURED's", () => {
+  for (const c of ["NON-ANSWER-READ", "ANSWER-UNREADABLE"] as const) {
+    const p = classPrecondition(c);
+    for (const f of ["measuredAt", "method", "evidence"] as const) {
+      assert.ok(p.requiredFields.includes(f), `${c} must require ${f}`);
+    }
+    assert.ok(p.requiresPoolState, `${c} must require pool state`);
+    assert.ok(p.requiresIdlePool, `${c} must require an idle pool`);
+  }
+  assert.deepEqual(classPrecondition("UNMEASURED").requiredFields, []);
+});
+
+// ── the SHIPPED record: the two re-filed rows derive, and their measured
+//    values are the ones the measurement produced ────────────────────────────
+
+interface ShippedRow {
+  model?: string;
+  measuredAt?: unknown;
+  class?: unknown;
+  httpStatus?: unknown;
+  evidence?: unknown;
+  poolAtRequest?: unknown;
+}
+
+const SHIPPED = (JSON.parse(
+  readFileSync(resolve(process.cwd(), "capabilities/model-verification.json"), "utf8"),
+) as { records: ShippedRow[] }).records;
+
+const rowFor = (model: string): ShippedRow => {
+  const r = SHIPPED.find((x) => x.model === model);
+  assert.ok(r, `the record must carry a ${model} row`);
+  return r as ShippedRow;
+};
+
+test("the shipped v0 row is re-filed NON-ANSWER-READ and the classifier AGREES from the record's own evidence", () => {
+  const r = rowFor("v0");
+  assert.equal(r.class, "NON-ANSWER-READ");
+  const derived = classifyOutcome({
+    httpStatus: r.httpStatus as number,
+    message: r.evidence as string,
+    poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown },
+  });
+  assert.equal(derived.cls, r.class, `the classifier derives ${derived.cls} from the shipped v0 evidence — RULE 11's rule would reject this row`);
+  // The measured values are the ones the 2026-09-30 GOAL-163 sweep printed.
+  assert.equal(r.measuredAt, "2026-09-30T15:31:32.680Z");
+  assert.equal(r.httpStatus, 200);
+  assert.deepEqual(r.poolAtRequest, { busy: 0, total: 3, queued: 0 });
+  assert.match(r.evidence as string, /13543ms/);
+  assert.match(r.evidence as string, /Exploring ideas\.\.\./);
+  assert.notEqual(r.class, "ANSWERS", "v0 returned a status string, not an answer; upgrading it would be a fabrication");
+});
+
+test("the shipped venice row is re-filed ANSWER-UNREADABLE and the classifier AGREES from the record's own evidence", () => {
+  const r = rowFor("venice");
+  assert.equal(r.class, "ANSWER-UNREADABLE");
+  const derived = classifyOutcome({
+    httpStatus: r.httpStatus as number,
+    message: r.evidence as string,
+    poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown },
+  });
+  assert.equal(derived.cls, r.class, `the classifier derives ${derived.cls} from the shipped venice evidence — RULE 11's rule would reject this row`);
+  assert.equal(r.measuredAt, "2026-09-30T15:31:46.237Z");
+  assert.equal(r.httpStatus, 502);
+  assert.deepEqual(r.poolAtRequest, { busy: 0, total: 4, queued: 0 });
+  assert.match(r.evidence as string, /109302ms/);
+  assert.match(r.evidence as string, /match ZERO nodes/);
+  assert.notEqual(r.class, "ANSWERS", "the driver never read venice's answer; the site answered, the profile could not see it");
+});
+
+test("the ANSWERS set did not grow — re-filing is not promoting", () => {
+  const answering = SHIPPED.filter((r) => r.class === "ANSWERS").map((r) => r.model).sort();
+  assert.deepEqual(answering, ["duckduckgo", "gemini"], `the ANSWERS set changed: ${answering.join(", ")} — v0 and venice must not be promoted to ANSWERS by a widened vocabulary`);
+  assert.equal(SHIPPED.filter((r) => r.class === "UNCLASSIFIED").length, 0, "no row may be left in the classifier's refusal token");
+});
+
