@@ -1,0 +1,98 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-omniroute/opencode/space-bunny-free",
+  "small_model": "opencode-omniroute/opencode/space-bunny-free",
+  "default_agent": "build",
+  "autoupdate": false,
+  "formatter": false,
+  "lsp": false,
+  "subagent_depth": 10,
+  "tool_output": {
+    "max_bytes": 51200,
+    "max_lines": 10000
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 2,
+    "preserve_recent_tokens": 200000,
+    "reserved": 200000
+  },
+  "agent": {
+    "build": {
+      "model": "opencode-omniroute/opencode/space-bunny-free",
+      "steps": 1000000000
+    },
+    "plan": {
+      "model": "opencode-omniroute/opencode/space-bunny-free",
+      "steps": 1000000000
+    },
+    "explore": {
+      "mode": "subagent",
+      "model": "opencode-omniroute/opencode/space-bunny-free",
+      "description": "Read-only recon/analysis subagent: search, read, report.",
+      "steps": 200000
+    },
+    "general": {
+      "mode": "subagent",
+      "model": "opencode-omniroute/opencode/space-bunny-free",
+      "description": "General execution subagent: one deliverable, its own file slice, its own verification command.",
+      "steps": 200000
+    }
+  },
+  "command": {
+    "plan": {
+      "agent": "plan",
+      "description": "Create a step-by-step plan before writing code.",
+      "template": "Create a detailed plan for: $ARGUMENTS"
+    },
+    "review": {
+      "agent": "explore",
+      "template": "Review all uncommitted changes for potential security issues, syntax errors, and performance bottlenecks."
+    },
+    "test": {
+      "agent": "build",
+      "template": "Run the test suite and summarize any failures."
+    }
+  },
+  "provider": {
+    "opencode-omniroute": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OmniRoute",
+      "options": {
+        "baseURL": "https://or.pubg-sell.ir/v1",
+        "apiKey": "{env:OMNIROUTE_API_KEY}"
+      },
+      "models": {
+        "opencode/space-bunny-free": {
+          "name": "space-bunny-free (OmniRoute)"
+        },
+        "opencode/big-pickle": {
+          "name": "big-pickle (OmniRoute)"
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "bash": "allow",
+    "edit": "allow",
+    "read": "allow",
+    "external_directory": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "webfetch": "allow",
+    "todowrite": "allow",
+    "question": "deny",
+    "task": "deny",
+    "websearch": "allow"
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    }
+  }
+}
