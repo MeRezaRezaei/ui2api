@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,14 @@ const ROOT = dirname(fileURLToPath(new URL(".", import.meta.url)));
 
 import { startPromptd } from "../src/prompt/http.js";
 import { answerableChatSurface, buildRegistryPackages } from "../src/prompt/registry.js";
+import {
+  consumerProse,
+  envKnobsIn,
+  goalRefsIn,
+  internalProseSamples,
+  proseRuleIds,
+  proseRuleTokens,
+} from "../src/prompt/consumer-surface.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 import type { ChatPool } from "../src/prompt/pool.js";
 
@@ -413,5 +421,127 @@ describe("ABSTRACTION LEAK: a DISCLOSURE is not a lie (pinned so honesty survive
         }
       }
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GOAL 162, PART THREE — `consumerProse()`'s leak classes are DERIVED FROM THE
+// CODE, so the redaction table can no longer rot OPEN.
+//
+// THE DEFECT THIS REPLACES. `consumerProse()` redacts an operator's manifest
+// prose before the registry republishes it as a consumer-facing tool
+// `description`. Its vocabulary was a TABLE — a redaction list, which can only
+// SHRINK when somebody remembers to widen it. A table that can rot open is not
+// a gate; it is a comment asking to be maintained, and this project has a long
+// history of paying for exactly that.
+//
+// WHAT IS DERIVED, AND WHAT HONESTLY IS NOT:
+//
+//   DERIVED (facts about the tree — a machine can count them):
+//     * every `UI2API_*` knob the CODE reads, scanned out of src/ and scripts/
+//     * every `GOAL nn` bookkeeping reference in the tree
+//     * every prose sample a source file DECLARES with the `// @internal-prose
+//       <class>` marker, harvested from the code itself — never hand-copied
+//
+//   NOT DERIVABLE, and said so rather than pretended away: the CONCEPT WORDS.
+//   No scan of a codebase can tell you that the word "Xvfb" is internal — only
+//   a person knows that. So the lexicon stays hand-declared, in ONE place
+//   (`proseRuleIds()`), and this gate's leverage is applied where it is real:
+//   every derived obligation must actually be REDACTED. A new knob, a new goal
+//   reference, or a new marker-declared class fails HERE. Only a genuinely new
+//   concept word needs a new entry in that one list — and adding it is a
+//   visible edit in one file, not a silent leak in production.
+describe("CONSUMER PROSE: the leak classes are derived from the code, not remembered", () => {
+  /** Every file whose prose can reach the consumer: the source we ship, the ops
+   *  scripts the docs tell an operator to run, and the per-site capability
+   *  packages whose manifests are republished as tool descriptions. Scanned by
+   *  directory walk, so a NEW site package is covered the day it lands. */
+  function proseSources(): string[] {
+    const out: string[] = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+        const child = `${rel}/${e.name}`;
+        if (e.isDirectory()) {
+          if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+          walk(child);
+        } else if (/\.(ts|json|md)$/.test(e.name)) {
+          out.push(child);
+        }
+      }
+    };
+    for (const top of ["src", "scripts", "capabilities"]) {
+      if (existsSync(join(ROOT, top))) walk(top);
+    }
+    return out;
+  }
+
+  test("every env knob the CODE reads is removed by consumerProse — the rule cannot be narrowed to a remembered list", () => {
+    const knobs = envKnobsIn(ROOT, proseSources());
+    assert.ok(knobs.length >= 10, `the knob derivation read only ${knobs.length} — a walk that collapsed proves nothing`);
+    const survivors = knobs.filter((k) => consumerProse(`set ${k}=9222 to attach`).includes(k));
+    assert.deepEqual(
+      survivors,
+      [],
+      `consumerProse() no longer redacts these knobs, which the code itself reads: ${survivors.join(", ")}. ` +
+        `A knob added to the code is covered BY CONSTRUCTION; this is the pin that keeps it so.`,
+    );
+  });
+
+  test("every GOAL nn reference in the tree is removed, and the DATE beside it survives", () => {
+    const refs = goalRefsIn(ROOT, proseSources());
+    assert.ok(refs.length >= 1, "the goal-reference derivation read nothing — refusing to pass on a collapsed walk");
+    for (const ref of refs.slice(0, 200)) {
+      const out = consumerProse(`${ref} measured 2026-09-23 on a real round-trip`);
+      assert.ok(!out.includes(ref), `consumerProse() leaked the internal gate number ${ref}: ${out}`);
+      assert.ok(
+        out.includes("2026-09-23"),
+        `the redaction deleted the DATE too — that is a second lie. A dated record is a disclosure a consumer branches on, and ${ref} must go without taking it: ${out}`,
+      );
+    }
+  });
+
+  test("every marker-declared internal prose class is covered by a rule (the marker convention is load-bearing)", () => {
+    const samples = internalProseSamples(ROOT, proseSources());
+    assert.ok(
+      samples.length >= 1,
+      "no source file declares an `// @internal-prose <class>` marker — the convention has no member, which means " +
+        "it is a convention in a comment rather than a mechanism. This is an anti-vacuity floor, not a coverage claim.",
+    );
+    const declared = new Set(proseRuleIds());
+    const uncovered = samples.filter((s) => !declared.has(s.cls)).map((s) => `${s.cls} (${s.file}:${s.line})`);
+    assert.deepEqual(
+      uncovered,
+      [],
+      `these classes are declared in the CODE but have no redaction rule in proseRuleIds(): ${uncovered.join(", ")}. ` +
+        `A prose class nobody declared a rule for is published to every consumer verbatim.`,
+    );
+    // …and the coverage is proven against the code's OWN harvested text, not a
+    // fixture somebody typed to please the rule.
+    const tokens = proseRuleTokens();
+    for (const s of samples) {
+      const redactions = (tokens[s.cls] ?? []).filter((re) => re.test(s.text));
+      assert.ok(
+        redactions.length > 0,
+        `the sample at ${s.file}:${s.line} is declared "${s.cls}" but none of that class's tokens occur in it: ${JSON.stringify(s.text)} — ` +
+          `either the class is mislabelled or the sample moved.`,
+      );
+      const out = consumerProse(s.text);
+      for (const re of redactions) {
+        assert.ok(!re.test(out), `consumerProse() left ${String(re)} in the ${s.cls} sample from ${s.file}:${s.line}: ${out}`);
+      }
+    }
+  });
+
+  test("NEGATIVE: the derivation catches a NEW internal phrase the class list never named", () => {
+    // The property the whole section exists for, proven by making the gate fail
+    // on a body it has never seen. If this ever passes vacuously, the derivation
+    // is decoration.
+    const novel = "GOAL 999 measured 2026-09-30; attach via UI2API_TOTALLY_NEW_KNOB=9222 on a real Chrome under Xvfb";
+    const out = consumerProse(novel);
+    assert.ok(!/\bGOAL\s+\d+\b/.test(out), `a goal number survived: ${out}`);
+    assert.ok(!/UI2API_TOTALLY_NEW_KNOB/.test(out), `an unseen env knob survived: ${out}`);
+    assert.ok(!/real Chrome/.test(out), `the mechanism survived: ${out}`);
+    assert.ok(!/Xvfb/.test(out), `the display mechanism survived: ${out}`);
+    assert.ok(out.includes("2026-09-30"), `the redaction took the disclosure date too: ${out}`);
   });
 });

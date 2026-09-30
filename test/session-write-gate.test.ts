@@ -412,13 +412,19 @@ test("resolveCapabilityAccount: a write-refused alias 400s (named error listing 
     // A write-refused alias must throw the NAMED 400 (never silently resolve):
     assert.throws(
       () => resolveCapabilityAccount("john  smith", profile, dataDir),
-      /no stored account "john  smith" for "gemini\.google\.com"; available: \[john-smith\]/,
-      "refused alias -> named unknown-account error (GOAL 51)"
+      // GOAL 162: the wording moved to the roster-free consumer projection. What
+      // this pin protects is UNCHANGED and is the part that matters: a
+      // write-refused alias still throws, still names the alias the caller sent,
+      // and still names the route that lists valid ids. What it no longer
+      // asserts is the roster — listing every other stored identity to a caller
+      // who asked about one is the leak. The permission is identical.
+      /account "john  smith" is not available for gemini\.google\.com;.*GET \/accounts\?site=/s,
+      "refused alias -> named unknown-account error (GOAL 51), roster-free (GOAL 162)"
     );
     assert.throws(
       () => resolveCapabilityAccount("JOHN SMITH", profile, dataDir),
-      /no stored account "JOHN SMITH"/,
-      "case-variant raw identity -> named unknown-account error"
+      /account "JOHN SMITH" is not available for/,
+      "case-variant raw identity -> named unknown-account error (GOAL 162 wording)"
     );
     // The guard runs BEFORE any browser work: it is pure (throws immediately,
     // no launchBrowser import path executed — verify the throw happens at the

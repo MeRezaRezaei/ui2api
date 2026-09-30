@@ -79,11 +79,20 @@ d("GOAL 117: no route echoes internal exception text to a client", () => {
     assert.match(seg, /message: e instanceof Error \? e\.message : String\(e\)/, "a request-shape 400 must keep its named message");
   });
 
-  t("the two remaining e.message uses are NAMED contracts, not leaks", () => {
-    // 1) a pool refusal: its message is a NAMED, actionable reason (the documented
-    //    pool_saturated / pool_queue_timeout / pool_closed contract)
-    assert.match(code(HTTP), /poolRefusal\(msg\)/, "the pool refusal message is a documented contract");
-    assert.match(code(HTTP), /code:\s*refusal\.code, message: msg/, "and it is emitted under its stable code");
+  t("the remaining e.message uses are NAMED contracts, not leaks — and the pool one is REDACTED", () => {
+    // 1) a pool refusal. GOAL 162 changed what this one says: the wire body
+    //    carries the CODE (the contract an agent branches on) plus the
+    //    consumer projection, and NO LONGER echoes the pool's own sentence with
+    //    its queue counters. The decision — telemetry-vs-contract, and why
+    //    `GET /status` is where the numbers belong — is written out in full in
+    //    `src/prompt/consumer-surface.ts` next to `consumerPoolRefusal`. What is
+    //    pinned here is the shape: the class is still NAMED, and the internal
+    //    prose is not what reaches the wire.
+    assert.match(code(HTTP), /poolRefusal\(msg\)/, "the pool refusal class is still labelled from the pool's own message");
+    assert.match(code(HTTP), /code:\s*refusal\.code, message: consumerPoolRefusal\(refusal\.code\)/,
+      "the 503 body must carry the CODE plus the consumer projection, never the pool's own queue prose");
+    assert.doesNotMatch(code(HTTP), /code:\s*refusal\.code, message: msg/,
+      "the 503 body echoes the pool's own sentence again — the pool's counters are operator telemetry, published on GET /status");
     // 2) the request-shape 400 above
     assert.match(
       code(HTTP),

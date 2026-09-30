@@ -81,7 +81,27 @@ function saturatedPool(opts: Partial<PoolOptions>, driver: unknown = deadDriver(
 
 // ── (1) bounded queue: capacity ──────────────────────────────────────────────
 
-test("GOAL83: acquire() past maxWaiters rejects with the NAMED saturation error (numbers included)", async () => {
+// GOAL 162 — WHY THE NUMBERS ARE STILL PINNED HERE, AND WHY THEY ARE NOT ON
+// THE WIRE. This file's pins state that "saturation must name the numbers", and
+// GOAL 162 removed those numbers from the 503 body. Those two things are NOT in
+// conflict once you say out loud WHERE the numbers are allowed to live, which is
+// what this comment is for:
+//
+//   * IN THE POOL'S OWN MESSAGE (`src/prompt/pool.ts`) — yes, deliberately. That
+//     message is the operator's: it is what the daemon logs, and the numbers it
+//     carries are the reason the pool is saturated. The pins below stay.
+//   * IN THE 503 BODY ON THE WIRE — no. The decision (written out in full in
+//     `src/prompt/consumer-surface.ts`, beside `consumerPoolRefusal`) is that
+//     the CODE is the client contract and the counters are OPERATOR TELEMETRY.
+//     The telemetry is not discarded: `GET /status` publishes the queue depth and
+//     its bound, which is the test at the bottom of this same file. What is
+//     refused is only the ECHO — repeating our queue's internals to any consumer
+//     that trips a 503.
+//
+// So a future reader who finds these numbers pinned here should read this comment
+// and not "restore" them onto the wire, and a reader who finds them gone from
+// the wire should read it and not go hunting for the counters to re-add.
+test("GOAL83: acquire() past maxWaiters rejects with the NAMED saturation error (numbers included — operator-side, GOAL 162)", async () => {
   const { pool } = saturatedPool({ max: 1, maxWaiters: 1, waiterTimeoutMs: 60_000 });
   try {
     // First request parks (the single page is busy) — the queue is now full.

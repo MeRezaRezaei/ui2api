@@ -21,12 +21,13 @@
  * change to every generated client, and it is never a "cleanup".
  *
  * ── WHAT IT IS, MEASURED (not assumed) ──────────────────────────────────────
- * The emitted table is 6 regex entries + 1 exact-match branch:
+ * The emitted table is 7 regex entries + 1 exact-match branch:
  *   /^pool saturated /      -> pool_saturated       [lang-php.ts:170]
  *   /^pool queue timeout /  -> pool_queue_timeout   [lang-php.ts:171]
  *   /^pool closed /         -> pool_closed          [lang-php.ts:172]
  *   /^request timeout after / -> request_timeout    [lang-php.ts:173]
- *   /^no stored account /   -> no_stored_account    [lang-php.ts:174]
+ *   /^no stored account /   -> no_stored_account    [lang-php.ts:174]  (legacy form)
+ *   /^account ".*" is not available for / -> no_stored_account  [GOAL 162]
  *   /^unknown site /        -> unknown_site         [lang-php.ts:175]
  *   trim($m) === 'not found' -> not_found          [lang-php.ts:182]
  *   else                     -> http_<status>       [lang-php.ts:185]
@@ -49,7 +50,7 @@
  *    branching on `http_400`. A derivation cannot be both honest and identical.
  *
  * ── SO IT IS SPLIT, AND BOTH HALVES ARE PINNED ──────────────────────────────
- *   LEGACY SHIM (6 of 7): every one of those codes is a code the DAEMON already
+ *   LEGACY SHIM (7 rows, 6 codes): every one of those codes is a code the DAEMON already
  *     publishes (http.ts poolRefusal:436-441, SHAPE_MESSAGES:961-966, the 504 at
  *     :1036). They exist for a pre-GOAL-143 daemon that sent those messages as
  *     bare strings. On TODAY's daemon they are BYPASSED — the class arrives
@@ -374,15 +375,25 @@ test("GOAL 157: browsing a capability surface needs NO vault identity, but the a
   });
 });
 
-test("codeFor: the emitted table is 6 regex entries + 1 exact-match branch, every entry ^-anchored (its published shape)", () => {
+test("codeFor: the emitted table is 7 regex entries + 1 exact-match branch, every entry ^-anchored (its published shape)", () => {
+  // GOAL 162 ADDED the seventh row rather than rewording the fifth. The
+  // unknown-account refusal's consumer projection is now `account "<id>" is not
+  // available for <site>; …`, so without a row for it that class would fall to
+  // `http_400` for any client still reading a Shape-1 body. The legacy
+  // `/^no stored account /` row is KEPT beside it rather than replaced: it still
+  // classifies a pre-GOAL-162 daemon and the CLI/plugin emitters (which keep
+  // the vault wording, because those are OPERATOR surfaces), and both rows map
+  // to the SAME published code — so no consumer sees a new code and no consumer
+  // loses one. This is a CONTRACT-preserving addition, not a change to the
+  // published list.
   assert.equal(
     TABLE.length,
-    6,
+    7,
     `the emitted prose table changed size: ${JSON.stringify(TABLE)} — every change here is a CONTRACT change, not a refactor`,
   );
   assert.deepEqual(
     TABLE.map((t) => t.code),
-    ["pool_saturated", "pool_queue_timeout", "pool_closed", "request_timeout", "no_stored_account", "unknown_site"],
+    ["pool_saturated", "pool_queue_timeout", "pool_closed", "request_timeout", "no_stored_account", "no_stored_account", "unknown_site"],
     "the table's entries or their ORDER moved — read the diff; a reordering changes which pattern a message matches first",
   );
   assert.ok(EXC_SRC.includes("trim($message) === 'not found'"), "the exact-match 'not found' policy branch is gone");
@@ -412,10 +423,18 @@ test("codeFor: the drift gate — every code still classifies the REAL message i
     // Failure mode A: the entry and the words its class really emits no longer
     // agree — EITHER an emitter was reworded, OR this table entry was. Both
     // leave the entry DEAD: the code would silently become http_<status>.
-    const ownPattern = entry ? entry.pattern : "^not found$";
+    // A class may be matched by MORE THAN ONE entry when its wording has two
+    // published forms (the legacy vault prefix and today's consumer projection,
+    // both naming `no_stored_account`). The property this gate protects is
+    // "the entry and the words its class really emits agree", so ANY entry that
+    // classifies the real message satisfies it — not a single hand-picked row.
+    const ownPattern = (entry ? entry.pattern : "^not found$");
+    // …except the POLICY branch (`not_found`), which is an exact-match, not a
+    // regex row, so it is never in TABLE and is judged by its own pattern.
+    const matchesSome = entry ? TABLE.filter((t) => t.code === k && new RegExp(t.pattern).test(message)) : [TABLE[0]!].filter(() => new RegExp(ownPattern).test(message));
     assert.ok(
-      new RegExp(ownPattern).test(message),
-      `${k}: the REAL message the daemon emits (${CAPTURED.get(k)!.emittedAt}) does not match its own entry /${ownPattern}/ — ` +
+      matchesSome.length > 0,
+      `${k}: the REAL message the daemon emits (${CAPTURED.get(k)!.emittedAt}) matches NO entry for its code (${JSON.stringify(matchesSome)}, entry looked at /${ownPattern}/) — ` +
         `the emitter was reworded, or this table entry was, and one of the two is now DEAD: ${JSON.stringify(message)}`,
     );
     // Failure mode B (a table edit): the code the class must carry.

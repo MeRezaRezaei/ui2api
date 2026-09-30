@@ -65,6 +65,7 @@ import { servedRoutes, SERVED_ROUTES } from "./served-routes-truth.test.js";
 import { startPromptd } from "../src/prompt/http.js";
 import { CAPABILITY_DISPATCH, dispatchableSiteIds } from "../src/prompt/capability-dispatch.js";
 import { consumerAccountFields } from "../src/prompt/consumer-surface.js";
+import { ChatPool, type PoolOptions, type PoolWorker } from "../src/prompt/pool.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HTTP_SRC = readFileSync(join(ROOT, "src/prompt/http.ts"), "utf8");
@@ -171,6 +172,49 @@ function hermeticPool() {
     stopReaper: () => {},
   };
   return { p, breach };
+}
+
+/** A REAL pool already at capacity, so the 503 refusal is produced by the pool
+ *  itself and the counters the daemon used to echo genuinely EXIST — the
+ *  redaction is then measured, not assumed. The synthetic worker carries no
+ *  page, so no browser is reachable from here either. */
+async function withSaturatedPool(
+  fn: (ask: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Reply>, breach: string[]) => Promise<void>,
+): Promise<void> {
+  const breach: string[] = [];
+  const dataDir = mkdtempSync(join(tmpdir(), "u2a-abstraction-saturated-"));
+  const pool = new ChatPool({ profiles: [], dataDir, max: 1, maxWaiters: 0, waiterTimeoutMs: 60_000 } as PoolOptions);
+  (pool as unknown as { workers: PoolWorker[] }).workers = [
+    { profileId: "gemini", driver: { page: undefined, close: async () => {}, ask: async () => ({}) }, busy: true } as unknown as PoolWorker,
+  ];
+  const server = (await startPromptd({ port: 0, dataDir, pool } as never)) as {
+    port?: number;
+    address?: { port?: number };
+    close?: () => void;
+  };
+  const port = server.port ?? server.address?.port;
+  assert.ok(port, "the gate needs a bound port; startPromptd returned none");
+  const ask = async (method: "GET" | "POST", path: string, body?: unknown): Promise<Reply> => {
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await r.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
+    return { status: r.status, text, json };
+  };
+  try {
+    await fn(ask, breach);
+  } finally {
+    server.close?.();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
 }
 
 type Reply = { status: number; text: string; json: any };
@@ -610,62 +654,92 @@ describe("ABSTRACTION GATE: a consumer needs zero knowledge of ui2api internals"
     });
   });
 
-  test("LEAK #4 (KNOWN RESIDUAL, named not hidden): the refusal still enumerates the roster", () => {
-    // STATED PLAINLY rather than quietly fixed or quietly dropped. The
-    // unknown-account refusal in `src/prompt/http.ts` appends
+  test("LEAK #4 (CLOSED, pinned closed): the refusal names the ACCOUNT and enumerates NOTHING else", async () => {
+    // WAS: the unknown-account refusal in `src/prompt/http.ts` appended
     // `available: [a, b, c]` — the slugs of every other stored session on that
-    // host — so a caller that guesses one wrong account learns the identity
-    // list. That is a real leak and it is NOT closed by this slice.
+    // host — so a caller that guessed one wrong account learned the identity
+    // list. It was parked as a KNOWN RESIDUAL and this test asserted the
+    // residual was still TRUE, so the day it was fixed the gate went red.
     //
-    // It is not closed HERE for two concrete reasons, both recorded rather
-    // than assumed: the message is built in `src/prompt/http.ts`, which lane
-    // 161-A owns and which three other gates
-    // (`account-exact-resolution-cli`, `session-write-gate`, `codefor-prose-table`)
-    // pin by exact shape, so changing it is a cross-lane edit, not a local one.
-    // The roster-free wording is WRITTEN and exported
-    // (`consumerAccountRefusal` in `src/prompt/consumer-surface.ts`); it is the
-    // one-line swap that closes this, and it needs the three pins updated with
-    // it so the roster stops being load-bearing in a contract test.
-    //
-    // This test asserts the residual is still TRUE, so the day it is fixed this
-    // gate goes red and the fix is recorded rather than discovered. A gate that
-    // would still be green after the leak closed would be a gate that had
-    // stopped measuring anything.
+    // GOAL 162 closed it by wiring the roster-free projection that already
+    // existed (`consumerAccountRefusal`). The pin is INVERTED, not deleted: it
+    // now asserts the roster is GONE and that the projection is what produced
+    // the bytes, so re-introducing the enumeration turns this red again.
     const httpSrc = readFileSync(join(fileURLToPath(new URL("..", import.meta.url)), "src/prompt/http.ts"), "utf8");
     const rosterEnumeration = /available: \[\$\{[^}]*\.map\(/;
-    assert.ok(
-      rosterEnumeration.test(httpSrc),
-      "the unknown-account refusal no longer enumerates the roster — update this residual and the three shape pins " +
-        "(account-exact-resolution-cli, session-write-gate, codefor-prose-table), and wire consumerAccountRefusal()",
+    assert.doesNotMatch(
+      httpSrc,
+      rosterEnumeration,
+      "the unknown-account refusal enumerates the roster again — a caller that guesses one account must not learn " +
+        "the identity list of every other stored session on the host",
     );
+
+    // …and over the wire, against a vault that HAS a roster to leak. The
+    // synthetic rows are the identities a leak would carry.
+    await withSeededVault(async (ask, breach) => {
+      const bad = await ask("GET", "/capabilities?site=gemini&account=definitely-not-real");
+      assert.equal(bad.status, 400, "the permission is unchanged: still a refusal, not a silent substitution");
+      assert.equal(bad.json?.error?.code, "no_stored_account", "still a NAMED code a client branches on");
+
+      const msg: string = bad.json?.error?.message ?? "";
+      assert.match(msg, /definitely-not-real/, "the refusal must name the account the CALLER asked for");
+      assert.doesNotMatch(
+        msg,
+        /available:|seeded-person|\bslug\b|\bvault\b|snapshot|cookies|localStorage|GOAL \d+|profileDir|\/home\//i,
+        `the refusal carried the roster or a vault internal: ${msg}`,
+      );
+      // The three things a caller CAN act on must survive — a refusal that
+      // names LESS than that is the silent-failure defect, not a fix.
+      assert.match(msg, /not available/, "the refusal must say the account is unavailable, so retrying is known not to help");
+      assert.match(msg, /GET \/accounts\?site=/, "the refusal must name the ONE route that lists valid account ids");
+      assert.deepEqual(breach, [], "an account refusal must never have asked for a browser");
+    });
   });
 
-  test("LEAK #5 (KNOWN RESIDUAL, named not hidden): the 503 pool refusal echoes the pool's queue prose", () => {
-    // The second named residual. `src/prompt/http.ts` answers a pool refusal
-    // with `{ code, message: <the pool's own error text> }`, and that text says
-    // "no page is free and the queue is full (3 waiting, limit 4)" — the warm
-    // page pool's internals, verbatim, to any consumer that trips a 503.
+  test("LEAK #5 (CLOSED, pinned closed): the 503 pool refusal carries the CODE, never the pool's queue counters", async () => {
+    // WAS: a pool refusal answered `{ code, message: <the pool's own error
+    // text> }`, so any consumer that tripped a 503 read "pool saturated (3
+    // waiting, limit 4) — no page is free and the queue is full" — the warm
+    // page pool's internals, verbatim. It was parked as a KNOWN RESIDUAL and
+    // this test asserted the residual was still TRUE.
     //
-    // NOT closed here, and the reason is a conflict rather than an omission.
-    // `test/pool-deadline.test.ts` pins those exact numbers in FOUR places
-    // ("saturation must name the numbers" is its own stated intent), so the
-    // numbers cannot be dropped from the message; the fix is to stop ECHOING
-    // the message on the wire and redacting it at the 503 sink the way the /v1
-    // error body now is — which is `src/prompt/http.ts`, lane 161-A's file. The
-    // `code` alone is already the contract a client branches on
-    // (`pool_saturated` / `pool_queue_timeout` / `pool_closed`), so nothing a
-    // consumer can act on is lost by the redaction; the numbers stay in the
-    // daemon's own log where the operator reads them.
+    // THE DECISION (written out in full in `src/prompt/consumer-surface.ts`,
+    // next to `consumerPoolRefusal`, because a decision with no written
+    // reasoning is a decision that gets re-litigated): THE CODE IS THE CLIENT
+    // CONTRACT; THE NUMBERS ARE OPERATOR TELEMETRY. `pool_saturated` is what an
+    // agent branches on and what a generated PHP client's `$errorCode` carries.
+    // "(3 waiting, limit 4)" describes OUR warm page pool at one instant: a
+    // consumer can do exactly one thing with it (retry), the retry does not
+    // depend on it being right, and publishing a pool's size and load on a
+    // loopback socket is reconnaissance about a resource the caller cannot
+    // act on. The numbers are NOT deleted — `GET /status` already publishes the
+    // queue depth and its bound, which is where telemetry belongs.
     //
-    // This asserts the residual is still TRUE, so the day it is fixed this gate
-    // turns red and the fix gets recorded instead of discovered.
+    // The pin is INVERTED, not deleted.
     const httpSrc = readFileSync(join(fileURLToPath(new URL("..", import.meta.url)), "src/prompt/http.ts"), "utf8");
-    const echoesPoolProse = /send\(res, 503, \{ error: \{ code: refusal\.code, message: msg \} \}\)/.test(httpSrc);
-    assert.ok(
-      echoesPoolProse,
-      "the 503 pool refusal no longer echoes the pool's own message — close this residual by redacting it at this sink " +
-        "and keeping the `code` (the only part a client branches on)",
+    assert.doesNotMatch(
+      httpSrc,
+      /send\(res, 503, \{ error: \{ code: refusal\.code, message: msg \} \}\)/,
+      "the 503 pool refusal echoes the pool's own message again — re-close it by redacting at this sink and keeping " +
+        "the `code`, which is the only part a client branches on",
     );
+
+    // Over the wire, from a pool that is REALLY at capacity, so the counters
+    // exist and the redaction is measured rather than assumed.
+    await withSaturatedPool(async (ask, breach) => {
+      const refused = await ask("POST", "/prompt", { site: "gemini", prompt: "hi" });
+      assert.equal(refused.status, 503, `a saturated pool must still answer 503: ${refused.status}: ${refused.text.slice(0, 160)}`);
+      assert.equal(refused.json?.error?.code, "pool_saturated", "the CODE is the contract and must survive verbatim");
+
+      const msg: string = refused.json?.error?.message ?? "";
+      assert.match(msg, /^pool saturated/, "the class prefix survives so `codeFor()` still classifies a Shape-1 body");
+      assert.doesNotMatch(msg, /\d+ waiting/, "the queue depth is operator telemetry — it belongs on GET /status");
+      assert.doesNotMatch(msg, /limit \d+/, "the queue bound is operator telemetry — it belongs on GET /status");
+      assert.doesNotMatch(msg, /no page is free|queue is full|page pool/i, "the pool's own queue vocabulary reached the consumer");
+      // The two facts a caller CAN act on must survive the redaction.
+      assert.match(msg, /wait a moment and retry/i, "a retryable refusal must say that waiting may help");
+      assert.deepEqual(breach, [], "a pool refusal must never have asked for a browser");
+    });
   });
 
   test("LEAK #3 (why it is a leak and not a convenience): the row is USABLE without the internals", async () => {

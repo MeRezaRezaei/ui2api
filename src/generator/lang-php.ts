@@ -209,6 +209,14 @@ final class Ui2apiException extends \\RuntimeException
             '/^pool closed /' => 'pool_closed',
             '/^request timeout after /' => 'request_timeout',
             '/^no stored account /' => 'no_stored_account',
+            // GOAL 162: the daemon's consumer projection of the SAME refusal is
+            // 'account "<id>" is not available for <site>; ...'. The row above is
+            // KEPT, not replaced: it still classifies a pre-GOAL-162 daemon (or
+            // the CLI/plugin emitters, which keep the vault wording for the
+            // operator), so deleting it would be a silent breaking change to
+            // every generated client that branches on 'no_stored_account'. The
+            // code is the same on both sides, so a consumer sees no difference.
+            '/^account ".*" is not available for /' => 'no_stored_account',
             '/^unknown site /' => 'unknown_site',
         ];
         foreach ($named as $pattern => $code) {

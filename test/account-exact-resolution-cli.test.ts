@@ -139,17 +139,43 @@ d("GOAL 118: an account reference resolves EXACTLY, or is refused by name", () =
     );
   });
 
-  t("it matches the DAEMON's canonical refusal shape, so both entry points agree", () => {
-    // the daemon's message, read from its own source
-    const daemonShape = /no stored account "\$\{[^}]+\}" for "\$\{[^}]+\}"; available: \[/.exec(HTTP);
-    assert.ok(daemonShape, "the daemon must still carry its canonical refusal shape");
+  t("the daemon and the CLI now DELIBERATELY diverge, and the pin says which way and why", () => {
+    // GOAL 162 split these two on purpose, so this pin records the split rather
+    // than asserting an agreement that no longer exists (and must not be
+    // re-faked to make a gate green):
+    //
+    //   THE DAEMON (`src/prompt/http.ts`) is a CONSUMER surface. Its refusal is
+    //   the roster-free projection (`consumerAccountRefusal`): it names the
+    //   account the caller asked for, says retrying will not help, and names the
+    //   ONE route that lists valid ids — and nothing else. The roster it used to
+    //   append was a real leak: on a loopback socket reachable by any local
+    //   process, one wrong guess answered with the identity of every other
+    //   stored session on that host.
+    //
+    //   THE CLI (`src/cli.ts`) is an OPERATOR surface, run by the person who
+    //   owns the machine and the vault. Listing the slugs there is what the
+    //   operator is being asked for — it is the answer to "which one did I
+    //   mean?" — and it discloses nothing to a caller who has no access to it.
+    //   Narrowing the operator's own tooling would be a convenience change, not
+    //   a leak fix, so it was deliberately left alone.
+    //
+    // BOTH still refuse, and both still name the account the caller sent.
+    const httpSrc = HTTP;
+    assert.doesNotMatch(
+      httpSrc,
+      /available: \[\$\{[^}]*\.map\(/,
+      "the daemon enumerates the roster again — the consumer surface must never hand a caller the vault's other identities",
+    );
+    assert.match(httpSrc, /consumerAccountRefusal\(account, host\)/, "the daemon's refusal must come from the roster-free projection");
+
     let cliMsg = "";
     try {
       resolveRequestedAccount(ACCOUNTS, "nope", HOST);
     } catch (e) {
       cliMsg = (e as Error).message;
     }
-    assert.match(cliMsg, /^no stored account "[^"]+" for "[^"]+"; available: \[/, "the CLI must use the same shape");
+    assert.match(cliMsg, /^no stored account "[^"]+" for "[^"]+"; available: \[/, "the OPERATOR-facing CLI keeps its roster");
+    assert.match(cliMsg, /"nope"/, "the CLI must still name the account the operator asked for");
   });
 
   t("the first-account default survives, but ONLY when no account was requested", () => {

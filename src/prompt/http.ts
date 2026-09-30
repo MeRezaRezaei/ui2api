@@ -64,6 +64,7 @@ import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedP
 import { readdirSync } from "node:fs";
 import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount, vaultRoot } from "../runtime/session-store.js";
 import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
+import { consumerAccountRefusal, consumerPoolRefusal } from "./consumer-surface.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -817,15 +818,16 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
   // driving the survivor's session.
   const match = resolveStoredAccount(dataDir, host, account);
   if (!match) {
-    const stored = listAccounts(dataDir, host);
-    throw new Error(`no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`);
+    throw new Error(consumerAccountRefusal(account, host));
   }
   // GOAL 124: an index ROW is only a claim. The snapshot behind it can be
   // missing, corrupt-JSON, wrong-shaped (GOAL 59) or anonymous (GOAL 49) — and
   // the runners' own `loadAccountSnapshot` returns null for all of them, which
   // used to degrade into an anonymous run that still answered ok:true. Judge it
   // HERE, on the pre-browser guard, so an unusable account is a 400 before a
-  // single browser is launched. The unknown-account message above is unchanged.
+  // single browser is launched. The unknown-account refusal above is the
+  // consumer projection (`consumerAccountRefusal`); the PERMISSION this guard
+  // enforces is unchanged by that wording.
   assertUsableStoredAccount(dataDir, host, match);
 }
 
@@ -1125,11 +1127,10 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // GOAL 51: canonical resolution — an unresolvable account (write-refused
         // alias) 400s instead of reading a fingerprint under a folded slug.
         if (!resolveStoredAccount(dataDir, host, account)) {
-          const stored = listAccounts(dataDir, host);
           return send(res, 400, {
             error: {
               code: "no_stored_account",
-              message: `no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]`,
+              message: consumerAccountRefusal(account, host),
             },
           });
         }
@@ -1141,6 +1142,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
             host,
             account,
             probed: false,
+            // @internal-prose operator-cli
             hint: "run `ui2api profile capabilities <host> --account <email>` once to probe this account",
           });
         }
@@ -1396,7 +1398,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       const msg = e instanceof Error ? e.message : String(e);
       const refusal = poolRefusal(msg);
       if (refusal) {
-        return send(res, 503, { error: { code: refusal.code, message: msg } });
+        return send(res, 503, { error: { code: refusal.code, message: consumerPoolRefusal(refusal.code) } });
       }
       // 400 for request-shape/identity errors the caller can correct: unknown
       // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
@@ -1412,6 +1414,12 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       const SHAPE_MESSAGES = [
         { re: /unknown site /, code: "unknown_site" },
         { re: /no stored account /, code: "no_stored_account" },
+        // The consumer projection of the SAME refusal (GOAL 162). The legacy
+        // prefix above is KEPT, not replaced: `codeFor()` in the generated PHP
+        // client classifies by prefix, so a row that only ever matched the old
+        // wording would still be needed for a pre-GOAL-162 daemon, and dropping
+        // it would be a silent breaking change to every generated client.
+        { re: /^account ".*" is not available for /, code: "no_stored_account" },
         { re: /is installed and serves POST \/capability/, code: "not_chat" },
         { re: /unknown capability /, code: "unknown_capability" },
       ] as const;

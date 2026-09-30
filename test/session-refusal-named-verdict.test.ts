@@ -315,10 +315,18 @@ test("GOAL 124: the pre-browser guard keeps the existing account contract — un
     assert.throws(
       () => resolveCapabilityAccount("nobody@x.test", profile, dataDir),
       (e: Error) => {
+        // GOAL 162: same contract, roster-free wording. The refusal names the
+        // alias the CALLER sent, says it is unavailable, and names the one route
+        // that lists valid ids. The identities of the other stored rows are gone
+        // — that list was the leak. `host` and `alice@x.test` (a row that exists)
+        // must both be ABSENT, so this is a positive pin on a negative.
         assert.equal(
           e.message,
-          `no stored account "nobody@x.test" for "${HOST}"; available: [alice@x.test, bob@x.test]`
+          `account "nobody@x.test" is not available for ${HOST}; send the request without "account" to use the ` +
+            `default account, or pass an id from GET /accounts?site=${HOST}`
         );
+        assert.ok(!e.message.includes("alice@x.test"), "the refusal must not enumerate the vault's other identities");
+        assert.ok(!e.message.includes("available: ["), "the refusal must carry no roster at all");
         return true;
       }
     );

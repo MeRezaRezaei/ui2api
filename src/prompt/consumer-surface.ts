@@ -26,6 +26,9 @@
  * thing that changes is WHICH BYTES of a permitted row cross the socket.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { StoredAccount } from "../runtime/session-store.js";
 import {
   CONSUMER_ACCOUNT_FIELDS,
@@ -149,7 +152,14 @@ const PROSE: ReadonlyArray<[RegExp, string]> = [
   [/\(GOAL\s+\d+\)/gi, ""],
   // Our env knobs and CLI, as they appear in a capability description.
   [/\bUI2API_[A-Z0-9_]+(?:=\d+)?\b/g, "an operator-attached session"],
-  [/\bui2api\s+[a-z-]+(?:\s+[a-z-]+){0,3}\s+(?=[.,;—]|$)/gi, "the operator's own tooling "],
+  // The operator's own command line. The rule was WIDENED by the derivation
+  // rather than by memory: it used to require a sentence-ending punctuation mark
+  // after the command, so the very common backticked form
+  // "`ui2api profile capabilities <host> --account <email>`" survived it whole.
+  // That was found by the marker-declared sample in `src/prompt/http.ts`, not by
+  // a reviewer re-reading the table — which is the whole point of deriving the
+  // classes instead of listing them.
+  [/\bui2api\s+[a-z][a-z-]*(?:\s+[a-z][a-z-]*){0,3}/gi, "the operator's own tooling"],
   // The mechanism the requirement names. The REQUIREMENT survives — that a
   // logged-in session is needed is a fact a consumer acts on.
   [/\bthe user's own real Chrome attached\b/gi, "a session attached by the service operator"],
@@ -165,6 +175,147 @@ const PROSE: ReadonlyArray<[RegExp, string]> = [
   [/\s+([,.;:])/g, "$1"],
   [/^[\s,;:—-]+/, ""],
 ];
+
+/**
+ * ── THE LEAK CLASSES ARE DERIVED, NOT REMEMBERED ─────────────────────────────
+ * WHY THIS EXISTS. The table above is a REDACTION, and a redaction can only ever
+ * SHRINK when somebody remembers to widen it. That is not a gate — it is a
+ * comment asking to be maintained. So the things the table has to cover are
+ * DISCOVERED FROM THE CODE and handed to the table as an obligation, which
+ * means a new internal phrase fails here instead of reaching a consumer.
+ *
+ * There are exactly two derivable things, and the boundary between them is
+ * drawn deliberately rather than by convenience:
+ *
+ *   DERIVED (these are facts ABOUT the tree, and a machine can count them):
+ *     * `envKnobsIn(root)` — every `UI2API_*` identifier the code actually
+ *       reads, scanned out of `src/` and `scripts/`. A knob added to the code
+ *       the same day it is added here is covered WITHOUT anybody editing the
+ *       redaction table; the gate's job is to PROVE the table still removes it,
+ *       which is what stops the regex from being quietly narrowed to a
+ *       hand-copied list.
+ *     * `goalRefsIn(root)` — every `GOAL nn` bookkeeping reference, same shape.
+ *     * `internalProseSamples(root)` — the MARKER convention below: a source
+ *       file that authors prose carrying internal vocabulary declares it with
+ *       `// @internal-prose <class>`, and the gate demands a rule that redacts
+ *       that class's own harvested text.
+ *
+ *   NOT DERIVABLE (and named as such, because pretending otherwise is the
+ *   rot this section exists to kill): the set of CONCEPT WORDS — "Chrome",
+ *   "Xvfb", "CDP", "headless". No amount of scanning the code can tell you that
+ *   the word "Xvfb" is internal; only a person knows that. So the lexicon is
+ *   hand-declared ONCE, as the rules above, and the gate's leverage is applied
+ *   where it is real: every marker-declared class must be covered, every knob
+ *   the code reads must be removed, every goal reference must be removed. A
+ *   NEW concept word needs a new rule, and `proseRuleIds()` is what the test
+ *   enumerates — so it is a visible edit in one list, never a silent leak.
+ */
+
+/** The marker a source file uses to declare "the next line is operator prose
+ *  that carries internal vocabulary of class `<id>`". The class id is a
+ *  CONTRACT: `proseRuleIds()` must name it, or the gate fails. */
+export const INTERNAL_PROSE_MARKER = "@internal-prose";
+
+export interface InternalProseSample {
+  /** the declared class id — must appear in `proseRuleIds()` */
+  cls: string;
+  /** repo-relative source file that authored it */
+  file: string;
+  /** 1-based line number of the SAMPLE (the line after the marker) */
+  line: number;
+  /** the code's OWN text, harvested — never a hand-copied fixture */
+  text: string;
+}
+
+/**
+ * Harvest every marker-declared prose sample from the tree. Reads files only;
+ * it never writes, and it never imports them.
+ */
+export function internalProseSamples(root: string, files: readonly string[]): InternalProseSample[] {
+  const out: InternalProseSample[] = [];
+  for (const rel of files) {
+    let src: string;
+    try {
+      src = readFileSync(join(root, rel), "utf8");
+    } catch {
+      continue; // a file that is not on disk contributes no obligation
+    }
+    const lines = src.split("\n");
+    for (let i = 0; i < lines.length - 1; i++) {
+      const m = new RegExp(`${INTERNAL_PROSE_MARKER}\\s+([a-z0-9-]+)`).exec(lines[i]!);
+      if (!m) continue;
+      // The sample is the next line that is not itself a comment or blank: the
+      // rule must be proven against real code, and a comment is not code.
+      let j = i + 1;
+      while (j < lines.length && (lines[j]!.trim() === "" || lines[j]!.trim().startsWith("//"))) j++;
+      if (j >= lines.length) continue;
+      out.push({ cls: m[1]!, file: rel, line: j + 1, text: lines[j]!.trim() });
+    }
+  }
+  return out;
+}
+
+/** Every `UI2API_*` identifier the CODE reads, scanned out of the tree. This is
+ *  the derivation that makes the redaction table's generic knob rule
+ *  self-maintaining: the set of knobs is measured, never listed. */
+export function envKnobsIn(root: string, files: readonly string[]): string[] {
+  const found = new Set<string>();
+  for (const rel of files) {
+    let src: string;
+    try {
+      src = readFileSync(join(root, rel), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of src.matchAll(/\bUI2API_[A-Z0-9_]+\b/g)) found.add(m[0]);
+  }
+  return [...found].sort();
+}
+
+/** Every `GOAL nn` bookkeeping reference in the tree. The date that sits beside
+ *  one in a description is a disclosure and SURVIVES the redaction; the number
+ *  is ours and does not. */
+export function goalRefsIn(root: string, files: readonly string[]): string[] {
+  const found = new Set<string>();
+  for (const rel of files) {
+    let src: string;
+    try {
+      src = readFileSync(join(root, rel), "utf8");
+    } catch {
+      continue;
+    }
+    for (const m of src.matchAll(/\bGOAL\s+\d+\b/gi)) found.add(m[0].replace(/\s+/g, " "));
+  }
+  return [...found].sort();
+}
+
+/** The classes the redaction table currently declares. The gate enumerates
+ *  THIS, so widening the wire vocabulary is a visible edit here and a failing
+ *  marker elsewhere — never a silent redaction that stopped matching. */
+export function proseRuleIds(): readonly string[] {
+  return [
+    "goal-number",
+    "env-knob",
+    "operator-cli",
+    "attach-mechanism",
+    "display-mechanism",
+    "browser-binding",
+  ];
+}
+
+/** The tokens each declared class must remove, used by the gate to prove the
+ *  coverage from the CODE's own words. A class with an empty token list is
+ *  vacuous and the gate says so. */
+export function proseRuleTokens(): Readonly<Record<string, readonly RegExp[]>> {
+  return {
+    "goal-number": [/\bGOAL\s+\d+\b/],
+    "env-knob": [/\bUI2API_[A-Z0-9_]+\b/],
+    "operator-cli": [/\bui2api\s+profile\b/, /\bui2api\s+chrome\b/],
+    "attach-mechanism": [/\breal Chrome\b/, /\bheaded\b/i, /\bheadless\b/i, /\bXvfb\b/, /\bCDP\b/],
+    "display-mechanism": [/\bXvfb\b/, /\bheaded\b/i, /\bheadless\b/i],
+    "browser-binding": [/\bbrowser-bound\b/i],
+  };
+}
 
 /**
  * What a consumer may read of an operator-facing prose blob. Idempotent, and
@@ -200,3 +351,61 @@ export function consumerAccountRefusal(account: string, site: string): string {
     `"account" to use the default account, or pass an id from GET /accounts?site=${site}`
   );
 }
+
+/**
+ * ── THE POOL REFUSAL A CONSUMER MAY READ ────────────────────────────────────
+ * THE DESIGN DECISION (GOAL 162 — read this before "fixing" the numbers back).
+ *
+ * THE QUESTION. `pool_saturated` was answered with the pool's own sentence —
+ * "pool saturated (3 waiting, limit 4) — no page is free and the queue is full".
+ * Is that OPERATOR TELEMETRY or CONSUMER CONTRACT?
+ *
+ * THE ANSWER: the CODE is the contract; the NUMBERS are operator telemetry.
+ *
+ *   * The code is what an agent branches on. `pool_saturated` / `pool_queue_timeout`
+ *     / `pool_closed` are published contract strings — they are in the shipped
+ *     error-contract table, they are what the generated PHP client's
+ *     `$errorCode` carries, and a consumer writes
+ *     `if ($e->errorCode === 'pool_saturated') retry()`. That is the part of a
+ *     503 that is API.
+ *   * The numbers are OUR state. "(3 waiting, limit 4)" describes the warm page
+ *     pool's internal queue at one instant. A consumer can do exactly one thing
+ *     with it — retry — and the retry's success does not depend on the numbers
+ *     being right. Worse, the numbers are a CAPACITY DISCLOSURE: on a
+ *     loopback socket, "3 waiting, limit 4" tells a local caller the pool's
+ *     size and load, which is reconnaissance about a resource it cannot act on.
+ *   * So the numbers are NOT deleted. They live where telemetry belongs and
+ *     where they are already published: `GET /status` reports the pool's queue
+ *     depth and its bound (pinned by test/pool-deadline.test.ts, "pool status
+ *     exposes the queue depth and its bound"). Dropping them from the 503 loses
+ *     the operator nothing, because the operator reads /status.
+ *
+ * WHY NOT THE OPPOSITE (keep the prose, redact the counters)? Because the
+ * prose IS the internal vocabulary: "no page is free and the queue is full"
+ * names the pool's own queue model to a consumer who has no page, no page pool,
+ * and no notion of "waiting". A consumer can act on exactly two facts — the
+ * code, and whether WAITING will help — so those two facts are what the message
+ * says.
+ *
+ * WHY THE PREFIX `pool saturated ` SURVIVES. It is not telemetry: it is the
+ * CLASS NAME, and `codeFor()` in `src/generator/lang-php.ts` classifies a
+ * Shape-1 refusal by message prefix. Keeping the prefix keeps that legacy entry
+ * alive instead of letting it rot into a dead row, while every counter and
+ * every pool noun after it is gone. A reword HERE (rather than in pool.ts) is
+ * what makes that entry safe to keep.
+ */
+export function consumerPoolRefusal(code: PoolRefusalCodeName): string {
+  switch (code) {
+    case "pool_saturated":
+      return "pool saturated — the service is at capacity; wait a moment and retry";
+    case "pool_queue_timeout":
+      return "pool queue timeout — the service stayed at capacity for the whole wait; wait a moment and retry";
+    case "pool_closed":
+      return "pool closed — the service is shutting down; retry against a restarted service";
+  }
+}
+
+/** The three published pool refusal classes, typed without importing `pool.ts`
+ *  (the consumer surface must not depend on the pool's implementation module,
+ *  only on the vocabulary it is allowed to speak). */
+export type PoolRefusalCodeName = "pool_saturated" | "pool_queue_timeout" | "pool_closed";

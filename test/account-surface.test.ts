@@ -214,10 +214,23 @@ test("GOAL8(c): an unknown account misses resolveCapabilityAccount's predicate a
   const match = resolveStoredAccount(dataDir, host, bogus);
   assert.equal(match, null, `bogus identity must not resolve to any stored account at ${host}`);
 
-  // The throw message shape is pinned in http.ts (must not drift):
-  const template =
-    'no stored account "${account}" for "${host}"; available: [${stored.map((a) => a.slug).join(", ")}]';
-  assert.ok(HTTP_SOURCE.includes(template), "resolveCapabilityAccount throw message shape must stay pinned");
+  // The throw message shape is pinned in http.ts (must not drift). GOAL 162
+  // replaced it with the roster-free consumer projection: the refusal names the
+  // account the CALLER asked for, says the account is unavailable, and names the
+  // one route that lists valid ids — and it enumerates NOTHING else. The gate is
+  // pinned CLOSED (the old roster template would have to come back to turn this
+  // red), not weakened.
+  assert.ok(
+    HTTP_SOURCE.includes("throw new Error(consumerAccountRefusal(account, host))"),
+    "resolveCapabilityAccount must refuse through the roster-free projection — a refusal that names the vault's " +
+      "other identities on a loopback socket is the leak this pin now keeps closed",
+  );
+  assert.doesNotMatch(
+    HTTP_SOURCE,
+    /available: \[\$\{[^}]*\.map\(/,
+    "the account refusal enumerates the roster again — the identity of every other stored session on this host " +
+      "reached a caller who asked about one account",
+  );
 
   // Honest negative through the snapshot seam the runner would use:
   assert.equal(
