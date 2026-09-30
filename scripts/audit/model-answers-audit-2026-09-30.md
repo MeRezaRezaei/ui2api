@@ -517,3 +517,147 @@ for whoever owns that file: assert that `CLASSES.length >= 6` and that every mem
 has an entry in `CLASS_PRECONDITIONS` (a check that `test/verification-class.test.ts` already performs, so
 nothing new is invented) — that keeps the pin's real intent (a class can never land without a precondition)
 while letting the vocabulary widen on purpose. **It was not applied here.**
+
+## 9. Sweep (GOAL 165): the first request-proven round trip for the two GOAL-163 profile fixes
+
+**Nothing in §1–§8 above was re-measured and nothing in it was rewritten.** Those sections are the record of
+builds `bdee4ac` and `73fc38e`; this one is the record of build **`5168940`**, and the contrast between them is
+the evidence.
+
+### 9.1 Deploy evidence — the stamp had to move before anything was measured
+
+| fact | value | where |
+|---|---|---|
+| pipeline | **808**, project 5, ref `main`, sha `5168940cf57bdbc679412c5fdb123fa67f5a27c5` | `glab api projects/5/pipelines/808` |
+| build | job **2314** success, 2026-09-30T16:13:57Z | `projects/5/pipelines/808/jobs` |
+| verify | job **2315** success, 16:20:42Z | same |
+| **deploy** | job **2316** success, **16:21:38Z** | same |
+| build commit before | `73fc38e4…` (the GOAL-163 build) | `/health`, polled at 16:09Z — still the old binary |
+| build commit **after** | **`5168940cf57bdbc679412c5fdb123fa67f5a27c5`**, `source: build-stamp`, `builtAt 2026-09-30T16:21:12Z` | `/health` → `liveness.build` |
+| deployed dist stamp | same commit, same `builtAt` | `/opt/ui2api/dist/runtime/build-info.json` |
+
+The old binary was observed **before** the deploy and the new one **after**, so the stamp is known to have moved
+rather than assumed to have. Had it not moved, this sweep would have stopped here rather than measured the old
+binary and called it a result — the GOAL-157 lesson used as a precondition instead of a footnote.
+
+**Marker greps in the DEPLOYED `dist`** (not the working tree), proving this build and not `73fc38e`:
+
+| marker | count | file |
+|---|---|---|
+| `NON_ANSWER_TEXT_PATTERNS` | **2** | `/opt/ui2api/dist/prompt/verification-class.js` |
+| `UNMATCHED_SELECTOR_PATTERNS` | **2** | same |
+| `answer-not-an-answer` | 1 | same |
+| `nonAnswerTextIn` / `unmatchedSelectorIn` | 3 / 2 | same |
+| `data-agent-activity-entry` | **3** lines | `/opt/ui2api/capabilities/v0/profile.json` (profile data, not dist) |
+
+The first five are the GOAL-164 vocabulary widening and are absent from `73fc38e`. The last is v0's GOAL-163
+activity/timeline exclusion, and it is the first build in which it is present.
+
+### 9.2 Method — serial, idle-pool, bracketed
+
+Identical exact-token probe (`Reply with exactly: PONG`) and identical harness
+`scripts/audit/measure-models.mjs`, wrapped by a driver that polls `GET /status` until `busy == 0 && queued == 0`
+before each request. Strictly serial, one model at a time, never concurrent. `duckduckgo` probed **first** and
+**last**. **7 live requests** against a budget of ~6: `duckduckgo` 2 (the bracket), `v0` 4, `venice` 1. The
+overage is entirely v0 — two of them its harness's one permitted retry, two more spent purely on the DOM capture
+this goal requires. Disclosed rather than absorbed, the same way GOAL 163 disclosed three.
+
+| model | class | http | ms | pool at request | the server's own body |
+|---|---|---|---|---|---|
+| **duckduckgo** | **ANSWERS** | 200 | 11365 | 0/1 idle, q 0 | `Duck.ai said Generating response PONG 2nd opinion` — **control, FIRST** |
+| v0 (att 1) | — | 502 | — | 0/3 idle, q 0 | `v0 did not return an answer within 90000ms — the site may be busy, rate-limiting, or showing a sign-in or consent wall. Retry; …` |
+| v0 (att 2) | — | 502 | 97195 | 0/3 idle, q 0 | same message |
+| **venice** | — | 200 | 41793 | 0/3 idle, q 0 | `The user wants me to reply with exactly "PONG". This is a simple request - I should just output the text "P…` |
+| v0 (att 3) | — | 502 | 96440 | 0/3 idle, q 0 | same message |
+| v0 (att 4) | — | 502 | 96440 | 0/3 idle, q 0 | same message (ran concurrently with the CDP poller) |
+| **duckduckgo** | **ANSWERS** | 200 | 9299 | 0/4 idle, q 0 | `Duck.ai said GPT-5.6 Luna PONG 2nd opinion` — **control, LAST** |
+
+**The bracket held.** The control answered 200 at both ends of the sweep, on the same build, at an idle pool. So
+the two rows between them are attributable to the models, not to a dying daemon — which is the whole reason the
+bracket is not optional.
+
+### 9.3 `v0` — the non-answer is GONE, and the capture failed again for a worse reason
+
+**The 200 carrying `Exploring ideas…` did not come back.** On all four attempts v0 returned the *named 502
+no-answer refusal* instead. That is a real improvement over §4: the status region is no longer served as the
+answer.
+
+It is **not** proof the GOAL-163 fix works, and this record does not claim it is. The read no longer reaches the
+point where it could serve the placeholder, so the exclusion list was never exercised. v0 is still an
+**unverified candidate**.
+
+**The DOM capture failed again — and the cause is different and worse than last time.** §7 disclosed that the
+previous attempt attached to a stale landing-page tab. This time **there was no v0 tab at all to attach to**:
+`GET /status` reported the v0 pool worker `"health": "live"`, `busy: false` throughout, while a read-only CDP
+enumeration of the daemon's own Chrome (`127.0.0.1:9222`, pid 3376878) listed **17 targets and not one on
+`v0.app`**. A poller sampling every 6 s for 110 s **concurrently with a live v0 request** captured **zero**
+snapshots. The pool's page is simply not visible to CDP. The driven `/chat` tab remains unreachable read-only,
+so **v0's fix remains a bundle hypothesis**, and **no selector was changed** — a profile edit made to make a
+measurement pass is the exact failure this goal exists to catch, and there was no capture from which to derive an
+honest correction anyway.
+
+### 9.4 `venice` — the selector is CONFIRMED, and the classifier would have lied
+
+A read-only CDP capture (`Runtime.evaluate` only — no navigation, no typing, no request to the site) of the
+venice tab shows `div[class~="assistant"] [class*="prose"]` matching **exactly one node**:
+
+```
+cls : space-y-4 whitespace-normal [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose dark:prose-invert flex-1
+text: PONG
+body: Use Classic Chat / Reply with exactly: PONG / Worked for < 1s · 1 step / PONG
+```
+
+It correctly excludes the user bubble (the *other* of the two `[class*="prose"]` nodes on the page) and the
+assistant footer, and both superseded GOAL-160 selectors match **zero** nodes
+(`[data-message-author-role="assistant"]` → 0, `[class*="message"] [class*="prose"]` → 0). **GOAL 163's venice fix
+is correct**, and this is a real upgrade over "live-proven but not request-proven": it now has both halves.
+
+**But the served text is not in that DOM.** The string the service returned —
+`The user wants me to reply with exactly "PONG". This is a simple request…` — appears **nowhere** in the captured
+page body, which holds the final `PONG`. The 200 served the model's **intermediate reasoning** while the read
+settled. Every declared `nonAnswerSelector` (`[class*="reasoning"]`, `[class*="thinking"]`,
+`[class*="chain-of-thought"]`, `[data-message-author-role="user"]`, `[class*="user-message"]`) matches **zero**
+nodes here, so **nothing could honestly be declared**, and the answer selector was **not widened**.
+
+**And the gate would have filed this as `ANSWERS`.** `classifyOutcome()` was run against this measurement's own
+status/message/answerText/pool and returns `{"cls":"ANSWERS","reason":"HTTP 200 with real model output"}`.
+Filing that would launder a non-answer into `ANSWERS`, so the row is filed **`UNCLASSIFIED`** and the defect is
+reported instead. It is the most serious of the three gate defects found so far, and it is structural:
+
+1. the `ANSWERS` branch (`src/prompt/verification-class.ts:210`) fires on any non-empty `answerText` below 400 and
+   sits **before** the `NON-ANSWER-READ` branch (line 219) — so the branch GOAL 164 added to catch *a 2xx
+   carrying a non-answer* is **unreachable for exactly the case it was written for**, i.e. any 2xx carrying text;
+2. `NON_ANSWER_TEXT_PATTERNS` holds only four phrases (`/not the requested token/`, `/is not the model's answer/`,
+   `/served as the answer/`, `/status line was served/`) which the service never emits, so even reordering would
+   not fire on this body.
+
+**GOAL 164 widened the vocabulary and left the widened branch as dead code for the case it names.** The fix is a
+reorder plus a real marker (or a `looksLikeTheAnswer` test), not a new phrase. **`verification-class.ts` and
+`test/model-verification-consistent.test.ts` were NOT edited** — they are off-limits to this goal, and editing the
+judge to fit the measurement is the exact thing this goal exists to catch. `RULE 4` goes **RED** naming exactly
+`v0` and `venice`, and that red is the deliverable.
+
+### 9.5 Which outcome, per model, plainly
+
+- **`v0` — (c)-adjacent, not clean.** Not a 2xx with wrong text, and not a zero-match: a **named 502 no-answer
+  refusal at an idle pool, four times out of four**. The gate works; the site produced no readable answer. Filed
+  `UNCLASSIFIED` because no class honestly means this.
+- **`venice` — none of the three, and the closest yet.** A real 200 from a real model, the selector confirmed
+  correct against the live DOM, and the served text is the model's intermediate reasoning rather than its final
+  `PONG`. Filed `UNCLASSIFIED` because `classifyOutcome()` would have derived `ANSWERS`.
+
+**Neither returned the real token, so `ANSWERS` did not grow.** The set is still exactly
+**`[duckduckgo, gemini]`** — `duckduckgo` was already `ANSWERS` and was merely re-confirmed on the new build, and
+`gemini` was not re-measured.
+
+### 9.6 What this sweep does NOT claim
+
+- **It does not claim v0's fix works.** The `Exploring ideas…` non-answer is gone, but the read never reached the
+  point where the exclusion list would matter, and **the driven tab could not be captured at all**, so the fix
+  stays a bundle hypothesis.
+- **It does not claim venice answers.** It claims something narrower and different: the *selector* is right, and
+  the non-answer comes from the read settling on intermediate reasoning.
+- **No profile was edited.** `capabilities/v0/profile.json` and `capabilities/venice/profile.json` are untouched.
+- **It makes no claim about the other 20 models.** They keep their own `daemonCommit`, correctly not overwritten.
+- **It cannot say which node carried venice's reasoning**, because no DOM existed containing the served text.
+- **Live requests: 7** against a ~6 budget, one over, entirely on v0 and disclosed above.
