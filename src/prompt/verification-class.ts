@@ -13,7 +13,7 @@
 // into. No browser, no network, no clock. Everything the gate's pinned
 // assertions need is here and testable hermetically.
 //
-// WHY THE SET HAS EIGHT MEMBERS AND NOT FOUR: more than a couple have different
+// WHY THE SET HAS NINE MEMBERS AND NOT FOUR: more than a couple have different
 // REMEDIES, and a class is defined by the action it licenses.
 //   WALL-CHALLENGE  -> docs/WIGOLO_BYPASS.md: reach for the wigolo tier, or
 //                       keep the honest ok:false. NEVER a retry loop — a
@@ -43,6 +43,7 @@ export const VERIFICATION_CLASSES = [
   "CONTENDED-TIMEOUT",
   "NON-ANSWER-READ",
   "ANSWER-UNREADABLE",
+  "UNATTRIBUTED-NO-ANSWER",
   "UNMEASURED",
 ] as const;
 
@@ -154,6 +155,18 @@ export const NO_COMPOSER_PATTERN = /no composer found/i;
 /** The server's own phrase for "this site needs a signed-in session". */
 export const SIGN_IN_MESSAGE_PATTERN = /requires sign-in|sign in once|requires login|not logged in|unauthenticated/i;
 
+/** The server's OWN wording for the no-answer timeout it reports, taken from
+ *  the single template that produces it (src/prompt/error-redaction.ts). This is
+ *  the service naming a condition and listing its candidate causes — busy,
+ *  rate-limiting, sign-in or consent wall — without asserting which one is real.
+ *  Matched only in that exact shape, so text that merely resembles a timeout is
+ *  not a match, and so widening it to catch generic prose about timeouts cannot
+ *  pull a different failure in behind it. v0 2026-09-30: four identical 502s at
+ *  an IDLE pool carrying this sentence. */
+export const NO_ANSWER_REFUSAL_PATTERNS: readonly RegExp[] = [
+  /did not return an answer(?: within \d+\s*ms)?/i,
+];
+
 const idle = (p: PoolState | undefined): boolean => p?.busy === 0 && p?.queued === 0;
 const has = (haystack: string, needles: readonly string[]): string | null => {
   const h = haystack.toLowerCase();
@@ -194,6 +207,12 @@ export function nonAnswerTextIn(message: string): string | null {
  *  nothing in the page. */
 export function unmatchedSelectorIn(message: string): string | null {
   return UNMATCHED_SELECTOR_PATTERNS.find((re) => re.test(message))?.source ?? null;
+}
+
+/** The service's own message is its named no-answer refusal. Returns the
+ *  matched pattern, so the reason quotes the measurement's own shape. */
+export function noAnswerRefusalIn(message: string): string | null {
+  return NO_ANSWER_REFUSAL_PATTERNS.find((re) => re.test(message))?.source ?? null;
 }
 
 /** The closed, ordered decision. Order is the whole honesty argument, in two
@@ -267,6 +286,25 @@ export function classifyOutcome(o: Outcome): Classification {
     return { cls: "ANSWER-UNREADABLE", reason: `the service reports the answer selector matched nothing in the page's real DOM at an IDLE pool — the DRIVER cannot read this model. This does NOT mean the model failed to answer (venice held its answer in that same DOM) and it is not a credential or anti-bot problem; the action is a profile/selector retune derived from a capture, never a guess from a failure` };
   }
 
+  // The service reported its own named no-answer refusal. It is placed LAST, so
+  // it can only ever hold what every specific condition above declined: no
+  // challenge page, no sign-in surface and no sign-in assertion, no missing
+  // composer, no zero-node answer selector, no answer text. WHAT IS KNOWN is
+  // that a no-answer was reported at an idle pool with no page attached; WHICH
+  // CAUSE produced it is NOT known, because the sentence names busy,
+  // rate-limiting and a sign-in/consent wall as candidates and asserts none. So
+  // this class licenses exactly one action — re-measure with something that
+  // separates those candidates — and asserting any one of them here would be
+  // the fabrication this project's own history forbids: a busy-pool timeout
+  // filed as a model property produced a 4.77-hour diagnosis that was wrong.
+  const refusal = noAnswerRefusalIn(o.message);
+  if (refusal) {
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `the service reported its named no-answer refusal at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — a measurement of the queue, not of the model` };
+    }
+    return { cls: "UNATTRIBUTED-NO-ANSWER", reason: `HTTP ${o.httpStatus} at an IDLE pool, no page reported, and the service's own message is its named no-answer refusal (${refusal}) — the refusal LISTS its candidate causes (busy, rate-limiting, sign-in or consent wall) and asserts NONE of them, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not "the site is rate-limited", not "log in", and not contention. The action is to re-measure with a discriminator that separates the candidates the service itself named` };
+  }
+
   return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} matched no named condition; message: ${o.message.slice(0, 120)}` };
 }
 
@@ -313,6 +351,21 @@ export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> =
   // method and an evidence string that names the zero-match, plus the idle pool
   // the request started into.
   "ANSWER-UNREADABLE": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
+  // UNATTRIBUTED-NO-ANSWER asserts only a REPORTED no-answer plus the absence of
+  // every cause the record could have named, so the minimum that means anything
+  // is a dated measurement, the method that took it, and an evidence string
+  // that carries the service's own refusal sentence — an evidence string that
+  // does not quote it proves no refusal happened. The idle pool is REQUIRED,
+  // because at a busy pool the same refusal is a measurement of the queue (this
+  // project's own lesson: a busy-pool timeout filed as a model property produced
+  // a 4.77-hour diagnosis that was wrong, which is why CONTENDED-TIMEOUT is a
+  // queue property and never a model property). It deliberately does NOT require
+  // observedPage: the service reported no page on this path, so demanding one
+  // would make the class unreachable rather than stricter. What it must NOT be
+  // allowed to carry is a cause: nothing here licenses "the site is
+  // rate-limited" or "log in", and the row stays a claim about a refusal whose
+  // cause is UNKNOWN, never a diagnosis of one.
+  "UNATTRIBUTED-NO-ANSWER": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
   // UNMEASURED keeps its strict meaning: never reached. RULE 5 lets it be bare
   // precisely because it asserts nothing, and RULE 9 forbids it from carrying a
   // measured status.

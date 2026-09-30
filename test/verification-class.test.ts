@@ -5,12 +5,14 @@ import {
   CHALLENGE_MARKERS,
   CLASS_PRECONDITIONS,
   NON_ANSWER_TEXT_PATTERNS,
+  NO_ANSWER_REFUSAL_PATTERNS,
   UNMATCHED_SELECTOR_PATTERNS,
   VERIFICATION_CLASSES,
   challengeMarkerIn,
   classifyOutcome,
   classPrecondition,
   loginMarkerIn,
+  noAnswerRefusalIn,
   nonAnswerTextIn,
   unmatchedSelectorIn,
   unmeasuredAfterMeasuredResponse,
@@ -407,7 +409,21 @@ const rowFor = (model: string): ShippedRow => {
   return r as ShippedRow;
 };
 
-test("the shipped v0 row re-derives UNCLASSIFIED, and the record says so — the gate naming it is reported, not silenced", () => {
+const SHIPPED_REFUSAL =
+  "v0 did not return an answer within 90000ms — the site may be busy, rate-limiting, or showing a sign-in or consent wall. Retry; if it repeats, pick another model id from GET /v1/models.";
+
+test("UNATTRIBUTED-NO-ANSWER: the service's own named refusal, at an idle pool, with no page", () => {
+  const c = classifyOutcome({ httpStatus: 502, message: SHIPPED_REFUSAL, poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNATTRIBUTED-NO-ANSWER", `expected UNATTRIBUTED-NO-ANSWER, got ${c.cls}: ${c.reason}`);
+  // The reason must say the cause is UNKNOWN, and must deny each candidate by
+  // name — a class whose wording let a reader conclude which cause is real
+  // would be the defect this row exists to prevent.
+  assert.match(c.reason, /NO CAUSE IS ESTABLISHED/);
+  assert.match(c.reason, /not "the site is rate-limited", not "log in", and not contention/);
+  assert.match(c.reason, /re-measure with a discriminator/);
+});
+
+test("the shipped v0 row re-derives UNATTRIBUTED-NO-ANSWER from its OWN evidence, and the row carries it", () => {
   const r = rowFor("v0");
   const derived = classifyOutcome({
     httpStatus: r.httpStatus as number,
@@ -415,16 +431,102 @@ test("the shipped v0 row re-derives UNCLASSIFIED, and the record says so — the
     poolAtRequest: r.poolAtRequest as { busy?: unknown; total?: unknown; queued?: unknown },
   });
   // The measured values are the ones the 2026-09-30 GOAL-165 sweep printed: four
-  // serial attempts at an idle pool, every one the SAME named 502 no-answer
-  // timeout. No member of the closed set names that condition, so the honest
-  // derivation is the classifier's refusal token and the row carries it.
+  // serial attempts at an idle pool, every one the SAME named 502 refusal.
   assert.equal(r.httpStatus, 502);
   assert.deepEqual(r.poolAtRequest, { busy: 0, total: 3, queued: 0 });
-  assert.equal(derived.cls, "UNCLASSIFIED");
-  assert.equal(r.class, "UNCLASSIFIED", "the row must carry what the classifier derives, not what would look better");
+  assert.equal(derived.cls, "UNATTRIBUTED-NO-ANSWER", `the shipped evidence must derive the class the row carries, got ${derived.cls}: ${derived.reason}`);
+  assert.equal(r.class, derived.cls, "the row must carry what the classifier derives — RULE 11 re-derives every measured row, so a hand-filed class is caught");
   assert.notEqual(r.class, "ANSWERS", "v0 never returned an answer; upgrading it would be a fabrication");
   assert.notEqual(r.class, "CONTENDED-TIMEOUT", "the pool was IDLE, so this is not a measurement of the queue");
-  assert.notEqual(r.class, "SIGN-OUT", "the message mentions a possible sign-in wall but names no sign-in requirement");
+  assert.notEqual(r.class, "SIGN-OUT", "the refusal LISTS a possible sign-in wall among its candidates and asserts none of them");
+  // The refusal sentence the class keys on really is in the row's evidence —
+  // otherwise the row would be asserting a refusal the record does not carry.
+  assert.ok(noAnswerRefusalIn(r.evidence as string), "the v0 row's evidence must carry the service's own refusal sentence");
+});
+
+test("the class cannot be read as a diagnosis: it is NOT any one of the causes the service named", () => {
+  // The refusal names three candidates. This class must hold none of them as
+  // its own claim, and each of the three named conditions must keep its own
+  // row when the evidence actually supports it.
+  assert.equal(NO_ANSWER_REFUSAL_PATTERNS.length, 1);
+  assert.ok(noAnswerRefusalIn(SHIPPED_REFUSAL), "the refusal marker must match the service's own sentence");
+  // A sentence that merely mentions timeouts is not a match, so the marker
+  // cannot be widened into prose-shaped free text.
+  assert.equal(noAnswerRefusalIn("the request timed out after a while"), null);
+  assert.equal(noAnswerRefusalIn("the site returned no content"), null);
+  assert.equal(noAnswerRefusalIn(SHIPPED_REFUSAL), "did not return an answer(?: within \\d+\\s*ms)?");
+});
+
+test("MUTUAL EXCLUSION: the new class cannot swallow a class that was already derivable", () => {
+  // (1) a 502 whose message NAMES a credential requirement is still SIGN-OUT,
+  // even though it also carries the refusal sentence.
+  const signOut = classifyOutcome({
+    httpStatus: 502,
+    message: `${SHIPPED_REFUSAL} v0 requires sign-in before any answer can be produced.`,
+    poolAtRequest: IDLE,
+  });
+  assert.equal(signOut.cls, "SIGN-OUT", `a named credential requirement was swallowed: ${signOut.cls}: ${signOut.reason}`);
+
+  // (2) a 502 whose REPORTED PAGE is an anti-bot surface is still WALL-CHALLENGE.
+  const wall = classifyOutcome({
+    httpStatus: 502,
+    message: SHIPPED_REFUSAL,
+    page: { title: "Just a moment...", url: "https://v0.dev/" },
+    poolAtRequest: IDLE,
+  });
+  assert.equal(wall.cls, "WALL-CHALLENGE", `a challenge page was swallowed: ${wall.cls}: ${wall.reason}`);
+
+  // (3) a 502 whose page LOADED and reported no composer is still COMPOSER-DRIFT —
+  // both on its own and when the refusal sentence rides along with it.
+  const driftAlone = classifyOutcome({
+    httpStatus: 502,
+    message: NO_COMPOSER("v0"),
+    page: { title: "v0", url: "https://v0.dev/chat" },
+    poolAtRequest: IDLE,
+  });
+  assert.equal(driftAlone.cls, "COMPOSER-DRIFT", `a missing composer was swallowed: ${driftAlone.cls}: ${driftAlone.reason}`);
+  const driftWithRefusal = classifyOutcome({
+    httpStatus: 502,
+    message: `${SHIPPED_REFUSAL} ${NO_COMPOSER("v0")}`,
+    page: { title: "v0", url: "https://v0.dev/chat" },
+    poolAtRequest: IDLE,
+  });
+  assert.equal(driftWithRefusal.cls, "COMPOSER-DRIFT", `a missing composer was swallowed by the new branch: ${driftWithRefusal.cls}: ${driftWithRefusal.reason}`);
+
+  // (4) the SAME refusal at a BUSY pool is still UNCLASSIFIED — a queue
+  // measurement, never a model property, in either direction.
+  const busy = classifyOutcome({ httpStatus: 502, message: SHIPPED_REFUSAL, poolAtRequest: BUSY });
+  assert.equal(busy.cls, "UNCLASSIFIED", `the refusal at a busy pool was filed as a model property: ${busy.cls}: ${busy.reason}`);
+  assert.match(busy.reason, /measurement of the queue/);
+
+  // (5) a CONTENDED-TIMEOUT is untouched: no response at all, at a busy pool,
+  // with the same refusal sentence in the message the record carries.
+  const contended = classifyOutcome({ httpStatus: 0, noResponse: true, message: SHIPPED_REFUSAL, poolAtRequest: BUSY });
+  assert.equal(contended.cls, "CONTENDED-TIMEOUT", `a contention row was re-filed: ${contended.cls}: ${contended.reason}`);
+  const contendedAtIdle = classifyOutcome({ httpStatus: 0, noResponse: true, message: SHIPPED_REFUSAL, poolAtRequest: IDLE });
+  assert.equal(contendedAtIdle.cls, "UNCLASSIFIED", "no response at an IDLE pool is not contention and not an unattributed refusal — the response was never reached");
+});
+
+test("ANTI-VACUITY: the refusal marker is not a free-text escape hatch for any other 502", () => {
+  const other = classifyOutcome({ httpStatus: 502, message: "something went wrong", poolAtRequest: IDLE });
+  assert.equal(other.cls, "UNCLASSIFIED", "a 502 naming no condition must stay the classifier's refusal");
+  // …and the class requires the refusal sentence, so it cannot be reached by
+  // dropping an observedPage onto a row that reports nothing else.
+  const noSentence = classifyOutcome({ httpStatus: 502, message: "no answer", page: { title: "v0", url: "https://v0.dev/" }, poolAtRequest: IDLE });
+  assert.equal(noSentence.cls, "UNCLASSIFIED", "a 502 without the service's own refusal sentence is not an unattributed refusal");
+});
+
+test("the new class declares a machine-checkable precondition, enforced by RULE 10", () => {
+  const p = classPrecondition("UNATTRIBUTED-NO-ANSWER");
+  for (const f of ["measuredAt", "method", "evidence"] as const) {
+    assert.ok(p.requiredFields.includes(f), `UNATTRIBUTED-NO-ANSWER must require ${f}`);
+  }
+  assert.ok(p.requiresPoolState, "UNATTRIBUTED-NO-ANSWER must require poolAtRequest {busy,total}");
+  assert.ok(p.requiresIdlePool, "UNATTRIBUTED-NO-ANSWER must require an IDLE pool — at a busy pool the same refusal is a measurement of the queue");
+  // observedPage is deliberately NOT required: the service reported no page on
+  // this path, and demanding one would make the class unreachable, not stricter.
+  assert.ok(!p.requiredFields.includes("observedPage"), "requiring observedPage would make the class unreachable — the refusal path reports no page");
+  assert.ok(CLASS_PRECONDITIONS["UNATTRIBUTED-NO-ANSWER"].requiredFields.length > 0, "a class that requires nothing is a free-text escape hatch");
 });
 
 test("the shipped venice row re-derives NON-ANSWER-READ, and the classifier AGREES from the record's own evidence", () => {
@@ -446,12 +548,13 @@ test("the shipped venice row re-derives NON-ANSWER-READ, and the classifier AGRE
 
 test("the ANSWERS set did not grow — re-filing is not promoting", () => {
   const answering = SHIPPED.filter((r) => r.class === "ANSWERS").map((r) => r.model).sort();
-  assert.deepEqual(answering, ["duckduckgo", "gemini"], `the ANSWERS set changed: ${answering.join(", ")} — v0 and venice must not be promoted to ANSWERS by a widened vocabulary`);
-  // v0 stays UNCLASSIFIED on purpose: the closed set has no member for a named
-  // 502 no-answer timeout at an idle pool, and inventing one here would be the
-  // widening RULE 4 exists to force a human to make. RULE 4 is RED naming v0 and
-  // that is the honest report, not a failure to file.
+  assert.deepEqual(answering, ["duckduckgo", "gemini"], `the ANSWERS set changed: ${answering.join(", ")} — v0 must not be promoted to ANSWERS by a widened vocabulary`);
+  // Every row is now filed in a member of the closed set, which is what lets
+  // RULE 4 stand down — and the class v0 carries is the refusal itself, never a
+  // cause the refusal only listed as a candidate.
   const unclassified = SHIPPED.filter((r) => r.class === "UNCLASSIFIED").map((r) => r.model).sort();
-  assert.deepEqual(unclassified, ["v0"], `only v0 may remain UNCLASSIFIED, got ${unclassified.join(", ")}`);
+  assert.deepEqual(unclassified, [], `no row may be parked on the classifier's refusal token, got ${unclassified.join(", ")}`);
+  const unattributed = SHIPPED.filter((r) => r.class === "UNATTRIBUTED-NO-ANSWER").map((r) => r.model).sort();
+  assert.deepEqual(unattributed, ["v0"], `only v0 may carry the unattributed refusal, got ${unattributed.join(", ")}`);
 });
 
