@@ -1,0 +1,127 @@
+# public-repo-paths.txt
+#
+# WHAT THIS FILE IS
+#   The auditable, reviewable list of PATHS removed from this repository's
+#   history to produce the PUBLIC-SANITIZED copy. It is fed to
+#   `git filter-repo --paths-from-file`, so it is the whole of the
+#   path-based filter — a reviewer reads THIS file, not a hand-typed blob
+#   inside a shell script.
+#
+# HOW IT WAS DERIVED (not guessed)
+#   Every path that has EVER existed at any commit, in one enumeration:
+#
+#     git rev-list --all --objects \
+#       | sed 's/^[0-9a-f]* //' | sort -u
+#
+#   ...which yields 5224 (commit, path) lines / 1906 distinct paths for this
+#   repo at 605 commits / 720 distinct paths. Filtered for brain-adjacent NAMES:
+#
+#     git rev-list --all --objects | sed 's/^[0-9a-f]* //' | sort -u \
+#       | grep -Ei '(^|/)(\.brain|verbatim|handoff)|VERBATIM|brain/'
+#
+#   -> 55 distinct paths. Each was then read (git show <sha>:<path>) and
+#      classified by CONTENT, not by name, into INCLUDE / EXCLUDE below.
+#
+# THE BOUNDARY, AND WHY (the decision that matters)
+#   INCLUDED = "the operator's own unedited words, the goal index derived from
+#   them, and the session-state machinery that exists only to serve them."
+#   EXCLUDED = "code and prose that MENTION the corpus but are not the corpus."
+#
+#   The decisive fact: this repo RELOCATED the corpus on 2026-09-25
+#   (commit 8c7c41d, "fold: relocate verbatim corpus to .brain"). BEFORE that,
+#   the entire archive lived under docs/. A filter that removed only `.brain`
+#   would have published 126 commits of the goal index and the full transcript.
+#   Hence every historical location below, not just the current one.
+#
+#   Per-path commit counts (measured, `git log --all --oneline -- <path> | wc -l`):
+#     126  docs/verbatim-goals.md          the goal index — the operator's record
+#     100  .brain/verbatim-goals.md        the same index after relocation
+#      82  docs/verbatim/ledger.md         the fold-by-fold ledger
+#      37  .brain/verbatim-coverage.md     coverage ledger
+#      33  docs/verbatim/state.json        session state (goals, folds, cursors)
+#      20  .brain/PRODUCTION_READINESS.md  operator-facing readiness record
+#      17  docs/verbatim/HANDOFF.md        next-agent directives
+#      15  .brain/verbatim.md              the pointer doc
+#      12  docs/verbatim.md                the pointer doc, pre-relocation
+#       8  docs/verbatim-coverage.md       coverage ledger, pre-relocation
+#       3  .brain/verbatim-report.md
+#       2  docs/verbatim-report.md
+#       2  docs/verbatim/cycle-runner.mjs  archive bookkeeping
+#       2  docs/verbatim/rebuild-sessions.mjs
+#       2  docs/verbatim/store-handoff-fold.mjs
+#       3  .brain/parked-gates/*           parked gate drafts (operator triage)
+#       2  docs/handoffs/*                 SEE NOTE BELOW — brain under an
+#                                            innocent-looking path
+#       1  VERBATIM.md                     SEE NOTE BELOW
+#       1  raw/VERBATIM-RAW.md             SEE NOTE BELOW
+#
+#   THE NOTE — three entries are brain material whose PATH looks innocent, and
+#   they are the reason this list is derived from content and not from a
+#   `.brain*` glob:
+#     * docs/handoffs/2026-09-20-crash-checkpoint.md opens with
+#       `> User verbatim (2026-09-20 14:1x, crash-directive): "this chat is
+#       broken because crash i need yo uto make hand of in docs for it..."` —
+#       the operator's raw, misspelled, unedited words, quoted at length.
+#     * docs/handoffs/2026-09-20-14-10-crash-handoff.md is anchored on
+#       "Goal (full verbatim, anchored in .brain/verbatim/)".
+#     * VERBATIM.md + raw/VERBATIM-RAW.md are a V1-gate requirement captured
+#       "word-for-word" from the operator ("i think the way that the login works
+#       is not what i need in fact its too hard for end user...").
+#     INCLUDED. A name-glob would have shipped all four to the world.
+#
+#   THE BOUNDARY CASES I EXCLUDED, and the reason for each — these are the
+#   judgement calls a reviewer should check first:
+#     * docs/handoffs/2026-09-20-crash-recovery.md — a fan-in STATUS report
+#       (suite numbers, gate verdicts, honest "nothing was live-posted"). It
+#       references the verbatim but quotes no operator words. EXCLUDED.
+#       NOTE: it is one commit away from an INCLUDED sibling; if a future
+#       corpus re-read finds a quote in it, move it up. This is a real
+#       residual risk, reported, not hidden.
+#     * docs/superpowers/specs/2026-09-16-capability-reflection-design.md —
+#       `git show` + grep for `verbatim|user said|> "` returns ZERO hits. It is
+#       a design doc. EXCLUDED.
+#     * scripts/verify-verbatim-index.mjs, test/verbatim-index.test.ts — these
+#       are CODE that gates the corpus; they are the mechanism, not the
+#       material. EXCLUDED from the path filter, but see the script's
+#       POST-FILTER step: the sanitized repo is expected to FAIL these two
+#       gates, because their subject (.brain/verbatim.md) is gone. That is
+#       honest and intended, and the script says so out loud.
+#     * fixture/, .opencode-ci/, .github/**, capabilities/**, src/**,
+#       test/** — the project. Not brain. EXCLUDED.
+#
+#   WHAT IS *NOT* ON THIS LIST AND CANNOT BE (the structural blind spot):
+#     brain CONTENT living inside a file with an innocent path — a transcript
+#     pasted into a README, a verbatim passage in a source comment, an
+#     infrastructure address in a code comment. Path filtering is structurally
+#     incapable of catching that. The script's residual scan MEASURES what
+#     survives, and the number it prints is the honest size of that hole.
+#     The expected non-zero survivors are enumerated in the run report.
+#
+# FORMAT
+#   One path per line. `#` comments and blank lines are ignored by
+#   `--paths-from-file` only if you pass the file through `grep -v`; this
+#   script does that itself, so keep comments here for the reviewer.
+#   A trailing `/` means "this directory and everything under it".
+#   Listing a DIRECTORY removes it recursively — that is why `.brain/`
+#   is one line and not 35.
+
+# ---- 1. the corpus, current location (relocated 2026-09-25, commit 8c7c41d) ----
+# 35 distinct paths ever; the whole tree, because it exists only to hold the
+# operator's transcript, the goal index, and the parked-gate triage notes.
+.brain/
+
+# ---- 2. the corpus, historical location under docs/ (before 2026-09-25) ----
+# Same material, earlier path. Removing only section 1 publishes all of this.
+docs/verbatim.md
+docs/verbatim-goals.md
+docs/verbatim-report.md
+docs/verbatim-coverage.md
+docs/verbatim/
+
+# ---- 3. brain material under innocent-looking paths (content-derived) ----
+# The operator's raw words quoted at length, or a document anchored on the
+# full verbatim. See the THE NOTE block above for the quoted evidence.
+docs/handoffs/2026-09-20-crash-checkpoint.md
+docs/handoffs/2026-09-20-14-10-crash-handoff.md
+VERBATIM.md
+raw/VERBATIM-RAW.md

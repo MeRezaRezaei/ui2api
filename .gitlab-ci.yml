@@ -149,6 +149,75 @@ deploy:
       echo "models:   $(curl -fsS --max-time 5 http://127.0.0.1:9797/v1/models  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).data.length))')"
       systemctl is-active ui2api-api
 
+# --------------------------------------------------------- github_release ----
+#
+# GitLab is the CI/CD actor; GitHub is the long-term store and the release
+# surface. The reason is survivability: this GitLab is a self-hosted VPS that may
+# be deleted, and when it is, the only durable record of what was deployed has
+# to already be somewhere else. `deploy` installs from the CI workspace and
+# leaves nothing behind — so a green build produced no artifact and no record.
+# This job is that record: one immutable tarball per green main build.
+#
+# CHAIN: stage `deploy`, `needs: ["verify"]`. A red suite must never produce a
+# release, and needs (not stage order alone) is what guarantees it.
+#
+# The contract the consumer lane relies on, exactly:
+#   tag            build-<short sha>        (immutable — never a moving tag)
+#   release name   ui2api build <full sha>
+#   asset          ui2api-<short sha>.tar.gz
+#   contents       dist/, capabilities/, scripts/ops/deploy.sh,
+#                  package.json, package-lock.json, RELEASE-MANIFEST.json
+#   EXCLUDES       data/ (the session vault), node_modules/, wigolo/, .git/,
+#                  .npm/, .opencode-ci/, .gitlab/
+#
+# The YAML is thin on purpose: packaging, the exclusion assertions, the manifest
+# and the read-back all live in scripts/ci/*.sh, where they can be read, quoted,
+# and dry-run locally. A tar flag buried in a `- |` block is untestable.
+github_release:
+  stage: deploy
+  image: node:24-bookworm
+  tags: ["ui2api"]
+  timeout: 30 minutes
+  interruptible: false
+  needs: ["verify"]
+  dependencies: []
+  # Not serialized behind `resource_group: ui2api-production` — this publishes to
+  # GitHub and touches nothing on this box, so it must not queue behind a deploy.
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  # GH_TOKEN is scoped to the agent-write ENVIRONMENT. Any job that uses the
+  # write secrets MUST declare that environment or it silently runs with no
+  # credentials (same measured lesson the kit's jobs carry). Without this block
+  # the job would build a correct artifact and then skip — looking green while
+  # publishing nothing.
+  environment:
+    name: agent-write
+    action: prepare
+    auto_stop_in: 1 day
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/, node_modules/]
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+    - apt-get update -qq && apt-get install -y -qq curl jq >/dev/null
+    - 'command -v jq >/dev/null || { echo "FATAL jq missing"; exit 1; }'
+    - 'command -v curl >/dev/null || { echo "FATAL curl missing"; exit 1; }'
+    # Package first, and let the script assert the exclusions against the real
+    # archive. If data/ cannot be excluded, the job dies here and ships nothing.
+    - ./scripts/ci/package-release.sh --out .release
+    # Then publish, then READ BACK. The token is never echoed, never written to
+    # a file, and never placed in a URL.
+    - ./scripts/ci/publish-github-release.sh .release/release.env "$GITHUB_REPO"
+  artifacts:
+    # Keep the built artifact in the GitLab job too: the release is the durable
+    # copy, this is the cheap per-run one. Manifest + tarball only, never the
+    # whole workspace (pipeline 173 died with 413 on exactly that mistake).
+    paths:
+      - .release/
+    expire_in: 30 days
+
 # >>> opencode-agent (opencode-ci kit) >>>
 # ---------------------------------------------------------------------------
 # OpenCode agent job (OpenCode + OmniRoute)
@@ -666,7 +735,10 @@ agent_reap:
           echo "  keep $B (NOT YET BACKED UP to github -- deleting it would lose work)"
           continue
         fi
-        case "$B" in *live*|*production*) echo "  keep $B (name touches the live line -- human only)"; continue;; esac
+        # A glob here would read as a YAML alias to the line scanner in
+        # test/helpers/ci-contract-scan.ts, which gates this file as unreadable.
+        # The test is the same one; only the spelling changes.
+        if printf '%s' "$B" | grep -qE 'live|production'; then echo "  keep $B (name touches the live line -- human only)"; continue; fi
         [ "${MERGED:-0}" -gt 0 ] || echo "  note $B is backed up on github but has no merged MR"
         ENC=$(printf '%s' "$B" | jq -sRr @uri)
         if timeout 60 curl -sk -o /dev/null -w "%{http_code}" -X DELETE -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$API/repository/branches/$ENC" | grep -q '^204$'; then

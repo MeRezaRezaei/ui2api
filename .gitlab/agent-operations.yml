@@ -1,0 +1,72 @@
+# Agent operations rulebook — the single source of truth for the opencode-ci tail.
+#
+# WHY THIS FILE EXISTS. The chat agent stops at `push` (doctrine LAW 2). Everything
+# to the right of that arrow — merge, reap, mirror, release — happens in CI, without a
+# human in the loop. A loop with no written rules is a loop nobody can audit, and an
+# audit trail that only exists in a commit message stops being an audit trail.
+#
+# This file is READ AT RUNTIME by `agent_merge`, which pulls `enabled_by` out of it with
+# a two-space-indented `sed`. That means the file cannot become decorative: if it is
+# absent the job refuses to act, and if the key changes the job stops acting.
+#
+# The structure is deliberately flat and line-oriented. A `sed -n 's/^  enabled_by: *//p'`
+# is the reader; anything this file cannot express in that shape does not belong in it.
+
+merge:
+  # The CI variable that must ALSO be true. Both must agree — the rulebook expresses
+  # doctrine, the variable is the per-repo switch, and neither alone is sufficient.
+  enabled_by: AGENT_MERGE
+  # Two gates, both required, and the second is not optional:
+  #   1. the pipeline on the MR HEAD sha is green — a green run id is a RECORD, not a
+  #      permission, so it is re-checked at merge time rather than trusted from the event;
+  #   2. reconciliation — every agent-produced card the MR claims to close is actually in
+  #      a terminal state.
+  # A merge with only gate 1 is a merge nobody reconciled, and this project has shipped
+  # "the agent said it was done" more than once.
+  require_green_pipeline: true
+  require_reconciliation: true
+  # GitLab's native auto-merge and required-approvals are Premium on this instance, so
+  # both gates are enforced by the script rather than by a branch-protection flag.
+  # `main` is NOT protected either, which is precisely why the script re-checks instead
+  # of trusting a flag.
+  min_gates: 2
+
+reap:
+  # Deleting a branch is irreversible on the remote. A branch is reaped ONLY when it is
+  # already mirrored to GitHub AND carries a merged MR. The mirror-first interlock is the
+  # whole safety property: if GitHub does not have the branch, deleting it in GitLab
+  # loses work, and the operator's stated requirement is that GitLab can be deleted at
+  # any time without losing anything.
+  enabled_by: AGENT_REAP
+  require_mirrored_to_github: true
+  require_merged_mr: true
+  # A branch whose name touches the live line is never reaped by an agent, whatever the
+  # gates say. This is the operator's red line, and it is a human-only decision.
+  never_reap_name_matching: 'live|production'
+
+mirror:
+  enabled_by: AGENT_MIRROR
+  # GitLab is the source of truth, so a non-fast-forward into GitHub means the two have
+  # DIVERGED and a human must look. It is never a silent overwrite, and never a force.
+  # The operator currently has a real 130-commit divergence on MeRezaRezaei/ui2api, and
+  # that divergence existing is the correct behaviour of this rule, not a bug in it.
+  no_force: true
+  no_prune: true
+  # `.brain` carries the operator's complete unedited transcripts. If the destination
+  # repository is not private the brain is DIVERTED to a dedicated private repository
+  # instead — and the job REFUSES if no private destination exists, rather than
+  # silently dropping it. Visibility is checked at runtime, never assumed, because a
+  # repository can be flipped public after the fact.
+  brain_dir: .brain
+  brain_divert_when_destination_public: true
+  brain_repo: MeRezaRezaei/operator-brain
+
+release:
+  # A GitHub Release is the durable record of what was built and deployable. The reason
+  # is the operator's: the self-hosted GitLab VPS may be deleted, so the code and a
+  # deployable artifact must both survive on GitHub.
+  enabled_by: AGENT_MERGE
+  # A tag that moves cannot answer "what was deployed on Tuesday", so a tag is written
+  # once and never forced.
+  immutable_tags: true
+  tag_prefix: build-
