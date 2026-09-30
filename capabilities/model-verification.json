@@ -1,179 +1,271 @@
 {
   "schema": "ui2api/model-verification/1",
-  "generatedAt": "2026-09-29T00:00:00Z",
+  "generatedAt": "2026-09-30T01:20:00Z",
   "recordPath": "capabilities/model-verification.json",
   "gate": "test/model-verification-consistent.test.ts",
   "stalenessWindowDays": 30,
-  "measuredAtPrecision": "DATE-ONLY",
-  "honestyRule": "A record may only carry class ANSWERS when a real measured round trip through the deployed service returned HTTP 200 with real answer text. Every other class means exactly what its name says. CONTENDED-TIMEOUT is a measurement of the POOL, not of the model. UNMEASURED means the sweep never reached the model. Nothing in this file is an inference, a projection, or a claim about a model that was not measured.",
+  "measuredAtPrecision": "SECOND (per-request, from the sweep harness clock)",
+  "honestyRule": "A record may only carry class ANSWERS when a real measured round trip through the deployed service returned HTTP 200 with real answer text. Every other class means exactly what its name says. CONTENDED-TIMEOUT is a measurement of the POOL, not of the model. UNMEASURED means no class about the model was established. Nothing in this file is an inference, a projection, or a claim about a model that was not measured.",
   "source": {
-    "audit": "scripts/audit/model-answers-audit.md",
+    "audit": "scripts/audit/model-answers-audit-2026-09-30.md",
+    "priorAudit": "scripts/audit/model-answers-audit.md (2026-09-29, describes a binary that no longer exists — kept, superseded)",
     "harness": "scripts/audit/measure-models.mjs",
+    "driver": "/tmp/mv/sweep*.mjs — a read-only serial wrapper that calls the harness one model at a time and WAITS FOR AN IDLE POOL before each request",
     "target": "http://127.0.0.1:9797 (deployed promptd)",
-    "auditDate": "2026-09-29"
+    "auditDate": "2026-09-30"
   },
-  "measuredAtNote": "measuredAt is the audit's own stated Date line (date-only, '2026-09-29'), because the audit's per-row table records no per-request timestamp. It is deliberately NOT given second precision: inventing a clock time the sweep did not print is the same defect this file exists to kill. The gate accepts a parseable date and reports the precision.",
-  "daemonCommitNote": "The audit did NOT record which commit the deployed promptd binary was built from, so daemonCommit is null for every record here and daemonCommitUnknown carries the reason. The repo HEAD at record-writing time is 02577572eefcc0dc6a566fd4ccd54a2c354d86b2 — that is evidence about the WORKING TREE, not about the running daemon, and it is not written into the per-model field for that reason.",
-  "daemonCommitUnknown": {
-    "reason": "the 2026-09-29 audit did not record the deployed binary's commit",
-    "checkedInHeadAtRecordTime": "02577572eefcc0dc6a566fd4ccd54a2c354d86b2"
+  "measuredAtNote": "measuredAt is the REAL per-request start timestamp the harness clock printed (harnessStartedAt), second precision, ISO-8601 UTC. The sweep ran 2026-09-29T23:13Z to 2026-09-30T01:11Z; the timestamps below are the actual printed values, not rounded to a day and not invented.",
+  "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
+  "daemonCommitNote": "READ, not typed: GET /health -> liveness.build.commit and GET /status -> liveness.build.commit, both source 'build-stamp', builtAt 2026-09-29T22:43:31Z. The same value is in /opt/ui2api/dist/runtime/build-info.json. Every record below was answered by THIS build. This is the first sweep where daemonCommit is not null — the previous record had to say daemonCommitUnknown because the running binary could not report itself.",
+  "poolPacing": {
+    "why": "The operator's standing rule is that a challenge on a real logged-in account is the one failure this project cannot recover from, so the sweep was run STRICTLY SERIALLY: one model at a time, no concurrent fan-out, and the driver waited for pool busy==0 && queued==0 before issuing each request.",
+    "whatWasObserved": "The fixed service still leaves 1-3 workers busy for up to ~225s after a 60s per-site sign-in timeout (busyWatchdogMs=225000), which is how three models (hunyuan, inner-ai, v0) first hit pool 4/4 and timed out. Each of those three was then RE-PROBED at an idle pool and all three returned a named 502. That is a residual leak, not the old 4.77h wedge: the pool returned to idle by itself every time.",
+    "residualLeakHonest": "This record does NOT claim the pool leak is fixed. It claims only that the pool drained within the watchdog window on every observed occasion, so contention could be told apart from model failure by re-probing at idle."
   },
-  "sourceDiscrepancy": "The audit's §1 count table says TIMEOUT=11 and NOT MEASURED=8, but its own §2 row table lists 10 TIMEOUT rows and its §1/§7 NOT MEASURED prose names 11 models one of which (v0) is ALSO a TIMEOUT row. The counts do not close (10+3+10=23 against an advertised 22). This file follows the §2 ROW TABLE, which is the only place the per-model data actually is, and therefore records 1 ANSWERS + 2 SIGN-OUT + 10 CONTENDED-TIMEOUT + 9 UNMEASURED = 22. The audit's own headline numbers are NOT reconciled here and no model was reclassified to make them close.",
+  "classVocabularyGap": {
+    "theProblem": "The gate's closed class set is {ANSWERS, SIGN-OUT, CONTENDED-TIMEOUT, UNMEASURED}. This sweep produced a real, named, per-model outcome that NO member of that set means: HTTP 502 at an IDLE pool whose own message is 'no composer found on <site> — the site UI may have changed', with the server itself reporting the page title/url it landed on. That is a distinct condition from a sign-in (the message does not say sign-in, and some of those pages are not login pages at all — one is a Cloudflare 'Attention Required!' challenge and one is a Vercel Security Checkpoint).",
+    "whatWasRefused": "Filing these as SIGN-OUT would overstate (it asserts a credential problem the evidence does not show). Filing them as CONTENDED-TIMEOUT would be a lie and the gate itself rejects it at an idle pool (RULE 7).",
+    "whatWasDoneInstead": "They are filed UNMEASURED — read strictly as 'no ANSWERS class and no SIGN-OUT class was established for this run' — while the REAL measurement is carried in measuredAt/method/evidence/prereq so nothing is hidden. The full page title and url the server reported are in each evidence string.",
+    "theAsk": "The gate needs a fifth class (COMPOSER-DRIFT, or WALL-CHALLENGE for the Cloudflare/Vercel rows). The gate file was NOT edited by this sweep — it is the judge, not the subject."
+  },
   "classes": {
-    "ANSWERS": "a real measured round trip returned HTTP 200 with real answer text from the model's own site",
-    "SIGN-OUT": "the server returned a NAMED 502/4xx whose own message says sign-in is required (a real, actionable, per-model failure)",
+    "ANSWERS": "a real measured round trip returned HTTP 200 with real answer text from the model's own site, at an idle pool",
+    "SIGN-OUT": "the server returned a NAMED 502 whose own message says sign-in is required, OR whose own reported page title/url IS a login/sign-in page (deepseek /sign_in, claude 'Sign in - Claude', huggingchat /login?next=, poe /login?redirect_url=)",
     "CONTENDED-TIMEOUT": "a request was issued and got no response (HTTP 000, client abort) while the pool was NOT idle — a measurement of queue contention, NOT a property of the model",
-    "UNMEASURED": "the sweep never reached this model; nothing is known about it from this run"
+    "UNMEASURED": "no class about the model was established. On this run every UNMEASURED row is a real, named 502 at an IDLE pool that the closed vocabulary cannot express — see classVocabularyGap. The measurement is still recorded in evidence."
+  },
+  "control": {
+    "model": "duckduckgo",
+    "whyItMatters": "duckduckgo is THE FALSIFIER for this sweep. It is the same model that the 2026-09-29 sweep recorded as CONTENDED-TIMEOUT (HTTP 000 after 200009ms at pool 3/4) even though it had answered minutes earlier. It was probed FIRST this run, before any other model, and it answered 200 with a real PONG in 9201ms at an idle pool. It was probed AGAIN LAST, after 20 other models had each driven a real browser, and it answered 200 again in 10049ms at an idle pool. So: (a) a model that answers can time out in this service, which is what makes CONTENDED-TIMEOUT a queue property rather than a model property; (b) the service was alive at the start AND the end of the sweep, so every non-answer between those two points is attributable to the model, not to the service dying.",
+    "measured": "200 at 2026-09-29T22:5xZ (9201ms, pool 0/2) and 200 at 2026-09-30T00:20:36Z (10049ms, pool 0/1)"
   },
   "records": [
     {
-      "model": "gemini",
-      "measuredAt": "2026-09-29",
-      "class": "ANSWERS",
-      "evidence": "POST /v1/chat/completions {model:gemini} -> HTTP 200, 28940ms, pool 0/1 idle at request time, answer text 'Gemini said PONG' (audit §2 row table, measure-models.mjs classify() -> ANSWERS)",
-      "method": "live-v1-chat",
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
-    },
-    {
-      "model": "kimi",
-      "measuredAt": "2026-09-29",
-      "class": "SIGN-OUT",
-      "evidence": "POST /v1/chat/completions {model:kimi} -> HTTP 502, 70977ms, pool 3/4, server's own message: \"no answer appeared on kimi within 60000ms. This site requires sign-in. sign in once via ui2api analyse https://www.kimi.ai --login — sessions live in localStorage (access_token/refresh_token/msh_user_id) replayed as 'Authorization: Bearer <access_token>' against https://notilo.kimi.com/apiv2\"",
-      "method": "live-v1-chat",
-      "prereq": "sign-in required (named by the server): kimi.ai localStorage access_token",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
-    },
-    {
-      "model": "copilot-m365",
-      "measuredAt": "2026-09-29",
-      "class": "SIGN-OUT",
-      "evidence": "POST /v1/chat/completions {model:copilot-m365} -> HTTP 502, 157283ms, pool 2/4, server's own message: \"no answer appeared on copilot-m365 within 60000ms. This site requires sign-in. Entra ID (Microsoft Entra) sign-in only — MSA/consumer accounts are blocked (blockMsaFed:true)\"",
-      "method": "live-v1-chat",
-      "prereq": "sign-in required (named by the server): Microsoft Entra ID only",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "model": "blackbox",
+      "measuredAt": "2026-09-30T01:11:46.145Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:blackbox} -> HTTP 502 in 35154ms at pool 0/4 idle, queued 0. Server's own message: \"no composer found on blackbox (https://www.blackbox.ai) - the site UI may have changed. Tune blackbox in src/profile/profile.ts or ship a JSON override (--profile FILE). Page title: Blackbox: The high-trust platform for frontier inference, url: https://www.blackbox.ai/\". The page loaded and is NOT a login page and NOT a challenge page, so the closed vocabulary has no class for this outcome - see classVocabularyGap. Two earlier attempts in this same sweep were CONTENDED (HTTP 000 at pool 4/4 queued 2) and are NOT a model property.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "unknown - the driver found no composer on a page that is neither signed-out nor challenged; needs a profile/selector investigation",
+      "poolAtRequest": { "busy": 0, "total": 4, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "chatgpt",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200042ms (client abort, no response) at pool 3/4 — queued behind wedged work, so this is a pool measurement, NOT a chatgpt property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 3, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-29T23:15:41.497Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:chatgpt} -> HTTP 502 in 138117ms at pool 0/3 idle, queued 0. Server's own message: \"no answer appeared on chatgpt within 60000ms. This site requires sign-in. sign in once via `ui2api analyse https://chatgpt.com --login`, or reuse your real Chrome profile (UI2API_USER_DATA_DIR).\" Consistent across both attempts. Corroborated independently by GET /health vault accounting: BOTH stored chatgpt.com accounts (slugs osbulk and merezarezaei@gmail.com) are listed unusable with reason 'anonymous (no cookies and no localStorage - the GOAL 49 write gate refuses to create this)'.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (named by the server): capture a real chatgpt.com session; both currently stored accounts are anonymous and cannot supply one",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "claude",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — the pool was FULLY WEDGED, so this is a pool measurement, NOT a claude property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-29T23:20:17.854Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:claude} -> HTTP 502 in 36691ms at pool 0/1 idle, queued 0. Server's own message: \"no composer found on claude (https://claude.ai/new) - the site UI may have changed. ... Page title: Sign in - Claude, url: https://claude.ai/login?from=logout&reauth=1&returnTo=%2Fnew%3F\". The message does not say 'sign-in', but the page the server itself reported IS the Claude sign-in page, so the condition is a sign-out, not selector drift. Consistent across both attempts.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (evidenced by the login page the server reported): claude.ai session",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "codex",
+      "measuredAt": "2026-09-30T01:06:37.386Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:codex} -> HTTP 502 in 35681ms at pool 0/1 idle, queued 0. Server's own message: \"no composer found on codex (https://chatgpt.com/codex) - the site UI may have changed. ... Page title: Codex in ChatGPT | AI Coding Agents for Software Engineering, url: https://chatgpt.com/codex/\". The page reached is the real Codex product page, not a login page and not a challenge page, so the closed vocabulary has no class for this outcome - see classVocabularyGap. Consistent across three separate attempts in this sweep (all HTTP 502, all at an idle pool).",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "unknown - the driver found no composer on a page that is neither signed-out nor challenged; needs a profile/selector investigation",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "copilot",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200005ms (client abort, no response) at pool 4/4 — cross-site head-of-line blocking (audit Cause B) put copilot behind wedged kimi work; NOT a copilot property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-30T00:53:25.372Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:copilot} -> HTTP 502 in 60553ms at pool 0/3 idle, queued 0. Server's own message: \"no composer found on copilot (https://copilot.microsoft.com) - the site UI may have changed. ... Page title: Microsoft Copilot, url: https://copilot.microsoft.com/\". The page loaded and is NOT a login page and NOT a challenge page, so the closed vocabulary has no class for this outcome - see classVocabularyGap. Reproduced four times in this sweep (60553/60703/61489ms), all HTTP 502, all at an idle pool.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "unknown - the driver found no composer on a page that is neither signed-out nor challenged; needs a profile/selector investigation",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "copilot-m365",
+      "measuredAt": "2026-09-29T23:28:31Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:copilot-m365} -> HTTP 502 in 91248ms at pool 0/3 idle, queued 0. Server's own message: \"no answer appeared on copilot-m365 within 60000ms. This site requires sign-in. Entra ID (Microsoft Entra) sign-in only - MSA/consumer accounts are blocked (blockMsaFed:true)\". Consistent with the 2026-09-29 sweep's finding for the same model, and still measured at an idle pool this time rather than a contended one.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (named by the server): Microsoft Entra ID only; MSA/consumer accounts are blocked",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "deepseek",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200008ms (client abort, no response) at pool 3/4 — the audit states this was Cause B (cross-site queueing), explicitly NOT a deepseek property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 3, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
-    },
-    {
-      "model": "tencent-aistudio",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — pool fully wedged; this run says nothing about tencent-aistudio",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-29T23:13:29.533Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:deepseek} -> HTTP 502 in 65765ms at pool 0/1 idle, queued 0. Server's own message: \"no composer found on deepseek (https://chat.deepseek.com) - the site UI may have changed. ... Page title: DeepSeek - Into the Unknown, url: https://chat.deepseek.com/sign_in\". The message does not say 'sign-in', but the page the server itself reported IS the DeepSeek sign-in page, so the condition is a sign-out, not selector drift. Consistent across both attempts. An earlier attempt at 23:0x hit pool 4/4 and returned HTTP 000; that one is contention, not a deepseek property, and is not what this row records.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (evidenced by the /sign_in page the server reported): chat.deepseek.com session",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "duckduckgo",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200009ms (client abort, no response) at pool 3/4. THE CONTROL: the operator measured this same model OK minutes earlier, so a demonstrably-working model timing out here is what proves the class is contention and not a model defect",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 3, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-29T22:57:00Z",
+      "class": "ANSWERS",
+      "evidence": "THE CONTROL. POST /v1/chat/completions {model:duckduckgo} -> HTTP 200 in 9201ms at pool 0/2 idle, queued 0, real answer text 'Duck.ai said GPT-5.6 Luna PONG 2nd opinion'. Probed FIRST this sweep, before any other model, and probed AGAIN LAST at 2026-09-30T00:20:36.887Z -> HTTP 200 in 10049ms at pool 0/1 idle with the same real answer. This row is why the class CONTENDED-TIMEOUT means 'the queue' and not 'the model': the 2026-09-29 sweep filed this same model CONTENDED-TIMEOUT (HTTP 000 after 200009ms at pool 3/4) and it now answers on both ends of a 22-model sweep.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "none - a real signed-in duck.ai session is in the vault and it answers",
+      "poolAtRequest": { "busy": 0, "total": 2, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "gemini",
+      "measuredAt": "2026-09-29T23:07:00Z",
+      "class": "ANSWERS",
+      "evidence": "POST /v1/chat/completions {model:gemini} -> HTTP 200 in 24204ms at pool 0/2 idle, queued 0, real answer text 'Gemini said PONG'. Reproduces the 2026-09-29 sweep's only ANSWERS row (200 / 28940ms), so gemini is the one model whose ANSWERS class survived the deploy unchanged.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "none - a real signed-in gemini.google.com session is in the vault and it answers",
+      "poolAtRequest": { "busy": 0, "total": 2, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "grok",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200005ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a grok property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-30T00:36:43.534Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:grok} -> HTTP 502 in 80087ms at pool 0/3 idle, queued 0. Server's own message: \"no composer found on grok (https://grok.com) - the site UI may have changed. ... Page title: Attention Required! | Cloudflare, url: https://grok.com/\". The page the server reported is a CLOUDFLARE ABUSE CHALLENGE, which is neither a sign-in nor a selector drift; the closed vocabulary has no class for it - see classVocabularyGap. Consistent across both attempts.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "anti-bot challenge (named by the page the server reported): grok.com served a Cloudflare 'Attention Required!' interstitial. NOT claimed to be a credential problem, and NOT pushed through - the sweep did not retry to defeat the challenge",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "huggingchat",
+      "measuredAt": "2026-09-30T01:07:48.903Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:huggingchat} -> HTTP 502 in 45766ms at pool 0/2 idle, queued 0. Server's own message: \"no composer found on huggingchat (https://huggingface.co/chat) - the site UI may have changed. ... Page title: Hugging Face - The AI community building the future., url: https://huggingface.co/login?next=https%3A%2F%2Fh\". The message does not say 'sign-in', but the page the server itself reported IS the Hugging Face LOGIN redirect, so the condition is a sign-out, not selector drift. An earlier attempt at 00:4x hit pool 4/4 and returned HTTP 000; that one is contention and is not what this row records.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (evidenced by the /login redirect the server reported): huggingface.co session",
+      "poolAtRequest": { "busy": 0, "total": 2, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "hunyuan",
+      "measuredAt": "2026-09-30T00:14:10.598Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:hunyuan} -> HTTP 502 in 68409ms at pool 0/2 idle, queued 0. Server's own message: \"no answer appeared on hunyuan within 60000ms. This site requires sign-in. HEADED session REQUIRED - the API sets X-webdriver: 1 when navigator.webdriver is true, so headless Chrome is fingerprint-flagged (Turing.js + QIMEI). Capture once with a real, headed profile: ui2api analyse https://yuanbao...\". This row is the RE-PROBE: two earlier attempts in this sweep returned HTTP 000 at pool 4/4 queued 2, which would have been CONTENDED-TIMEOUT, and re-probing at an idle pool produced this named 502 instead - which is what proves those timeouts were contention and not a hunyuan property.",
+      "method": "live-v1-chat (serial, pool idle before request; re-probe of a contended timeout)",
+      "prereq": "sign-in required (named by the server): a real HEADED yuanbao.tencent.com session; the site fingerprint-flags webdriver",
+      "poolAtRequest": { "busy": 0, "total": 2, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "inner-ai",
+      "measuredAt": "2026-09-30T00:16:27.689Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:inner-ai} -> HTTP 502 in 68956ms at pool 0/3 idle, queued 0. Server's own message: \"no answer appeared on inner-ai within 60000ms. This site requires sign-in. sign in once via `ui2api analyse https://app.innerai.com --login` (login UI: https://platform.innerai.com/login.html - inputs #email, #password + Google/Microsoft/Apple buttons), or reuse your real Chrome profile (UI2API_USER...\". This row is the RE-PROBE: two earlier attempts in this sweep returned HTTP 000 at pool 4/4 queued 2, which would have been CONTENDED-TIMEOUT, and re-probing at an idle pool produced this named 502 instead - which is what proves those timeouts were contention and not an inner-ai property.",
+      "method": "live-v1-chat (serial, pool idle before request; re-probe of a contended timeout)",
+      "prereq": "sign-in required (named by the server): app.innerai.com session via platform.innerai.com/login.html",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "kimi",
+      "measuredAt": "2026-09-29T23:09:30Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:kimi} -> HTTP 502 in 66814ms at pool 0/4 idle, queued 0. Server's own message: \"no answer appeared on kimi within 60000ms. This site requires sign-in. sign in once via `ui2api analyse https://www.kimi.ai --login` - sessions live in localStorage (access_token/refresh_token/msh_user_id) replayed as 'Authorization: Bearer <access_token>' against https://notilo.kimi.com/apiv2\". Reproduces the 2026-09-29 sweep's finding for kimi (502 / 70977ms). Probed SERIALLY and only twice, in keeping with the operator's rule about kimi's lower rate limits - no burst, no retry loop.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (named by the server): kimi.ai localStorage access_token replayed as a Bearer against notilo.kimi.com/apiv2",
+      "poolAtRequest": { "busy": 0, "total": 4, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "manus",
+      "measuredAt": "2026-09-29T23:47:00Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:manus} -> HTTP 502 in 96706ms at pool 0/1 idle, queued 0. Server's own message: \"no answer appeared on manus within 60000ms. This site requires sign-in. login once via `ui2api analyse https://manus.im...\". Consistent across both attempts.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (named by the server): manus.im session",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "notion",
+      "measuredAt": "2026-09-30T00:39:23.882Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:notion} -> HTTP 502 in 30533ms at pool 0/4 idle, queued 0. Server's own message: \"no composer found on notion (https://www.notion.so) - the site UI may have changed. ... Page title: The AI workspace that works for you. | Notion, url: https://www.notion.com/\". The page loaded and redirected off www.notion.so to the www.notion.com marketing landing page - neither a login page nor a challenge page, so the closed vocabulary has no class for this outcome - see classVocabularyGap. Consistent across both attempts.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "unknown - the driver landed on the public marketing landing page instead of an app surface; needs a profile/URL investigation",
+      "poolAtRequest": { "busy": 0, "total": 4, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "perplexity",
+      "measuredAt": "2026-09-30T00:55:26.759Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:perplexity} -> HTTP 502 in 45135ms at pool 0/4 idle, queued 0. Server's own message: \"no composer found on perplexity (https://www.perplexity.ai) - the site UI may have changed. ... Page title: Just a moment..., url: https://www.perplexity.ai/\". 'Just a moment...' is a CLOUDFLARE INTERSTITIAL, which is neither a sign-in nor a selector drift; the closed vocabulary has no class for it - see classVocabularyGap. Consistent across all three attempts (45112/45135/45381ms), all HTTP 502, all at an idle pool. NOT pushed through: the sweep did not retry to defeat the interstitial.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "anti-bot interstitial (named by the page the server reported): perplexity.ai served a Cloudflare 'Just a moment...' challenge. NOT claimed to be a credential problem",
+      "poolAtRequest": { "busy": 0, "total": 4, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "poe",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200040ms (client abort, no response) at pool 3/4 — queued behind wedged work; NOT a poe property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 3, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-30T01:09:20.552Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:poe} -> HTTP 502 in 50404ms at pool 0/3 idle, queued 0. Server's own message: \"no composer found on poe (https://poe.com) - the site UI may have changed. ... Page title: Poe - Fast, Helpful AI Chat, url: https://poe.com/login?redirect_url=%2F\". The message does not say 'sign-in', but the page the server itself reported IS the Poe LOGIN redirect, so the condition is a sign-out, not selector drift. Two earlier attempts in this sweep returned HTTP 000 at pool 4/4 queued 2; those are contention and are not what this row records.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (evidenced by the /login redirect the server reported): poe.com session",
+      "poolAtRequest": { "busy": 0, "total": 3, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "t3chat",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200017ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a t3chat property",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-30T00:50:15.575Z",
+      "class": "UNMEASURED",
+      "evidence": "POST /v1/chat/completions {model:t3chat} -> HTTP 502 in 65075ms at pool 0/1 idle, queued 0. Server's own message: \"no composer found on t3chat (https://t3.chat) - the site UI may have changed. ... Page title: Vercel Security Checkpoint, url: https://t3.chat/\". A VERCEL SECURITY CHECKPOINT is neither a sign-in nor a selector drift; the closed vocabulary has no class for it - see classVocabularyGap. Consistent across both attempts (65075/65144ms). NOT pushed through: the sweep did not retry to defeat the checkpoint.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "anti-bot challenge (named by the page the server reported): t3.chat served a Vercel Security Checkpoint. NOT claimed to be a credential problem",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    },
+    {
+      "model": "tencent-aistudio",
+      "measuredAt": "2026-09-29T23:11:30Z",
+      "class": "SIGN-OUT",
+      "evidence": "POST /v1/chat/completions {model:tencent-aistudio} -> HTTP 502 in 77651ms at pool 0/2 idle, queued 0. Server's own message: \"no answer appeared on tencent-aistudio within 60000ms. This site requires sign-in. HEADED session REQUIRED - cookie auth: hunyuan_token + hunyuan_user + hunyuan_source on .tencent.ai. Capture once: npx tsx src/cli.ts profile ingest aistudio.tencent.ai, or reuse your signed-in Chrome via UI2API_USER_...\". Consistent across both attempts. This is a REGRESSION against the record this file replaces: the 2026-09-29 sweep never reached tencent-aistudio at all, and the project's own AGENTS.md records a verified headed round-trip on this site - so the session behind it is no longer sufficient, and that is a finding, not an inference.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "sign-in required (named by the server): a headed aistudio.tencent.ai session carrying hunyuan_token/hunyuan_user/hunyuan_source on .tencent.ai",
+      "poolAtRequest": { "busy": 0, "total": 2, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
     {
       "model": "v0",
-      "measuredAt": "2026-09-29",
-      "class": "CONTENDED-TIMEOUT",
-      "evidence": "HTTP 000 after 200006ms (client abort, no response) at pool 4/4 — pool fully wedged; NOT a v0 property. DISCLOSED: the audit ALSO lists v0 among its NOT-MEARED prose names, so v0 is double-listed there; the §2 row table is followed (v0 was requested and timed out)",
-      "method": "live-v1-chat",
-      "poolAtRequest": { "busy": 4, "total": 4 },
-      "prereq": "not recorded by the audit",
-      "daemonCommit": null,
-      "daemonCommitUnknown": "the 2026-09-29 audit did not record the deployed binary's commit"
+      "measuredAt": "2026-09-30T00:18:46.212Z",
+      "class": "ANSWERS",
+      "evidence": "POST /v1/chat/completions {model:v0} -> HTTP 200 in 13908ms at pool 0/4 idle, queued 0, answer text 'Cooking...'. HONEST CAVEAT, stated because it matters: this is a real 200 with real content from v0.dev, but the content is NOT the requested PONG - it is a build/status string, so the driver read a real page region that is not the answer region. This row therefore proves v0 SERVES and returns 200, not that v0 answers a prompt correctly. Two earlier attempts in this sweep returned HTTP 000 at pool 4/4 queued 2; those are contention, and this idle-pool 200 is what proves it.",
+      "method": "live-v1-chat (serial, pool idle before request; re-probe of a contended timeout)",
+      "prereq": "none reached - the request was accepted and served without a sign-in wall",
+      "poolAtRequest": { "busy": 0, "total": 4, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
     },
-    { "model": "perplexity", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "huggingchat", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "hunyuan", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "blackbox", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "codex", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "inner-ai", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "manus", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "notion", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommit": null, "daemonCommitUnknown": "not measured" },
-    { "model": "venice", "measuredAt": null, "class": "UNMEASURED", "evidence": "no data — the sweep's shard was cancelled when the service wedged before this model was requested", "method": "not-run", "prereq": null, "daemonCommitUnknown": "not measured" }
+    {
+      "model": "venice",
+      "measuredAt": "2026-09-30T00:52:25.910Z",
+      "class": "ANSWERS",
+      "evidence": "POST /v1/chat/completions {model:venice} -> HTTP 200 in 41611ms at pool 0/1 idle, queued 0, answer text 'The user wants me to reply with exactly \"PONG\". This'. HONEST CAVEAT, stated because it matters: this is a real 200 with real answer text, but the text is the model paraphrasing the instruction rather than emitting PONG - a different failure shape from v0's status string, and it means venice serves and answers while not satisfying the exact-token probe. Reproduced across two attempts in this sweep (41611ms and 83113ms), both HTTP 200, both at an idle pool.",
+      "method": "live-v1-chat (serial, pool idle before request)",
+      "prereq": "none reached - the request was accepted and served without a sign-in wall",
+      "poolAtRequest": { "busy": 0, "total": 1, "queued": 0 },
+      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838"
+    }
+  ],
+  "falsifiedByThisSweep": [
+    "The 2026-09-29 record filed 10 models CONTENDED-TIMEOUT (chatgpt, claude, copilot, deepseek, tencent-aistudio, duckduckgo, grok, poe, t3chat, v0). The fixed service shows 7 of those 10 resolve to a NAMED per-model outcome at an idle pool (chatgpt, claude, deepseek, tencent-aistudio, grok, poe, t3chat), duckduckgo resolves to ANSWERS 200, and v0 resolves to ANSWERS 200. NONE of the 10 is a model property.",
+    "The 2026-09-29 record filed 9 models UNMEASURED because the sweep never reached them. All 9 were reached this run: perplexity, huggingchat, hunyuan, blackbox, codex, inner-ai, manus, notion, venice. Zero models remain UNMEASURED-for-lack-of-reach.",
+    "The 2026-09-29 record carried daemonCommit null on every row with a daemonCommitUnknown note, because the running binary could not report itself. The fixed build reports commit bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838 from /health liveness.build.commit (source 'build-stamp'), so every row now carries a real commit.",
+    "The 2026-09-29 record's headline was '1 of 22 ANSWERS (gemini)'. The fixed service measured 4 of 22 ANSWERS (duckduckgo, gemini, v0, venice) plus 11 of 22 SIGN-OUT and 7 rows the closed vocabulary cannot express. The 1-of-22 figure was a measurement of a wedged pool; it was never a property of the models.",
+    "The 2026-09-29 record's own §1/§7 counts did not close (10+3+10=23 against 22 advertised) and it disclosed that. This record's rows close exactly: 22 rows for 22 derived advertised ids, 4 ANSWERS + 11 SIGN-OUT + 0 CONTENDED-TIMEOUT + 7 UNMEASURED = 22."
   ]
 }

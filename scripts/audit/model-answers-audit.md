@@ -3,6 +3,16 @@
 Date: 2026-09-29 · Service: `127.0.0.1:9797` (deployed promptd) · Read-only against the vault.
 No service was restarted. No source file was modified. `npx tsc --noEmit` = 0.
 
+> **SUPERSEDED — 2026-09-30. Do not read this report as the current state.**
+> This sweep ran against a deployed binary that **no longer exists**. Every number below was taken
+> while the pool was wedged (all four workers stuck on copilot for 4.77 hours), so the "1 of 22
+> answering" headline is a measurement of **the queue**, not of the models — this report says so in
+> its own §0, and §4 shows the known-good control timing out in it.
+> The current measurement is **`scripts/audit/model-answers-audit-2026-09-30.md`**, against deployed
+> build `bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838`, which reports **4 ANSWERS + 11 SIGN-OUT + 7 rows
+> the class vocabulary cannot express**, with **zero** CONTENDED-TIMEOUT rows. This file is kept
+> unedited as the honest record of what the wedged build did; it is history, not guidance.
+
 ## 0. The headline is NOT the one I was sent to prove
 
 I was asked to measure which of the 22 advertised models answer. **I could not complete that
