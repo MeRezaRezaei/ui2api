@@ -303,8 +303,21 @@ scan_paths() { # $1=repo  $2=path-regex
 # consequence (it sets ALL_PASS=0), so this is not the only line of defence; it
 # is here so the failure says "this grep cannot do what the script needs" instead
 # of arriving as a thousand warnings beside a suspiciously perfect table.
-if ! echo x | grep -aqP '(?<![0-9.])10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}(?![0-9.])' 2>/dev/null; then
-  fail "this grep cannot do PCRE lookarounds, which INFRA_RE requires. Without -P the infra class matches NOTHING and reports a false zero. Install GNU grep, or rewrite INFRA_RE in POSIX ERE (losing the boundary assertions)."
+#
+# THE PROBE ITSELF WAS WRONG ON FIRST WRITE, and that is worth recording. It fed
+# `echo x` to a lookaround pattern that can only match an address, so a perfectly
+# healthy PCRE grep returned 1 ("no match") and the probe read that as "PCRE
+# unsupported" — failing pipeline 1069 on a runner whose grep handles -P fine
+# (verified in the very image the job uses: node:24-bookworm, GNU grep 3.8,
+# `printf '10.1.2.3' | grep -P ...` exits 0).
+#
+# "Exit 1" means two different things to grep — no match, or the feature is not
+# compiled — and only one of them is a failure. So the probe must supply input
+# that DOES match, which makes exit 0 mean "PCRE and lookarounds both work" and
+# leaves every non-zero exit unambiguous. A guard that cannot tell a clean result
+# from a broken instrument is the same defect as the one it guards against.
+if ! printf '10.1.2.3\n' | grep -aqP '(?<![0-9.])10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}(?![0-9.])' 2>/dev/null; then
+  fail "this grep cannot do PCRE lookarounds, which INFRA_RE requires. Without -P the infra class matches NOTHING and reports a false zero. Install GNU grep with PCRE, or rewrite INFRA_RE in POSIX ERE (losing the boundary assertions)."
 fi
 
 scan_object_content() { # $1=repo $2=extended-regex [$3=grep flavour: E (default) or P]
