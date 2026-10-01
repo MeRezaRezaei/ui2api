@@ -545,6 +545,124 @@ function window0(): number {
   return typeof record.stalenessWindowDays === "number" ? record.stalenessWindowDays : STALENESS_WINDOW_DAYS;
 }
 
+// ── RULE 12: the SIGN-OUT runbook must cover every SIGN-OUT row ──────────────
+//
+// WHY THIS RULE EXISTS, and why it is a RULE and not a habit.
+//
+// A SIGN-OUT row is the one class whose remedy is a HUMAN: no code in this repo
+// can authenticate as the operator, so the only honest deliverable for those
+// rows is a copy-pasteable document. That is exactly the shape that rots
+// silently. A runbook is prose about a JSON record, prose is never re-derived,
+// and the drift is invisible from inside either file: delete a section, and the
+// record still says SIGN-OUT while the document quietly stops mentioning it.
+// Nobody notices until an operator picks the site off a list that no longer
+// lists it.
+//
+// So the coverage is derived, not remembered. `signOutRunbookCoverage()` reads
+// the runbook from DISK and extracts the site ids it actually claims to cover —
+// each coverage anchor is an HTML comment carrying a machine-readable id, so a
+// human-edited section cannot accidentally claim coverage it does not have, and
+// a stale section cannot silently keep a coverage claim after its row leaves
+// the record.
+//
+// The direction that matters is: RECORD -> RUNBOOK. A new SIGN-OUT row with no
+// runbook entry is the failure this kills. The reverse (a runbook entry for a
+// row that is no longer SIGN-OUT) is also reported, because a leftover section
+// teaching an operator to log into a site that now answers is its own kind of
+// lie — it costs them an afternoon and teaches them the record is unreliable.
+//
+// WHAT IT DOES NOT DO, stated so it is not over-read: it does NOT check that the
+// commands in the runbook are correct. That is a different, already-shipped gate
+// (test/ci-contract-doc-commands.test.ts proves every `ui2api …` command and
+// every repo path a doc tells a human to run really is dispatched / really is on
+// disk). This rule proves COVERAGE; that one proves TRUTH of what is written.
+
+const RUNBOOK_PATH = resolve(process.cwd(), "docs/SIGN_OUT_LOGIN_RUNBOOK.md");
+
+/**
+ * The coverage anchor a runbook section must carry. Deliberately a distinct
+ * token rather than a bare `### 4.1 \`chatgpt\`` heading match: a heading can be
+ * reworded or renumbered by an editor, and a coverage rule keyed on prose
+ * formatting fails on cosmetics while a stale id survives a rewrite.
+ *
+ *   <!-- sign-out-row: <id> -->
+ */
+const COVERAGE_ANCHOR = /<!--\s*sign-out-row:\s*([a-z][a-z0-9-]*)\s*-->/g;
+
+/** The runbook's own declared coverage count, if it states one. */
+const COVERAGE_COUNT_RE = /<!--\s*sign-out-count:\s*(\d+)\s*-->/;
+
+/** Site ids the runbook claims to cover, parsed from the anchors on disk. */
+export function runbookClaimedIds(text: string): string[] {
+  return [...text.matchAll(COVERAGE_ANCHOR)].map((m) => m[1]!);
+}
+
+/** The runbook's declared count, or undefined when it states none. */
+export function runbookDeclaredCount(text: string): number | undefined {
+  const m = text.match(COVERAGE_COUNT_RE);
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * SIGN-OUT rows the runbook does not cover, and coverage anchors that name a row
+ * that is no longer SIGN-OUT. Both lists are sorted so a failure names its rows
+ * in the same order every run.
+ */
+export function signOutRunbookCoverage(
+  runbook: string,
+  rows: ModelRecord[],
+): { uncovered: string[]; orphaned: string[] } {
+  const signOut = rows.filter((r) => r.class === "SIGN-OUT").map((r) => r.model).filter(nonEmptyString).sort();
+  const claimed = [...new Set(runbookClaimedIds(runbook))].sort();
+  return {
+    uncovered: signOut.filter((id) => !claimed.includes(id)),
+    orphaned: claimed.filter((id) => !signOut.includes(id)),
+  };
+}
+
+test("RULE 12: every SIGN-OUT row is covered by the human-login runbook, and the runbook's own count agrees", (t) => {
+  const runbook = readFileSync(RUNBOOK_PATH, "utf8");
+
+  // non-vacuity: the runbook must EXIST and must actually carry anchors. Without
+  // this, a truncated or gutted runbook would make the coverage check pass
+  // vacuously against an empty claim list, which is the exact false green this
+  // repo has been bitten by before.
+  const claimed = runbookClaimedIds(runbook);
+  assert.ok(
+    claimed.length >= 5,
+    `non-vacuity: expected the runbook to carry >=5 \`<!-- sign-out-row: id -->\` coverage anchors, found ${claimed.length} — if the anchors are gone the coverage rule below would pass on an empty claim set`,
+  );
+
+  const { uncovered, orphaned } = signOutRunbookCoverage(runbook, records);
+  assert.deepEqual(
+    uncovered,
+    [],
+    `SIGN-OUT rows with no runbook entry: ${uncovered.join(", ")} — these rows need a HUMAN login, and no code can perform it, so the honest deliverable is the runbook. Add a section with a \`<!-- sign-out-row: <id> -->\` anchor. Never close the gap by reclassifying the row or by weakening this rule.`,
+  );
+  assert.deepEqual(
+    orphaned,
+    [],
+    `the runbook claims coverage for rows that are NOT SIGN-OUT: ${orphaned.join(", ")} — a leftover section teaching an operator to log into a site that now answers is its own lie. Remove the anchor, or re-derive why the row is still SIGN-OUT.`,
+  );
+
+  // The count the runbook prints must be the count the record holds. A doc that
+  // says "11 sites" while covering 9 is the number-rot this repo's own
+  // doc-numbers-truth gate exists to catch, restated for this one number.
+  const declared = runbookDeclaredCount(runbook);
+  assert.equal(
+    declared,
+    signOutRowCount(records),
+    `the runbook declares \`<!-- sign-out-count: N -->\` as ${declared} but the record holds ${signOutRowCount(records)} SIGN-OUT rows — one of the two numbers is stale`,
+  );
+
+  t.diagnostic(`RULE 12: ${claimed.length} SIGN-OUT rows, all covered by ${RUNBOOK_PATH.replace(`${process.cwd()}/`, "")}`);
+});
+
+/** How many rows the record currently holds in the SIGN-OUT class. */
+export function signOutRowCount(rows: ModelRecord[]): number {
+  return rows.filter((r) => r.class === "SIGN-OUT").length;
+}
+
 // ── MUTATION PROOF: the gate must be provably capable of failing ─────────────
 // Every predicate above is fed a fabricated or corrupted record and MUST
 // report it. If any of these ever passes, the gate is blind.
@@ -733,5 +851,76 @@ test("MUTATION: the gate's own predicates reject a fabricated ANSWERS claim", ()
     underivedRows([nonAnswerRead, answerUnreadable]),
     [],
     "and must NOT report a row that does carry a measurement",
+  );
+});
+
+test("MUTATION: the runbook-coverage predicate really goes red when a row's coverage is removed", () => {
+  // RULE 12 is only a gate if it can fail. These are the three mutations that
+  // must each be DETECTED, plus the non-vacuity assertion that the shipped
+  // runbook is currently GREEN — without that last one, a predicate that always
+  // returned "uncovered: []" would pass this whole test.
+
+  const runbook = readFileSync(RUNBOOK_PATH, "utf8");
+
+  // precondition: the shipped runbook is fully covered. If this ever fails, the
+  // mutations below prove nothing about a predicate that is already red.
+  assert.deepEqual(
+    signOutRunbookCoverage(runbook, records).uncovered,
+    [],
+    "precondition: every shipped SIGN-OUT row must be covered before the mutations below mean anything",
+  );
+
+  const rows: ModelRecord[] = records;
+
+  // (a) THE HEADLINE MUTATION — one row's coverage anchor deleted from the
+  // runbook. This is the exact drift the rule exists to kill: the record still
+  // says SIGN-OUT, the document quietly stops mentioning it.
+  const victim = signOutRowCount(rows) > 0 ? rows.find((r) => r.class === "SIGN-OUT")!.model as string : "chatgpt";
+  const stripped = runbook.replace(new RegExp(`<!--\\s*sign-out-row:\\s*${victim}\\s*-->`, "g"), "");
+  assert.notEqual(stripped, runbook, `precondition: the mutation must actually remove ${victim}'s anchor from the runbook`);
+  assert.deepEqual(
+    signOutRunbookCoverage(stripped, rows).uncovered,
+    [victim],
+    "the gate must RED when one SIGN-OUT row's runbook coverage is removed",
+  );
+
+  // (b) a NEW SIGN-OUT row appears in the record with no runbook entry — the
+  // other direction, and the one that fires when a future sweep signs out a
+  // site nobody wrote a section for.
+  const withNew = [...rows, { model: "brand-new-signout-site", class: "SIGN-OUT", measuredAt: "2026-10-01", method: "live-v1-chat", evidence: "measured sign-out" }];
+  assert.ok(
+    signOutRunbookCoverage(runbook, withNew).uncovered.includes("brand-new-signout-site"),
+    "the gate must RED when a new SIGN-OUT row has no runbook entry",
+  );
+
+  // (c) a STALE anchor — the runbook still covers a row the record no longer
+  // holds as SIGN-OUT. The doc would otherwise teach an operator to log into a
+  // site that already answers.
+  const withStale = rows.map((r) => (r.model === victim ? { ...r, class: "ANSWERS" } : r));
+  assert.ok(
+    signOutRunbookCoverage(runbook, withStale).orphaned.includes(victim),
+    "the gate must RED when the runbook claims coverage for a row that is no longer SIGN-OUT",
+  );
+
+  // (d) the count pin: the declared count drifting from the record's count.
+  const lyingCount = runbook.replace(/<!--\s*sign-out-count:\s*\d+\s*-->/, "<!-- sign-out-count: 3 -->");
+  assert.notEqual(lyingCount, runbook, "precondition: the count mutation must actually change the declared count");
+  assert.notEqual(
+    runbookDeclaredCount(lyingCount),
+    signOutRowCount(rows),
+    "the gate must RED when the runbook's declared sign-out count disagrees with the record",
+  );
+
+  // (e) the anchor parser is not satisfied by ordinary prose — a runbook that
+  // merely NAMES a site in a sentence has not covered it.
+  assert.deepEqual(
+    runbookClaimedIds("chatgpt and claude both need a login"),
+    [],
+    "a runbook that merely mentions a site id in prose must NOT count as covering it",
+  );
+  assert.deepEqual(
+    runbookClaimedIds("<!-- sign-out-row: poe -->\n<!-- sign-out-row: manus -->"),
+    ["poe", "manus"],
+    "the anchor parser must read the ids it is defined on",
   );
 });
