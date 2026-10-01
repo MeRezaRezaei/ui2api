@@ -85,20 +85,35 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The opencode-ci kit's real implementation, read as TEXT. Path is the
- *  operator's checkout; when it is absent the contract test SKIPS with a named
- *  reason rather than fabricating a pass, and every other test in this file
- *  still runs. */
-const KIT = join(process.env.HOME ?? "/root", "Documents/projects/gitlab-ops/opencode-ci/gitlab-ci.snippet.yml");
-/** The WHOLE kit file, and the `mirror_to_github` job's own block.
+/** Where the mirror job is pinned from, and WHY it changed.
  *
- *  Two constants on purpose. The contract pins below are all facts about the
- *  MIRROR job, so they match against MIRROR_JOB — which keeps an assertion
- *  failure readable (a 40-line diff, not a 30KB one) and prevents a fact about
- *  the mirror from being accidentally satisfied by a same-looking string in
- *  some other job. KIT_TEXT is kept for the two whole-file preconditions. */
+ *  It was `$HOME/Documents/projects/gitlab-ops/opencode-ci/gitlab-ci.snippet.yml`
+ *  — the kit's SOURCE checkout. That was a defect, and CI caught it: the runner
+ *  has no such path, so `KIT_TEXT` was empty there and the contract pins either
+ *  failed or skipped depending on which guard they carried. A test whose subject
+ *  lives OUTSIDE the repo is not hermetic and cannot be relied on by the one
+ *  environment that actually has to pass.
+ *
+ *  It is now this repo's OWN `.gitlab-ci.yml`, which contains the RENDERED
+ *  `mirror_to_github` job. That is strictly better for three reasons: it travels
+ *  with the repo, it is the file GitLab actually executes, and it means the gate
+ *  pins the thing that RUNS rather than a source of truth that has to be
+ *  re-rendered into it.
+ *
+ *  The kit source is still worth pinning — it is where the code is authored — so
+ *  the upstream checkout is checked too, but only as an ADDITIONAL assertion that
+ *  skips cleanly when absent. A missing upstream must never fail this gate, and a
+ *  missing rendered job must never pass it silently. */
+const RENDERED = join(ROOT, ".gitlab-ci.yml");
+const KIT = join(process.env.HOME ?? "/root", "Documents/projects/gitlab-ops/opencode-ci/gitlab-ci.snippet.yml");
+const RENDERED_TEXT = existsSync(RENDERED) ? readFileSync(RENDERED, "utf8") : "";
+const RENDERED_MIRROR = RENDERED_TEXT.slice(RENDERED_TEXT.indexOf("\nmirror_to_github:"));
 const KIT_TEXT = existsSync(KIT) ? readFileSync(KIT, "utf8") : "";
-const MIRROR_JOB = KIT_TEXT.slice(KIT_TEXT.indexOf("\nmirror_to_github:"));
+const MIRROR_JOB = RENDERED_MIRROR !== "" ? RENDERED_MIRROR : KIT_TEXT.slice(KIT_TEXT.indexOf("\nmirror_to_github:"));
+/** True when the pins below are matching against the repo's own CI config rather
+ *  than the operator's kit checkout. Reported on every run, because a gate whose
+ *  subject silently changes scope is a gate nobody can reason about. */
+const PINNING_RENDERED = RENDERED_MIRROR !== "";
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, { encoding: "utf8", cwd: ROOT, timeout: 120000 }).trim();
@@ -420,67 +435,61 @@ d("P2 (text): the kit's shell carries the same CONTRACT — read as text, not ex
     assert.match(MIRROR_JOB, /GH_TOKEN/, "the shell reads a live token — hence not hermetic, hence untested here");
   });
 
-  t("MEASURED_DEFECT: the divert is an ADDITIONAL push, NOT an exclusion — .brain is reachable from a mirrored branch", (tt) => {
-    // THE FINDING. See the header block. This is asserted rather than
-    // described so that it is (a) visible in every run, and (b) forced to be
-    // retracted if the shell is ever fixed — a fixed shell makes this RED,
-    // which is the intended way for a documented defect to be retired.
-    if (KIT_TEXT !== "") {
-      // The main mirror pushes refs/remotes/origin/* -> refs/heads/*, i.e. a
-      // refspec push, which transfers the WHOLE TREE of each pushed commit.
-      assert.match(
-        KIT_TEXT,
-        /for b in \$BR; do SPEC="\$SPEC refs\/remotes\/origin\/\$b:refs\/heads\/\$b"; done/,
-        "precondition: the main mirror still uses a branch refspec (whole-tree push)",
-      );
-      // And INCLUDE_BRAIN gates only the SEPARATE divert push.
-      assert.match(
-        KIT_TEXT,
-        /if \[ "\$\{INCLUDE_BRAIN:-1\}" = "0" \] && \[ -n "\$\{BRAIN_REPO:-\}" \]; then/,
-        "precondition: INCLUDE_BRAIN still gates only the separate divert push, so it cannot be excluding .brain from the main push",
-      );
-    }
-
-    // The measured, load-bearing half — and the part that is independent of the
-    // kit: is `.brain` actually reachable from a branch the mirror pushes?
-    // %(symref) is requested so the bare symbolic `origin` HEAD ref is dropped.
-    // Without it, `origin` is listed as a branch AND `origin/main` is listed
-    // again, and every .brain file is counted twice — a gate that double-counts
-    // is a gate whose number is wrong for a reason nobody can see.
-    const branches = git("for-each-ref", "--format=%(refname:short) %(symref)", "refs/remotes/origin")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !l.endsWith("/HEAD"))
-      // A non-symref line is just "origin/main" after trim, so the second
-      // field is undefined; only a real symref has a non-empty one.
-      .filter((l) => (l.split(" ")[1] ?? "") === "") // drop symrefs (the bare `origin`)
-      .map((l) => l.split(" ")[0]);
-    assert.ok(branches.length > 0, "precondition: at least one origin branch exists to reason about");
-
-    const reachable: string[] = [];
-    for (const b of branches) {
-      const tree = git("ls-tree", "-r", "--name-only", b);
-      reachable.push(...tree.split("\n").filter((f) => f.startsWith(".brain/")));
-    }
-    // MEASURED 2026-09-30: `git ls-tree -r --name-only origin/main | grep -c '^\.brain/'` = 27,
-    // and that is the count over the only real mirrored branch, so it is pinned
-    // EXACTLY. This is NOT an aspiration that must go to zero here — fixing it is a
-    // change to the kit, which is not this lane's file, and asserting zero
-    // would make this gate RED forever for a reason it cannot fix. What is
-    // asserted is that the number is KNOWN and cannot drift silently: a
-    // corpus that grows here is the operator's own transcript getting closer
-    // to a public mirror, and it must be a decision, never a surprise.
-    assert.equal(
-      reachable.length,
-      MEASURED_BRAIN_REACHABLE_FROM_MIRROR_2026_09_30,
-      "the number of .brain files reachable from a mirrored branch CHANGED since 2026-09-30. Growing means the operator's transcript is getting closer to a public mirror — investigate and update this number deliberately. Shrinking to 0 means the defect above is FIXED: retract it in the header.",
-    );
+  t("RETIRED DEFECT -> now a REFUSAL: the shell no longer publishes the corpus to a public destination", (tt) => {
+    // THIS PIN IS THE WHOLE POINT OF THE FILE, and it has already been retired once.
+    //
+    // It was written as MEASURED_DEFECT: "the divert is an ADDITIONAL push, NOT an
+    // exclusion". That was true and it was a live leak on BOTH kit consumers — the
+    // main mirror pushes a branch refspec, which transfers the whole tree, so
+    // INCLUDE_BRAIN=0 stripped nothing from the push and the corpus was published
+    // BEFORE the divert copied it. The closing log line then printed
+    // `brain_included=0` while the corpus was in the push.
+    //
+    // The kit now REFUSES when the destination is not private and the history
+    // carries .brain, because that cannot be fixed by unstaging anything: git
+    // history is immutable, so a commit that carried the corpus carries it into
+    // every push of that commit forever.
+    //
+    // So the assertion flipped from "the bug is present" to "the refusal is
+    // present". That is the designed retirement path — a documented defect whose
+    // fix turns the pin RED is how a finding is closed deliberately rather than
+    // left to rot in a comment.
     assert.ok(
-      reachable.length > 0,
-      "KNOWN DEFECT (see header): .brain is reachable from a mirrored branch, so a PUBLIC $GITHUB_REPO would receive the corpus in the main push despite INCLUDE_BRAIN=0. " +
-        "If this has been fixed (e.g. by an export-ignore/filter-repo step, or by untracking .brain from mirrored branches), RETRACT this finding deliberately and say so in the header.",
+      PINNING_RENDERED,
+      "the pins below must match this repo's OWN .gitlab-ci.yml — if the rendered mirror job is missing, this gate has no subject and must not report a pass",
     );
-    tt.diagnostic(`KNOWN DEFECT pinned: ${reachable.length} .brain file(s) reachable from mirrored branch(es) ${branches.join(", ")} — main refspec push would carry them to a public destination.`);
+    assert.match(
+      MIRROR_JOB,
+      /refusing to mirror to a NON-PRIVATE destination/,
+      "the mirror must REFUSE a non-private destination when the history carries .brain",
+    );
+    assert.match(
+      MIRROR_JOB,
+      /git log --all --oneline -- "\$BRAIN_DIR"/,
+      "the refusal must be driven by a MEASURED count of .brain commits, not an assumption",
+    );
+    assert.match(
+      MIRROR_JOB,
+      /Git history is immutable/,
+      "the refusal must state WHY it cannot be fixed by unstaging — a refusal without its reason is a wall, not a contract",
+    );
+    // The status line must no longer claim a safety property it cannot deliver.
+    // The status line must no longer claim a safety property it cannot deliver.
+    // Matched on an `echo` specifically: the shell carries a COMMENT recording
+    // that this line used to print `brain_included=0` while the corpus was in the
+    // push, and pinning the bare string would fail on the very comment that
+    // documents the fix. A pin that cannot distinguish a claim from a note about
+    // a retracted claim trains the next reader to ignore it.
+    assert.ok(
+      !/echo\s+.*brain_included=/.test(MIRROR_JOB),
+      "the closing log line must not ECHO brain_included= — that reported the INTENT while the push carried the corpus",
+    );
+    assert.match(
+      MIRROR_JOB,
+      /destination PRIVATE; history carries/,
+      "the status line must state what was actually TRUE about the push",
+    );
+    tt.diagnostic(`pinning scope: ${PINNING_RENDERED ? "this repo's .gitlab-ci.yml (hermetic)" : "kit checkout (NOT hermetic)"}`);
   });
 });
 

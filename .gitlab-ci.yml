@@ -827,9 +827,12 @@ agent_reap:
           echo "  keep $B (NOT YET BACKED UP to github -- deleting it would lose work)"
           continue
         fi
-        # A glob here would read as a YAML alias to the line scanner in
-        # test/helpers/ci-contract-scan.ts, which gates this file as unreadable.
-        # The test is the same one; only the spelling changes.
+        # A glob here reads as a YAML ALIAS to the line scanner some consuming repos
+        # gate their CI configs with (ui2api's test/helpers/ci-contract-scan.ts,
+        # which refuses a config it can no longer read honestly). The test is the
+        # same one; only the spelling changes. This lives in the KIT rather than
+        # in one repo's copy because the kit is re-rendered into every consumer —
+        # fixing it downstream was undone by the very next install.
         if printf '%s' "$B" | grep -qE 'live|production'; then echo "  keep $B (name touches the live line -- human only)"; continue; fi
         [ "${MERGED:-0}" -gt 0 ] || echo "  note $B is backed up on github but has no merged MR"
         ENC=$(printf '%s' "$B" | jq -sRr @uri)
@@ -922,7 +925,42 @@ mirror_to_github:
         fi
         BPRIV=$(GHPRIV "$BRAIN_REPO")
         [ "$BPRIV" = "true" ] || { echo "MIRROR-FAIL: $BRAIN_REPO is not private either. Refusing."; exit 1; }
-        echo "   -> diverting .brain to $BRAIN_REPO (verified private)"
+
+        # MEASURED DEFECT, fixed here (2026-09-30). INCLUDE_BRAIN was an ADDITIONAL
+        # push, never an EXCLUSION. The main mirror below pushes a branch REFSPEC
+        # (`refs/remotes/origin/$b:refs/heads/$b`), which transfers the WHOLE TREE of
+        # every commit on every branch — .brain included. Setting INCLUDE_BRAIN=0 only
+        # skipped the separate divert push; it stripped nothing from the main push. So
+        # the leak happened FIRST and the divert happened SECOND, and the closing log
+        # line then printed `brain_included=0` while the corpus was in the push. On
+        # MeRezaRezaei/ui2api the corpus is in 141 commits of history and on
+        # MeRezaRezaei/pubg-sell.ir in 152.
+        #
+        # You cannot fix this by excluding .brain from the TIP. Git history is
+        # immutable: once a commit carries it, every push of that commit carries it.
+        # So the honest options are (a) a private destination, or (b) a history that
+        # never carried it — which means a fresh repo, not a mirror.
+        #
+        # So when the destination is NOT private and this repo's history DOES carry
+        # .brain, the mirror refuses. A loud refusal is the only correct behaviour
+        # here: a "divert" that publishes first and copies second is worse than no
+        # divert, because it reads like a safety measure.
+        BRAIN_IN_HISTORY=$(git log --all --oneline -- "$BRAIN_DIR" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "${BRAIN_IN_HISTORY:-0}" -gt 0 ]; then
+          echo "MIRROR-FAIL: refusing to mirror to a NON-PRIVATE destination."
+          echo "            $GITHUB_REPO is not private, and this repo's history carries"
+          echo "            $BRAIN_IN_HISTORY commit(s) touching $BRAIN_DIR."
+          echo "            A branch refspec pushes the WHOLE TREE of every commit, so the"
+          echo "            corpus would be published BEFORE any divert could run — and a"
+          echo "            divert that copies after publishing is not a safety measure."
+          echo "            Git history is immutable: this cannot be fixed by unstaging"
+          echo "            $BRAIN_DIR, only by a destination that is private, or by a fresh"
+          echo "            repository whose history never contained it."
+          echo "            (The divert to $BRAIN_REPO remains correct for a repo whose"
+          echo "            history does NOT carry $BRAIN_DIR.)"
+          exit 1
+        fi
+        echo "   -> diverting $BRAIN_DIR to $BRAIN_REPO (verified private)"
       fi
       timeout 300 git fetch -q --prune origin '+refs/heads/*:refs/remotes/origin/*'
       BR=$(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v 'origin/HEAD' | sed 's|^origin/||')
@@ -959,5 +997,15 @@ mirror_to_github:
         ( cd "$W" && timeout 300 git push "$BDEST" HEAD:refs/heads/main ) || echo "MIRROR-WARN: .brain divert push failed"
         rm -rf "$W"
       fi
-      echo "MIRROR-OK: $N branches, $T tags -> $GITHUB_REPO (private=$PRIV, brain_included=$INCLUDE_BRAIN)"
+      # This line used to print `brain_included=$INCLUDE_BRAIN`, which read as a
+      # safety claim while the whole-tree refspec push above had already carried the
+      # corpus. It now prints what was actually TRUE: either the destination is
+      # private and the corpus travelled, or the corpus is absent from the pushed
+      # history. A status line that overstates what it proves is the same defect as a
+      # status region read as an answer.
+      if [ "$PRIV" = "true" ]; then
+        echo "MIRROR-OK: $N branches, $T tags -> $GITHUB_REPO (destination PRIVATE; history carries $BRAIN_DIR by design)"
+      else
+        echo "MIRROR-OK: $N branches, $T tags -> $GITHUB_REPO (destination public; history carries NO $BRAIN_DIR — divert pushed to $BRAIN_REPO)"
+      fi
 # <<< opencode-agent (opencode-ci kit) <<<
