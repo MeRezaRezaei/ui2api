@@ -281,13 +281,22 @@ public_mirror:
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
     # Build AND verify both halves. Non-zero exit here means DO NOT PUBLISH, and
     # the push lines below never run.
-    - ./scripts/ci/make-public-repo.sh --work "$CI_PROJECT_DIR/.mirror" --keep
+    # The sandbox MUST live outside the source repo, and the script refuses to run
+    # otherwise. MEASURED: the first attempt passed --work "$CI_PROJECT_DIR/.mirror"
+    # and the job died on the script's own guard —
+    #   "FATAL: sandbox .../.mirror is inside the source repo ..."
+    # which is the guard working exactly as designed. A filter-repo sandbox inside
+    # the repo it is filtering is the one arrangement that can rewrite the source.
+    - mkdir -p /tmp/mirror-work && ./scripts/ci/make-public-repo.sh --work /tmp/mirror-work --keep
     - |
       set -uo pipefail
       [ -n "${GH_TOKEN:-}" ] || { echo "MIRROR-SKIP: no GH_TOKEN in scope. Nothing was pushed."; exit 0; }
-      PRIV="$CI_PROJECT_DIR/.mirror/private-full"
-      PUB="$CI_PROJECT_DIR/.mirror/public-sanitized"
-      MAPS="$CI_PROJECT_DIR/.mirror/maps"
+      PRIV="/tmp/mirror-work/private-full"
+      PUB="/tmp/mirror-work/public-sanitized"
+      # The maps are the reconstruction key, so they are copied back into the
+      # workspace to be published as a job artifact. They are small; the repos are not.
+      mkdir -p "$CI_PROJECT_DIR/.mirror/maps"
+      cp -a /tmp/mirror-work/maps/. "$CI_PROJECT_DIR/.mirror/maps/" 2>/dev/null || true
       # The token goes in an Authorization header or a credential-free URL only
       # via git's askpass. It is never echoed and never written to a file.
       export GIT_ASKPASS=/tmp/.askpass.sh

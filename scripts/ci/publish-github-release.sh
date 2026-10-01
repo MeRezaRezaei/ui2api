@@ -124,12 +124,27 @@ echo "  release url   : $RB_URL"
 # download rather than accepting whatever came back. A read-back that had merely
 # logged the hash would have published a green lie.
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
-timeout 300 curl -sSL "${AUTH[@]}" -H "Accept: application/octet-stream" \
-  -o "$TMPD/$ASSET_NAME" "https://api.github.com/repos/$REPO/releases/assets/$RB_ASSET_ID"
-GOT_BYTES=$(wc -c < "$TMPD/$ASSET_NAME" | tr -d ' ')
-# A short read is GitHub handing back an error page, not an asset. Compare the
-# size the API reports BEFORE trusting any hash of it.
-[ "$GOT_BYTES" = "$RB_SIZE" ] || { echo "PUBLISH-FAIL: downloaded $GOT_BYTES bytes, GitHub reports the asset as $RB_SIZE — refusing to hash an error page"; exit 1; }
+# MEASURED 2026-09-30 (twice): a freshly uploaded asset is NOT immediately
+# servable. The first read-back got a 9-byte "Not Found" from
+# browser_download_url; this one, using the API endpoint correctly, got 1734
+# bytes against an asset GitHub reports as 1019179. Both are GitHub still settling
+# the upload, not a corrupt artifact — proven by re-fetching the same asset minutes
+# later and getting the real bytes with a matching sha.
+#
+# So the read-back RETRIES until the size matches, and reports how many attempts it
+# took. Without that, a correct publish fails on a timing artefact; with a bounded
+# retry, a genuinely wrong asset still fails, because no amount of waiting turns a
+# short body into the right one.
+GOT_BYTES=0
+for attempt in 1 2 3 4 5 6; do
+  timeout 300 curl -sSL "${AUTH[@]}" -H "Accept: application/octet-stream" \
+    -o "$TMPD/$ASSET_NAME" "https://api.github.com/repos/$REPO/releases/assets/$RB_ASSET_ID" || true
+  GOT_BYTES=$(wc -c < "$TMPD/$ASSET_NAME" 2>/dev/null | tr -d ' ')
+  echo "  attempt $attempt: $GOT_BYTES bytes (GitHub reports $RB_SIZE)"
+  [ "$GOT_BYTES" = "$RB_SIZE" ] && break
+  [ "$attempt" = "6" ] || sleep 10
+done
+[ "$GOT_BYTES" = "$RB_SIZE" ] || { echo "PUBLISH-FAIL: after 6 attempts GitHub served $GOT_BYTES bytes for an asset it reports as $RB_SIZE — refusing to hash a short body"; exit 1; }
 GOT="$(sha256sum "$TMPD/$ASSET_NAME" | cut -d' ' -f1)"
 echo "  sha built     : $ASSET_SHA256"
 echo "  sha downloaded: $GOT"
