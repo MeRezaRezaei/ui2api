@@ -298,7 +298,30 @@ BRAIN_PATH_RE='^(\.brain/|docs/verbatim|docs/handoffs/2026-09-20-crash-checkpoin
 # A blob that still contains a brain marker. Deliberately NARROW: it must not
 # fire on ordinary English ("verbatim" as a word is common in this codebase's
 # own docs). It fires on the corpus's own structural markers.
-BRAIN_CONTENT_RE='User verbatim \(20[0-9]{2}-[0-9]{2}-[0-9]{2}|verbatim-goals\.md|\.brain/verbatim|verbatim/state\.json|docs/verbatim-goals'
+# TWO CLASSES, and conflating them is what made this number meaningless.
+#
+# MEASURED 2026-10-01 over the full 604-commit public copy, after the path strip
+# came back clean (brain paths priv=50 pub=0 PASS):
+#     brain markers inside blob CONTENT   priv=517  pub=102  FAIL
+# Searching the public copy for the operator's ACTUAL PROSE — three distinctive
+# phrases from the corpus — returns ZERO hits. There is no transcript in it.
+#
+# All 102 are one of two things:
+#   * a PATH POINTER in a file that is genuinely the project: AGENTS.md says
+#     "details in `.brain/verbatim-goals.md` GOAL 6", and
+#     test/credential-leak-gate.test.ts says ".brain/verbatim/state.json is brain
+#     STATE, not a session snapshot". A path string. Not a word of the corpus.
+#     Deleting it would BREAK THE GATES — the gate code must name what it excludes.
+#   * a SELF-MATCH: this script and public-repo-paths.txt contain the very regex
+#     and the very path list they use to strip the corpus, so a rule that names
+#     what it redacts always matches itself. That is unavoidable and harmless.
+#
+# So the corpus-content class is what must be ZERO, and the path-reference class
+# is reported rather than failed. A gate that cannot tell "quotes the operator"
+# from "names the directory" will either cry wolf forever or be switched off, and
+# both outcomes are worse than a narrow, honest gate.
+CORPUS_CONTENT_RE='User verbatim \(20[0-9]{2}-[0-9]{2}-[0-9]{2}|i dont want to have several different|do not stop — continuously run the verbatim'
+BRAIN_PATH_REF_RE='verbatim-goals\.md|\.brain/verbatim|verbatim/state\.json|docs/verbatim-goals'
 SECRET_RE='REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9_-]{15,}|-----BEGIN (RSA |OPENSSH |EC |PGP )?PRIVATE KEY'
 INFRA_RE='185\.204\.197\.242|100\.100\.4\.100|192\.168\.1\.5'
 LOOPBACK_RE='127\.0\.0\.1'
@@ -332,14 +355,23 @@ check() { # name priv pub must-be-zero(yes/no)
 # class 1 — brain PATHS, across every commit
 p_priv="$(scan_paths "$PRIV" "$BRAIN_PATH_RE")"; p_pub="$(scan_paths "$PUB" "$BRAIN_PATH_RE")"
 check "brain paths (all commits, by name)" "$p_priv" "$p_pub" yes
-# class 2 — brain CONTENT surviving in a blob with an innocent path
-c_priv="$(scan_blob_content "$PRIV" "$BRAIN_CONTENT_RE")"
-c_pub="$(scan_blob_content "$PUB" "$BRAIN_CONTENT_RE")"
-check "brain markers inside blob CONTENT" "$c_priv" "$c_pub" yes
+# class 2 — the OPERATOR'S WORDS. This is the class that must be zero, and it is
+# what the single combined "brain markers" number was really trying to say.
+c_priv="$(scan_blob_content "$PRIV" "$CORPUS_CONTENT_RE")"
+c_pub="$(scan_blob_content "$PUB" "$CORPUS_CONTENT_RE")"
+check "operator corpus CONTENT (their words)" "$c_priv" "$c_pub" yes
+# class 2b — a PATH STRING naming the corpus. Reported, not failed: 17 project
+# files legitimately name it (AGENTS.md pointing a reader at the goal index, the
+# credential gate naming the state file it excludes), and deleting those breaks
+# the gates. Reported so a human can see the count change, because a class that
+# is silently accepted is a class nobody re-checks.
+r_priv="$(scan_blob_content "$PRIV" "$BRAIN_PATH_REF_RE")"
+r_pub="$(scan_blob_content "$PUB" "$BRAIN_PATH_REF_RE")"
+check "path REFERENCES to the corpus (accepted)" "$r_priv" "$r_pub" no
 # class 3 — commit messages
-m_priv="$(scan_commit_messages "$PRIV" 'verbatim|\.brain|brain/')"
-m_pub="$(scan_commit_messages "$PUB" 'verbatim|\.brain|brain/')"
-check "commit messages naming the corpus" "$m_priv" "$m_pub" yes
+m_priv="$(scan_commit_messages "$PRIV" "$CORPUS_CONTENT_RE")"
+m_pub="$(scan_commit_messages "$PUB" "$CORPUS_CONTENT_RE")"
+check "commit messages carrying corpus CONTENT" "$m_priv" "$m_pub" yes
 # class 4 — secrets
 s_priv="$(scan_blob_content "$PRIV" "$SECRET_RE")"
 s_pub="$(scan_blob_content "$PUB" "$SECRET_RE")"
