@@ -118,7 +118,19 @@ test("the hub UI's publish template advertises EXACTLY the fields the gate deman
   );
   // …and the template is what the UI actually renders, not just what the module
   // exports. The rendered HTML is the surface the operator reads.
-  const store = new RegistryStore(resolve(ROOT, "data", "test-hub-publish-contract"));
+  // A TEMP DIR, not `data/`. This used to build its scratch store inside the
+  // session vault, which is the credential store: real cookies, real Bearer
+  // tokens, and — since `vault tighten --apply` — owned 0700 by `ui2api`. So a
+  // test that merely needed somewhere to write was failing for anyone who did
+  // not own the vault, and it only passed in CI because the container runs as
+  // root. MEASURED 2026-10-01: 7 pass / 2 fail as `me` with EACCES on mkdir,
+  // 9 pass / 0 fail as the owner.
+  //
+  // That is a test using the credential vault as scratch space, which is the
+  // exact mistake test/vault-permission-census.test.ts exists to catch — and it
+  // was passing only because the harness happened to be privileged. Tests write
+  // to a temp dir; the vault holds credentials.
+  const store = new RegistryStore(mkdtempSync(resolve(tmpdir(), "ui2api-hub-contract-")));
   const html = renderHubHtml(store, { registryUrl: "http://none" });
   const tpl = /id="manifest">([\s\S]*?)<\/textarea>/.exec(html);
   assert.ok(tpl, "the hub UI no longer renders a #manifest textarea — the publish template cannot be measured");
@@ -145,7 +157,7 @@ test("the template's ui2api value is THIS build's version — not a literal that
   // actually reads. Comparing the rendered VALUE (not just its presence) is
   // what makes this independent of the edge pin: re-inlining the old literal
   // template in ui.ts is caught here too, and again there.
-  const html = renderHubHtml(new RegistryStore(resolve(ROOT, "data", "test-hub-publish-contract2")), {
+  const html = renderHubHtml(new RegistryStore(mkdtempSync(resolve(tmpdir(), "ui2api-hub-contract2-"))), {
     registryUrl: "http://none",
   });
   const rendered = /id="manifest">([\s\S]*?)<\/textarea>/.exec(html);
