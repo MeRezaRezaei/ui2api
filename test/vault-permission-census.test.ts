@@ -256,7 +256,21 @@ function censusTree(root: string): Census {
       else outOfScopeFiles.push(entry);
     }
   };
-  walk(root);
+  // Same root-level tolerance as fingerprint(), for the same reason, and the
+  // same reason it was needed there: the repair that made this census tolerate
+  // EACCES guarded the RECURSIVE call and left this one bare. Before
+  // `vault tighten --apply` the root was 0755 and readable, so the omission was
+  // invisible — the vault was only ever locked at the SUBTREE level. Tightening
+  // the root to 0700 (which is the point of the command) turned a latent gap
+  // into the normal case, and the census died on the very hardening it exists to
+  // confirm. Recorded as unreadable, not swallowed, so the under-approximation
+  // is reported rather than silently becoming "clean".
+  try {
+    walk(root);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EACCES") unreadable.push(".");
+    else throw err;
+  }
   // ROUND N+99 — vacuous means "nothing to examine", not merely "the directory is
   // absent". MEASURED on GitLab pipeline 297: `data/` was ABSENT from the doc's
   // claim but PRESENT-AND-EMPTY on the checkout, so `existsSync` was true,
@@ -313,7 +327,21 @@ function fingerprint(root: string): string[] {
       }
     }
   };
-  walk(root);
+  // The ROOT readdir needs the same tolerance as the recursive one, and its
+  // absence is what made this function look fixed when it was not. The earlier
+  // repair guarded `walk(abs)` for subtrees but left `readdirSync(dir)` bare, so
+  // the census tolerated being locked out of a SUBTREE and then died on being
+  // locked out of data/ itself — which is exactly the state the hardening is
+  // supposed to produce, and which is now the normal state on this box after
+  // `vault tighten --apply` took 398 entries to owner-only. An unreadable root
+  // is symmetric too: we cannot mutate what we cannot enter, so before == after
+  // still holds and still proves nothing false. censusTree reports the count so
+  // the reduced coverage is visible rather than silent.
+  try {
+    walk(root);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EACCES") throw err;
+  }
   return out.sort();
 }
 
