@@ -871,8 +871,18 @@ d("GOAL 164/173: corpus containment for the PUBLIC DESTINATION, under the decide
     const unknown = resolveVisibilityProbe(null);
     assert.equal(unknown.proven, false, "an unreachable visibility probe must be reported as UNPROVEN");
     assert.match(unknown.reason, /NOT a private repo/, "the refusal must say why an unknown is not a yes");
-    assert.equal(resolveVisibilityProbe(true).isPrivate, true);
-    assert.equal(resolveVisibilityProbe(false).isPrivate, false);
+    assert.equal(resolveVisibilityProbe(true).proven, true, "a reachable probe must be PROVEN");
+    assert.equal(resolveVisibilityProbe(false).proven, true, "a reachable probe must be PROVEN");
+    // Narrow on the discriminant before reading the payload: `VisibilityProbe` is a
+    // union, so `.isPrivate` does not exist on the unproven arm. Reading it through
+    // `proven &&` both satisfies the type and asserts the thing that actually
+    // matters — that the reachable arms are proven, not merely that they carry a
+    // boolean. `tsc -p tsconfig.test.json` is the gate that caught this; the
+    // default project does not compile the test tree.
+    const provenPrivate = resolveVisibilityProbe(true);
+    const provenPublic = resolveVisibilityProbe(false);
+    assert.equal(provenPrivate.proven && provenPrivate.isPrivate, true, "a proven-private destination must report private");
+    assert.equal(provenPublic.proven && provenPublic.isPrivate, false, "a proven-public destination must report NOT private");
   });
 
   t("the gitignore rule is KEPT, and scoped to the DESTINATION — asserted on both sides so neither half can drift", () => {

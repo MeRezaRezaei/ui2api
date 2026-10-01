@@ -172,6 +172,20 @@ interface Census {
    * credential exposure and neither belongs in the gated set.
    */
   symlinks: number;
+  /**
+   * Directories the walk could NOT enter (EACCES), relative paths.
+   *
+   * ROUND N+102 — MEASURED on the dev box: the vault is owned by the `ui2api`
+   * service user while the suite runs as the operator (`me`), and `data/` holds
+   * 45 subtrees the runner legitimately cannot `scandir` — 9 of them VAULT-SCOPE
+   * (`sessions/{chat.deepseek,chatgpt,deepseek,gemini.google,mail.google,
+   * www.aparat,www.kimi,youtube}.com`, `www.kimi.ai/.session/chrome-login-profile`).
+   * An unreadable subtree is the hardening WORKING: a 0700 dir owned by another
+   * user denies exactly the other local users it exists to deny. It is recorded
+   * here and reported, never silently dropped — a census that skipped them
+   * quietly would under-approximate its own population.
+   */
+  unreadable: string[];
   /** True when there is nothing to examine — no data/ at all (clean CI checkout),
    * or present-but-empty. Either way the census reports it rather than scoring
    * an empty result as a pass. */
@@ -200,11 +214,12 @@ function classify(rel: string): Class {
  */
 function censusTree(root: string): Census {
   if (!existsSync(root)) {
-    return { files: [], dirs: [], outOfScope: [], symlinks: 0, vacuous: true };
+    return { files: [], dirs: [], outOfScope: [], symlinks: 0, unreadable: [], vacuous: true };
   }
   const files: Entry[] = [];
   const dirs: Entry[] = [];
   const outOfScopeFiles: Entry[] = [];
+  const unreadable: string[] = [];
   let symlinks = 0;
 
   const walk = (dir: string): void => {
@@ -223,7 +238,17 @@ function censusTree(root: string): Census {
       }
       if (st.isDirectory()) {
         if (isVaultScope(rel)) dirs.push({ rel, mode: st.mode & 0o777, size: st.size, mtimeMs: st.mtimeMs, isDir: true });
-        walk(abs);
+        // A subtree this process cannot enter is a SENSOR reading, not a crash:
+        // the vault is owned by the `ui2api` service user, so a 0700 host dir
+        // correctly denies the operator account running the suite. Recorded and
+        // reported; never silently skipped, so the census's own coverage is
+        // always visible in its output.
+        try {
+          walk(abs);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "EACCES") unreadable.push(rel);
+          else throw err;
+        }
         continue;
       }
       const entry: Entry = { rel, mode: st.mode & 0o777, size: st.size, mtimeMs: st.mtimeMs, isDir: false };
@@ -248,6 +273,7 @@ function censusTree(root: string): Census {
     dirs,
     outOfScope: outOfScopeFiles,
     symlinks,
+    unreadable,
     vacuous: files.length === 0,
   };
 }
@@ -274,7 +300,17 @@ function fingerprint(root: string): string[] {
       if (st.isSymbolicLink()) continue;
       if (!isVaultScope(rel)) continue;
       out.push(`${rel}|${st.mode & 0o777}|${st.size}|${st.mtimeMs}`);
-      if (st.isDirectory()) walk(abs);
+      // Same EACCES tolerance as censusTree, for the same reason: an entry we
+      // cannot enter cannot be mutated by us either, so its absence from both
+      // the before and the after fingerprint is symmetric and proves nothing
+      // about mutation.
+      if (st.isDirectory()) {
+        try {
+          walk(abs);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EACCES") throw err;
+        }
+      }
     }
   };
   walk(root);
@@ -446,6 +482,10 @@ test("real vault: world-readable exposure is legacy residue only, never a recurr
       `All are legacy residue written BEFORE the chmod-enforcing seam (commit cef7af1) landed. ` +
       `Out-of-scope files under data/ (counted, not gated): ${c.outOfScope.length}. ` +
       `Symlinks skipped (Chrome's dangling Singleton* + meaningless 0777 link modes): ${c.symlinks}. ` +
+      `Subtrees unreadable by THIS user (EACCES — owned by another user, so 0700 hardening is working): ` +
+      `${c.unreadable.length}, of which vault-scope: ${c.unreadable.filter(isVaultScope).length}. ` +
+      `Those files are NOT in the counts above; the census under-approximates by that much when run ` +
+      `as a non-owner. Run as the vault owner for a complete census. ` +
       `ACTION: operator rotates the credentials and tightens the modes; the per-class caps below ` +
       `then fall and stay green. This gate never edits data/ itself.`
   );
