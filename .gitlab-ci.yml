@@ -750,41 +750,7 @@ opencode_fix_ci:
 # Runs on the same baremetal runner as deploy_dev, so /var/www is visible to it.
 # Only cheap coreutils checks: no composer, no vendor, no apt.
 # ---------------------------------------------------------------------------
-opencode_preflight:
-  stage: deploy
-  image: php:8.3-cli
-  variables:
-    DEV_APP_PATH: "/opt/ui2api"   # the only tree this job is allowed to inspect
-  needs: ["verify"]
-  rules:
-    - if: $CI_COMMIT_REF_NAME == "main"
-  # Same reason as red_line_guard: a job with no before_script of its own
-  # inherits the host repo's global one, which is written for that repo's
-  # toolchain. This image is php:8.3-cli.
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq git >/dev/null
-    - 'command -v git >/dev/null || { echo "FATAL git missing in php:8.3-cli"; exit 1; }'
-  script:
-    - |
-      set -uo pipefail
-      T="$DEV_APP_PATH"
-      fail() { echo "PREFLIGHT-FAIL: $*"; exit 1; }
-      echo "== pre-flight for $T =="
-      [ -d "$T" ] || fail "target directory missing"
-      [ -f "$T/.env" ] || fail ".env missing — refusing to deploy over a broken env"
-      echo "   .env present, sha256 $(sha256sum "$T/.env" | cut -c1-16)…"
-      [ -f "$T/artisan" ] || fail "artisan missing"
-      [ -f "$T/public/index.php" ] || fail "public/index.php missing"
-      [ -L "$T/public/storage" ] || fail "public/storage is not a symlink"
-      echo "   public/storage -> $(readlink "$T/public/storage")"
-      for d in "$T/storage/framework/views" "$T/storage/app/public" "$T/storage/logs" "$T/bootstrap/cache"; do
-        [ -d "$d" ] || fail "missing runtime dir $d"
-        [ -w "$d" ] || fail "runtime dir not writable: $d"
-      done
-      echo "   runtime dirs present and writable"
-      echo "PREFLIGHT-OK: $T is in a deployable shape"
-
-
+# ---- opencode_preflight NOT INSTALLED for this profile (install.opencode_preflight: false) ----
 workflow:
   name: "$CI_COMMIT_BRANCH #$CI_PIPELINE_SOURCE ${CI_MERGE_REQUEST_IFFSET:-(none)}"
 
