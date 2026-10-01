@@ -166,7 +166,13 @@ tar -czf "$TARBALL" -C "$STAGE/root" .
 # asserting that a tar command was written correctly.
 LIST="$(tar -tzf "$TARBALL")"
 
-FORBIDDEN_PREFIXES=(data/ node_modules/ wigolo/ .git/ .npm/ .opencode-ci/ .gitlab/)
+# `.brain/` was MEASURED absent from the archive on 2026-10-01, but it was absent
+# by omission rather than by rule, which is not a property worth relying on: the
+# operator's raw transcripts are the single most damaging thing this repository
+# could ship in a publicly downloadable asset, and a release tarball is exactly
+# that. It is asserted now so a future change to the file list cannot leak it
+# silently. The vault (`data/`) is here for the same reason and has always been.
+FORBIDDEN_PREFIXES=(data/ .brain/ node_modules/ wigolo/ .git/ .npm/ .opencode-ci/ .gitlab/)
 for bad in "${FORBIDDEN_PREFIXES[@]}"; do
   # The `./` is OPTIONAL in the pattern and this is load-bearing. `tar -czf x .`
   # lists every entry as `./data/sessions/...`, so an anchored `^data/` matches
