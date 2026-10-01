@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,8 +14,10 @@ import {
   envKnobsIn,
   goalRefsIn,
   internalProseSamples,
+  mechanismTermsIn,
   proseRuleIds,
   proseRuleTokens,
+  DECLARED_EXCEPTIONS,
 } from "../src/prompt/consumer-surface.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 import type { ChatPool } from "../src/prompt/pool.js";
@@ -543,5 +545,317 @@ describe("CONSUMER PROSE: the leak classes are derived from the code, not rememb
     assert.ok(!/real Chrome/.test(out), `the mechanism survived: ${out}`);
     assert.ok(!/Xvfb/.test(out), `the display mechanism survived: ${out}`);
     assert.ok(out.includes("2026-09-30"), `the redaction took the disclosure date too: ${out}`);
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * GOAL 167 — THE CONCEPT WORDS ARE MOSTLY DERIVABLE, AND THE HARD-CODED LIST
+ * WAS BOUNDED BY A CLAIM THAT MEASUREMENT REFUTED.
+ *
+ * THE DEFECT THIS REPLACES. Runner-up #3 in `.brain/verbatim-goals.md` read:
+ * "concept words (`Chrome`, `Xvfb`, `CDP`, `headless`) cannot be derived, so the
+ * consumer-prose gate's leverage is bounded by what no scan can know." The
+ * supporting comment in `consumer-surface.ts` asserted that "no amount of
+ * scanning the code can tell you that the word `Xvfb` is internal".
+ *
+ * MEASURED, that was FALSE for three of the four — and the falsification was not
+ * academic. Each of the four hand-typed rules had a LIVE HOLE its exact-match
+ * form could not see, because the rule named one string while the leak arrived
+ * as a sibling:
+ *
+ *     rule `/\breal Chrome\b/i`   bare `Chrome` and `google-chrome` SURVIVED
+ *     rule `/\bXvfb\b/`           lowercase `xvfb` SURVIVED
+ *     rule `/\bCDP\b/`            lowercase `cdp` SURVIVED
+ *     rule `/\bheadless|headed\b/i`  `headful` SURVIVED
+ *
+ * So the honest disposition is per term, decided by measurement:
+ *
+ *   Chrome  → (b) DERIVABLE. `CHROME_SYSTEM_PATHS` / `CHROME_CHROMIUM_PATHS`
+ *             (`src/runtime/browser.ts`) and `PROFILE_CANDIDATES`
+ *             (`src/runtime/chrome-owner.ts:41`) are closed arrays whose string
+ *             literals name the binaries the launch seam RESOLVES.
+ *   Xvfb    → (b) DERIVABLE. `has("Xvfb")` (`src/runtime/requirements.ts:453`)
+ *             is a literal naming a PROGRAM the readiness checker RUNS.
+ *   headless→ (b) DERIVABLE. `args.push("--headless=new")`
+ *             (`src/runtime/chrome-daemon.ts:303`) is a flag passed to the browser.
+ *   CDP     → (c) DECLARED EXCEPTION. Measured: it occurs in `src/` only inside
+ *             comments and inside `error-redaction.ts`'s own alternation. No
+ *             name, key, id, probe, ladder, flag or dependency carries it, so a
+ *             scan has nothing to read. Pinned by `DECLARED_EXCEPTIONS`.
+ *
+ * AND THE SHAPE-BASED ALTERNATIVE WAS MEASURED AND REJECTED, because the honest
+ * answer here is not always the cleverer one. "Redact any capitalised token that
+ * is not a site name" catches all four plus 276 further distinct tokens across
+ * the real 162-description corpus — including `Answer`, `Capability`, `Search`,
+ * `Tool`, `Image`, `Response`, `Request`, `model` and `session`. A gate that
+ * redacts "model" and "Tool" cries wolf on the words a consumer legitimately
+ * uses, so the derivation is anchored to a POSITION (a probe argument, a closed
+ * path array, a browser-args push) rather than to a letter case.
+ */
+describe("CONSUMER PROSE: the mechanism nouns are derived from exec surfaces, and the exceptions are pinned", () => {
+  /** The sources a mechanism noun can come from: shipped source and the ops
+   *  scripts the docs tell an operator to run. `proseSources()` above also walks
+   *  `capabilities/`, but a manifest is PROSE and must never be able to declare
+   *  an obligation on the gate — that would make the thing being measured the
+   *  thing doing the measuring. */
+  function mechanismSources(): string[] {
+    const out: string[] = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+        const child = `${rel}/${e.name}`;
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        if (e.isDirectory()) walk(child);
+        else if (/\.(ts|tsx|js|sh)$/.test(e.name)) out.push(child);
+      }
+    };
+    for (const top of ["src", "scripts"]) if (existsSync(join(ROOT, top))) walk(top);
+    return out;
+  }
+
+  test("NON-VACUITY: the derivation reads a real vocabulary, and it does not read ITSELF", () => {
+    const files = mechanismSources();
+    const terms = mechanismTermsIn(ROOT, files);
+    // A collapsed walk would make every pin below vacuously GREEN.
+    assert.ok(
+      terms.size >= 8,
+      `the mechanism derivation read only ${terms.size} terms from ${files.length} files — ` +
+        `a walk that collapsed proves nothing`,
+    );
+    // …and it must be reading the TREE, not this gate's own prose about the
+    // tree. `consumer-surface.ts` quotes `has("Xvfb")` and
+    // `args.push("--headless=new")` as examples of the witnesses; a derivation
+    // that read its own documentation would MANUFACTURE the obligations it is
+    // supposed to discover, and could be satisfied by editing a comment.
+    for (const [term, where] of terms) {
+      assert.doesNotMatch(
+        where,
+        /^src\/prompt\/consumer-surface\.ts/,
+        `"${term}" was derived from consumer-surface.ts's own doc comment (${where}). The ` +
+          `derivation must read the tree, never its own description of the tree — otherwise ` +
+          `editing this comment satisfies the gate.`,
+      );
+    }
+    // The three terms the goals index named as NON-derivable must now come from
+    // the real witnesses, named by file and line.
+    const expected: Record<string, RegExp> = {
+      chrome: /src\/runtime\/browser\.ts:\d+$/,
+      xvfb: /src\/runtime\/requirements\.ts:\d+$/,
+      headless: /src\/runtime\/chrome-daemon\.ts:\d+$/,
+    };
+    for (const term of Object.keys(expected)) {
+      assert.ok(terms.has(term), `"${term}" is no longer derived at all — the exec surface it came from moved`);
+      assert.match(terms.get(term)!, expected[term]!, `"${term}" derived from the wrong witness: ${terms.get(term)}`);
+    }
+  });
+
+  test("every DERIVED mechanism noun is removed by consumerProse (the list cannot rot open)", () => {
+    const terms = mechanismTermsIn(ROOT, mechanismSources());
+    assert.ok(terms.size >= 8, "the derivation read nothing — refusing to pass on a collapsed walk");
+    const survivors: string[] = [];
+    for (const [term, where] of terms) {
+      // Probe three shapes, because a rule that matches one spelling and not its
+      // siblings is exactly the defect this goal closes.
+      for (const probe of [`probe ${term} probe`, `probe ${term.toUpperCase()} probe`, `probe ${term.toUpperCase()}-STABLE probe`]) {
+        const out = consumerProse(probe).toLowerCase();
+        if (out.includes(term)) survivors.push(`${term} (${where}) leaked from ${JSON.stringify(probe)} -> ${JSON.stringify(out)}`);
+      }
+    }
+    assert.deepEqual(
+      survivors,
+      [],
+      `consumerProse() no longer redacts these mechanism nouns, which the CODE names as things ` +
+        `it executes:\n  ${survivors.join("\n  ")}\nA browser binary added to a ladder, a program ` +
+        `added to a readiness probe, or a launch flag added to the browser args is covered BY ` +
+        `CONSTRUCTION; this pin is what keeps it so.`,
+    );
+  });
+
+  test("the derivation catches a mechanism noun NOBODY wrote down — the RED half", () => {
+    // The anti-vacuity half, in the direction that matters: a term the class
+    // list never named, in a spelling it never named, must still be removed.
+    // Every one of these is a SIBLING of a declared term, not the term itself —
+    // each survived the old exact-match rules (measured on the old table).
+    const undeclared = [
+      "attach via the user's google-chrome build",
+      "the ui2api-chrome profile directory",
+      "run it under xvfb on :99",
+      "the browser was spawned headful, not headless",
+      "spoken over cdp to the endpoint",
+      "Playwright/CDP UI path: type into the composer",
+      "the Chromium executable is missing",
+    ];
+    for (const body of undeclared) {
+      const out = consumerProse(body);
+      for (const leak of [/google-chrome/i, /ui2api-chrome/i, /\bxvfb\b/i, /\bheadful\b/i, /\bheadless\b/i, /\bcdp\b/i, /\bplaywright\b/i, /\bchromium\b/i]) {
+        assert.ok(
+          !leak.test(out),
+          `a mechanism noun the rule list never named survived consumerProse().\n  in : ${body}\n  out: ${out}\n  leaked: ${leak}`,
+        );
+      }
+    }
+  });
+
+  test("FALSE-POSITIVE: the ordinary words a consumer legitimately reads are NOT redacted", () => {
+    // The other half, and the one that decides whether this goal was worth doing.
+    // A gate loosened until it catches everything catches nothing, so these are
+    // the words the shape-based rule would have eaten (measured: all of them are
+    // among the 276 tokens it flags) and this gate must leave alone.
+    const allowed = [
+      "Answer", "Capability", "Search", "Tool", "Image", "Response", "Request",
+      "model", "session", "account", "message", "stream", "citation", "upload",
+      "conversation", "history", "attachment", "summary", "reasoning", "composer",
+      "Answer, Capability, Search, Tool, Image, Response, Request, model, session",
+    ];
+    for (const word of allowed) {
+      const body = `the ${word} is available`;
+      assert.equal(
+        consumerProse(body),
+        body,
+        `consumerProse() mangled an ordinary consumer word: ${JSON.stringify(body)} -> ${JSON.stringify(consumerProse(body))}. ` +
+          `Redacting vocabulary a consumer legitimately reads is a gate that cries wolf, which is worse ` +
+          `than a narrow honest one.`,
+      );
+    }
+    // …and the DISCLOSURES must survive the mechanism redaction, exactly as they
+    // do for the knob and goal classes: a redaction that eats the diagnosis is a
+    // second lie.
+    const dated = "LIVE-VERIFIED 2026-09-20 on headed Chrome: 60 results returned";
+    const out = consumerProse(dated);
+    assert.ok(!/chrome/i.test(out), `the mechanism must go: ${out}`);
+    assert.ok(out.includes("2026-09-20"), `the redaction took the disclosure date too: ${out}`);
+    assert.ok(/LIVE-VERIFIED/.test(out), `the redaction took the verification verdict too: ${out}`);
+  });
+
+  test("the ONE non-derivable term is a DECLARED exception that carries its reason and still works", () => {
+    // Disposition (c), done honestly: not derived, so not pretended to be. The
+    // list must stay short, every entry must justify itself in writing, and every
+    // entry must ACTUALLY be redacted — an exception that stopped working while
+    // still being listed is the worst of both worlds.
+    assert.ok(
+      DECLARED_EXCEPTIONS.length >= 1,
+      "DECLARED_EXCEPTIONS is empty. If `CDP` now derives, remove the export and this pin with it — " +
+        "an empty exception list is a claim that nothing is non-derivable, which measurement refutes.",
+    );
+    assert.ok(
+      DECLARED_EXCEPTIONS.length <= 2,
+      `DECLARED_EXCEPTIONS has grown to ${DECLARED_EXCEPTIONS.length} entries (${DECLARED_EXCEPTIONS.map((e) => e.term).join(", ")}). ` +
+        `Each addition means a term was given up on rather than derived, and the list is supposed to be ` +
+        `short enough to audit. Derive it from an exec surface instead, or justify why it cannot be.`,
+    );
+    for (const e of DECLARED_EXCEPTIONS) {
+      assert.ok(
+        e.why.trim().length >= 40,
+        `the exception "${e.term}" has no usable reason (${JSON.stringify(e.why)}). An exception with no ` +
+          `stated reason is indistinguishable from a hand-typed list entry, which is the rot this gate exists to kill.`,
+      );
+      const out = consumerProse(`probe ${e.term} probe`).toLowerCase();
+      assert.ok(
+        !out.includes(e.term.toLowerCase()),
+        `DECLARED_EXCEPTIONS lists "${e.term}" but consumerProse() no longer removes it: ${JSON.stringify(out)}. ` +
+          `A declared exception that stopped working is silently still paying the exception's cost.`,
+      );
+      // Case-insensitively, because that was one of the two live holes.
+      const upper = consumerProse(`probe ${e.term.toUpperCase()} probe`).toLowerCase();
+      assert.ok(!upper.includes(e.term.toLowerCase()), `the exception "${e.term}" survives in another case: ${upper}`);
+    }
+  });
+
+  test("MUTATION PROOF: breaking the mechanism rule turns this gate RED (it is not a decoration)", async () => {
+    // A test that cannot fail on the change it exists to catch is a decoration.
+    // Rather than trust that, this test MUTATES the rule table in a temporary
+    // copy of the module and re-runs the same assertions against it — so the
+    // assertions are proven load-bearing without ever editing the real source.
+    //
+    // Each mutation REVERTS one rule to the exact pre-GOAL-167 form and then
+    // demands that the sibling spelling it used to miss LEAKS. A mutant that does
+    // not leak means the assertion is not exercising the rule, and this test says
+    // so rather than passing quietly.
+    const srcPath = join(ROOT, "src/prompt/consumer-surface.ts");
+    const original = readFileSync(srcPath, "utf8");
+    // [label, the current rule as written in the file, the pre-167 rule, the sibling spelling that rule used to miss]
+    const mutants: ReadonlyArray<readonly [string, string, string, string, RegExp]> = [
+      [
+        "chrome family reverted to the exact-match `real Chrome` form",
+        "/\\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\\b/gi",
+        "/\\breal Chrome\\b/gi",
+        "google-chrome",
+        /\bgoogle-chrome\b/,
+      ],
+      [
+        "chromium family removed entirely",
+        "[/\\bchromium(?:[-_]browser)?\\b/gi, \"an operator-attached session\"],",
+        "",
+        "Chromium",
+        /\bChromium\b/,
+      ],
+      [
+        "display family reverted to the case-sensitive `Xvfb` form",
+        "[/\\b(?:xvfb|xorg)\\b/gi, \"a virtual display\"],",
+        "[/\\bXvfb\\b/g, \"a virtual display\"],",
+        "xvfb",
+        /\bxvfb\b/,
+      ],
+      [
+        "headless family reverted to the case-sensitive two-word form",
+        "[/\\bhead(?:less|ed|ful)\\b/gi, \"display-attached\"],",
+        "[/\\bheadless\\b/g, \"display-attached\"],",
+        "headful",
+        /\bheadful\b/,
+      ],
+      [
+        "cdp exception reverted to the case-sensitive `CDP` form",
+        "[/\\bcdp\\b/gi, \"the attach endpoint\"],",
+        "[/\\bCDP\\b/g, \"the attach endpoint\"],",
+        "cdp",
+        /\bcdp\b/,
+      ],
+      [
+        "automation-library family deleted",
+        "[/\\b(?:playwright|selenium|webdriver|puppeteer)\\b/gi, \"a session driven by the service operator\"],",
+        "",
+        "Playwright",
+        /\bPlaywright\b/,
+      ],
+    ];
+    for (const [label, current, reverted, siblingText, sibling] of mutants) {
+      assert.ok(
+        original.includes(current),
+        `the mutation "${label}" could not find its rule in consumer-surface.ts (${current}). The rule moved, ` +
+          `so this mutation is no longer proving what it claims — update it rather than let it pass vacuously.`,
+      );
+      const mutated = original.replace(current, reverted);
+      assert.notEqual(mutated, original, `the mutation "${label}" changed nothing`);
+      const dir = mkdtempSync(join(tmpdir(), "u2a-prose-mutant-"));
+      try {
+        const mutantPath = join(dir, "consumer-surface.ts");
+        const realDir = dirname(srcPath);
+        const wired = mutated.replace(/from "(\.\.?\/[^"]+)"/g, (_m, spec: string) =>
+          `from ${JSON.stringify(join(realDir, spec).replace(/\.js$/, ".ts"))}`,
+        );
+        writeFileSync(mutantPath, wired, "utf8");
+        const mod = (await import(mutantPath)) as typeof import("../src/prompt/consumer-surface.js");
+        // Probe with the SIBLING spelling, in the case the old rule could not match.
+        const probe = `probe ${siblingText} probe`;
+        const survived = mod.consumerProse(probe);
+        assert.match(
+          survived,
+          sibling,
+          `the mutant "${label}" was expected to LEAK ${JSON.stringify(siblingText)} but did not — the ` +
+            `assertion this mutation is meant to falsify is not exercising the rule, so the real rule is ` +
+            `being carried by something else.`,
+        );
+        // …and the REAL module must redact that same sibling, which is the
+        // positive half: the mutant fails where the real thing passes.
+        assert.doesNotMatch(
+          consumerProse(probe),
+          sibling,
+          `the REAL consumerProse() leaked ${JSON.stringify(siblingText)} — the gate this test claims to ` +
+            `pin is not actually holding`,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   });
 });

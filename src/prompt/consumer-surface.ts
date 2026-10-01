@@ -166,9 +166,31 @@ const PROSE: ReadonlyArray<[RegExp, string]> = [
   [/\bthe user's own signed-in Chrome\b/gi, "a session attached by the service operator"],
   [/\battached real Chrome\b/gi, "an operator-attached session"],
   [/\breal Chrome\b/gi, "an operator-attached session"],
-  [/\bheadless\b|\bheaded\b/gi, "display-attached"],
-  [/\bXvfb\b/g, "a virtual display"],
-  [/\bCDP\b/g, "the attach endpoint"],
+  // MECHANISM NOUNS, DERIVED (GOAL 167). The four rules these replace were
+  // `real Chrome` / `headless|headed` / `Xvfb` / `CDP`, and MEASURED against the
+  // shipped capability corpus they each had a HOLE the exact-match form could
+  // not see: bare `Chrome`, `google-chrome`, `ui2api-chrome`, `Chromium`,
+  // lowercase `xvfb`, lowercase `cdp` and `headful` ALL survived verbatim to
+  // the wire. Each rule below is now a case-insensitive FAMILY, and each family
+  // is a member of `mechanismTermsIn()` — the derivation that proves the family
+  // is not a remembered instance. See the derivation section below.
+  [/\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\b/gi, "an operator-attached session"],
+  [/\bchromium(?:[-_]browser)?\b/gi, "an operator-attached session"],
+  [/\b(?:xvfb|xorg)\b/gi, "a virtual display"],
+  [/\bhead(?:less|ed|ful)\b/gi, "display-attached"],
+  // `CDP` is the ONE concept word that does not derive (measured: it appears in
+  // `src/` only inside comments, never in a name, key, id, flag, ladder or
+  // dependency). It stays an EXPLICIT, SELF-DOCUMENTING exception with its
+  // reason recorded here and pinned by the gate — see `DECLARED_EXCEPTIONS`.
+  [/\bcdp\b/gi, "the attach endpoint"],
+  // The libraries the shipped daemon loads. `playwright` is the automation layer
+  // the whole product is built on and leaked verbatim into two shipped capability
+  // descriptions ("Playwright filechooser event NEVER fires", "Playwright/CDP UI
+  // path") — measured on the corpus, not imagined. `zod` / `classic-level` are
+  // our own internal plumbing; a consumer is never told which validation library
+  // a daemon happens to use.
+  [/\b(?:playwright|selenium|webdriver|puppeteer)\b/gi, "a session driven by the service operator"],
+  [/\b(?:zod|classic-level)\b/gi, "internal implementation detail"],
   [/\bbrowser-bound\b/gi, "session-bound"],
   // Collapse the whitespace the removals left behind, and tidy the seams.
   [/\s{2,}/g, " "],
@@ -199,16 +221,70 @@ const PROSE: ReadonlyArray<[RegExp, string]> = [
  *       file that authors prose carrying internal vocabulary declares it with
  *       `// @internal-prose <class>`, and the gate demands a rule that redacts
  *       that class's own harvested text.
+ *     * `mechanismTermsIn(root, files)` — GOAL 167. The MECHANISM NOUNS, below.
  *
- *   NOT DERIVABLE (and named as such, because pretending otherwise is the
- *   rot this section exists to kill): the set of CONCEPT WORDS — "Chrome",
- *   "Xvfb", "CDP", "headless". No amount of scanning the code can tell you that
- *   the word "Xvfb" is internal; only a person knows that. So the lexicon is
- *   hand-declared ONCE, as the rules above, and the gate's leverage is applied
- *   where it is real: every marker-declared class must be covered, every knob
- *   the code reads must be removed, every goal reference must be removed. A
- *   NEW concept word needs a new rule, and `proseRuleIds()` is what the test
- *   enumerates — so it is a visible edit in one list, never a silent leak.
+ * ── GOAL 167: THE CONCEPT WORDS ARE MOSTLY DERIVABLE, AND THE CLAIM WAS WRONG ──
+ * The previous revision of this comment asserted that the concept words
+ * ("Chrome", "Xvfb", "CDP", "headless") were NOT derivable, on the grounds that
+ * "no amount of scanning the code can tell you that the word Xvfb is internal".
+ * MEASURED against the tree, that claim was wrong for THREE of the four, and the
+ * error was not academic: the four hand-typed rules had live holes.
+ *
+ * WHAT "DERIVABLE" MEANS HERE, precisely, because the word is otherwise vague.
+ * A mechanism noun is not internal because a person says so — it is internal
+ * because the code NAMES IT AS A THING IT EXECUTES. That is a checkable
+ * property, and it has three machine-readable witnesses in this tree:
+ *
+ *   1. EXEC PROBE  — `has("Xvfb")` in `src/runtime/requirements.ts:453` is a
+ *      string literal naming a PROGRAM the readiness checker runs. A generic
+ *      English word never appears in that position, so the position itself is
+ *      the evidence. This yields `Xvfb`, `Xorg`.
+ *   2. EXEC LADDER — the closed path arrays `CHROME_SYSTEM_PATHS` /
+ *      `CHROME_CHROMIUM_PATHS` (`src/runtime/browser.ts`) and `PROFILE_CANDIDATES`
+ *      (`src/runtime/chrome-owner.ts:41`) list the browser BINARIES the launch
+ *      seam resolves, one per string literal. Their leaves yield `chrome`,
+ *      `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`,
+ *      `ui2api-chrome`.
+ *   3. BROWSER LAUNCH FLAG — `args.push("--headless=new")`
+ *      (`src/runtime/chrome-daemon.ts:303`) names a flag passed to the browser
+ *      process. The FLAG NAME (before any `=value`) yields `headless`.
+ *   Plus package.json `dependencies`, which yields `playwright` — the automation
+ *   library the entire product is built on, and which was leaking verbatim into
+ *   two shipped capability descriptions.
+ *
+ * So `Chrome`, `Xvfb` and `headless` are DERIVED, and `proseRuleTokens()`'s
+ * mechanism families are pinned against this derivation: a browser binary added
+ * to a ladder tomorrow fails the gate until a rule covers it.
+ *
+ * WHAT THE SHAPE-BASED ALTERNATIVE COSTS, because it was the tempting option and
+ * it was measured rather than assumed. "Redact any capitalised token that is not
+ * a site name" would catch all four plus hundreds more — and it was run over the
+ * real 162-description corpus, where it flags 276 distinct tokens including
+ * `Answer`, `Capability`, `Search`, `Tool`, `Image`, `Response`, `Request`,
+ * `model` and `session`. A gate that redacts "model" and "Tool" is a gate that
+ * cries wolf on the words a consumer legitimately uses, which is why the three
+ * EXEC-SURFACE derivations above are used instead: they are precise because
+ * they are anchored to a position, not to a letter case.
+ *
+ * ── THE ONE GENUINE EXCEPTION: `CDP`, DECLARED AND PINNED ────────────────────
+ * `CDP` is the only one of the four that does not derive, and the reason is
+ * specific rather than philosophical: MEASURED, `CDP` occurs in `src/` only
+ * inside COMMENTS (`driver.ts:197`, `pool.ts:19`, `chrome-daemon.ts:268`, …) and
+ * inside `error-redaction.ts`'s own hand-written alternation. It appears in no
+ * name, no key, no check id, no exec probe, no ladder, no flag, no path and no
+ * dependency. There is nothing for a scan to read. (The nearest candidate,
+ * `ALLOWED_SCHEMES` in `wigolo.ts:129`, contains "cdp" as a URL scheme — but
+ * deriving from that set would also derive `http`, `https` and `ws`, which occur
+ * legitimately throughout consumer prose. So that source is REJECTED, on
+ * measured evidence, rather than quietly used.)
+ *
+ * So `CDP` is disposition (c): a DELIBERATE accepted exception, and the honest
+ * fix for it is to make it self-documenting and pinned rather than to pretend it
+ * derives. `DECLARED_EXCEPTIONS` below carries the term AND the reason, and the
+ * gate asserts three things about every entry: it is non-empty, its reason is
+ * non-empty, and `consumerProse` really does remove it. A stale exception — one
+ * the code no longer mentions anywhere — is reported by the gate instead of
+ * sitting in a comment forever.
  */
 
 /** The marker a source file uses to declare "the next line is operator prose
@@ -289,6 +365,124 @@ export function goalRefsIn(root: string, files: readonly string[]): string[] {
   return [...found].sort();
 }
 
+/**
+ * ── GOAL 167: THE MECHANISM NOUNS, DERIVED FROM EXEC SURFACES ────────────────
+ * A mechanism noun is internal because the code NAMES IT AS A THING IT RUNS —
+ * not because a person typed it into a list. Three machine-readable witnesses of
+ * that exist in this tree, and the derivation reads all of them. Each is anchored
+ * to a POSITION (a probe argument, a closed path array, a browser-args push)
+ * rather than to a letter case, which is what keeps it from crying wolf: see the
+ * measurement in the header comment.
+ *
+ * Returns a map of lowercased term -> the `file:line` that earned it, so a
+ * failing gate names the source of the obligation instead of just the word.
+ */
+export function mechanismTermsIn(root: string, files: readonly string[]): ReadonlyMap<string, string> {
+  const found = new Map<string, string>();
+  const note = (raw: string, where: string): void => {
+    const term = raw.trim().toLowerCase();
+    // Two characters cannot be a mechanism noun ("X" is an executable check, not
+    // a product) and a term with punctuation is a path fragment, not a word.
+    if (term.length < 3 || !/^[a-z0-9][a-z0-9.-]*$/.test(term)) return;
+    if (!found.has(term)) found.set(term, where);
+  };
+  for (const rel of files) {
+    // THIS MODULE IS EXCLUDED, and the reason is load-bearing rather than
+    // cosmetic: the header comment above QUOTES `args.push("--headless=new")` and
+    // `has("Xvfb")` as examples of the witnesses. If the derivation read itself,
+    // this comment would MANUFACTURE the obligations it is supposed to discover —
+    // `headless` and `xvfb` were both first "found" here, masking the real
+    // witnesses in `chrome-daemon.ts` and `requirements.ts`. A gate that derives
+    // its expectations out of its own documentation is a gate that passes when
+    // the documentation changes. Skipping self also means an obligation cannot
+    // be satisfied by editing the comment that describes it.
+    if (rel === "src/prompt/consumer-surface.ts") continue;
+    let src: string;
+    let lineOf: (index: number) => string;
+    try {
+      src = readFileSync(join(root, rel), "utf8");
+    } catch {
+      continue;
+    }
+    lineOf = (index: number) => `${rel}:${src.slice(0, index).split("\n").length}`;
+    // (1) EXEC PROBE — a string literal handed to `has(...)` names a PROGRAM the
+    //     readiness checker runs. `src/runtime/requirements.ts` probes Xvfb/Xorg.
+    for (const m of src.matchAll(/\bhas\("([^"]+)"\)/g)) note(m[1]!, lineOf(m.index));
+    // (2) EXEC LADDER — the closed path arrays naming the browser binaries the
+    //     launch seam resolves; the LEAF of each path is the product name.
+    for (const m of src.matchAll(
+      /const\s+[A-Z0-9_]*(?:_PATHS|_CANDIDATES)\b[^\n]*=\s*\[([\s\S]*?)\]/g,
+    )) {
+      for (const s of m[1]!.matchAll(/"([^"]+)"/g)) {
+        const v = s[1]!;
+        note(v.includes("/") ? v.slice(v.lastIndexOf("/") + 1) : v, `${rel}:${src.slice(0, m.index).split("\n").length}`);
+      }
+    }
+    // (3) BROWSER LAUNCH FLAG — `args.push("--headless=new")` names a flag passed
+    //     to the browser process. The FLAG NAME only: the `=value` half is a
+    //     version string, and CLI flags are excluded on purpose (they are
+    //     operator vocabulary, already covered by the `ui2api …` rule).
+    for (const m of src.matchAll(/args\.push\("--([a-z0-9-]+)/g)) note(m[1]!, lineOf(m.index));
+  }
+  // (4) RUNTIME DEPENDENCIES — the libraries the shipped daemon actually loads.
+  //     `dependencies` only, never `devDependencies`: a test-runner is not
+  //     something a consumer is told about, and `tsx`/`typescript` in operator
+  //     prose would be a redaction with no consumer benefit.
+  //
+  //     SCOPED PACKAGES ARE SKIPPED. Taking the last path segment of
+  //     `@modelcontextprotocol/sdk` yields `sdk`, which is an ordinary English
+  //     noun — and a rule for it would redact the word "SDK" out of legitimate
+  //     prose. That is a false positive manufactured by the derivation itself,
+  //     and the honest response is to not derive the fragment: a scoped
+  //     package's segment is not a package name.
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
+    for (const name of Object.keys(pkg.dependencies ?? {})) {
+      if (name.startsWith("@")) continue;
+      note(name, "package.json:dependencies");
+    }
+  } catch {
+    // no manifest on disk contributes no obligation
+  }
+  return found;
+}
+
+/**
+ * ── THE DECLARED EXCEPTIONS: non-derivable by MEASUREMENT, and pinned ────────
+ * A concept word the derivation cannot reach is not a silent gap and not a
+ * comment asking to be maintained — it is a DECLARED exception carrying its own
+ * reason, and the gate enforces three things about it: the list is not empty,
+ * every reason is non-empty, and `consumerProse` really removes the term.
+ *
+ * The list is expected to be SHORT and is expected to be justified term by term.
+ * `CDP` is the sole member; the reason is the measurement recorded in the header
+ * comment (it exists only in comments and in `error-redaction.ts`'s own
+ * alternation, so no scan can read it). If a second term is ever added here, the
+ * gate still forces its reason to be written down, which is the whole point: a
+ * bounded, self-documenting exception list can be audited, whereas a fourth
+ * hand-typed regex in a table cannot.
+ */
+export interface DeclaredException {
+  readonly term: string;
+  /** WHY it cannot be derived. Non-empty, and the gate enforces it. */
+  readonly why: string;
+}
+
+export const DECLARED_EXCEPTIONS: readonly DeclaredException[] = [
+  {
+    term: "cdp",
+    why:
+      "MEASURED: `CDP` occurs in src/ only inside comments and inside " +
+      "error-redaction.ts's own hand-written alternation — never in a name, key, " +
+      "check id, exec probe, exec ladder, launch flag or dependency, so no scan " +
+      "has anything to read. ALLOWED_SCHEMES in wigolo.ts does contain \"cdp\" but " +
+      "deriving from that set would also derive http/https/ws, which occur " +
+      "legitimately in consumer prose (measured), so that source is rejected.",
+  },
+];
+
 /** The classes the redaction table currently declares. The gate enumerates
  *  THIS, so widening the wire vocabulary is a visible edit here and a failing
  *  marker elsewhere — never a silent redaction that stopped matching. */
@@ -300,6 +494,7 @@ export function proseRuleIds(): readonly string[] {
     "attach-mechanism",
     "display-mechanism",
     "browser-binding",
+    "automation-library",
   ];
 }
 
@@ -311,9 +506,20 @@ export function proseRuleTokens(): Readonly<Record<string, readonly RegExp[]>> {
     "goal-number": [/\bGOAL\s+\d+\b/],
     "env-knob": [/\bUI2API_[A-Z0-9_]+\b/],
     "operator-cli": [/\bui2api\s+profile\b/, /\bui2api\s+chrome\b/],
-    "attach-mechanism": [/\breal Chrome\b/, /\bheaded\b/i, /\bheadless\b/i, /\bXvfb\b/, /\bCDP\b/],
-    "display-mechanism": [/\bXvfb\b/, /\bheaded\b/i, /\bheadless\b/i],
+    // The mechanism families are case-INSENSITIVE and cover the derived shapes,
+    // not the four remembered instances: `real Chrome`/`headless`/`Xvfb`/`CDP`
+    // each leaked a sibling form (bare `Chrome`, `google-chrome`, lowercase
+    // `xvfb`, `headful`) that no gate watching the exact string would have seen.
+    "attach-mechanism": [
+      /\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\b/i,
+      /\bchromium(?:[-_]browser)?\b/i,
+      /\bhead(?:less|ed|ful)\b/i,
+      /\bxvfb\b/i,
+      /\bcdp\b/i,
+    ],
+    "display-mechanism": [/\bxvfb\b/i, /\bxorg\b/i, /\bhead(?:less|ed|ful)\b/i],
     "browser-binding": [/\bbrowser-bound\b/i],
+    "automation-library": [/\b(?:playwright|selenium|webdriver|puppeteer)\b/i],
   };
 }
 
