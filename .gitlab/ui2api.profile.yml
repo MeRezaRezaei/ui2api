@@ -1,0 +1,49 @@
+# ui2api profile — GitLab is the CI/CD actor; GitHub is long-term storage + release.
+#
+# The operator's intent, verbatim in intent: "if i want to delete the vps of it the
+# full codes and developments are inside github safe". So GitHub must carry the code
+# and the release, and .brain must NOT travel with a public code repo — it goes to a
+# dedicated PRIVATE repo shared by all the operator's projects.
+
+project: ui2api
+gitlab_path: MeRezaRezaei/ui2api
+gitlab_host: gitlab.pubg-sell.ir
+gitlab_path_encoded: MeRezaRezaei%2Fui2api
+
+github_repo: MeRezaRezaei/ui2api
+
+# THE SHARED BRAIN REPO. One private repo for EVERY project the operator owns, so a
+# public code repo can never carry the verbatim corpus.
+github_brain_repo: MeRezaRezaei/operator-brain
+brain_dir: .brain
+
+# ui2api has ONE live tree (/opt/ui2api) — there is no dev/production split here, and
+# inventing one would be a guard guarding nothing. deploy_ref stays main because main
+# is the only ref allowed to ship.
+live_app_path: /opt/ui2api
+dev_app_path: /opt/ui2api
+live_branch: main
+deploy_ref: main
+integration_branch: main
+
+runner_tag: ui2api
+
+variables:
+  OPENCODE_AGENT: "true"
+  OPENCODE_AGENT_FIX: "true"
+  AGENT_MERGE: "true"
+  AGENT_REAP: "true"
+  AGENT_MIRROR: "true"
+  OPENCODE_ALLOW_PIPELINE: "false"
+
+install:
+  # OFF, with reason: ui2api has no separate live branch. live_branch would have to
+  # equal the integration branch, and a guard that watches its own branch fails
+  # every pipeline for ever. See the note above.
+  red_line_guard: false
+  opencode_pair: true
+  opencode_fix_ci: true
+  opencode_preflight: true
+  agent_merge: true
+  agent_reap: true
+  mirror_to_github: true
