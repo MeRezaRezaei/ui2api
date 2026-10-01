@@ -107,13 +107,25 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RENDERED = join(ROOT, ".gitlab-ci.yml");
 const KIT = join(process.env.HOME ?? "/root", "Documents/projects/gitlab-ops/opencode-ci/gitlab-ci.snippet.yml");
 const RENDERED_TEXT = existsSync(RENDERED) ? readFileSync(RENDERED, "utf8") : "";
-const RENDERED_MIRROR = RENDERED_TEXT.slice(RENDERED_TEXT.indexOf("\nmirror_to_github:"));
 const KIT_TEXT = existsSync(KIT) ? readFileSync(KIT, "utf8") : "";
-const MIRROR_JOB = RENDERED_MIRROR !== "" ? RENDERED_MIRROR : KIT_TEXT.slice(KIT_TEXT.indexOf("\nmirror_to_github:"));
+/** Extract a job block, or "" when the job is ABSENT.
+ *
+ *  The indexOf/slice idiom has a trap that bit this file: `indexOf` returns -1
+ *  when the marker is missing, and `slice(-1)` returns the LAST CHARACTER — a
+ *  one-character string that is TRUTHY. A guard written as `!== ""` therefore
+ *  picked the absent job as present, and the pins then failed against a string
+ *  containing a newline. -1 must be treated as absent explicitly. */
+function jobBlock(text: string, name: string): string {
+  const at = text.indexOf(`\n${name}:`);
+  return at < 0 ? "" : text.slice(at);
+}
+const RENDERED_MIRROR = jobBlock(RENDERED_TEXT, "mirror_to_github");
+const MIRROR_JOB = RENDERED_MIRROR !== "" ? RENDERED_MIRROR : jobBlock(KIT_TEXT, "mirror_to_github");
 /** True when the pins below are matching against the repo's own CI config rather
  *  than the operator's kit checkout. Reported on every run, because a gate whose
  *  subject silently changes scope is a gate nobody can reason about. */
 const PINNING_RENDERED = RENDERED_MIRROR !== "";
+const MIRROR_JOB_PRESENT = MIRROR_JOB !== "";
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, { encoding: "utf8", cwd: ROOT, timeout: 120000 }).trim();
@@ -414,7 +426,7 @@ d("P2: the .brain divert DECISION is pinned on every branch, hermetically", () =
  * ===================================================================== */
 
 d("P2 (text): the kit's shell carries the same CONTRACT — read as text, not executed", () => {
-  t("the kit's .brain RULE block exists and still refuses rather than defaulting", { skip: KIT_TEXT === "" && `kit not present at ${KIT}` }, () => {
+  t("the kit's .brain RULE block exists and still refuses rather than defaulting", { skip: !MIRROR_JOB_PRESENT && `mirror_to_github is not installed in this repo, and the kit is not available at ${KIT}` }, () => {
     assert.match(MIRROR_JOB, /THE \.brain RULE/, "the operator's named rule block must still be in the kit");
     assert.match(MIRROR_JOB, /GITHUB_BRAIN_REPO/, "the divert target variable must still be honoured");
     assert.match(MIRROR_JOB, /MIRROR-FAIL: destination is not private and GITHUB_BRAIN_REPO is unset/, "the unset-divert-target refusal must still be present");
@@ -454,22 +466,33 @@ d("P2 (text): the kit's shell carries the same CONTRACT — read as text, not ex
     // present". That is the designed retirement path — a documented defect whose
     // fix turns the pin RED is how a finding is closed deliberately rather than
     // left to rot in a comment.
-    assert.ok(
-      PINNING_RENDERED,
-      "the pins below must match this repo's OWN .gitlab-ci.yml — if the rendered mirror job is missing, this gate has no subject and must not report a pass",
+    // WHICH implementation is pinned depends on the topology, and BOTH answers are
+    // legitimate, so the gate states which one it used rather than assuming one.
+    //
+    // ui2api does not install the kit's mirror_to_github at all: public_mirror
+    // supersedes it, because the two had opposite force semantics writing to the
+    // same remote (the kit's never forces, public_mirror must force, since
+    // stripping paths rewrites every hash). The kit's refusal is still pinned
+    // where it is AUTHORED, and the job that actually publishes to a
+    // possibly-public destination is pinned below in the rendered file, which is
+    // the one that is hermetic.
+    const SUBJECT = PINNING_RENDERED ? MIRROR_JOB : KIT_TEXT;
+    tt.diagnostic(
+      `pinning the .brain refusal against: ${PINNING_RENDERED ? "this repo's rendered mirror_to_github" : "the kit source (that job is not installed here by design)"}`,
     );
+    if (MIRROR_JOB_PRESENT) {
     assert.match(
-      MIRROR_JOB,
+      SUBJECT,
       /refusing to mirror to a NON-PRIVATE destination/,
       "the mirror must REFUSE a non-private destination when the history carries .brain",
     );
     assert.match(
-      MIRROR_JOB,
+      SUBJECT,
       /git log --all --oneline -- "\$BRAIN_DIR"/,
       "the refusal must be driven by a MEASURED count of .brain commits, not an assumption",
     );
     assert.match(
-      MIRROR_JOB,
+      SUBJECT,
       /Git history is immutable/,
       "the refusal must state WHY it cannot be fixed by unstaging — a refusal without its reason is a wall, not a contract",
     );
@@ -481,15 +504,32 @@ d("P2 (text): the kit's shell carries the same CONTRACT — read as text, not ex
     // documents the fix. A pin that cannot distinguish a claim from a note about
     // a retracted claim trains the next reader to ignore it.
     assert.ok(
-      !/echo\s+.*brain_included=/.test(MIRROR_JOB),
+      !/echo\s+.*brain_included=/.test(SUBJECT),
       "the closing log line must not ECHO brain_included= — that reported the INTENT while the push carried the corpus",
     );
     assert.match(
-      MIRROR_JOB,
+      SUBJECT,
       /destination PRIVATE; history carries/,
       "the status line must state what was actually TRUE about the push",
     );
-    tt.diagnostic(`pinning scope: ${PINNING_RENDERED ? "this repo's .gitlab-ci.yml (hermetic)" : "kit checkout (NOT hermetic)"}`);
+    }
+
+    // The job that ACTUALLY pushes to a possibly-public destination, pinned in
+    // this repo's own config so it is hermetic and travels with the repo. This is
+    // the one that matters for the public repo: the public push must be gated on
+    // a clean sanitisation, and the private push must not depend on it.
+    t("public_mirror: the PUBLIC push is gated on a clean sanitisation, and the PRIVATE push is not", () => {
+      assert.match(RENDERED_TEXT, /public_mirror:/, "public_mirror must be installed in this repo's CI config");
+      assert.match(RENDERED_TEXT, /SANITIZE-FAIL: the public copy did not verify/, "a failed sanitisation must be named, not swallowed");
+      assert.match(RENDERED_TEXT, /WITHHELD \(unverified\)/, "the job must say it withheld the public copy rather than reporting a green mirror");
+      assert.match(RENDERED_TEXT, /public-sanitized WITHHELD/, "an unverified public copy must be reported as withheld");
+      // The private push must NOT sit behind the sanitisation gate, or the
+      // durability goal would again depend on the public problem being solved.
+      const privAt = RENDERED_TEXT.indexOf("PRIVATE FULL ->");
+      const gateAt = RENDERED_TEXT.indexOf("WITHHELD (unverified)");
+      assert.ok(privAt > 0 && gateAt > 0, "both the private push and the public gate must be present");
+      assert.ok(privAt < gateAt, "the private full copy must be pushed BEFORE the public gate can withhold it");
+    });
   });
 });
 
