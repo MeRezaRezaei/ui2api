@@ -250,7 +250,26 @@ github_release:
     - ./scripts/ci/package-release.sh --out .release
     # Then publish, then READ BACK. The token is never echoed, never written to
     # a file, and never placed in a URL.
-    - ./scripts/ci/publish-github-release.sh .release/release.env "$GITHUB_REPO"
+    # RELEASES GO TO THE PRIVATE FULL REPO, not to the public sanitized mirror.
+    #
+    # This is the same "two writers, one destination" mistake that produced every
+    # publication failure in this pipeline, in a new disguise. The release is
+    # BUILT from the full checkout, so the tag it creates names a FULL-HISTORY
+    # commit SHA. The public destination's history is rewritten by filter-repo,
+    # so those SHAs do not exist there — and yet the tag was created there
+    # anyway, pinning whatever commit already occupied that name. MEASURED: all
+    # 30 build-* tags on the public destination pointed at 5bb2511, the
+    # pre-sanitization main that carried 29 .brain paths, while main itself had
+    # already been force-pushed to the clean 76ba51f. The tags were the only
+    # thing keeping the dirty history alive — so a public flip would have
+    # published the corpus through every tag, with a clean main standing right
+    # there as evidence that everything was fine.
+    #
+    # One writer per destination: the full history is written by the release job
+    # and the private mirror; the sanitized history is written by the mirror
+    # alone. A release whose SHA cannot exist in its target repository is not a
+    # release, it is a dangling reference with a download button on it.
+    - ./scripts/ci/publish-github-release.sh .release/release.env "$GITHUB_FULL_REPO"
   artifacts:
     # Keep the built artifact in the GitLab job too: the release is the durable
     # copy, this is the cheap per-run one. Manifest + tarball only, never the
