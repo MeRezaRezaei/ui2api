@@ -87,6 +87,7 @@ interface Flags {
   site?: string;
   profile?: string;
   apply?: boolean;
+  dryRun?: boolean;
   json?: boolean;
   newChat?: boolean;
   timeoutMs?: number;
@@ -144,6 +145,20 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--xhost-all") f.xhostAll = true;
     if (argv[i] === "--model") f.model = argv[++i];
     if (argv[i] === "--lang") f.lang = argv[++i];
+    // MEASURED 2026-10-01: `--apply` was NOT parsed here, so `flags.apply` was
+    // always undefined, `apply` was always false, and `vault tighten --apply`
+    // ran in DRY-RUN mode forever while printing a confident, correct, and
+    // completely inert report of the exposure it had not fixed:
+    //
+    //     266 entries would change, 55 already tight ... dry run — nothing was modified
+    //
+    // A credential-permissions tool that cannot apply is worse than no tool: the
+    // output reads as a remediation report, so the world-readable session
+    // snapshots (state.json / accounts.json holding real cookies and Bearer
+    // tokens) looked handled by anyone who ran it. `--dry-run` is parsed too, so
+    // the pair is explicit in both directions rather than implied by absence.
+    if (argv[i] === "--apply") f.apply = true;
+    if (argv[i] === "--dry-run") f.dryRun = true;
   }
   return f;
 }
@@ -1141,7 +1156,8 @@ async function cmdVault(sub: string | undefined, flags: Flags): Promise<void> {
       console.log(`[ui2api]   ${c.kind.padEnd(4)} ${c.path}  ${from} -> ${to}${apply ? "" : "   (not applied)"}`);
     }
     console.log(
-      `[ui2api] ${res.changes.length} entr${res.changes.length === 1 ? "y" : "ies"} would change, ` +
+      `[ui2api] ${res.changes.length} entr${res.changes.length === 1 ? "y" : "ies"} ` +
+        `${apply ? "CHANGED" : "would change"}, ` +
         `${res.unchanged} already tight, ${res.skippedSymlinks.length} symlink(s) skipped, ` +
         `${res.errors.length} error(s)`
     );
