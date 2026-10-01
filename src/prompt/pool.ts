@@ -240,6 +240,15 @@ export interface BrowserProbe {
 export type WorkerHealth = "live" | "dead" | "unprobed";
 
 export interface PoolWorker {
+  /* GOAL 172 — STABLE, POOL-LOCAL identity, assigned once when the page is
+   * created and never reused. This is the field that makes /status decidable:
+   * without it, two reads of `workers[]` cannot be joined, so a health claim
+   * cannot be tracked to a page, and nothing in the report can be matched
+   * against a CDP target list. Assigned by the pool, so ids are unique within a
+   * pool but mean nothing across pools or processes — and that is stated rather
+   * than implied, because a number that looks globally unique would invite
+   * exactly the cross-process comparison it cannot support. */
+  id: number;
   profileId: string;
   driver: ChatDriver;
   busy: boolean;
@@ -265,15 +274,43 @@ export interface PoolWorker {
 export interface PoolWorkerStatus {
   /* Which site this page serves (the honest "which request is this page on"). */
   site: string;
+  /* GOAL 172 — a STABLE identity for this pool slot, assigned once at spawn and
+   * never reused. Without it the workers array is undecidable: entries can be
+   * reordered, evicted and respawned between two /status reads, so "the worker
+   * that said live" cannot be tied to anything a second later, and nothing in
+   * this report can be cross-referenced against a CDP target list. A respawn is
+   * a NEW page, so it gets a new id — reusing one would claim continuity that
+   * does not exist. */
+  id: number;
+  /* The page's own URL, which is the field an operator can actually match
+   * against `curl localhost:9222/json`. Null when it cannot be read, never a
+   * guess: an unreadable URL is a fact about the reader, not about the page. */
+  pageUrl: string | null;
   busy: boolean;
   /* How long this page has been busy, measured from busySince. null whenever
-     the page is idle — a null is a fact, a 0 would be a guess. */
+   * the page is idle — a null is a fact, a 0 would be a guess. */
   busyMs: number | null;
   /* The identity-keyed account in flight, or null for the pool's shared default
-     session (a warm page carries the legacy account — null says exactly that). */
+   * session (a warm page carries the legacy account — null says exactly that). */
   account: string | null;
   health: WorkerHealth;
   checkedAt: string | null;
+  /* GOAL 172 — ms since that health was MEASURED, or null when never measured.
+   * `checkedAt` alone is a timestamp no reader has to interpret; this is the
+   * arithmetic, so a 4-minute-old `live` is visibly four minutes old. */
+  healthAgeMs: number | null;
+  /* GOAL 172 — true when the health claim is OLDER than one health interval, so
+   * it describes the past rather than the present. This is what stops a stale
+   * `live` from reading as a current one.
+   *
+   * MEASURED, and the reason it matters: the sweep skips BUSY workers entirely
+   * (`if (w.busy) continue`) so a page mid-request is never re-probed. Its
+   * `health` and `checkedAt` therefore age without bound for the length of the
+   * request, and /status reported that stale value with nothing marking it as
+   * stale. The sweep skipping busy pages is CORRECT — evicting a page out from
+   * under an in-flight request would be worse — so the fix is to make the age
+   * visible, not to probe a page that must not be touched. */
+  healthStale: boolean;
   dedicated: boolean;
 }
 
@@ -386,6 +423,10 @@ export function siteRateLimitMs(siteId: string): number {
 export class ChatPool {
   private browser?: Browser;
   private workers: PoolWorker[] = [];
+  /* GOAL 172 — monotonic, never reused. See PoolWorker.id for why the id is
+   * minted at spawn and what it deliberately does NOT claim (it is pool-local,
+   * so it must never be compared across pools or processes). */
+  private nextWorkerId = 0;
   // GOAL 103: slots RESERVED by an in-flight spawn. `workers.length` alone
   // undercounts: spawn() awaits a browser + driver start, so concurrent acquires
   // all saw the same pre-spawn length and every one of them spawned — measured
@@ -790,7 +831,13 @@ export class ChatPool {
       try {
         await driver.start();
         const dedicated = account && account !== "default" ? { account } : undefined;
-        return { profileId: siteId, driver, busy: false, dedicated };
+        /* GOAL 172 — the id is minted HERE, at page creation, and nowhere else.
+         * Minting it at the point of reporting instead would be wrong: the array
+         * can be reordered between reads, so an index-derived id would silently
+         * change identity when a slot is evicted. `++this.nextWorkerId` is
+         * monotonic and never reused, so a respawn is visibly a different page
+         * rather than a re-indexed one. */
+        return { id: ++this.nextWorkerId, profileId: siteId, driver, busy: false, dedicated };
       } catch (e) {
         lastErr = e;
         // GOAL 119: this driver already opened a browser CONTEXT and a PAGE
@@ -1089,7 +1136,7 @@ export class ChatPool {
       const wedgedReclaimed = await this.reclaimWedgedWorkers();
       const wedgedSites = wedgedReclaimed.sites;
       for (const w of [...this.workers]) {
-        if (w.busy) continue; // in use: never evicted mid-request (the watchdog above owns that case)
+        if (w.busy) continue; // in use: never probed or evicted mid-request (the watchdog above owns that case)
         checked++;
         const usable = await isWorkerUsable(w);
         w.checkedAt = new Date().toISOString();
@@ -1195,16 +1242,31 @@ export class ChatPool {
       busyWatchdogMs: this.busyWatchdogMs,
       perSiteMax: this.perSiteMax,
       requestTimeoutMs: this.requestTimeoutMs,
-      workers: this.workers.map((w) => ({
-        site: w.profileId,
-        busy: w.busy,
-        // null when idle — a measured "not busy" is a fact, a 0 would be a guess.
-        busyMs: w.busy && typeof w.busySince === "number" ? Math.max(0, now - w.busySince) : null,
-        account: w.dedicated?.account ?? null,
-        health: w.health ?? "unprobed",
-        checkedAt: w.checkedAt ?? null,
-        dedicated: Boolean(w.dedicated),
-      })),
+      workers: this.workers.map((w) => {
+        /* GOAL 172 — the age of this worker's health claim, computed here rather
+         * than left to the reader. `stale` is measured against the pool's own
+         * health interval, because a value older than the interval between
+         * measurements describes the past, not the page. */
+        const checkedMs = w.checkedAt ? Date.parse(w.checkedAt) : NaN;
+        const ageMs = Number.isNaN(checkedMs) ? null : Math.max(0, now - checkedMs);
+        return {
+          id: w.id,
+          site: w.profileId,
+          /* Best-effort and explicitly nullable. A page that has navigated to
+           * about:blank, or a driver with no readable page, yields null rather
+           * than a plausible-looking string. */
+          pageUrl: readPageUrl(w),
+          busy: w.busy,
+          // null when idle — a measured "not busy" is a fact, a 0 would be a guess.
+          busyMs: w.busy && typeof w.busySince === "number" ? Math.max(0, now - w.busySince) : null,
+          account: w.dedicated?.account ?? null,
+          health: w.health ?? "unprobed",
+          checkedAt: w.checkedAt ?? null,
+          healthAgeMs: ageMs,
+          healthStale: ageMs === null ? true : ageMs > this.reaperMs,
+          dedicated: Boolean(w.dedicated),
+        };
+      }),
       lastSweep: this.lastSweep,
       reaper: this.reaperTimer ? "running" : "stopped",
     };
@@ -1396,6 +1458,29 @@ const WORKER_PROBE_TIMEOUT_MS = 5_000;
    A handle with no probe surface is now VISIBLY unprobed instead of silently
    borrowing a neighbour's answer — which is a strictly smaller lie, and the
    only one this file is allowed to tell. */
+/* GOAL 172 — the page URL, or null. This is the field an operator can actually
+ * match against `curl -s localhost:<port>/json`, which is what makes the health
+ * claim cross-referenceable rather than merely assertable.
+ *
+ * NULL IS A REAL ANSWER and the distinction is deliberate: a page parked on
+ * about:blank, a driver exposing no page, and a page whose url() throws all
+ * yield null, because "I could not read it" and "it is blank" are different
+ * facts and conflating them is the class of error this whole report is trying
+ * to stop making. A previous session's central finding was that a stale
+ * `health:"live"` on a page that had already navigated away is exactly this
+ * mistake wearing a green badge — so the URL that would have disproved it was
+ * not in the report at all. */
+function readPageUrl(w: PoolWorker): string | null {
+  try {
+    const page = (w.driver as unknown as { page?: { url?: () => unknown } }).page;
+    if (!page || typeof page.url !== "function") return null;
+    const u = page.url();
+    return typeof u === "string" && u.length > 0 ? u : null;
+  } catch {
+    return null;
+  }
+}
+
 async function probeWorkerHealth(w: PoolWorker): Promise<WorkerHealth> {
   try {
     const page: Page | undefined = (w.driver as unknown as { page?: Page }).page;
