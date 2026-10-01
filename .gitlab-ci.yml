@@ -368,8 +368,20 @@ public_mirror:
         echo "SANITIZE-FAIL: the public copy did not verify. It will NOT be published."
         echo "               The private full copy is still safe to push, and pushing it"
         echo "               is what makes deleting the GitLab VPS survivable."
+        rm -f /tmp/mirror-work/public-verified
       else
-        echo "SANITIZE-OK: both halves verified"
+        # THE MARKER THE PUSH GATE READS. It did not exist until now, which meant
+        # the public branch of that gate could never be taken: the condition
+        # tested for a file nothing wrote AND for a log nothing redirected to,
+        # so a fully clean, VERDICT: PASS copy was still withheld — pipeline 1114
+        # printed "VERDICT: PASS" and "SANITIZE-OK: both halves verified" and
+        # then said "the sanitized copy did not verify".
+        #
+        # A gate that cannot open is not a gate. This marker is written ONLY on
+        # the sanitizer's own exit status, and removed on failure, so it cannot
+        # outlive the run that justified it.
+        touch /tmp/mirror-work/public-verified
+        echo "SANITIZE-OK: both halves verified (marker written: /tmp/mirror-work/public-verified)"
       fi
       cp -a /tmp/mirror-work/maps/. "$CI_PROJECT_DIR/.mirror/maps/" 2>/dev/null || true
     - |
@@ -440,9 +452,13 @@ public_mirror:
       timeout -k 10 1200 git -C "$PRIV" push origin $SPEC \
         || { echo "MIRROR-FAIL: private-full push refused - a human must look"; exit 1; }
 
-      # The public push is hard-gated: a failed sanitisation leaves this directory
-      # unverified, and the verifier's own record is read here rather than trusted.
-      if [ ! -f /tmp/mirror-work/public-verified ] && ! grep -q "SANITIZE-OK" /tmp/sanitize.log 2>/dev/null; then
+      # The public push is hard-gated on a clean verification, and the gate reads
+      # the SANITIZER'S OWN exit status via the marker it writes — not a log
+      # line, and not a file the verifier never creates. Both of those were here
+      # until 2026-10-01 and made the condition permanently true, so a copy that
+      # had measured zero on every forbidden class was still withheld. See the
+      # marker write above.
+      if [ ! -f /tmp/mirror-work/public-verified ]; then
         echo "== PUBLIC SANITIZED -> SKIPPED =="
         echo "   The sanitized copy did not verify, so it is not published."
         echo "   Publishing it would put brain material in a PUBLIC repository, and a"
