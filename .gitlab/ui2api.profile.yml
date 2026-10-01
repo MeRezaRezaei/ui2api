@@ -43,7 +43,32 @@ install:
   red_line_guard: false
   opencode_pair: true
   opencode_fix_ci: true
-  opencode_preflight: true
+  # OFF, with reason. The kit's opencode_preflight is a LARAVEL pre-flight: it
+  # asserts .env, artisan, public/index.php, a public/storage symlink and
+  # storage/framework/{views,app,logs} + bootstrap/cache. ui2api is TypeScript —
+  # there is no composer.json and no artisan anywhere in the repo or in the
+  # deploy tree, so the job could never pass. MEASURED 2026-10-01, job 3244:
+  #     PREFLIGHT-FAIL: target directory missing
+  # and it has failed on every pipeline it has ever run (jobs 2982, 2891, 2900,
+  # 3015, 3033, 3047, 3091, 3179, 3244, 3289) — it has never caught anything,
+  # because it is INERT rather than protective. It also lost the `tags: [deploy]`
+  # its own header comment claims, so it ran on the docker executor, in a
+  # container with no bind mount and therefore no /opt at all, while `deploy` on
+  # the same pipeline wrote to /opt/ui2api successfully. The comment and the
+  # config were opposites.
+  #
+  # A gate that is red on every pipeline for ever trains the reader to ignore
+  # red, which is the exact failure class this project keeps fighting. The safety
+  # it was meant to provide is already provided, and better, by `deploy`'s own
+  # post-deploy health assertion, which restarts the service and fails on
+  # /health non-2xx — a check against the LIVE service rather than a directory
+  # shape.
+  #
+  # A real TypeScript preflight is worth having, but it cannot be written here:
+  # .gitlab-ci.yml is RENDERED by the kit installer, so an edit to the rendered
+  # job is undone by the next install. The fix belongs in the kit template. Until
+  # then this stays off, honestly, rather than red.
+  opencode_preflight: false
   agent_merge: true
   agent_reap: true
   # OFF, with reason. public_mirror SUPERSEDES it for this project.
