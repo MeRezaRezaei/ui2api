@@ -44,6 +44,23 @@
 
 set -euo pipefail
 
+# A SILENT EXIT IS THE ONE FAILURE MODE THIS SCRIPT MUST NEVER HAVE.
+#
+# `set -e` aborts on the first non-zero status and prints NOTHING, so a run that
+# dies mid-verification looks identical to a run that was cancelled, timed out, or
+# killed by the runner — and this script spends its life distinguishing a clean
+# repository from a broken instrument, so an instrument that dies without saying
+# why is the worst thing it can do. MEASURED 2026-10-01 on pipeline 1098: the
+# job failed at 616s of a 2400s allowance with failure_reason=script_failure and
+# a trace that simply STOPPED after the commit-message class. Nothing in the log
+# said what happened.
+#
+# So the failing LINE is named, and so is the class that was in flight. The
+# per-class progress lines that follow are the ones a reader actually needs: a
+# table that stops after row four is self-describing, whereas a silent death is
+# not.
+trap 'rc=$?; echo ""; echo "SANITIZE-ABORT: stopped at line $LINENO with exit status $rc." >&2; echo "  The last scan class printed above is the one that was in flight; a class that never printed never ran." >&2; echo "  124 = a bounded command hit its timeout. 1/2 = a tool rejected its input. 127 = a command was not found." >&2; exit $rc' ERR
+
 # --- every command in this script is bounded; exit 124 is a named failure ---
 T_CLONE=600        # a full-history clone
 T_FILTER=900       # filter-repo over the whole history
