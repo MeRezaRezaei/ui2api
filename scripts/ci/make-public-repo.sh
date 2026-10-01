@@ -185,11 +185,26 @@ REMOVED==>REMOVED
 REPL
 
 say "3. public-sanitized: strip paths"
-# --paths-from-file so the filter is the reviewable list, not a hand-typed blob.
-# NOTE: no --force. filter-repo aborts on a non-bare repo without it, which is
-# the second structural guarantee that this cannot rewrite the real repo.
+# --paths-from-file WITHOUT --invert-paths means "KEEP ONLY THESE PATHS" — so the
+# sanitized copy became the INVERSE of its purpose: the whole corpus, and none of
+# the code. MEASURED on pipeline 915: the verification read `brain paths priv=38
+# pub=38` and refused to publish, and the scanner self-test proved the scan itself
+# was sound (`planted probe -> brain-paths=1 secrets=1 infra=1 msgs=1`).
+#
+# This is the single most dangerous failure in the whole architecture, and the
+# reason it was caught is the point: a single missing flag would have published
+# your complete transcript corpus to a public repository, and the only thing
+# between that and the world was the two-column check refusing to report success.
+# --invert-paths is what makes the list a REMOVAL list.
+#
+# The comment below is deliberately explicit about --force, because the same
+# class of "one flag means the opposite of what it looks like" is what just bit.
+# NOTE: --force is required here only because the clone is BARE (filter-repo
+# refuses a non-bare working tree without it), which is itself the guarantee that
+# this can never rewrite the operator's real repo.
 timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
   --force \
+  --invert-paths \
   --paths-from-file "$PATHS_ACTUAL" \
   --message-callback '
     import re
