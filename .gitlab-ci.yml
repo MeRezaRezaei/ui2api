@@ -351,8 +351,27 @@ public_mirror:
       echo "== PRIVATE FULL -> github/$GITHUB_FULL_REPO =="
       git -C "$PRIV" remote remove origin 2>/dev/null || true
       git -C "$PRIV" remote add origin "https://github.com/$GITHUB_FULL_REPO.git"
-      timeout -k 10 1200 git -C "$PRIV" push --mirror origin \
-        || { echo "MIRROR-FAIL: private-full push refused — a human must look"; exit 1; }
+      # NOT `--mirror`. MEASURED 2026-10-01: `git push --mirror` on a --mirror CLONE
+      # also pushes refs/remotes/* — this repo's LOCAL remote-tracking refs
+      # (refs/remotes/origin/*, refs/remotes/gitlab/*). Those are not branches of
+      # this project; they are this machine's view of ANOTHER remote. GitHub
+      # refused the push:
+      #     remote: fatal: did not receive expected object 5e6eca9d...
+      #     error: remote unpack failed: index-pack failed
+      # An explicit heads+tags refspec pushes the real branches and the real tags
+      # and nothing else. Same lesson as the kit's own mirror: push what you mean,
+      # named explicitly, rather than a wildcard that also takes the bookkeeping.
+      SPEC=""
+      for b in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/heads); do
+        SPEC="$SPEC $b:refs/heads/$(basename "$b")"
+      done
+      for t in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/tags); do
+        SPEC="$SPEC $t:$t"
+      done
+      echo "   refs: $(echo $SPEC | wc -w)"
+      [ -n "$SPEC" ] || { echo "MIRROR-FAIL: private-full has no branches or tags to push"; exit 1; }
+      timeout -k 10 1200 git -C "$PRIV" push origin $SPEC \
+        || { echo "MIRROR-FAIL: private-full push refused - a human must look"; exit 1; }
 
       # The public push is hard-gated: a failed sanitisation leaves this directory
       # unverified, and the verifier's own record is read here rather than trusted.
@@ -370,7 +389,12 @@ public_mirror:
       git -C "$PUB" remote add origin "https://github.com/$GITHUB_REPO.git"
       # Force, and ONLY here: a sanitized history is a deliberate rewrite. The
       # commit-maps travel with it so the full repo can be reconstructed later.
-      timeout -k 10 1200 git -C "$PUB" push --mirror --force origin \
+      PSPEC=""
+      for b in $(git -C "$PUB" for-each-ref --format='%(refname)' refs/heads); do
+        PSPEC="$PSPEC $b:refs/heads/$(basename "$b")"
+      done
+      [ -n "$PSPEC" ] || { echo "MIRROR-FAIL: public-sanitized has no branches"; exit 1; }
+      timeout -k 10 1200 git -C "$PUB" push origin --force $PSPEC \
         || { echo "MIRROR-FAIL: public-sanitized push refused"; exit 1; }
       rm -f "$GIT_ASKPASS"
       echo "MIRROR-OK: private-full -> $GITHUB_FULL_REPO ; public-sanitized -> $GITHUB_REPO"
