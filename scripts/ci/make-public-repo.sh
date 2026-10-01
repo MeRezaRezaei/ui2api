@@ -338,17 +338,34 @@ scan_object_content() { # $1=repo $2=extended-regex [$3=grep flavour: E (default
   # the most dangerous possible failure for this script, and the one that
   # actually happened. MEASURED 2026-10-01 on pipeline 1068, which spent 4MB of
   # log on the warnings before the trace was truncated.
-  local repo="$1" re="$2" flavour="${3:-E}" flag="-E"
-  [ "$flavour" = "P" ] && flag="-P"
+  local repo="$1" re="$2" flavour="${3:-E}"
+  # The option is a WHOLE argument, never a suffix glued onto -aq. Building it as
+  # `grep -aq"$flag"` produced `grep -aq-P`, which grep reads as `-a`, `-q` and
+  # then an invalid `-P`; it printed "invalid option" once per object, flooded
+  # 4MB, and — worse — every class scanned that way returned 0, so the run
+  # reported priv=0 for classes that provably have hits. MEASURED on pipeline
+  # 1071. Same class of bug as the -E/-P mismatch before it: a scanner that
+  # cannot fail cannot report.
   local n=0
-  while read -r obj; do
-    [ -n "$obj" ] || continue
-    if timeout -k 5 30 git -C "$repo" cat-file -p "$obj" 2>/dev/null \
-         | grep -aq"$flag" "$re"; then
-      n=$((n+1))
-    fi
-  done < <(timeout -k 5 "$T_SCAN" git -C "$repo" rev-list --all --objects \
-             | awk '{print $1}' | sort -u)
+  if [ "$flavour" = "P" ]; then
+    while read -r obj; do
+      [ -n "$obj" ] || continue
+      if timeout -k 5 30 git -C "$repo" cat-file -p "$obj" 2>/dev/null \
+           | grep -aqP "$re"; then
+        n=$((n+1))
+      fi
+    done < <(timeout -k 5 "$T_SCAN" git -C "$repo" rev-list --all --objects \
+               | awk '{print $1}' | sort -u)
+  else
+    while read -r obj; do
+      [ -n "$obj" ] || continue
+      if timeout -k 5 30 git -C "$repo" cat-file -p "$obj" 2>/dev/null \
+           | grep -aqE "$re"; then
+        n=$((n+1))
+      fi
+    done < <(timeout -k 5 "$T_SCAN" git -C "$repo" rev-list --all --objects \
+               | awk '{print $1}' | sort -u)
+  fi
   echo "$n"
 }
 scan_object_content_excluding() { # $1=repo $2=extended-regex $3=path-regex-to-skip
