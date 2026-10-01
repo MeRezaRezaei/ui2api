@@ -197,7 +197,7 @@ REPL
 for a in ${UI2API_INFRA_ADDRESSES//,/ }; do
   printf '%s==>REMOVED\n' "$a" >> "$WORK/replace-text.txt"
 done
-note "replace-text rules: $(grep -c . "$WORK/replace-text.txt") literal tokens, of which $(printf '%s' "${UI2API_INFRA_ADDRESSES:-}" | wc -w) are author hosts supplied by CI config"
+note "replace-text rules: $(grep -c . "$WORK/replace-text.txt") literal tokens, of which $(printf '%s' "${UI2API_INFRA_ADDRESSES//,/ }" | wc -w) are author hosts supplied by CI config"
 
 say "3. public-sanitized: strip paths"
 # --paths-from-file WITHOUT --invert-paths means "KEEP ONLY THESE PATHS" — so the
@@ -217,10 +217,6 @@ say "3. public-sanitized: strip paths"
 # NOTE: --force is required here only because the clone is BARE (filter-repo
 # refuses a non-bare working tree without it), which is itself the guarantee that
 # this can never rewrite the operator's real repo.
-timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
-  --force \
-  --invert-paths \
-  --paths-from-file "$PATHS_ACTUAL" \
 # The commit-message callback is written to a FILE and passed by substitution.
 # Two reasons, both learned the hard way on 2026-10-01:
 #   * it used to be a single-quoted shell string, where one apostrophe in a
@@ -275,6 +271,10 @@ src = src.replace("__INFRA_LITERALS__", "(" + ", ".join(repr(a) for a in vals) +
 open(p, "w").write(src)
 CBPY
 
+timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
+  --force \
+  --invert-paths \
+  --paths-from-file "$PATHS_ACTUAL" \
   --message-callback "$(cat "$WORK/message-callback.py")" \
   --replace-text "$WORK/replace-text.txt" \
   || fail "filter-repo exited $? (124 = timeout)"
