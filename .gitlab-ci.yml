@@ -265,12 +265,16 @@ public_mirror:
     auto_stop_in: 1 day
   script:
     - export HOME=/tmp/.opencode-home && mkdir -p "$HOME"
-    - apt-get update -qq && apt-get install -y -qq curl git jq python3 >/dev/null
+    - apt-get update -qq && apt-get install -y -qq curl git jq python3 python3-pip >/dev/null
     - 'command -v jq >/dev/null || { echo "FATAL jq missing"; exit 1; }'
-    # filter-repo is the tool that makes the split possible. It is NOT a
-    # dependency of this image, and a job that silently lacks it would publish
-    # an UNSANITIZED copy, so it is asserted rather than assumed.
-    - pip3 install --quiet --break-system-packages git-filter-repo || pip3 install --quiet git-filter-repo
+    # filter-repo is the tool that makes the split possible, and it is NOT in
+    # this image. MEASURED: node:24-bookworm ships no pip3 at all, so the first
+    # attempt died with exit 127 on `pip3: command not found` — and a job that
+    # silently lacks the tool would publish an UNSANITIZED copy, which is the one
+    # outcome worth failing closed on. So python3-pip is installed AND the tool is
+    # asserted afterwards.
+    - 'command -v pip3 >/dev/null || { echo "FATAL pip3 missing - cannot install git-filter-repo"; exit 1; }'
+    - pip3 install --quiet --break-system-packages git-filter-repo
     - 'git filter-repo --version >/dev/null 2>&1 || { echo "FATAL git-filter-repo unavailable - refusing to publish"; exit 1; }'
     - git config --global user.email "mirror@${CI_SERVER_HOST}"
     - git config --global user.name "GitLab Mirror"
@@ -611,7 +615,13 @@ opencode_preflight:
     DEV_APP_PATH: "/opt/ui2api"   # the only tree this job is allowed to inspect
   needs: ["verify"]
   rules:
-    - if: $CI_COMMIT_REF_NAME == "ci-dev"
+    - if: $CI_COMMIT_REF_NAME == "main"
+  # Same reason as red_line_guard: a job with no before_script of its own
+  # inherits the host repo's global one, which is written for that repo's
+  # toolchain. This image is php:8.3-cli.
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git >/dev/null
+    - 'command -v git >/dev/null || { echo "FATAL git missing in php:8.3-cli"; exit 1; }'
   script:
     - |
       set -uo pipefail
@@ -658,6 +668,20 @@ red_line_guard:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
+  # Its OWN before_script, and it is load-bearing rather than tidy.
+  #
+  # A job with no before_script of its own INHERITS the host repository's global
+  # one — which is written for that repo's toolchain, not for this image. This
+  # job runs in php:8.3-cli, and a consuming repo whose global before_script ends
+  # in `node --version` (ui2api's does) made this job die with exit 127 on
+  # "node: command not found" before it checked a single thing.
+  #
+  # The failure mode is the one this kit exists to prevent: a guard that cannot
+  # run is worse than no guard, because a red pipeline reads as "something is
+  # wrong with the change" when the truth is "the guard never executed".
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git >/dev/null
+    - 'command -v git >/dev/null || { echo "FATAL git missing in php:8.3-cli"; exit 1; }'
   script:
     - |
       set -uo pipefail

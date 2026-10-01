@@ -100,7 +100,8 @@ RB_CODE="$(timeout 60 curl -sS -o /tmp/rb.json -w '%{http_code}' "${AUTH[@]}" \
 RB_TAG="$(jq -r '.tag_name' /tmp/rb.json)"
 RB_URL="$(jq -r '.html_url' /tmp/rb.json)"
 RB_ASSET="$(jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name==$n) | .name' /tmp/rb.json | head -1)"
-RB_URL_A="$(jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name==$n) | .browser_download_url' /tmp/rb.json | head -1)"
+RB_ASSET_ID="$(jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name==$n) | .id' /tmp/rb.json | head -1)"
+RB_SIZE="$(jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name==$n) | .size' /tmp/rb.json | head -1)"
 
 echo "  tag on GitHub : $RB_TAG"
 echo "  release name  : $(jq -r '.name' /tmp/rb.json)"
@@ -109,10 +110,26 @@ echo "  release url   : $RB_URL"
 
 [ "$RB_TAG" = "$RELEASE_TAG" ] || { echo "PUBLISH-FAIL: tag mismatch: built '$RELEASE_TAG', GitHub has '$RB_TAG'"; exit 1; }
 [ "$RB_ASSET" = "$ASSET_NAME" ] || { echo "PUBLISH-FAIL: asset '$ASSET_NAME' not on the release (found '${RB_ASSET:-none}')"; exit 1; }
-[ -n "$RB_URL_A" ] || { echo "PUBLISH-FAIL: no download URL for $ASSET_NAME"; exit 1; }
+[ -n "$RB_ASSET_ID" ] && [ "$RB_ASSET_ID" != "null" ] || { echo "PUBLISH-FAIL: no asset id for $ASSET_NAME"; exit 1; }
 
+# MEASURED 2026-09-30: fetching the asset by its `browser_download_url` returns a
+# 9-byte "Not Found" on a PRIVATE repository, even with a valid token. The
+# read-back hashed those 9 bytes, compared them against the built asset, and
+# declared PUBLISH-FAIL on a release that was in fact byte-for-byte correct.
+# The strictness was right and the URL was wrong: the API asset endpoint with
+# `Accept: application/octet-stream` returns the real bytes, and the sha matches.
+#
+# Worth stating plainly, because the failure mode is unusual and instructive: this
+# gate caught a bug in ITSELF, and it caught it by FAILING CLOSED on a bad
+# download rather than accepting whatever came back. A read-back that had merely
+# logged the hash would have published a green lie.
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
-timeout 300 curl -sSL "${AUTH[@]}" -o "$TMPD/$ASSET_NAME" "$RB_URL_A"
+timeout 300 curl -sSL "${AUTH[@]}" -H "Accept: application/octet-stream" \
+  -o "$TMPD/$ASSET_NAME" "https://api.github.com/repos/$REPO/releases/assets/$RB_ASSET_ID"
+GOT_BYTES=$(wc -c < "$TMPD/$ASSET_NAME" | tr -d ' ')
+# A short read is GitHub handing back an error page, not an asset. Compare the
+# size the API reports BEFORE trusting any hash of it.
+[ "$GOT_BYTES" = "$RB_SIZE" ] || { echo "PUBLISH-FAIL: downloaded $GOT_BYTES bytes, GitHub reports the asset as $RB_SIZE — refusing to hash an error page"; exit 1; }
 GOT="$(sha256sum "$TMPD/$ASSET_NAME" | cut -d' ' -f1)"
 echo "  sha built     : $ASSET_SHA256"
 echo "  sha downloaded: $GOT"
