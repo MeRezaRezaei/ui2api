@@ -104,6 +104,36 @@ export function pickLatestVersion(names: string[]): string | null {
  * mirror target is now EXPLICIT: supply `repoUrl` or `UI2API_REGISTRY_REPO`. We
  * never invent a default destination for a write.
  */
+/* The public repository is `MeRezaRezaei/ui2api`, written only by the sanitizer.
+ * The name is overridable by env so a fork can guard ITS OWN public repo without
+ * editing this file, and the DEFAULT is the operator's real destination — a gate
+ * that defaults to permissive is not a gate. */
+const PUBLIC_SANITIZED_DEST =
+  process.env.UI2API_PUBLIC_DEST_REPO ?? "MeRezaRezaei/ui2api";
+
+/** True when `repoUrl` names the public sanitized destination. Compared on the
+ *  `owner/name` identity only, so ssh/https/`.git`/trailing-slash spellings all
+ *  resolve to the same verdict — a gate that can be walked around by changing the
+ *  URL's SHAPE is not a gate. */
+export function namesPublicSanitizedDest(repoUrl: string): boolean {
+  const m = /(?:github\.com[:/])([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?\s*$/i.exec(repoUrl);
+  if (!m) return false;
+  return `${m[1]}/${m[2]}`.toLowerCase() === PUBLIC_SANITIZED_DEST.toLowerCase();
+}
+
+function assertNotPublicSanitizedDest(repoUrl: string): void {
+  if (!namesPublicSanitizedDest(repoUrl)) return;
+  throw new Error(
+    `refusing to mirror packages into the PUBLIC SANITIZED repository ${PUBLIC_SANITIZED_DEST}. ` +
+      "That repository is a full-history rewrite whose only writer is the sanitizer " +
+      "(public_mirror), and it is published precisely because every forbidden class measured zero. " +
+      "A package mirror would write into it with no sanitisation and no verification marker, which " +
+      "destroys the property that makes it safe to publish. Mirror packages into the registry " +
+      "(ui2api-registry) or the private full copy instead. If you really are re-pointing the " +
+      "sanitizer, change scripts/ci/make-public-repo.sh and .gitlab-ci.yml, not a package push.",
+  );
+}
+
 export function pushToMirror(pkg: MirrorPackage, opts: { repoUrl?: string; workDir?: string } = {}): void {
   const repoUrl = opts.repoUrl ?? process.env.UI2API_REGISTRY_REPO;
   if (!repoUrl) {
@@ -112,6 +142,24 @@ export function pushToMirror(pkg: MirrorPackage, opts: { repoUrl?: string; workD
         "that should receive published packages. There is no default community mirror — none is published."
     );
   }
+  /* THE PUBLIC SANITIZED DESTINATION IS NOT A PACKAGE MIRROR, and this seam had
+     no way to know that.
+     `public_mirror`'s public half is the ONLY writer of
+     `MeRezaRezaei/ui2api`, and it writes a full-history rewrite that has measured
+     every forbidden class at zero. This function clones with `--depth 1` and
+     commits package JSON into whatever URL it is handed — so
+     `--mirror-repo https://github.com/MeRezaRezaei/ui2api.git` would be a second,
+     ungated writer to a repository whose entire value is that it is a faithful
+     mirror, and it would do so with no sanitisation step and no verification
+     marker at all.
+
+     Blast radius is bounded — package JSON, never the corpus — but "bounded" is
+     not "safe": the failure is a public history that stops being a faithful
+     mirror, which is precisely what the whole publication pipeline exists to
+     prevent. The same shape as `assertSafePackageSegment`, one level up: a
+     destination that is unsafe to write is refused BY NAME, before any
+     filesystem or network work. */
+  assertNotPublicSanitizedDest(repoUrl);
   // Refuse the identifier BEFORE any filesystem work, naming the field — same
   // gate, same order and the same refusal shape as the two sibling seams.
   const safeName = assertSafePackageSegment("name", pkg.name);

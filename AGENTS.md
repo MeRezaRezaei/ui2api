@@ -316,22 +316,45 @@ sudo -u ui2api -H npx tsx src/cli.ts chrome stop     # refuses to kill a Chrome 
   `findOwnerChrome`, `resolveAttachPort`, `stopChromeDaemon`); the launch seam
   prefers the live daemon via `UI2API_ATTACH_PORT` (see `launchBrowser`).
 
-## GIT WIRING — both remotes, and the privacy gate
+## GIT WIRING — the topology, and the privacy gate
 
-The project lives on **GitHub AND GitLab**, and both are **private**.
+The code lives in **three** repositories, and exactly one of them is public.
 `.brain/` is the operator's private IP and must never reach a public remote.
 
-- `origin` fetches from GitHub and **pushes to BOTH** (two push URLs), so one
-  `git push origin` lands in both places. `gitlab` is the explicit GitLab remote.
+- `origin` is **GitLab, for both fetch and push** (`gitlab` points at the same
+  place). This CHANGED on 2026-10-01 and the old wiring was the cause of a real
+  incident: `origin` used to fetch from GitHub and **push to BOTH**, so an
+  ordinary `git push origin` wrote the full, corpus-bearing history straight into
+  `MeRezaRezaei/ui2api` — the repo that is the *sanitized public mirror* — racing
+  the CI job that force-pushes a clean history to the same ref. Last writer won,
+  and the public copy carried `.brain` for about two minutes.
+  **Now: zero remotes reference `github.com`.** The public repo is reachable only
+  by typing its URL deliberately, which is the point. Verify with
+  `git remote -v | grep -c github.com` -> `0`.
+- The topology, and who may write to each destination:
+  - `MeRezaRezaei/ui2api` (GitLab) — the **actor**. Full history, `.brain`
+    tracked, CI runs here. GitLab and `ui2api-full` are the complete record.
+  - `MeRezaRezaei/ui2api` (GitHub) — the **sanitized public copy**, written by
+    exactly one job (`public_mirror`'s public half) and only after
+    `scripts/ci/make-public-repo.sh` measured every forbidden class at zero.
+  - `MeRezaRezaei/ui2api-full` (GitHub) — **private**, complete record. GitHub
+    Releases are published HERE, because a release built from the full checkout
+    cannot have a valid tag in a rewritten (sanitized) history.
+  - `MeRezaRezaei/operator-brain` — private shared brain vault.
 - **Port 22 is blocked on this box** — an SSH push hangs until timeout. GitLab is
   therefore HTTPS (443) with a token in a `0600` credential file, never in the
   repo. Do not "fix" a push by switching to SSH; it will hang.
 - **CI is GitLab** (`.gitlab-ci.yml`). The GitHub workflow is a redundant lane.
-- Verify privacy before any push that carries `.brain/`:
-  `gh repo view MeRezaRezaei/ui2api --json isPrivate` -> `true`, and
-  `glab api "projects/MeRezaRezaei%2Fui2api"` -> `visibility: private`.
+- Before any push that carries `.brain/`, note that **only the GitLab destinations
+  may receive it**: `ui2api-full` (private) and GitLab itself. Never the public
+  repo. Verify with
+  `gh repo view MeRezaRezaei/ui2api --json isPrivate` -> `false` (it is public and
+  sanitized) and `glab api "projects/5"` -> `visibility: private`.
 - Export `GITLAB_HOST=gitlab.pubg-sell.ir` before `glab ci status`, or it reports
-  "no GitLab remotes found" (it reads `origin`'s fetch URL, which is GitHub).
+  "no GitLab remotes found". NOTE: the old workaround claimed this was because
+  `glab` reads `origin`'s fetch URL "which is GitHub" — that is no longer true,
+  since `origin` IS GitLab. The variable is still required (it is not inferred from
+  a remote), but the stated reason is stale and this line records the correction.
 - Full detail, verification commands and gotchas: **`docs/GIT_WIRING.md`**.
 
 ## THE CHROME POINT OF USE — read this before touching any browser code
