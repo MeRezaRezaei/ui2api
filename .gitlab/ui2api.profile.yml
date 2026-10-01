@@ -46,4 +46,23 @@ install:
   opencode_preflight: true
   agent_merge: true
   agent_reap: true
-  mirror_to_github: true
+  # OFF, with reason. public_mirror SUPERSEDES it for this project.
+  #
+  # MEASURED on pipeline 947: the kit's mirror_to_github ran for the first time
+  # (it had been inert — no OMNIROUTE_API_KEY/GH_TOKEN) and did its job exactly
+  # right: it verified the destination is PRIVATE, counted 2 branches and 5 tags,
+  # and then REFUSED to push because GitHub's main holds work we do not have —
+  #   ! [rejected]  origin/main -> main (fetch first)
+  # That is the no-force rule doing its job, and it is right in the abstract.
+  #
+  # But this project has TWO mirrors with OPPOSITE force semantics writing to the
+  # SAME repo: the kit's never forces (a human looks at a divergence), and
+  # public_mirror forces for the sanitized copy (because stripping paths rewrites
+  # every hash, so a non-fast-forward there is the intended operation, not an
+  # anomaly). Two jobs fighting over one remote is a design collision, and the
+  # loser's failure is noise that trains people to ignore red.
+  #
+  # public_mirror handles both halves with the right semantics each: the private
+  # full copy WITHOUT force, the public sanitized copy WITH force and hard-gated
+  # on a clean verification. So the kit's mirror is redundant here, not wrong.
+  mirror_to_github: false
