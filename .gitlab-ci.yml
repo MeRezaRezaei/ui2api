@@ -307,7 +307,33 @@ public_mirror:
     #   "FATAL: sandbox .../.mirror is inside the source repo ..."
     # which is the guard working exactly as designed. A filter-repo sandbox inside
     # the repo it is filtering is the one arrangement that can rewrite the source.
-    - mkdir -p /tmp/mirror-work && ./scripts/ci/make-public-repo.sh --work /tmp/mirror-work --keep
+    # The two halves have DIFFERENT risk and therefore different urgency, so they no
+    # longer share a fate.
+    #
+    # MEASURED on pipeline 921, after the --invert-paths fix:
+    #     brain paths (all commits, by name)         priv=37     pub=0      PASS
+    #     brain markers inside blob CONTENT          priv=36     pub=18     FAIL
+    #     commit messages naming the corpus          priv=28     pub=15     FAIL
+    #     measured infra addresses                   priv=9      pub=1      FAIL
+    #
+    # The PATH strip is now correct. What remains is the blind spot path filtering
+    # structurally cannot close: the corpus quoted INSIDE files with innocent paths,
+    # and commit messages that name it. That is real work, not a flag.
+    #
+    # So: the PRIVATE full copy — the actual durability goal, the one that means
+    # deleting the GitLab VPS costs nothing — is pushed even when the public copy
+    # cannot be, because a private repo of the complete history has no leak to
+    # contain. The PUBLIC push stays hard-gated on a clean verification.
+    - mkdir -p /tmp/mirror-work
+    - |
+      if ! ./scripts/ci/make-public-repo.sh --work /tmp/mirror-work --keep; then
+        echo "SANITIZE-FAIL: the public copy did not verify. It will NOT be published."
+        echo "               The private full copy is still safe to push, and pushing it"
+        echo "               is what makes deleting the GitLab VPS survivable."
+      else
+        echo "SANITIZE-OK: both halves verified"
+      fi
+      cp -a /tmp/mirror-work/maps/. "$CI_PROJECT_DIR/.mirror/maps/" 2>/dev/null || true
     - |
       set -uo pipefail
       [ -n "${GH_TOKEN:-}" ] || { echo "MIRROR-SKIP: no GH_TOKEN in scope. Nothing was pushed."; exit 0; }
@@ -328,6 +354,17 @@ public_mirror:
       timeout -k 10 1200 git -C "$PRIV" push --mirror origin \
         || { echo "MIRROR-FAIL: private-full push refused — a human must look"; exit 1; }
 
+      # The public push is hard-gated: a failed sanitisation leaves this directory
+      # unverified, and the verifier's own record is read here rather than trusted.
+      if [ ! -f /tmp/mirror-work/public-verified ] && ! grep -q "SANITIZE-OK" /tmp/sanitize.log 2>/dev/null; then
+        echo "== PUBLIC SANITIZED -> SKIPPED =="
+        echo "   The sanitized copy did not verify, so it is not published."
+        echo "   Publishing it would put brain material in a PUBLIC repository, and a"
+        echo "   public repository's history cannot be un-published. Private copy above"
+        echo "   still pushed: the durability goal does not wait for this."
+        echo "MIRROR-OK: private-full published; public-sanitized WITHHELD (unverified)"
+        exit 0
+      fi
       echo "== PUBLIC SANITIZED -> github/$GITHUB_REPO =="
       git -C "$PUB" remote remove origin 2>/dev/null || true
       git -C "$PUB" remote add origin "https://github.com/$GITHUB_REPO.git"
