@@ -26,6 +26,24 @@
  * AND non-empty, the honest answer is the generic fallback, never the raw text.
  */
 
+// The account-refusal SENTENCE is owned by `consumerAccountRefusal()` in
+// `./consumer-surface.ts` and is imported, never re-typed. This file used to
+// carry its own near-copy of it, and the two had already drifted: the closing
+// clause read "or use an account id returned by GET /accounts?site=X" here and
+// "or pass an id from GET /accounts?site=X" there. Two wordings of one condition
+// means a consumer can be handed two different sentences for the same refusal,
+// and a reword of either copy leaves the other stale with nothing to catch it —
+// the same shape as the credential gate that once asserted on a string a
+// redaction step had already replaced, and so proved nothing.
+//
+// REDACTION IS NOT AN EXCUSE FOR A SECOND OWNER: it rewrites what a caller may
+// READ, and this sentence is already the roster-free projection written for
+// exactly that reader. Delegating is therefore both the dedup fix and the more
+// correct behaviour. `test/error-redaction.test.ts` pins it two ways: the
+// clause may be TYPED in exactly one file under `src/`, and the bytes this seam
+// emits must equal the owner's bytes.
+import { consumerAccountRefusal } from "./consumer-surface.js";
+
 /** The site/model the request was for — always known at the sink. */
 export interface RedactionContext {
   /** The model id the caller asked for (already a public /v1 id). */
@@ -48,11 +66,18 @@ const CLASSES: ReadonlyArray<{ re: RegExp; say: (ctx: RedactionContext, raw: str
     // The account the caller asked for is not one this daemon can use. The
     // words "session"/"vault" are dropped: what the caller controls is the
     // account selector, so that is the vocabulary the answer uses.
+    //
+    // THE SENTENCE IS NOT AUTHORED HERE — see the import note at the top. This
+    // class decides only WHICH account was refused (the caller's own `account`
+    // wins; otherwise the one quoted in the raw message) and what to say when
+    // the raw message named none, which is a DIFFERENT condition and keeps its
+    // own sentence: with no account to echo, the caller cannot fix a typo, so
+    // the honest remedy is the operator granting access.
     re: /no stored (?:session|account) for|sl[ug]?-collision/i,
     say: (c, raw) => {
       const asked = c.account ?? /\baccount "([^"]+)"/i.exec(raw)?.[1];
       return asked
-        ? `account "${asked}" is not available for ${c.site ?? "this model"}; send the request without "account" to use the default account, or use an account id returned by GET /accounts?site=${c.site ?? ""}`
+        ? consumerAccountRefusal(asked, c.site ?? "this model")
         : `no account is available for ${c.site ?? "this model"}; the service operator must grant access before this model can be used`;
     },
   },
