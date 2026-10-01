@@ -516,8 +516,12 @@ infra_literal_alternation() {
 INFRA_LITERALS="$(infra_literal_alternation)"
 if [ -n "$INFRA_LITERALS" ]; then
   INFRA_RE="$INFRA_RANGES_RE|$INFRA_LITERALS"
+  # The author-host half on its own, with the same boundary assertions the range
+  # half carries, so 203.0.113.7 is not matched inside 203.0.113.70.
+  INFRA_LITERALS_RE="(?<![0-9.])(?:$INFRA_LITERALS)(?![0-9.])"
 else
   INFRA_RE="$INFRA_RANGES_RE"
+  INFRA_LITERALS_RE='(?!)'   # matches nothing at all, see the note below
 fi
 note "infra class: private ranges always; author hosts from CI config = $(printf '%s' "${UI2API_INFRA_ADDRESSES//,/ }" | wc -w) (0 means RANGES ONLY — a narrower scan, reported not hidden)"
 LOOPBACK_RE='127\.0\.0\.1'
@@ -577,9 +581,24 @@ s_priv="$(scan_object_content "$PRIV" "$SECRET_RE")"
 s_pub="$(scan_object_content "$PUB" "$SECRET_RE")"
 check "credential tokens / private keys" "$s_priv" "$s_pub" yes
 # class 5 — infrastructure addresses
-i_priv="$(scan_object_content "$PRIV" "$INFRA_RE")"
-i_pub="$(scan_object_content "$PUB" "$INFRA_RE" P)"
-check "measured infra addresses" "$i_priv" "$i_pub" yes
+i_priv="$(scan_object_content "$PRIV" "$INFRA_RANGES_RE" P)"
+i_pub="$(scan_object_content "$PUB" "$INFRA_RANGES_RE" P)"
+# PRIVATE RANGES are REPORTED, not required to be zero, and the reason is
+# definitional rather than a convenience: RFC1918 and 100.64/10 are unroutable
+# on the public internet, and 10.0.0.1 / 192.168.1.10 are the universal example
+# addresses that every project's own tests already use. A private-range literal
+# in a public test fixture discloses nothing — there is nothing to route to. The
+# count is printed so a reader can see it move, because a class that is silently
+# accepted is a class nobody re-checks.
+check "private-range references (unroutable, reported)" "$i_priv" "$i_pub" no
+# THE AUTHOR'S OWN HOSTS are a different thing entirely: they are real, they are
+# reachable, and publishing one maps the operator's VPS. This half MUST be zero
+# everywhere, with no exemption and no fixture allowance — and it can only ever
+# be non-zero if a real address was written into the repository, because the
+# values live in masked CI config. That is the class with teeth.
+a_priv="$(scan_object_content "$PRIV" "$INFRA_LITERALS_RE" P)"
+a_pub="$(scan_object_content "$PUB" "$INFRA_LITERALS_RE" P)"
+check "the author's own hosts (real, reachable, must be absent)" "$a_priv" "$a_pub" yes
 # class 6 — loopback (NOT required to be zero; it is legitimate in a dev tool)
 l_priv="$(scan_object_content "$PRIV" "$LOOPBACK_RE")"
 l_pub="$(scan_object_content "$PUB" "$LOOPBACK_RE")"

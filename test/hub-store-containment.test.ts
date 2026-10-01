@@ -153,8 +153,16 @@ d("GOAL 122: the hub is loopback-only unless explicitly opted in", () => {
       // explicit, host-matching opt-in
       process.env.UI2API_HUB_BIND = "0.0.0.0";
       assert.equal(resolveHubBindHost("0.0.0.0"), "0.0.0.0", "a matching opt-in must work");
-      // and an opt-in for one host must NOT authorise another
-      assert.throws(() => resolveHubBindHost("REMOVED"), /refusing to bind/);
+      // and an opt-in for one host must NOT authorise another.
+      //
+      // The address is 192.168.1.250, not REMOVED. This file ships inside
+      // the public copy, and REMOVED is the operator's ACTUAL LAN address —
+      // measured in the private corpus and listed in the sanitizer's author-host
+      // list. A refusal test exercises identically against any private address,
+      // so there is no reason for the real one to be in here. MEASURED
+      // 2026-10-01: the publication sanitizer's infra class caught this line,
+      // which is the class doing exactly the job it exists for.
+      assert.throws(() => resolveHubBindHost("192.168.1.250"), /refusing to bind/);
     } finally {
       if (prev === undefined) delete process.env.UI2API_HUB_BIND;
       else process.env.UI2API_HUB_BIND = prev;
