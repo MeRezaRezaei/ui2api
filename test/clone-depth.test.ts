@@ -7,7 +7,12 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const git = (...args: string[]): string =>
-  execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  execFileSync("git", ["-C", ROOT, ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: 30_000,
+    killSignal: "SIGKILL",
+  });
 
 /** True when this checkout's history is truncated. `git rev-parse --is-shallow-repository`
  *  is the authoritative answer; it was added in git 2.15 and this box is far past that. */
@@ -106,6 +111,13 @@ t("a truncated history is DETECTABLE, not merely assumed absent", () => {
 
   const out = execFileSync("bash", ["-c", probe], {
     encoding: "utf8",
+    // Bounded, because the suite has a gate that requires every subprocess and
+    // network call in test/ to carry a timeout or a kill — and that gate caught
+    // this file when it was first written without one. A probe that builds a git
+    // repository will hang if git ever waits on a credential or a lock, and a
+    // hanging probe takes the whole suite with it.
+    timeout: 30_000,
+    killSignal: "SIGKILL",
     stdio: ["ignore", "pipe", "pipe"],
   });
 
