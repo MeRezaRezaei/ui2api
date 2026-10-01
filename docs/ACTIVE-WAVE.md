@@ -1,54 +1,40 @@
-# ACTIVE WAVE — 2026-10-01T19:30Z
+# ACTIVE WAVE — 2026-10-01T20:05Z (SECOND WAVE)
 
-Four lanes dispatched in ONE message (parallel siblings, not serialised). If you
-are reading this after an interrupt, COLLECT THEM FIRST — their results do not
-survive a stop, but their task ids do, and a finished-but-uncollected lane is a
-silent result.
+Two lanes out. Collect with `get_delegation_status` on 1–2 ids at a time, re-armed
+until terminal. A turn must never end with a task still `running`.
 
-| task_id | lane | owns | state |
-| --- | --- | --- | --- |
-| `e048ab3d-9db0-4de0-935a-dbcc15741ea8` | duplicated account-refusal owner | runner-up #2 — `error-redaction.ts` vs `consumerAccountRefusal()` | dispatched |
-| `e2ad4601-bc62-41f0-b0b7-30546f149c9d` | concept-word derivation | runner-up #3 — Chrome/Xvfb/CDP/headless not derivable | dispatched |
-| `d7840483-0fc3-43fb-a0f6-5b30e74a126a` | stale classification record | runner-up #5 — classes 7-9 not enumerated | dispatched |
-| `788cd004-5e75-4766-9d32-47ab0c491820` | SIGN-OUT runbook | runner-up #1 — 11 human-login rows | dispatched |
+| task_id | lane | owns |
+| --- | --- | --- |
+| `37f512e5-7ac5-48f1-b6c8-9e30d2ad1a84` | GitHub `origin` divergence | runner-up #4 — measure what GitHub holds, recommend, and only then act locally |
+| `927cbd6a-c2f8-49cf-a479-ae68944e22ed` | duplicated concept-word list | runner-up #3 residue — `error-redaction.ts` carries a SECOND hand-typed concept list |
 
-**Collect with `get_delegation_status` on 1–2 ids at a time** (6+ times out at the
-MCP layer), re-armed until every task is terminal. A turn must never end with a
-task still `running`.
+## FIRST WAVE — all four collected and merged (nothing outstanding)
 
-## STATE AT DISPATCH
+| lane | outcome | commit |
+| --- | --- | --- |
+| account-refusal owner | duplicate deleted; its shipped gate was VACUOUS (file-count, not occurrence-count) — rewritten and proven | `b1cb4e6` |
+| concept-word derivation | 3 of 4 terms were derivable; class now derived; 2 live leaks found in 162 descriptions | `91f787a` |
+| class record | premise MISNUMBERED; `MODEL_ANSWER_CLASSES` was a lying hand-typed list, now derived; 6 falsified counts fixed | `a90f439` |
+| SIGN-OUT runbook | 558-line runbook + RULE 12 anti-rot gate, proven red on a removed anchor | `f5a708a` |
 
-- HEAD `62e7398`, tree clean, nothing unpushed.
-- Pipeline **1138 fully green**: build, verify, deploy, github_release, agent_reap
-  all `success`. (github_release green means the artifacts-uploader 500 did not
-  recur — that fault is intermittent, not fixed.)
-- Public repo live and verified: `MeRezaRezaei/ui2api`, anonymous clone measured
-  0 corpus paths / 0 addresses / 0 tokens / 0 `data/` paths across 407 commits.
-- GOAL 172 closed (`aeb102e`); GOAL 175 closed (`83380f7`).
+Two lanes DIED (`child_rejected`) before reporting. Their residue was salvaged from
+the tree and verified rather than trusted — that is where the account-refusal fix
+came from, and its gate turned out to be vacuous. **A dead lane is not a failed
+lane: read the tree before re-dispatching.**
 
-## WHEN THE LANES LAND
+## THE PATTERN ACROSS THIS WAVE — read before writing any gate
 
-1. Verify each lane's claims YOURSELF before merging — a lane's report is a
-   claim, not evidence. Run the test files it names and read the output.
-2. Watch for the two failure modes this session keeps hitting:
-   - a lane that edits `package.json` and deletes the
-     `node --import tsx --test-concurrency=4 --test-timeout=120000 --test `
-     prefix (a bare file list then fails with `sh: test/...: Permission denied`);
-   - a lane that adds a `test/*.test.ts` without registering it, which
-     `test/gate-wiring.test.ts` R4 catches and `test/doc-numbers-truth.test.ts`
-     catches as a stale count in `README.md` + `.brain/PRODUCTION_READINESS.md` 4.1.
-3. Run BOTH tsc projects before committing:
-   `npx tsc --noEmit` AND `npx tsc --noEmit -p tsconfig.test.json`.
-4. Merge to main, then let CI be the authority — do not claim green without
-   reading the pipeline.
+Every single lane shipped a gate that mutation proved VACUOUS:
+- a file COUNT where the question was occurrence COUNT,
+- four hand-typed regexes where the code had an exec surface to derive from,
+- a pinned list where the vocabulary could be derived,
+- a completeness gate silent on one of its own classes.
 
-## THE POINT OF THE NESTING
+**Not one had been watched to go red before it was believed.** Every gate is proven
+red now. Before you trust a new gate, mutate the thing it guards and watch it fail;
+and if the mutation does not fire, establish whether the gate is broken or the
+mutation was wrong — both happened today, in that order.
 
-The operator stopped this session several times; each stop killed every running
-lane and the goal, so the next turn began with nothing. Two halves to the fix, and
-both are needed:
+## STATE
 
-- **durable** — `scripts/ops/resume-state.sh` plus this file, so the state is
-  re-readable in one command instead of re-derived from history;
-- **wide** — lanes in parallel from the start, so one stop costs one wave rather
-  than a serial queue.
+HEAD `d023a37`, tree clean, nothing unpushed. Public repo live and verified.
