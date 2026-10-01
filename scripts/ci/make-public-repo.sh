@@ -296,7 +296,18 @@ scan_paths() { # $1=repo  $2=path-regex
     | sed 's/^[0-9a-f]* //' | sort -u \
     | grep -cE "$2" || true
 }
-scan_object_content() { # $1=repo $2=extended-regex
+# CAPABILITY PROBE, before any scan runs. INFRA_RE needs PCRE (lookarounds and
+# `(?:)`), and `grep -E` accepts it silently — warning once per object, matching
+# nothing, and reporting a flawless zero. On pipeline 1068 that produced 4MB of
+# warnings before the trace was truncated. The planted self-test DOES catch the
+# consequence (it sets ALL_PASS=0), so this is not the only line of defence; it
+# is here so the failure says "this grep cannot do what the script needs" instead
+# of arriving as a thousand warnings beside a suspiciously perfect table.
+if ! echo x | grep -aqP '(?<![0-9.])10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}(?![0-9.])' 2>/dev/null; then
+  fail "this grep cannot do PCRE lookarounds, which INFRA_RE requires. Without -P the infra class matches NOTHING and reports a false zero. Install GNU grep, or rewrite INFRA_RE in POSIX ERE (losing the boundary assertions)."
+fi
+
+scan_object_content() { # $1=repo $2=extended-regex [$3=grep flavour: E (default) or P]
   # Renamed from `scan_blob_content`, which was a lie. `rev-list --all --objects`
   # yields COMMITS and TREES as well as blobs, and `cat-file -p` on a commit
   # prints its MESSAGE — so this function has always scanned commit messages too,
@@ -305,13 +316,22 @@ scan_object_content() { # $1=repo $2=extended-regex
   # and read as a file-content problem. Messages are intentionally still included
   # here (belt and braces alongside the dedicated commit-message class); only the
   # name was wrong. If you ever want blobs only, filter on the object TYPE.
-  # Enumerate every distinct object, then grep its content. Bounded and honest:
-  # this is a real full-history content scan, not a HEAD scan.
-  local repo="$1" re="$2" n=0
+  #
+  # THE FLAVOUR ARGUMENT IS LOAD-BEARING. INFRA_RE needs PCRE: its alternation
+  # uses `(?:...)` and boundary lookarounds, which POSIX ERE does not have. Fed
+  # to `grep -E` it does not fail — it WARNS ("? at start of expression") and
+  # then matches NOTHING. A must-be-zero class that matches nothing reports a
+  # perfect zero, so a broken regex is indistinguishable from a clean repository:
+  # the most dangerous possible failure for this script, and the one that
+  # actually happened. MEASURED 2026-10-01 on pipeline 1068, which spent 4MB of
+  # log on the warnings before the trace was truncated.
+  local repo="$1" re="$2" flavour="${3:-E}" flag="-E"
+  [ "$flavour" = "P" ] && flag="-P"
+  local n=0
   while read -r obj; do
     [ -n "$obj" ] || continue
     if timeout -k 5 30 git -C "$repo" cat-file -p "$obj" 2>/dev/null \
-         | grep -aqE "$re"; then
+         | grep -aq"$flag" "$re"; then
       n=$((n+1))
     fi
   done < <(timeout -k 5 "$T_SCAN" git -C "$repo" rev-list --all --objects \
@@ -448,7 +468,7 @@ s_pub="$(scan_object_content "$PUB" "$SECRET_RE")"
 check "credential tokens / private keys" "$s_priv" "$s_pub" yes
 # class 5 — infrastructure addresses
 i_priv="$(scan_object_content "$PRIV" "$INFRA_RE")"
-i_pub="$(scan_object_content "$PUB" "$INFRA_RE")"
+i_pub="$(scan_object_content "$PUB" "$INFRA_RE" P)"
 check "measured infra addresses" "$i_priv" "$i_pub" yes
 # class 6 — loopback (NOT required to be zero; it is legitimate in a dev tool)
 l_priv="$(scan_object_content "$PRIV" "$LOOPBACK_RE")"
@@ -475,7 +495,7 @@ git -C "$PLANT" add -A >/dev/null
 git -C "$PLANT" commit --quiet -m "plant: brain path + REMOVED token + infra addr + 'User verbatim (2026-09-20'"
 plant_paths="$(scan_paths "$PLANT" "$BRAIN_PATH_RE")"
 plant_secret="$(scan_object_content "$PLANT" "$SECRET_RE")"
-plant_infra="$(scan_object_content "$PLANT" "$INFRA_RE")"
+plant_infra="$(scan_object_content "$PLANT" "$INFRA_RE" P)"
 plant_msg="$(scan_commit_messages "$PLANT" 'verbatim|\.brain|brain/')"
 note "planted probe -> brain-paths=$plant_paths secrets=$plant_secret infra=$plant_infra msgs=$plant_msg"
 {
