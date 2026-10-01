@@ -374,15 +374,22 @@ public_mirror:
       # An explicit heads+tags refspec pushes the real branches and the real tags
       # and nothing else. Same lesson as the kit's own mirror: push what you mean,
       # named explicitly, rather than a wildcard that also takes the bookkeeping.
-      SPEC=""
+      SPEC=""; NBRANCH=0; NTAG=0
       for b in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/heads); do
-        SPEC="$SPEC $b:refs/heads/$(basename "$b")"
+        SPEC="$SPEC $b:refs/heads/$(basename "$b")"; NBRANCH=$((NBRANCH+1))
       done
       for t in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/tags); do
-        SPEC="$SPEC $t:$t"
+        SPEC="$SPEC $t:$t"; NTAG=$((NTAG+1))
       done
-      echo "   refs: $(echo $SPEC | wc -w)"
-      [ -n "$SPEC" ] || { echo "MIRROR-FAIL: private-full has no branches or tags to push"; exit 1; }
+      echo "   pushing $NBRANCH branch(es) and $NTAG tag(s)"
+      # BRANCHES ARE REQUIRED, and this check is the whole point.
+      #
+      # MEASURED: the first run pushed 5 TAGS and no branch, reported
+      # "MIRROR-OK", and left a repo containing no main at all. The old guard
+      # only asked whether SPEC was non-empty, and five tags make it non-empty.
+      # A backup with tags and no branch is not a backup, and it looks completely
+      # healthy in the GitHub UI — real repo, real pushed_at, five real tags.
+      [ "$NBRANCH" -gt 0 ] || { echo "MIRROR-FAIL: private-full has NO BRANCH to push ($NTAG tag(s) only)."; echo "            A backup without a branch is not a backup. Refusing to report MIRROR-OK."; exit 1; }
       timeout -k 10 1200 git -C "$PRIV" push origin $SPEC \
         || { echo "MIRROR-FAIL: private-full push refused - a human must look"; exit 1; }
 
