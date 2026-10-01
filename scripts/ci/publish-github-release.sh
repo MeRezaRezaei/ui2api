@@ -137,14 +137,23 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 # short body into the right one.
 GOT_BYTES=0
 for attempt in 1 2 3 4 5 6; do
-  timeout 300 curl -sSL "${AUTH[@]}" -H "Accept: application/octet-stream" \
+  # The Accept header must OVERRIDE the one in AUTH, not sit beside it. Measured
+  # on pipeline 992: passing `-H "Accept: application/octet-stream"` in ADDITION to
+  # AUTH's own `-H "Accept: application/vnd.github+json"` made curl send TWO Accept
+  # headers; GitHub honoured the JSON one and returned the asset's 1734-byte METADATA
+  # instead of its bytes, on all six attempts. A consistent 1734 bytes was the tell
+  # — a race returns a varying short body, a header conflict returns the same wrong
+  # body every time. So the JSON Accept is replaced, not appended.
+  timeout 300 curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" \
+    -H "Accept: application/octet-stream" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     -o "$TMPD/$ASSET_NAME" "https://api.github.com/repos/$REPO/releases/assets/$RB_ASSET_ID" || true
   GOT_BYTES=$(wc -c < "$TMPD/$ASSET_NAME" 2>/dev/null | tr -d ' ')
   echo "  attempt $attempt: $GOT_BYTES bytes (GitHub reports $RB_SIZE)"
   [ "$GOT_BYTES" = "$RB_SIZE" ] && break
   [ "$attempt" = "6" ] || sleep 10
 done
-[ "$GOT_BYTES" = "$RB_SIZE" ] || { echo "PUBLISH-FAIL: after 6 attempts GitHub served $GOT_BYTES bytes for an asset it reports as $RB_SIZE — refusing to hash a short body"; exit 1; }
+[ "$GOT_BYTES" = "$RB_SIZE" ] || { echo "PUBLISH-FAIL: after 6 attempts GitHub served $GOT_BYTES bytes for an asset it reports as $RB_SIZE"; echo "  first bytes: $(head -c 160 "$TMPD/$ASSET_NAME" | tr -d '\n')"; exit 1; }
 GOT="$(sha256sum "$TMPD/$ASSET_NAME" | cut -d' ' -f1)"
 echo "  sha built     : $ASSET_SHA256"
 echo "  sha downloaded: $GOT"
