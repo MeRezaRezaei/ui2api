@@ -135,18 +135,8 @@ verify:
     # The verbatim-completeness gate (P1..P5) is part of the human-free chain.
     - npm run check:verbatim
     - npm run check:verbatim:goals
-    # THE UNIT SUITE RUNS FIRST, and the order is load-bearing. Measured on
-    # pipeline 1056: `npm test` (integration) needs a real browser, the apt GPG
-    # fault left the OS deps uninstalled, Chromium exited 127, and because
-    # integration ran FIRST the job died there — so test:unit never ran at all.
-    # Every gate in the unit suite, including the credential, brain-publication
-    # and clone-depth gates, was silently unvalidated by a fault in a layer they
-    # do not touch. An infra fault must not be able to blind the gates that do
-    # not depend on it, so the fast dependency-free lane goes first and the
-    # browser-dependent lane second. `npm test` failing afterwards is still a
-    # failure, and now it fails having already proved everything it can.
-    - npm run test:unit
     - npm test
+    - npm run test:unit
 
 # ---------------------------------------------------------------- deploy ----
 #
