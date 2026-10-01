@@ -378,6 +378,28 @@ public_mirror:
       for b in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/heads); do
         SPEC="$SPEC $b:refs/heads/$(basename "$b")"; NBRANCH=$((NBRANCH+1))
       done
+      # A GitLab runner checkout is a DETACHED HEAD at one commit. Measured: on
+      # pipeline 956 the private-full clone had 604 reachable commits (so refs and
+      # objects were fine) but ZERO refs/heads, because the source had no local
+      # branch ref to mirror. `--mirror` copies the source's ref NAMESPACE, not
+      # its history, so a detached checkout produces a mirror with no branches —
+      # which is exactly the shape that made five tags look like a backup.
+      #
+      # So when no branch ref is found, rebuild one from the source's own HEAD.
+      # The history is already complete; only the NAME was missing.
+      if [ "$NBRANCH" -eq 0 ]; then
+        SB="$(git -C "$PRIV" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        if [ -z "$SB" ]; then
+          SB="$(git -C "$CI_PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+          case "$SB" in HEAD|"") SB="main";; esac
+        fi
+        SHA="$(git -C "$PRIV" rev-parse HEAD 2>/dev/null || true)"
+        if [ -n "$SHA" ]; then
+          echo "   no branch ref in the mirror; rebuilding '$SB' at $SHA from the detached checkout"
+          git -C "$PRIV" update-ref "refs/heads/$SB" "$SHA"
+          SPEC="refs/heads/$SB:refs/heads/$SB"; NBRANCH=1
+        fi
+      fi
       for t in $(git -C "$PRIV" for-each-ref --format='%(refname)' refs/tags); do
         SPEC="$SPEC $t:$t"; NTAG=$((NTAG+1))
       done
