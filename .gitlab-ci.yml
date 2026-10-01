@@ -135,6 +135,14 @@ verify:
     # the browser binary itself installs without it, and the suite asserts the
     # binary works. So a failed --with-deps degrades to a plain install with a
     # loud warning instead of taking the build down over a mirror signature.
+    # `jq` IS REQUIRED, not a nicety. scripts/ci/assert-repo-visibility.sh refuses
+    # without it — correctly, because a visibility answer it cannot parse is not an
+    # answer — and its own tests failed on pipeline 1174 with "jq is not on PATH".
+    # It is installed HERE, version-pinned, rather than left to `install-deps`,
+    # because the apt path is signature-dependent and the mirror has already
+    # failed once today. Same failure class as libnspr4: a tool the gates depend
+    # on, assumed present in an image that does not promise it.
+    - apt-get update -qq && apt-get install -y -qq jq >/dev/null
     - npx playwright install chromium
     - 'npx playwright install-deps chromium || echo "WARN - OS deps install failed (apt/mirror fault); continuing, the suite reports any genuinely missing library"'
     # Its own wigolo checkout. NOT passed as an artifact: node_modules plus a
@@ -402,7 +410,23 @@ public_mirror:
         touch /tmp/mirror-work/public-verified
         echo "SANITIZE-OK: both halves verified (marker written: /tmp/mirror-work/public-verified)"
       fi
-      cp -a /tmp/mirror-work/maps/. "$CI_PROJECT_DIR/.mirror/maps/" 2>/dev/null || true
+      # PATH FIXED, and the suppression REMOVED. This copied from
+      # `/tmp/mirror-work/maps/`, which does not exist — the sanitizer writes
+      # `$WORK/commit-maps` (make-public-repo.sh:129). Every run therefore copied
+      # nothing, and `2>/dev/null || true` hid both the error text and the exit
+      # code. MEASURED: 12 of 12 successful public_mirror artifacts were exactly
+      # 190 bytes — a zero-length directory entry, not the reconstruction key.
+      #
+      # NOT deleted, deliberately. A sibling lane recommended removing the artifact
+      # on the grounds that nothing consumes it and it is regenerable. Both are
+      # true and neither is decisive: the map is the ONLY record relating the
+      # sanitized history back to the original, "later on make the full repo
+      # again" is the operator's stated requirement, and regeneration is
+      # byte-identical only under the SAME git-filter-repo version — which CI
+      # installs unpinned. A durability artifact that has silently contained
+      # nothing for 13 hours is a false claim; one that contains the key is the
+      # real thing.
+      cp -a /tmp/mirror-work/commit-maps/. "$CI_PROJECT_DIR/.mirror/maps/"
     - |
       set -uo pipefail
       [ -n "${GH_TOKEN:-}" ] || { echo "MIRROR-SKIP: no GH_TOKEN in scope. Nothing was pushed."; exit 0; }
@@ -410,8 +434,12 @@ public_mirror:
       PUB="/tmp/mirror-work/public-sanitized"
       # The maps are the reconstruction key, so they are copied back into the
       # workspace to be published as a job artifact. They are small; the repos are not.
+      # The source path was WRONG (`maps/`, not `commit-maps/`) and the error was
+      # suppressed, so this has been copying nothing since it was written. Both are
+      # fixed: correct path, and no `2>/dev/null || true`, so a future break is LOUD
+      # rather than a 190-byte artifact that claims to be a key.
       mkdir -p "$CI_PROJECT_DIR/.mirror/maps"
-      cp -a /tmp/mirror-work/maps/. "$CI_PROJECT_DIR/.mirror/maps/" 2>/dev/null || true
+      cp -a /tmp/mirror-work/commit-maps/. "$CI_PROJECT_DIR/.mirror/maps/"
       # The token goes in an Authorization header or a credential-free URL only
       # via git's askpass. It is never echoed and never written to a file.
       export GIT_ASKPASS=/tmp/.askpass.sh
