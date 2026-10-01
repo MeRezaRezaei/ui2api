@@ -1372,7 +1372,12 @@ d("P6a: the visibility probe exists, and it is a SEPARATE tool from the sanitize
 // reason in the run output.
 function toolingPresent(bin: string): boolean {
   try {
-    execFileSync("sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
+    // Bounded, and caught by test/test-timeout-discipline.test.ts: the first
+    // version of this helper was an unbounded execFileSync, which is the exact
+    // defect that gate exists to forbid — found by the gate, in the commit that
+    // added it. `command -v` is instant in practice, which is precisely why an
+    // unbounded call is easy to write and bad to ship.
+    execFileSync("sh", ["-c", `command -v ${bin}`], { stdio: "ignore", timeout: 5_000 });
     return true;
   } catch {
     return false;
