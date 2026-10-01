@@ -682,11 +682,33 @@ red_line_guard:
   before_script:
     - apt-get update -qq && apt-get install -y -qq git >/dev/null
     - 'command -v git >/dev/null || { echo "FATAL git missing in php:8.3-cli"; exit 1; }'
+  # The guard reads LIVE_BRANCH and LIVE_APP_PATH, so it must CARRY them.
+  #
+  # MEASURED 2026-09-30: this job died with `LIVE_APP_PATH: unbound variable` on
+  # ui2api. The script referenced both placeholders but no `variables:` block ever
+  # declared them — only DEV_APP_PATH was passed. Under `set -u` an undefined
+  # reference is fatal, which is the correct shell behaviour and a kit bug: it
+  # would break identically for EVERY consumer, on the guard that exists
+  # specifically to be the thing that cannot be bypassed.
+  #
+  # They are declared HERE rather than relying on a global, for the same reason
+  # the before_script is: a kit job must not depend on what its consumer happens
+  # to define globally. And they are asserted, not merely set — a guard that
+  # silently compares against an empty path guards nothing.
+  variables:
+    LIVE_APP_PATH: "/opt/ui2api"
+    LIVE_BRANCH: "main"
+    DEV_APP_PATH: "/opt/ui2api"
   script:
     - |
       set -uo pipefail
       echo "== red line guard =="
       LIVE_PATH="$LIVE_APP_PATH"
+      if [ -z "$LIVE_PATH" ] || [ -z "$LIVE_BRANCH" ]; then
+        echo "FATAL: the red line guard has no live path/branch. A guard with nothing to guard"
+        echo "       passes vacuously, which is worse than no guard at all. Refusing to run."
+        exit 1
+      fi
       # 1. the live branch may not exist, and may never be built or deployed
       if [ "$CI_COMMIT_REF_NAME" = "$LIVE_BRANCH" ] || [ "$CI_COMMIT_BRANCH" = "$LIVE_BRANCH" ]; then
         echo "RED-LINE-VIOLATION: a pipeline is running for the 'production' branch."; exit 1
@@ -932,6 +954,12 @@ mirror_to_github:
       # NOT `gh api`: gh is only installed in the node:22 agent image, not in php:8.3-cli.
       GHPRIV() { timeout 60 curl -skfL -H "Authorization: Bearer $GH_TOKEN" \
                    "https://api.github.com/repos/$1" | jq -r '.private // "unknown"'; }
+      # BRAIN_DIR was READ by the refusal below but never ASSIGNED. Under `set -u`
+      # that is fatal, so the refusal would have died with "BRAIN_DIR: unbound
+      # variable" — the gate would have refused to run at all instead of refusing
+      # to push. A safety check that cannot execute is not a safety check.
+      BRAIN_DIR="${BRAIN_DIR:-.brain}"
+      echo "== .brain RULE: brain dir is $BRAIN_DIR"
       PRIV=$(GHPRIV "$GITHUB_REPO")
       BRAIN_REPO="${GITHUB_BRAIN_REPO:-}"
       if [ "$PRIV" = "true" ]; then
