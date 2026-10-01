@@ -151,6 +151,18 @@ for d in "$PRIV" "$PUB"; do
 done
 note "both clones carry the full $SRC_COMMITS-commit history (verified by count)"
 
+# A SHALLOW source is the failure mode that makes this whole job worthless without
+# any job going red. MEASURED on pipeline 953: GitLab's default clone is shallow,
+# the job received 20 commits where the repo has 602, and the private-full copy
+# would have been pushed as a 20-commit "complete history" — indistinguishable
+# from a real backup in the GitHub UI, and useless as one.
+#
+# The clone-count check above only compares the clones to EACH OTHER, so a shallow
+# source passes it perfectly. This compares against the REMOTE, which is the only
+# reference that can tell a complete history from a truncated one.
+timeout -k 5 "$T_SMALL" git -C "$SRC" rev-parse --is-shallow-repository 2>/dev/null | grep -q true && \
+  fail "the SOURCE clone is SHALLOW (GIT_DEPTH is not 0). A shallow private-full copy is not a backup — refuse to build one"
+
 # ===========================================================================
 # 2. THE PRIVATE-FULL COPY — the durability record
 #    No rewrite. It is the lossless half and the reconstruction reference.

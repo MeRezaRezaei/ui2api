@@ -277,6 +277,19 @@ public_mirror:
   interruptible: false
   needs: ["verify"]
   dependencies: []
+  # FULL HISTORY, and this is load-bearing rather than a habit.
+  #
+  # MEASURED on pipeline 953: without it, GitLab's default shallow clone gave the
+  # job 20 commits where the repo has 602, and the job then reported
+  #     private-full: 20 commits
+  #     refs: 0
+  # and refused to push. The whole purpose of the private full copy is to be the
+  # complete history — a shallow copy of it is not a backup of anything, it is a
+  # snapshot of the last few commits, and it would have been indistinguishable
+  # from a real one in the GitHub UI. The kit's own mirror job already sets this;
+  # this job was written without it.
+  variables:
+    GIT_DEPTH: "0"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   environment:
