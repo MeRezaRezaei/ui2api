@@ -113,6 +113,17 @@ verify:
     # exactly like the registry knob above; without it the offline half still holds
     # the line and the live half skips with a named reason.
     UI2API_GH_LIVE: "1"
+    # The author's own infrastructure addresses. MASKED, and deliberately NOT in
+    # the repository: this project publishes itself, so a literal here or in
+    # scripts/ci/make-public-repo.sh or in the brain-publication gate would put
+    # the operator's real hosts into the public copy. MEASURED 2026-10-01: all
+    # three files carried them and the infra class measured pub=7 against its own
+    # tooling — the gate that exists to stop the leak was the leak. The values
+    # live here, in masked CI config, and are the single source for the scanner,
+    # the blob redaction, the commit-message redaction and the coverage gate.
+    # Unset is a real, reported state: the scanner then runs on private RANGES
+    # only, which is weaker, and says so rather than reading as a full scan.
+    UI2API_INFRA_ADDRESSES: "$UI2API_INFRA_ADDRESSES"
   script:
     - npm ci --cache .npm --prefer-offline
     # MEASURED 2026-10-01: this died with exit 100 on
@@ -300,6 +311,10 @@ public_mirror:
   # this job was written without it.
   variables:
     GIT_DEPTH: "0"
+    # See the note on `verify`. This is the job that actually publishes, so it is
+    # the one that must not publish on a narrowed scan: with this unset the
+    # sanitizer runs on private ranges alone and says so in its own output.
+    UI2API_INFRA_ADDRESSES: "$UI2API_INFRA_ADDRESSES"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   environment:

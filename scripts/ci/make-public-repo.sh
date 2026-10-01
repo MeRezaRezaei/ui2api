@@ -191,10 +191,13 @@ REMOVED==>REMOVED
 REMOVED==>REMOVED
 REMOVED==>REMOVED
 REMOVED==>REMOVED
-REMOVED==>REMOVED
-REMOVED==>REMOVED
-REMOVED==>REMOVED
 REPL
+# The author's own hosts, appended from CI config rather than written here — see
+# the note above INFRA_RANGES_RE for why they cannot live in this file.
+for a in ${UI2API_INFRA_ADDRESSES//,/ }; do
+  printf '%s==>REMOVED\n' "$a" >> "$WORK/replace-text.txt"
+done
+note "replace-text rules: $(grep -c . "$WORK/replace-text.txt") literal tokens, of which $(printf '%s' "${UI2API_INFRA_ADDRESSES:-}" | wc -w) are author hosts supplied by CI config"
 
 say "3. public-sanitized: strip paths"
 # --paths-from-file WITHOUT --invert-paths means "KEEP ONLY THESE PATHS" — so the
@@ -218,7 +221,16 @@ timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
   --force \
   --invert-paths \
   --paths-from-file "$PATHS_ACTUAL" \
-  --message-callback '
+# The commit-message callback is written to a FILE and passed by substitution.
+# Two reasons, both learned the hard way on 2026-10-01:
+#   * it used to be a single-quoted shell string, where one apostrophe in a
+#     COMMENT silently truncated the argument and filter-repo reported
+#     "unrecognized arguments"; and
+#   * the author's own host addresses must not be written into this file at all,
+#     because this file ships inside the public copy. They come from the masked
+#     CI variable UI2API_INFRA_ADDRESSES and are spliced in below.
+{
+  cat > "$WORK/message-callback.py" <<'CBODY'
     import re
     # A commit message can carry the same material as the file it renamed:
     # this repo has 128 commits whose message mentions the corpus and 26 that
@@ -246,12 +258,24 @@ timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
                      r"|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\."
                      r"(?:[0-9]{1,3}\.)[0-9]{1,3})(?![0-9.])",
                      "[redacted-private-net]", message)
-    for lit in ("REMOVED", "REMOVED", "REMOVED", "REMOVED"):
+    for lit in __INFRA_LITERALS__:
         message = message.replace(lit, "[redacted-author-infra]")
     if isb:
         message = message.encode("utf-8", "surrogateescape")
     return message
-  ' \
+CBODY
+}
+python3 - "$WORK/message-callback.py" <<'CBPY'
+import os, sys
+p = sys.argv[1]
+src = open(p).read()
+env = os.environ.get("UI2API_INFRA_ADDRESSES", "")
+vals = [a for a in env.replace(",", " ").split() if a]
+src = src.replace("__INFRA_LITERALS__", "(" + ", ".join(repr(a) for a in vals) + (",)" if len(vals) == 1 else ",)"))
+open(p, "w").write(src)
+CBPY
+
+  --message-callback "$(cat "$WORK/message-callback.py")" \
   --replace-text "$WORK/replace-text.txt" \
   || fail "filter-repo exited $? (124 = timeout)"
 
@@ -433,13 +457,52 @@ SELFMATCH_PATH_RE='^scripts/ci/(make-public-repo\.sh|public-repo-paths\.txt)$'
 BRAIN_PATH_REF_RE='verbatim-goals\.md|\.brain/verbatim|verbatim/state\.json|docs/verbatim-goals'
 SECRET_RE='REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9_-]{15,}|-----BEGIN (RSA |OPENSSH |EC |PGP )?PRIVATE KEY'
 # Private/internal network topology, as a PATTERN rather than the 3-literal
-# allowlist this used to be. An allowlist only ever catches the leaks someone
-# already found: the author's own public VPS addresses (REMOVED/.250,
-# REMOVED, REMOVED) are not in any RFC1918 range, so no private-range
-# regex will match them, and they are named in the corpus. So: a range pattern
-# for private topology (RFC1918 + the 100.64/10 CGNAT range Tailscale uses), plus
-# a declared list of the author's own public hosts. Both halves are printed.
-INFRA_RE='(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|185\.204\.197\.24[02]|185\.204\.197\.250|46\.4\.67\.240|91\.99\.27\.189)(?![0-9.])'
+# THE AUTHOR'S OWN PUBLIC VPS ADDRESSES ARE NOT IN THIS FILE, ON PURPOSE.
+#
+# This script ships inside the public copy — it is the project's own publication
+# tooling, and stripping it would strip the mechanism that publishes. So every
+# byte here is public. It used to name the operator's actual hosts inline, as
+# redaction rules and as regex alternatives, which is self-defeating: the gate
+# whose entire purpose is to stop those addresses reaching a public repository was
+# itself carrying them, and the infra class measured pub=7 against its own
+# tooling. MEASURED on pipeline 1072 — the run that caught it, and it was right.
+#
+# The split is by severity, not convenience:
+#   * PRIVATE RANGES stay here as a regex. Being able to recognise RFC1918 or
+#     Tailscale's 100.64/10 is not a secret, and a range catches every address of
+#     that kind including ones nobody has thought to look for yet.
+#   * The author's own PUBLIC host addresses sit in no private range, so no regex
+#     can find them and they must be named literally — which means they must
+#     arrive from OUTSIDE the repository. They come from the masked CI variable
+#     UI2API_INFRA_ADDRESSES. One source, used by the scanner, the blob redaction
+#     and the commit-message redaction alike, so the three cannot drift apart.
+INFRA_RANGES_RE='(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?![0-9.])'
+
+# Build the author-host alternation from CI config. Empty is a real, reportable
+# state — it means the class is running on ranges alone, which is weaker, and the
+# report says so rather than letting a narrowed scan read as a full one.
+infra_literal_alternation() {
+  local out="" a list
+  # Comma OR space separated. GitLab rejected `masked: true` for a value shaped
+  # like IP addresses, so this arrives comma-separated rather than masked; the
+  # splitter therefore has to accept both, and a comma left attached to an
+  # address would produce a regex that silently matches nothing — the exact
+  # failure mode this class has already produced twice.
+  list="${UI2API_INFRA_ADDRESSES//,/ }"
+  for a in $list; do
+    a="${a//./\\.}"
+    [ -n "$out" ] && out="$out|"
+    out="$out$a"
+  done
+  printf '%s' "$out"
+}
+INFRA_LITERALS="$(infra_literal_alternation)"
+if [ -n "$INFRA_LITERALS" ]; then
+  INFRA_RE="$INFRA_RANGES_RE|$INFRA_LITERALS"
+else
+  INFRA_RE="$INFRA_RANGES_RE"
+fi
+note "infra class: private ranges always; author hosts from CI config = $(printf '%s' "${UI2API_INFRA_ADDRESSES//,/ }" | wc -w) (0 means RANGES ONLY — a narrower scan, reported not hidden)"
 LOOPBACK_RE='127\.0\.0\.1'
 DATA_RE='^data/'
 
@@ -520,7 +583,15 @@ mkdir -p "$PLANT"
 git init --quiet "$PLANT"
 git -C "$PLANT" config user.email p@p; git -C "$PLANT" config user.name p
 mkdir -p "$PLANT/.brain"
-printf 'REMOVEDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nREMOVED\n' > "$PLANT/.brain/verbatim.md"
+# The probe address is RFC1918 and deliberately NOT the author's own host. Two
+# reasons, and both matter: the infra class must FIRE on this probe or the
+# self-test is worthless, and INFRA_RE always contains the private ranges, so a
+# private address is the one thing guaranteed to be matched without naming a real
+# machine. An RFC1918 literal in a public repository discloses nothing — nobody
+# can route to it — whereas the author's actual VPS address would be exactly the
+# leak this whole class exists to prevent.
+PROBE_ADDR="10.254.254.254"
+printf 'REMOVEDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n%s\n' "$PROBE_ADDR" > "$PLANT/.brain/verbatim.md"
 git -C "$PLANT" add -A >/dev/null
 git -C "$PLANT" commit --quiet -m "plant: brain path + REMOVED token + infra addr + 'User verbatim (2026-09-20'"
 plant_paths="$(scan_paths "$PLANT" "$BRAIN_PATH_RE")"
@@ -533,7 +604,7 @@ note "planted probe -> brain-paths=$plant_paths secrets=$plant_secret infra=$pla
   echo "## Scanner self-test (planted, then discarded)"
   echo
   echo "A sample commit carrying a \`.brain/verbatim.md\` path, a \`REMOVED\` token, the"
-  echo "address \`REMOVED\`, and a brain-mentioning message was written to a"
+  echo "a token, a private-range address, and a brain-mentioning message were written to a"
   echo "throwaway repo and scanned with the SAME functions:"
   echo
   echo "| class | planted-probe count |"

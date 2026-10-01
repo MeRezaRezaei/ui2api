@@ -652,7 +652,19 @@ export function fmtDivergence(d: KnobDivergence): string {
  * reason fails its own test, and an entry naming a knob no config sets is stale and
  * also fails, so an unjustified exception cannot rot in quietly.
  */
-export const KNOB_PARITY_ALLOW: Record<string, string> = {};
+export const KNOB_PARITY_ALLOW: Record<string, string> = {
+  // The author's own infrastructure addresses. Present in .gitlab-ci.yml (the
+  // actor that actually publishes) and deliberately ABSENT from the GitHub
+  // workflow, which never runs the sanitizer. The asymmetry is forced by the
+  // threat model rather than chosen for convenience: the repository publishes
+  // itself, so the addresses cannot live in it, and duplicating them into a
+  // second platform's secret store would widen their exposure to buy nothing —
+  // no GitHub job needs them. The census and the redaction-contract proof SKIP
+  // with a named reason wherever the variable is absent, so the GitHub lane
+  // reports that it did not check rather than reporting a pass it did not earn.
+  UI2API_INFRA_ADDRESSES:
+    "GitLab-only by design: it is the publishing actor's input, and the addresses must not be duplicated into a second platform's secret store for jobs that never use them. Absent => the gate skips with a named reason.",
+};
 
 /**
  * The `test/*.test.ts` files in the git INDEX — i.e. the files the repository

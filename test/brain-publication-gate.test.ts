@@ -255,14 +255,45 @@ export const MEASURED_VOCAB_FILES_2026_09_30: readonly string[] = [
  *  files each address appears in. Low-severity for a public repo, but a real
  *  disclosure of the operator's infrastructure, so it is pinned rather than
  *  assumed absent. */
-export const MEASURED_INFRA_ADDRESSES_2026_09_30: ReadonlyArray<{
+/**
+ * THE ADDRESSES THEMSELVES ARE NOT IN THIS FILE. This file ships inside the
+ * public copy, so a literal here is a literal in the public repository — and
+ * these are the operator's real hosts, which is precisely the disclosure the
+ * whole publication pipeline exists to prevent. MEASURED 2026-10-01: this gate
+ * and the sanitizer between them carried every one of them, and the infra class
+ * duly measured pub=7 against its own tooling. The gate that exists to stop the
+ * leak was itself the leak.
+ *
+ * They arrive in the masked CI variable UI2API_INFRA_ADDRESSES — the same single
+ * source the sanitizer uses for its scanner, its blob redaction and its
+ * commit-message redaction, so the three cannot drift apart. That drift is the
+ * only way a coverage pin stops meaning anything.
+ *
+ * WHAT STAYS HERE is the part that is genuinely public knowledge: WHICH private
+ * file each address was measured in. Paths are not secrets, and that mapping is
+ * the real content of the census. An empty address list is a real, reportable
+ * state (a local run with no CI config): every consumer below either skips with
+ * a named reason or falls back to a NON-SECRET fixture, and never to a silent
+ * pass.
+ */
+const AUTHOR_INFRA_FILES: readonly (readonly string[])[] = [
+  [".brain/verbatim.md", ".brain/verbatim/2026-08-29-origins-npm-omniroute-plan.md"],
+  [".brain/verbatim.md", ".brain/verbatim/2026-08-29-origins-npm-omniroute-plan.md"],
+  [".brain/verbatim-coverage.md", ".brain/verbatim-goals.md"],
+];
+
+export const authorInfraAddresses = (): string[] =>
+  (process.env.UI2API_INFRA_ADDRESSES ?? "").replace(/,/g, " ").split(/\s+/).filter(Boolean);
+
+export const measuredInfraAddresses = (): ReadonlyArray<{
   address: string;
   files: readonly string[];
-}> = [
-  { address: "REMOVED", files: [".brain/verbatim.md", ".brain/verbatim/2026-08-29-origins-npm-omniroute-plan.md"] },
-  { address: "REMOVED", files: [".brain/verbatim.md", ".brain/verbatim/2026-08-29-origins-npm-omniroute-plan.md"] },
-  { address: "REMOVED", files: [".brain/verbatim-coverage.md", ".brain/verbatim-goals.md"] },
-];
+}> => authorInfraAddresses().map((address, i) => ({ address, files: AUTHOR_INFRA_FILES[i] ?? [] }));
+
+/** A NON-SECRET stand-in for the contract tests. The redaction contract is a
+ *  property of the RULE FILE, not of any particular host, so proving it needs no
+ *  real address — and using one would put a real host back into this file. */
+export const FIXTURE_INFRA_ADDRESS = "10.254.254.254";
 
 /* ========================================================================
  * P5 — the package-wide release surface.
@@ -613,8 +644,17 @@ d("P3: .brain's credential-bearing character is a pinned census, not an assumpti
     );
   });
 
-  t("CENSUS: the real infrastructure addresses are pinned, so a new one is visible", () => {
-    for (const { address, files } of MEASURED_INFRA_ADDRESSES_2026_09_30) {
+  t("CENSUS: the real infrastructure addresses are pinned, so a new one is visible", (tt) => {
+    const measured = measuredInfraAddresses();
+    if (measured.length === 0) {
+      // Neither a pass nor a failure: this file must not name the addresses,
+      // so the census can only run where CI supplies them. Said out loud,
+      // because a census that silently measures nothing is the failure this
+      // repo keeps fighting.
+      tt.skip("UI2API_INFRA_ADDRESSES is unset and the addresses cannot be written here, because this file ships in the public copy");
+      return;
+    }
+    for (const { address, files } of measured) {
       for (const f of files) {
         assert.ok(
           readFileSync(join(ROOT, f), "utf8").includes(address),
@@ -700,7 +740,20 @@ export function parseReplaceTextRules(scriptText: string): ReadonlyArray<{ liter
   return out;
 }
 
-export const REDACTION_RULES = parseReplaceTextRules(SANITIZER_TEXT);
+/** The rule set the sanitizer will ACTUALLY use, not just the one written in the
+ *  file. The static heredoc holds the token and key patterns; the author's own
+ *  host addresses are appended at RUNTIME from UI2API_INFRA_ADDRESSES, because
+ *  this repository is itself published and cannot carry them.
+ *
+ *  Reading only the heredoc — which is what this did — models a rule file that
+ *  no longer exists, and reports every author address as UNCOVERED. That is the
+ *  safe direction to be wrong in, but it is still wrong, and it made the whole
+ *  P3b block untestable. Both halves are combined here so the test's model and the
+ *  sanitizer's behaviour cannot drift. */
+export const REDACTION_RULES: ReadonlyArray<{ literal: string; replacement: string }> = [
+  ...parseReplaceTextRules(SANITIZER_TEXT),
+  ...authorInfraAddresses().map((a) => ({ literal: a, replacement: "REMOVED" })),
+];
 
 /** Run the sanitizer's REAL `--replace-text` path over a fixture containing the
  *  given literals, and return the rewritten blob content.
@@ -809,7 +862,7 @@ d("P3b: the sanitizer's REPLACEMENT path is armed and actually rewrites the lite
     // about whether anything is armed to remove it.
     const uncovered = uncoveredAddresses(
       REDACTION_RULES,
-      MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address),
+      authorInfraAddresses(),
     );
     assert.deepEqual(
       uncovered,
@@ -828,8 +881,22 @@ d("P3b: the sanitizer's REPLACEMENT path is armed and actually rewrites the lite
   t(
     "PROOF: each literal is rewritten by the REAL filter-repo path — absent AND replaced",
     { skip: !FILTER_REPO_AVAILABLE && "git filter-repo is not on PATH here, so the replacement contract cannot be executed; install it with `pipx install git-filter-repo`" },
-    () => {
-      const addresses = MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address);
+    (tt) => {
+      // The literals under test are the IP-shaped rules THE RULE FILE ACTUALLY
+      // CONTAINS, not a fixture this file invented. A guessed fixture is not
+      // covered by the rules, so asserting it gets rewritten asserts something
+      // false — and did, until this was corrected: the proof went red on a
+      // fixture address no rule mentions.
+      //
+      // The contract being proved is a property of the rule file, so the rule
+      // file supplies its own subjects. With no address rules present (a local
+      // run with no CI config) there is nothing to prove and the test says so,
+      // rather than proving something adjacent.
+      const addresses = REDACTION_RULES.map((r) => r.literal).filter((l) => /^\d{1,3}(\.\d{1,3}){3}$/.test(l));
+      if (addresses.length === 0) {
+        tt.skip("the sanitizer carries no IP-shaped redaction rule here, because the author's hosts come from UI2API_INFRA_ADDRESSES and it is unset; there is no address contract to prove");
+        return;
+      }
 
       // ANTI-VACUITY, and the honest shape of the whole block: the same literals
       // BEFORE the filter are present. If this control were ever empty the
@@ -843,8 +910,14 @@ d("P3b: the sanitizer's REPLACEMENT path is armed and actually rewrites the lite
     },
   );
 
-  t("MUTATION: the armed-and-fires pin CAN go red (three ways the redaction breaks)", () => {
-    const ADDR = MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address);
+  t("MUTATION: the armed-and-fires pin CAN go red (three ways the redaction breaks)", (tt) => {
+    // Same discipline as the proof above: the subjects come from the rule file's
+    // own IP-shaped rules, so the mutation is always about rules that exist.
+    const ADDR = REDACTION_RULES.map((r) => r.literal).filter((l) => /^\d{1,3}(\.\d{1,3}){3}$/.test(l));
+    if (ADDR.length === 0) {
+      tt.skip("no IP-shaped redaction rule is present (the author's hosts come from UI2API_INFRA_ADDRESSES, unset here), so there is no address rule to mutate");
+      return;
+    }
     const ruleFor = (lit: string) => ({ literal: lit, replacement: "REMOVED" });
 
     // 1. A rule line is DROPPED from the sanitizer. Nothing is armed for that

@@ -216,11 +216,17 @@ test("MUTATION R3: deleting the UI2API_GH_LIVE assignment from one config is rep
   const b = ".github/workflows/ci.yml";
   const deleted = CI_TEXTS[a]!.replace(/\n\s*UI2API_GH_LIVE:.*/, "");
   assert.notEqual(deleted, CI_TEXTS[a]!, "the mutation must actually remove the assignment");
-  const problems = knobDivergences(a, deleted, b, CI_TEXTS[b]!);
-  assert.equal(problems.length, 1, `expected one divergence; got ${JSON.stringify(problems)}`);
+  // Filtered through KNOB_PARITY_ALLOW, exactly as the R3 gate itself filters.
+  // Without that filter this assertion counted ALLOWED asymmetries as problems,
+  // so the first justified exception added to the allow-list broke this
+  // anti-vacuity test — a test about the mutation, failing on the baseline.
+  const unexplained = (x: string, y: string) =>
+    knobDivergences(a, x, b, y).filter((d) => KNOB_PARITY_ALLOW[d.knob] === undefined);
+  const problems = unexplained(deleted, CI_TEXTS[b]!);
+  assert.equal(problems.length, 1, `expected one UNEXPLAINED divergence; got ${JSON.stringify(problems)}`);
   assert.match(fmtDivergence(problems[0]!), /UI2API_GH_LIVE/);
   // Untouched, the pair is in parity — the rule is not simply always-red.
-  assert.deepEqual(knobDivergences(a, CI_TEXTS[a]!, b, CI_TEXTS[b]!), []);
+  assert.deepEqual(unexplained(CI_TEXTS[a]!, CI_TEXTS[b]!), []);
 });
 
 test("R3 allow-list hygiene: every knob-parity exception names a real knob AND carries a reason", () => {
