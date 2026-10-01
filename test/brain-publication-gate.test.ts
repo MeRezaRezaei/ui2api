@@ -1,7 +1,8 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -621,6 +622,261 @@ d("P3: .brain's credential-bearing character is a pinned census, not an assumpti
         );
       }
     }
+  });
+});
+
+/* ========================================================================
+ * P3b — the REDACTION CONTRACT: given a literal the corpus really carries,
+ * does the sanitizer's own replacement path actually rewrite it?
+ *
+ * WHY THIS BLOCK EXISTS (the defect class it closes).
+ *
+ * The census test directly above asserts that each measured address is PRESENT
+ * in a `.brain` file. That is a real assertion and it can fail — but it is a
+ * statement about the PRIVATE corpus, and nothing in this file connects it to
+ * what the PUBLIC copy will contain. That is the exact failure class the GOAL
+ * 171 lesson names: the gate can be 24/24 green while the thing it exists to
+ * prevent happens, because
+ *
+ *   (a) a line is deleted from the sanitizer's `--replace-text` heredoc, or
+ *   (b) the heredoc is renamed/relocated so filter-repo is handed a DIFFERENT
+ *       (or no) pattern file, or
+ *   (c) the `literal==>replacement` syntax drifts so filter-repo parses a rule
+ *       that matches nothing,
+ *
+ * and the corpus still carries the literal, still pins green up here, and the
+ * public copy still carries it.
+ *
+ * So this block pins the SANITIZER'S CONTRACT rather than a fixed string, and
+ * it pins it in the direction that actually bites. It does NOT assert that the
+ * placeholder `REMOVED` is absent: that claim is vacuous (it is satisfied by
+ * the redaction machinery having STOPPED WORKING, by the literal never having
+ * been there, and by the filter being run with the wrong flag), and it is
+ * brittle (it fails on ordinary prose that happens to use the word). What it
+ * asserts instead is POSITIVE PROOF that the redaction HAPPENED:
+ *
+ *   (a) the real literal is ABSENT from the rewritten blob, AND
+ *   (b) the replacement that the SCRIPT ITSELF documents for that literal IS
+ *       PRESENT in that blob.
+ *
+ * (b) is the half that makes the zero meaningful. It is derived from the
+ * script, never hardcoded here, so the token cannot drift into a lie.
+ *
+ * HONEST SCOPE — what this block does NOT prove. It exercises filter-repo's
+ * `--replace-text` on a FIXTURE, because that path is a pure content rewrite
+ * and runs in ~0.3s with no network and no token. It does NOT run
+ * `scripts/ci/make-public-repo.sh` end to end (that clones the real history and
+ * scans every blob of every commit, which is minutes of work and belongs in
+ * CI, not in a unit suite), and it does NOT cover the commit-message
+ * redaction, which `--replace-text` provably cannot do — the script's own
+ * `--message-callback` handles that side, and it is asserted by that script's
+ * own residual scan, not from here. So: this block proves the replacement PATH
+ * is armed and behaves; it does not restate the whole sanitizer verdict.
+ * ===================================================================== */
+
+const SANITIZER = join(ROOT, "scripts/ci/make-public-repo.sh");
+const SANITIZER_TEXT = existsSync(SANITIZER) ? readFileSync(SANITIZER, "utf8") : "";
+
+/** Every `literal==>replacement` rule the sanitizer hands to `--replace-text`,
+ *  read out of the script AS TEXT.
+ *
+ *  Parsed by matching the rule SYNTAX across the whole file rather than by
+ *  slicing a named heredoc. That is deliberate: the rules are the contract, and
+ *  the contract must survive the heredoc being renamed or moved. A parser that
+ *  hardcoded the delimiter would itself rot the moment the script was tidied,
+ *  which is the same failure in a new costume.
+ *
+ *  The literal side is matched lazily and non-greedily: filter-repo's own format
+ *  is `literal==>replacement`, and the first `==>` delimits, so anything up to it
+ *  is the literal. */
+export function parseReplaceTextRules(scriptText: string): ReadonlyArray<{ literal: string; replacement: string }> {
+  const out: Array<{ literal: string; replacement: string }> = [];
+  const re = /^(.+?)==>(\S*)$/gm;
+  for (let m = re.exec(scriptText); m !== null; m = re.exec(scriptText)) {
+    const literal = m[1];
+    if (literal.length === 0) continue;
+    out.push({ literal, replacement: m[2] });
+  }
+  return out;
+}
+
+export const REDACTION_RULES = parseReplaceTextRules(SANITIZER_TEXT);
+
+/** Run the sanitizer's REAL `--replace-text` path over a fixture containing the
+ *  given literals, and return the rewritten blob content.
+ *
+ *  Uses `git filter-repo` exactly as the sanitizer does — same flag, same
+ *  replace-text file format — against a throwaway repo in a temp dir. If
+ *  filter-repo is not installed the caller skips, because the CONTRACT cannot
+ *  be proven without the tool that implements it. */
+function redactThroughFilterRepo(literals: readonly string[]): string {
+  const dir = mkdtempSync(join(tmpdir(), "brain-redaction-"));
+  try {
+    const g = (...args: string[]): string =>
+      execFileSync("git", args, { encoding: "utf8", cwd: dir, timeout: 120000 }).trim();
+    g("init", "--quiet", ".");
+    g("config", "user.email", "gate@example.invalid");
+    g("config", "user.name", "gate");
+    const seed = literals.map((l, i) => `line-${i} ${l}`).join("\n") + "\n";
+    writeFileSync(join(dir, "seed.md"), seed);
+    // The rule file is built FROM THE SCRIPT'S OWN RULES, so this cannot pass by
+    // agreeing with a token this file invented.
+    writeFileSync(
+      join(dir, "replace-text.txt"),
+      REDACTION_RULES.map((r) => `${r.literal}==>${r.replacement}`).join("\n") + "\n",
+    );
+    g("add", "-A");
+    g("commit", "--quiet", "-m", "seed");
+    execFileSync("git", ["filter-repo", "--force", "--replace-text", "replace-text.txt"], {
+      encoding: "utf8",
+      cwd: dir,
+      timeout: 120000,
+      stdio: "pipe",
+    });
+    return g("cat-file", "-p", "HEAD:seed.md");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const FILTER_REPO_AVAILABLE = (() => {
+  try {
+    execFileSync("git", ["filter-repo", "--version"], { encoding: "utf8", timeout: 30000, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+/* --- the two gate-worthy checks as PURE functions, so they can be proven red --
+ *
+ * Extracted for the same reason this file's three existing MUTATION tests
+ * extract their subjects: a gate that has never been red is a pin nobody reads,
+ * and the only way to demonstrate red for a check whose real subject
+ * (`scripts/ci/make-public-repo.sh`) belongs to ANOTHER lane is to feed the same
+ * predicate mutated input. These take data, so nothing has to be mutated on disk. */
+
+/** Measured addresses that NO rule would redact. Non-empty means the public copy
+ *  carries them. */
+export function uncoveredAddresses(
+  rules: ReadonlyArray<{ literal: string; replacement: string }>,
+  addresses: readonly string[],
+): string[] {
+  const literals = new Set(rules.map((r) => r.literal));
+  return addresses.filter((a) => !literals.has(a));
+}
+
+/** Assert the redaction actually fired: for each literal, it is ABSENT from the
+ *  rewritten text AND the rule's own documented replacement IS present.
+ *
+ *  Returns normally when clean; throws with a NAMED reason when not. The
+ *  replacement is taken from the rule, never from a constant, so this cannot
+ *  drift into asserting a token the sanitizer does not emit. */
+export function assertRedactionFired(
+  rules: ReadonlyArray<{ literal: string; replacement: string }>,
+  rewritten: string,
+  literals: readonly string[],
+): void {
+  const byLiteral = new Map(rules.map((r) => [r.literal, r.replacement]));
+  for (const a of literals) {
+    assert.ok(!rewritten.includes(a), `${a} survived the sanitizer's own replacement path — the public copy would carry it`);
+    const replacement = byLiteral.get(a);
+    assert.ok(replacement !== undefined, `${a} has no rule, so there is nothing to assert was applied`);
+    assert.ok(
+      rewritten.includes(replacement),
+      `${a} is absent from the rewritten blob but its documented replacement (${JSON.stringify(replacement)}) is NOT present either — the redaction did not actually fire for it`,
+    );
+  }
+}
+
+d("P3b: the sanitizer's REPLACEMENT path is armed and actually rewrites the literals", () => {
+  t("the sanitizer hands filter-repo at least one literal==>replacement rule", () => {
+    assert.ok(
+      SANITIZER_TEXT !== "",
+      `scripts/ci/make-public-repo.sh is missing at ${SANITIZER} — the redaction contract has no subject and this gate must NOT pass on absence`,
+    );
+    assert.ok(
+      REDACTION_RULES.length > 0,
+      "no `literal==>replacement` rule was parsed from the sanitizer: with an empty rule set --replace-text redacts nothing, every literal reaches the public copy, and this gate would otherwise stay green",
+    );
+  });
+
+  t("EVERY measured infra address is COVERED by a rule (the redaction is armed, not merely present)", () => {
+    // The positive half, and the cheapest one. A line silently dropped from the
+    // heredoc — the single most likely way the redaction breaks — turns this RED
+    // immediately, without running anything. This is the assertion the file did
+    // not have: it pinned that the address is in the corpus, and said nothing
+    // about whether anything is armed to remove it.
+    const uncovered = uncoveredAddresses(
+      REDACTION_RULES,
+      MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address),
+    );
+    assert.deepEqual(
+      uncovered,
+      [],
+      `these measured infrastructure addresses have NO --replace-text rule, so the public copy would carry them: ${uncovered.join(", ")}. Add \`<address>==><token>\` to the sanitizer's replacement list.`,
+    );
+  });
+
+  t("no rule is a NO-OP (a self-replacement leaks the literal while looking configured)", () => {
+    for (const { literal, replacement } of REDACTION_RULES) {
+      assert.notEqual(replacement, literal, `rule for ${literal} replaces it with itself — the literal survives verbatim`);
+      assert.notEqual(replacement, "", `rule for ${literal} has an EMPTY replacement, which would DELETE rather than redact and hide the fact that the rule fired`);
+    }
+  });
+
+  t(
+    "PROOF: each literal is rewritten by the REAL filter-repo path — absent AND replaced",
+    { skip: !FILTER_REPO_AVAILABLE && "git filter-repo is not on PATH here, so the replacement contract cannot be executed; install it with `pipx install git-filter-repo`" },
+    () => {
+      const addresses = MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address);
+
+      // ANTI-VACUITY, and the honest shape of the whole block: the same literals
+      // BEFORE the filter are present. If this control were ever empty the
+      // assertions below would be measuring nothing.
+      const before = addresses.map((a, i) => `line-${i} ${a}`).join("\n") + "\n";
+      for (const a of addresses) {
+        assert.ok(before.includes(a), `precondition: the fixture really does carry ${a}`);
+      }
+
+      assertRedactionFired(REDACTION_RULES, redactThroughFilterRepo(addresses), addresses);
+    },
+  );
+
+  t("MUTATION: the armed-and-fires pin CAN go red (three ways the redaction breaks)", () => {
+    const ADDR = MEASURED_INFRA_ADDRESSES_2026_09_30.map((a) => a.address);
+    const ruleFor = (lit: string) => ({ literal: lit, replacement: "REMOVED" });
+
+    // 1. A rule line is DROPPED from the sanitizer. Nothing is armed for that
+    //    literal, so the public copy carries it. This is the most likely real
+    //    break and the one no assertion in this file previously covered.
+    assert.deepEqual(
+      uncoveredAddresses(ADDR.map(ruleFor).slice(1), ADDR),
+      [ADDR[0]],
+      "a dropped rule must leave exactly that address uncovered — otherwise the armed-pin cannot fail",
+    );
+
+    // 2. The literal SURVIVES the rewrite (filter ran with the wrong flag / a
+    //    different rule file). The real assertion must throw.
+    assert.throws(
+      () => assertRedactionFired(ADDR.map(ruleFor), `line-0 ${ADDR[0]}\n`, [ADDR[0]]),
+      /survived the sanitizer's own replacement path/,
+      "an unredacted literal MUST be caught",
+    );
+
+    // 3. THE VACUITY THIS REPLACES: the literal is absent but the replacement is
+    //    NOT present — the redaction did not actually fire, and an
+    //    absence-only check would have called this clean. This is precisely the
+    //    input the old `!includes("REMOVED")`-shaped claim could not see.
+    assert.throws(
+      () => assertRedactionFired(ADDR.map(ruleFor), "line-0 [redacted]\n", [ADDR[0]]),
+      /did not actually fire/,
+      "an absence WITHOUT the documented replacement MUST be caught — an absence-only check would pass this",
+    );
+
+    // And the SAME check passes on the honest rewrite, so the pin is measuring
+    // the redaction and not merely the presence of a rule.
+    assert.doesNotThrow(() => assertRedactionFired(ADDR.map(ruleFor), "line-0 REMOVED\n", [ADDR[0]]));
   });
 });
 

@@ -231,6 +231,23 @@ timeout -k 5 "$T_FILTER" git -C "$PUB" filter-repo \
     message = re.sub(r"(?i)\.?brain/verbatim[A-Za-z0-9_./-]*", "[redacted-corpus]", message)
     message = re.sub(r"(?i)docs/verbatim[A-Za-z0-9_./-]*", "[redacted-corpus]", message)
     message = re.sub(r"(?i)\bverbatim\b", "operator record", message)
+    # INFRA, in commit messages. `--replace-text` CANNOT do this: it rewrites
+    # blob content only, never commit messages. That asymmetry was the whole
+    # bug — one commit message named the live Tailscale address of the operator
+    # and their VPS, and it sailed through a scan whose every other class passed.
+    # A gate class that only exists on one side of a two-surface redaction is a
+    # gate that is measuring half of what it claims to.
+    # (No apostrophes anywhere in this block: it lives inside a shell
+    # single-quoted string, and one of them silently truncates the argument —
+    # filter-repo reported "unrecognized arguments" and the whole run died.)
+    message = re.sub(r"(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}"
+                     r"|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3}"
+                     r"|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}"
+                     r"|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\."
+                     r"(?:[0-9]{1,3}\.)[0-9]{1,3})(?![0-9.])",
+                     "[redacted-private-net]", message)
+    for lit in ("REMOVED", "REMOVED", "REMOVED", "REMOVED"):
+        message = message.replace(lit, "[redacted-author-infra]")
     if isb:
         message = message.encode("utf-8", "surrogateescape")
     return message
@@ -243,7 +260,12 @@ say "3b. residual-secret replacement patterns applied by the filter above"
 # invocation, because it is read at argument-parse time). This copy is the
 # auditable record of exactly which literal tokens were neutralised.
 cp "$WORK/replace-text.txt" "$MAPS/replace-text.applied.txt"
-note "patterns: $(wc -l < "$MAPS/replace-text.applied.txt") literal tokens -> REMOVED"
+note "patterns: $(wc -l < "$MAPS/replace-text.applied.txt") literal tokens -> their declared replacements"
+# The replacement tokens are reported, not asserted as the literal word REMOVED.
+# This line used to hardcode "-> REMOVED" while the rule file's right-hand side
+# was free to be anything, so the log would keep claiming a redaction that had
+# been renamed. A log that can describe a different thing from what it did is
+# worse than no log: it is read as evidence.
 
 PUB_COMMITS="$(timeout -k 5 "$T_SMALL" git -C "$PUB" rev-list --all --count)"
 note "public-sanitized commits after filter: $PUB_COMMITS (source was $SRC_COMMITS)"
@@ -274,8 +296,16 @@ scan_paths() { # $1=repo  $2=path-regex
     | sed 's/^[0-9a-f]* //' | sort -u \
     | grep -cE "$2" || true
 }
-scan_blob_content() { # $1=repo  $2=extended-regex
-  # Enumerate every distinct blob, then grep its content. Bounded and honest:
+scan_object_content() { # $1=repo $2=extended-regex
+  # Renamed from `scan_blob_content`, which was a lie. `rev-list --all --objects`
+  # yields COMMITS and TREES as well as blobs, and `cat-file -p` on a commit
+  # prints its MESSAGE — so this function has always scanned commit messages too,
+  # while its name promised blobs only. That is how one commit naming the
+  # operator's live infrastructure was reported under a "blob content" heading
+  # and read as a file-content problem. Messages are intentionally still included
+  # here (belt and braces alongside the dedicated commit-message class); only the
+  # name was wrong. If you ever want blobs only, filter on the object TYPE.
+  # Enumerate every distinct object, then grep its content. Bounded and honest:
   # this is a real full-history content scan, not a HEAD scan.
   local repo="$1" re="$2" n=0
   while read -r obj; do
@@ -288,7 +318,26 @@ scan_blob_content() { # $1=repo  $2=extended-regex
              | awk '{print $1}' | sort -u)
   echo "$n"
 }
-scan_commit_messages() { # $1=repo  $2=extended-regex
+scan_blob_content_excluding() { # $1=repo $2=extended-regex $3=path-regex-to-skip
+  # Same total-history content scan, but a blob is only counted if its path does
+  # NOT match the skip. Used for the ONE class where the sanitizer's own tooling
+  # must be excluded, because it necessarily contains the patterns it searches
+  # for. The excluded hits are counted and PRINTED separately rather than dropped,
+  # so "exempt" can never quietly become "ignored".
+  local repo="$1" re="$2" skip="$3" n=0 self=0
+  while read -r obj path; do
+    [ -n "$obj" ] || continue
+    local isself=0
+    [ -n "$path" ] && printf '%s' "$path" | grep -aqE "$skip" && isself=1
+    if timeout -k 5 30 git -C "$repo" cat-file -p "$obj" 2>/dev/null \
+         | grep -aqE "$re"; then
+      if [ "$isself" = 1 ]; then self=$((self+1)); else n=$((n+1)); fi
+    fi
+  done < <(timeout -k 5 "$T_SCAN" git -C "$repo" rev-list --all --objects \
+             | sed 's/^\([0-9a-f]*\) /\1 /' | sort -u)
+  echo "$n $self"
+}
+scan_commit_messages() { # $1=repo $2=extended-regex
   timeout -k 5 "$T_SCAN" git -C "$1" log --all --format='%H%x09%B%x1e' 2>/dev/null \
     | grep -acE "$2" || true
 }
@@ -321,9 +370,26 @@ BRAIN_PATH_RE='^(\.brain/|docs/verbatim|docs/handoffs/2026-09-20-crash-checkpoin
 # from "names the directory" will either cry wolf forever or be switched off, and
 # both outcomes are worse than a narrow, honest gate.
 CORPUS_CONTENT_RE='User verbatim \(20[0-9]{2}-[0-9]{2}-[0-9]{2}|i dont want to have several different|do not stop — continuously run the verbatim'
+# The sanitizer's OWN tooling necessarily contains these patterns: this line is
+# the literal, and the self-test above plants a probe whose commit message quotes
+# one. A redaction rule that names what it redacts always matches itself, so those
+# blobs are counted into a DECLARED SELF-MATCH class rather than being silently
+# skipped — the class is printed with its count on every run, so it can never
+# quietly grow. This is a bounded, audited exemption for the tooling that does the
+# redaction; it is NOT permission for project code to quote the operator, which is
+# why the corpus quotes in public-repo-paths.txt are paraphrased rather than
+# exempt. (Measured on pipeline 992: pub=5, of which 4 were this class.)
+SELFMATCH_PATH_RE='^scripts/ci/(make-public-repo\.sh|public-repo-paths\.txt)$'
 BRAIN_PATH_REF_RE='verbatim-goals\.md|\.brain/verbatim|verbatim/state\.json|docs/verbatim-goals'
 SECRET_RE='REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9]{20,}|REMOVED[A-Za-z0-9_-]{15,}|-----BEGIN (RSA |OPENSSH |EC |PGP )?PRIVATE KEY'
-INFRA_RE='185\.204\.197\.242|100\.100\.4\.100|192\.168\.1\.5'
+# Private/internal network topology, as a PATTERN rather than the 3-literal
+# allowlist this used to be. An allowlist only ever catches the leaks someone
+# already found: the author's own public VPS addresses (REMOVED/.250,
+# REMOVED, REMOVED) are not in any RFC1918 range, so no private-range
+# regex will match them, and they are named in the corpus. So: a range pattern
+# for private topology (RFC1918 + the 100.64/10 CGNAT range Tailscale uses), plus
+# a declared list of the author's own public hosts. Both halves are printed.
+INFRA_RE='(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|185\.204\.197\.24[02]|185\.204\.197\.250|46\.4\.67\.240|91\.99\.27\.189)(?![0-9.])'
 LOOPBACK_RE='127\.0\.0\.1'
 DATA_RE='^data/'
 
@@ -357,32 +423,36 @@ p_priv="$(scan_paths "$PRIV" "$BRAIN_PATH_RE")"; p_pub="$(scan_paths "$PUB" "$BR
 check "brain paths (all commits, by name)" "$p_priv" "$p_pub" yes
 # class 2 — the OPERATOR'S WORDS. This is the class that must be zero, and it is
 # what the single combined "brain markers" number was really trying to say.
-c_priv="$(scan_blob_content "$PRIV" "$CORPUS_CONTENT_RE")"
-c_pub="$(scan_blob_content "$PUB" "$CORPUS_CONTENT_RE")"
+c_priv="$(scan_object_content "$PRIV" "$CORPUS_CONTENT_RE")"
+read -r c_pub c_self <<<"$(scan_blob_content_excluding "$PUB" "$CORPUS_CONTENT_RE" "$SELFMATCH_PATH_RE")"
 check "operator corpus CONTENT (their words)" "$c_priv" "$c_pub" yes
+# Declared, counted, never silent: the sanitizer's own two files necessarily
+# contain the patterns they search for. Printed every run so a reader can see it
+# stay at the tooling's own size instead of growing into project code.
+note "  DECLARED SELF-MATCH (sanitizer's own tooling, excluded above): pub=$c_self"
 # class 2b — a PATH STRING naming the corpus. Reported, not failed: 17 project
 # files legitimately name it (AGENTS.md pointing a reader at the goal index, the
 # credential gate naming the state file it excludes), and deleting those breaks
 # the gates. Reported so a human can see the count change, because a class that
 # is silently accepted is a class nobody re-checks.
-r_priv="$(scan_blob_content "$PRIV" "$BRAIN_PATH_REF_RE")"
-r_pub="$(scan_blob_content "$PUB" "$BRAIN_PATH_REF_RE")"
+r_priv="$(scan_object_content "$PRIV" "$BRAIN_PATH_REF_RE")"
+r_pub="$(scan_object_content "$PUB" "$BRAIN_PATH_REF_RE")"
 check "path REFERENCES to the corpus (accepted)" "$r_priv" "$r_pub" no
 # class 3 — commit messages
 m_priv="$(scan_commit_messages "$PRIV" "$CORPUS_CONTENT_RE")"
 m_pub="$(scan_commit_messages "$PUB" "$CORPUS_CONTENT_RE")"
 check "commit messages carrying corpus CONTENT" "$m_priv" "$m_pub" yes
 # class 4 — secrets
-s_priv="$(scan_blob_content "$PRIV" "$SECRET_RE")"
-s_pub="$(scan_blob_content "$PUB" "$SECRET_RE")"
+s_priv="$(scan_object_content "$PRIV" "$SECRET_RE")"
+s_pub="$(scan_object_content "$PUB" "$SECRET_RE")"
 check "credential tokens / private keys" "$s_priv" "$s_pub" yes
 # class 5 — infrastructure addresses
-i_priv="$(scan_blob_content "$PRIV" "$INFRA_RE")"
-i_pub="$(scan_blob_content "$PUB" "$INFRA_RE")"
+i_priv="$(scan_object_content "$PRIV" "$INFRA_RE")"
+i_pub="$(scan_object_content "$PUB" "$INFRA_RE")"
 check "measured infra addresses" "$i_priv" "$i_pub" yes
 # class 6 — loopback (NOT required to be zero; it is legitimate in a dev tool)
-l_priv="$(scan_blob_content "$PRIV" "$LOOPBACK_RE")"
-l_pub="$(scan_blob_content "$PUB" "$LOOPBACK_RE")"
+l_priv="$(scan_object_content "$PRIV" "$LOOPBACK_RE")"
+l_pub="$(scan_object_content "$PUB" "$LOOPBACK_RE")"
 row "loopback 127.0.0.1 (legit here)" "$l_priv" "$l_pub" "n/a"
 note "$(printf '%-42s priv=%-6s pub=%-6s %s' "loopback 127.0.0.1" "$l_priv" "$l_pub" "informational")"
 # class 7 — the captured-session vault
@@ -404,8 +474,8 @@ printf 'REMOVEDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nREMOVED\n' > "$PLANT/.brain
 git -C "$PLANT" add -A >/dev/null
 git -C "$PLANT" commit --quiet -m "plant: brain path + REMOVED token + infra addr + 'User verbatim (2026-09-20'"
 plant_paths="$(scan_paths "$PLANT" "$BRAIN_PATH_RE")"
-plant_secret="$(scan_blob_content "$PLANT" "$SECRET_RE")"
-plant_infra="$(scan_blob_content "$PLANT" "$INFRA_RE")"
+plant_secret="$(scan_object_content "$PLANT" "$SECRET_RE")"
+plant_infra="$(scan_object_content "$PLANT" "$INFRA_RE")"
 plant_msg="$(scan_commit_messages "$PLANT" 'verbatim|\.brain|brain/')"
 note "planted probe -> brain-paths=$plant_paths secrets=$plant_secret infra=$plant_infra msgs=$plant_msg"
 {

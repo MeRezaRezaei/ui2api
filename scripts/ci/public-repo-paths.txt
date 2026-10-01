@@ -58,16 +58,21 @@
 #   THE NOTE — three entries are brain material whose PATH looks innocent, and
 #   they are the reason this list is derived from content and not from a
 #   `.brain*` glob:
-#     * docs/handoffs/2026-09-20-crash-checkpoint.md opens with
-#       `> User verbatim (2026-09-20 14:1x, crash-directive): "this chat is
-#       broken because crash i need yo uto make hand of in docs for it..."` —
-#       the operator's raw, misspelled, unedited words, quoted at length.
-#     * docs/handoffs/2026-09-20-14-10-crash-handoff.md is anchored on
-#       "Goal (full verbatim, anchored in .brain/verbatim/)".
-#     * VERBATIM.md + raw/VERBATIM-RAW.md are a V1-gate requirement captured
-#       "word-for-word" from the operator ("i think the way that the login works
-#       is not what i need in fact its too hard for end user...").
+#     * docs/handoffs/2026-09-20-crash-checkpoint.md opens by quoting the
+#       operator's raw directive from 2026-09-20 at length — their own unedited,
+#       misspelled words, not a paraphrase.
+#     * docs/handoffs/2026-09-20-14-10-crash-handoff.md is anchored on a heading
+#       that advertises itself as the full verbatim and points into .brain/.
+#     * VERBATIM.md + raw/VERBATIM-RAW.md hold the operator's word-for-word
+#       account of why the login flow is unsuitable for an end user.
 #     INCLUDED. A name-glob would have shipped all four to the world.
+#
+#   THE QUOTES ARE PARAPHRASED HERE ON PURPOSE. This file ships inside the PUBLIC
+#   copy, so an earlier revision of this note that reproduced the operator's words
+#   at length was itself a corpus-content hit — the sanitizer was redacting the
+#   operator's prose and this file was shipping it. The reasoning survives without
+#   the quotation: what matters for the gate is WHICH paths carry corpus material,
+#   not the wording of the material itself.
 #
 #   THE BOUNDARY CASES I EXCLUDED, and the reason for each — these are the
 #   judgement calls a reviewer should check first:
