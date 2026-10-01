@@ -426,6 +426,7 @@ public_mirror:
       # installs unpinned. A durability artifact that has silently contained
       # nothing for 13 hours is a false claim; one that contains the key is the
       # real thing.
+      mkdir -p "$CI_PROJECT_DIR/.mirror/maps"
       cp -a /tmp/mirror-work/commit-maps/. "$CI_PROJECT_DIR/.mirror/maps/"
     - |
       set -uo pipefail
