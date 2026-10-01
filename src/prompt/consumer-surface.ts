@@ -483,6 +483,84 @@ export const DECLARED_EXCEPTIONS: readonly DeclaredException[] = [
   },
 ];
 
+/**
+ * ── THE CONCEPT VOCABULARY: DECLARED ONCE, CONSUMED BY BOTH SEAMS ────────────
+ * WHY THIS IS A SEPARATE EXPORT AND NOT JUST THE PROSE TABLE. The prose table
+ * above is not a vocabulary — it is a list of (matcher, REPLACEMENT) pairs, and
+ * the replacement is half the meaning: `consumerProse` TRANSLATES (`chrome` →
+ * "an operator-attached session") because a capability description has to stay a
+ * sentence. The error seam in `./error-redaction.ts` DELETES the same words
+ * because an error message that said "an operator-attached session was closed"
+ * would be nonsense. Two different treatments, so the RULES cannot be shared.
+ *
+ * But the WORDS were shared, and they were typed twice — which is the rot this
+ * removes. MEASURED on the tree before this export existed: the error seam's
+ * hand-written alternation carried 8 of the 14 concept words and silently missed
+ * SIX that the prose table and the derivation both know —
+ * `xorg` (a `has("Xorg")` exec probe in `requirements.ts:454`), `zod` and
+ * `classic-level` (both real entries in `package.json:dependencies`),
+ * `selenium` / `puppeteer` (the automation family), and `headful` (the sibling
+ * the exact-match `headless` form cannot see). Each of those six reached a
+ * consumer verbatim in a scrubbed error message, because `redactInternalError`'s
+ * re-check did not list them either. A shared list with a gate on it is what
+ * turns "somebody remembered to widen it" into "the seam cannot stop covering it".
+ *
+ * ORDER IS PART OF THE CONTRACT, AND SO IS WHAT IS *ABSENT* FROM IT. The error
+ * seam builds its alternation from this list, so a term that is a PREFIX of a
+ * later term must not be moved after it — `chrome` before `chrome-browser`
+ * deletes `chrome` out of `google-chrome-stable` and leaves `google--stable`,
+ * and reversing the pair would delete the whole token and CHANGE THE BYTES a
+ * consumer reads. MEASURED, not assumed: listing `google-chrome` after `chrome`
+ * turned the scrubbed form of "google-chrome was headed" from `google- was`
+ * into ` was` — a different string on the wire for no security gain.
+ *
+ * So the compound binary leaves are DELIBERATELY ABSENT: `chromium-browser`,
+ * `chrome-browser`, `chrome-stable`, `chrome-beta`, `chrome-driver`,
+ * `google-chrome`, `google-chrome-stable`, `google-chrome-beta` and
+ * `ui2api-chrome` are all already removed by the two base tokens `chrome` and
+ * `chromium`, which a `\b`-anchored match finds inside them (`google-chrome`
+ * matches `chrome` because `-` is a non-word character). Listing them would add
+ * no coverage and would only change WHICH SPAN a match removes. The derivation
+ * still yields them — `mechanismTermsIn()` reports the full compound leaves — so
+ * this is checked the only way that is actually true: the gate asserts the seam
+ * REMOVES every derived term, not that the list NAMES it. Coverage is a
+ * behavioural property, and a list that must contain a redundant compound to
+ * prove it is a list that will rot the moment someone reorders it.
+ *
+ * WHAT IS NOT HERE, and why. `browser` (bare) is absent because
+ * `consumerProse` deliberately does not redact it: "browser" is an ordinary
+ * English word a capability description may legitimately use, and redacting it
+ * is a false positive, not a leak. The error seam keeps it as its own word,
+ * because in an ERROR message it is never something the caller needs. The same
+ * is true of the DOM-locator and credential-store vocabulary (`locator`,
+ * `selector`, `localStorage`, `cookie jar`) and of our own name (`ui2api`).
+ * Those are the error seam's alone, they live in its `ERROR_ONLY_TERMS`, and
+ * they are deliberately NOT shared — sharing them would widen the prose seam
+ * onto words that cry wolf there.
+ */
+export const CONCEPT_TERMS: readonly string[] = [
+  // Browser binaries — the exec ladders the launch seam resolves. The COMPOUND
+  // leaves are absent on purpose; see the header. Two base tokens cover them.
+  "chrome",
+  "chromium",
+  // Display / attachment mechanism — the exec probes and the launch flag.
+  "xvfb",
+  "xorg",
+  "cdp",
+  "headless",
+  "headed",
+  "headful",
+  // Automation libraries — the runtime dependencies the daemon loads.
+  "playwright",
+  "selenium",
+  "webdriver",
+  "puppeteer",
+  "zod",
+  "classic-level",
+  // How a session is bound, when prose names it at all.
+  "browser-bound",
+];
+
 /** The classes the redaction table currently declares. The gate enumerates
  *  THIS, so widening the wire vocabulary is a visible edit here and a failing
  *  marker elsewhere — never a silent redaction that stopped matching. */

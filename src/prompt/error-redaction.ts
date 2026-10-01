@@ -42,7 +42,7 @@
 // correct behaviour. `test/error-redaction.test.ts` pins it two ways: the
 // clause may be TYPED in exactly one file under `src/`, and the bytes this seam
 // emits must equal the owner's bytes.
-import { consumerAccountRefusal } from "./consumer-surface.js";
+import { CONCEPT_TERMS, consumerAccountRefusal } from "./consumer-surface.js";
 
 /** The site/model the request was for — always known at the sink. */
 export interface RedactionContext {
@@ -136,6 +136,103 @@ const CLASSES: ReadonlyArray<{ re: RegExp; say: (ctx: RedactionContext, raw: str
   },
 ];
 
+/* ── THE CONCEPT WORDS ARE NOT TYPED HERE ────────────────────────────────────
+ * THIS USED TO BE A SECOND, HAND-WRITTEN COPY. That is the defect this block
+ * removes, and it was measured before anything was edited: the alternation
+ * below carried 8 of the concept words the prose seam knows and MISSED SIX —
+ * `xorg` (a `has("Xorg")` exec probe in `src/runtime/requirements.ts:454`),
+ * `zod` and `classic-level` (real entries in `package.json:dependencies`),
+ * `selenium` and `puppeteer`, and `headful` (the sibling the exact-match
+ * `headless` form cannot see). Each reached a consumer verbatim, because the
+ * re-check below did not list them either — two copies of one vocabulary, and
+ * the copy that mattered most was the one nobody was proving.
+ *
+ * So the vocabulary now lives ONCE, in `CONCEPT_TERMS` in `./consumer-surface.ts`
+ * — the file that already owns `mechanismTermsIn()`, the derivation that
+ * discovers concept words from the code's own exec surfaces. This seam CONSUMES
+ * it. It does not re-type it, and `test/error-redaction.test.ts` fails if the
+ * words are typed in two places again.
+ *
+ * WHY THE SEAM DOES NOT CALL `mechanismTermsIn()` DIRECTLY. It is tempting, and
+ * it would make the list self-maintaining with no gate at all. It is refused for
+ * a stated reason: that derivation READS THE SOURCE TREE, and this is the last
+ * gate before the wire. A daemon running without `src/` beside it would scan
+ * nothing, derive NOTHING, and silently redact fewer words — a redaction seam
+ * that FAILS OPEN. The declared list is constant; the derivation stays a
+ * TEST-TIME obligation, which is where a "this word exists in the code" claim
+ * belongs, and it is the same shape the prose seam already uses.
+ */
+
+/**
+ * The words ONLY this seam owns, each with the reason it is not shared. These
+ * are the DOM-locator language, the credential stores, and our own name — none
+ * of them is a mechanism noun the derivation can reach, and none of them may be
+ * handed to the PROSE seam, where they would redact ordinary words:
+ *
+ *   - `browser` (bare) — an ordinary English word a capability description may
+ *     legitimately use, so `consumerProse` deliberately leaves it; in an ERROR
+ *     message it is never anything the caller needs.
+ *   - `locator`, `selector` — Playwright's DOM-query language. The caller
+ *     cannot act on "waiting for locator".
+ *   - `localStorage`, `cookie jar` — the credential stores. A description never
+ *     names them and must not; an internal error can, so they are deleted.
+ *   - `profile.ts` — redundant with the file-extension rule above it, kept
+ *     explicit because the bytes it produces are pinned by a test.
+ *   - `ui2api` — our own name, and the error seam has no CLI phrase to match.
+ */
+const ERROR_ONLY_TERMS: readonly string[] = [
+  "browser",
+  "locator",
+  "selector",
+  "localStorage",
+  "cookie jar",
+  "profile.ts",
+  "ui2api",
+];
+
+/** Escape a vocabulary term for use inside an alternation. EVERY term arrives
+ *  RAW — a term is a word, not a pattern — so this is the single place a
+ *  metacharacter is escaped, and it runs exactly once.
+   *
+   * THE DOUBLE-ESCAPE THIS FUNCTION EXISTS TO PREVENT, because it shipped in
+   * the first draft of this change and was caught by measurement rather than by
+   * reading: `ERROR_ONLY_TERMS` carried `profile\\.ts` PRE-ESCAPED, on the
+   * theory that the alternation was built from a string. The escape set below
+   * includes the backslash, so the pre-escaped term came out as `profile\\\\.ts`
+   * — a literal backslash followed by ANY character — and `profile.ts` silently
+   * STOPPED being redacted while every test stayed green. A pre-escaped term in
+   * a list whose builder escapes is the same shape as the duplicate vocabulary
+   * this whole change exists to remove: two places that must agree, one of them
+   * invisible. */
+function termPattern(term: string): string {
+  return term.replace(/[\\^$*+?()[\]{}|]/g, "\\$&");
+}
+
+/**
+ * THE WORD LIST, ASSEMBLED FROM ITS TWO OWNED PARTS. Exported so the gate can
+ * assert on the pattern itself rather than on a hand-copied expectation — a test
+ * that re-typed the words would be the second copy this change removed.
+ *
+ * ORDER. The shared terms come first, in `CONCEPT_TERMS`' declared order, then
+ * this seam's own. Every alternative deletes, so order cannot change WHICH span
+ * is removed except where one term is a prefix of another (`chrome` vs
+ * `chrome-browser`) — and none of the eight words this seam already carried is a
+ * prefix of any shared term, so the assembled pattern matches the pre-change one
+ * on every word it used to match. `test/error-redaction.test.ts` proves that
+ * against the frozen original rather than trusting the claim.
+ */
+export const INTERNAL_WORD_RE = new RegExp(
+  `\\b(?:${[...CONCEPT_TERMS, ...ERROR_ONLY_TERMS].map(termPattern).join("|")})\\b`,
+  "gi",
+);
+
+/** The SAME vocabulary, non-global. `RESIDUAL_INTERNAL` is consulted with
+ *  `.some(re => re.test(text))`, and `.test()` on a `g`-flagged regex advances
+ *  `lastIndex` and therefore returns a different answer on a second call — a
+ *  verdict that depended on how many times the scrub had already run. Two
+ *  instances, ONE vocabulary. */
+export const INTERNAL_WORD_RE_NON_GLOBAL = new RegExp(INTERNAL_WORD_RE.source, "i");
+
 /** Anything in here is internal by construction and never reaches a caller. */
 const MECHANICAL: ReadonlyArray<[RegExp, string]> = [
   [/\bUI2API_[A-Z0-9_]+/g, "<an internal setting>"],
@@ -148,7 +245,7 @@ const MECHANICAL: ReadonlyArray<[RegExp, string]> = [
   [/\b\/(?:home|opt|usr|var|etc|tmp)\/\S*/g, ""],
   [/\b[\w./-]+\.(?:ts|tsx|js|mjs|json)\b/g, ""],
   [/\bx-[a-z-]+\b/gi, ""],
-  [/\b(?:browser|chrome|chromium|playwright|Xvfb|CDP|locator|selector|headless|headed|webdriver|localStorage|cookie jar|profile\.ts|ui2api)\b/gi, ""],
+  [INTERNAL_WORD_RE, ""],
   [/\s{2,}/g, " "],
   [/^\s*[-—,:;]\s*/g, ""],
 ];
@@ -189,6 +286,25 @@ export function redactInternalError(raw: unknown, ctx: RedactionContext = {}): s
  * the shapes that forced the scrub in the first place. Kept deliberately
  * BROADER than the class table: this is the last gate before the wire, and it
  * must fail closed.
+ *
+ * THE WORD ROW HERE USED TO BE A THIRD HAND-WRITTEN COPY — and the narrowest of
+ * the three: it listed 8 words where the scrub listed 15 and the shared
+ * vocabulary lists 14. That is the defect in its purest form, because this row
+ * is the one that decides whether a surviving word is ALLOWED OUT. A word the
+ * scrub missed AND this row missed is a word that reaches a consumer, and the
+ * gap was invisible because all three lists were "correct" in isolation.
+ *
+ * It is now built from the same `CONCEPT_TERMS` as the scrub, and it is a SEPARATE
+ * non-global regex because `.test()` on a `g` regex is stateful: sharing the
+ * scrub's `g` instance would make the verdict depend on how many times the scrub
+ * had run before it. Two instances, one vocabulary.
+ *
+ * WHY WIDENING IT COSTS NOTHING, MEASURED rather than assumed. In every case where
+ * the scrub worked, this row could never fire — the word is already gone. It only
+ * decides anything where the scrub FAILED, and where it failed the honest answer
+ * is the named fallback rather than the raw text. That is the direction the
+ * honesty rule at the top of this file demands, and it is why widening a
+ * fail-closed gate is safe while widening a delete rule is not.
  */
 const RESIDUAL_INTERNAL: readonly RegExp[] = [
   /https?:\/\//,
@@ -197,7 +313,7 @@ const RESIDUAL_INTERNAL: readonly RegExp[] = [
   /\bUI2API_[A-Z0-9_]+/,
   /--[a-z][a-z0-9-]*/,
   /\bGOAL\s+\d+\b/,
-  /\b(?:browser|chrome|chromium|playwright|Xvfb|CDP|localStorage|locator)\b/i,
+  INTERNAL_WORD_RE_NON_GLOBAL,
   /(?:locator\(|getByRole\(|waiting for |\[data-testid|:has-text\()/,
   /:has-text\(|::after/,
   /\bx-[a-z-]+\b/i,
