@@ -174,24 +174,24 @@ const PROSE: ReadonlyArray<[RegExp, string]> = [
   // the wire. Each rule below is now a case-insensitive FAMILY, and each family
   // is a member of `mechanismTermsIn()` — the derivation that proves the family
   // is not a remembered instance. See the derivation section below.
-  [/\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\b/gi, "an operator-attached session"],
-  [/\bchromium(?:[-_]browser)?\b/gi, "an operator-attached session"],
-  [/\b(?:xvfb|xorg)\b/gi, "a virtual display"],
-  [/\bhead(?:less|ed|ful)\b/gi, "display-attached"],
+  [/\bchrome(?:[-_]?(?:browser|stable|beta|driver))?[a-z]*\b/gi, "an operator-attached session"],
+  [/\bchromium(?:[-_]browser)?[a-z]*\b/gi, "an operator-attached session"],
+  [/\b(?:xvfb|xorg)[a-z]*\b/gi, "a virtual display"],
+  [/\bhead(?:less|ed|ful)[a-z]*\b/gi, "display-attached"],
   // `CDP` is the ONE concept word that does not derive (measured: it appears in
   // `src/` only inside comments, never in a name, key, id, flag, ladder or
   // dependency). It stays an EXPLICIT, SELF-DOCUMENTING exception with its
   // reason recorded here and pinned by the gate — see `DECLARED_EXCEPTIONS`.
-  [/\bcdp\b/gi, "the attach endpoint"],
+  [/\bcdp[a-z]*\b/gi, "the attach endpoint"],
   // The libraries the shipped daemon loads. `playwright` is the automation layer
   // the whole product is built on and leaked verbatim into two shipped capability
   // descriptions ("Playwright filechooser event NEVER fires", "Playwright/CDP UI
   // path") — measured on the corpus, not imagined. `zod` / `classic-level` are
   // our own internal plumbing; a consumer is never told which validation library
   // a daemon happens to use.
-  [/\b(?:playwright|selenium|webdriver|puppeteer)\b/gi, "a session driven by the service operator"],
-  [/\b(?:zod|classic-level)\b/gi, "internal implementation detail"],
-  [/\bbrowser-bound\b/gi, "session-bound"],
+  [/\b(?:playwright|selenium|webdriver|puppeteer)[a-z]*\b/gi, "a session driven by the service operator"],
+  [/\b(?:zod|classic-level)[a-z]*\b/gi, "internal implementation detail"],
+  [/\bbrowser-bound[a-z]*\b/gi, "session-bound"],
   // Collapse the whitespace the removals left behind, and tidy the seams.
   [/\s{2,}/g, " "],
   [/\s+([,.;:])/g, "$1"],
@@ -588,16 +588,16 @@ export function proseRuleTokens(): Readonly<Record<string, readonly RegExp[]>> {
     // not the four remembered instances: `real Chrome`/`headless`/`Xvfb`/`CDP`
     // each leaked a sibling form (bare `Chrome`, `google-chrome`, lowercase
     // `xvfb`, `headful`) that no gate watching the exact string would have seen.
-    "attach-mechanism": [
-      /\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\b/i,
-      /\bchromium(?:[-_]browser)?\b/i,
-      /\bhead(?:less|ed|ful)\b/i,
-      /\bxvfb\b/i,
-      /\bcdp\b/i,
+  "attach-mechanism": [
+      /\bchrome(?:[-_]?(?:browser|stable|beta|driver))?[a-z]*\b/i,
+      /\bchromium(?:[-_]browser)?[a-z]*\b/i,
+      /\bhead(?:less|ed|ful)[a-z]*\b/i,
+      /\bxvfb[a-z]*\b/i,
+      /\bcdp[a-z]*\b/i,
     ],
-    "display-mechanism": [/\bxvfb\b/i, /\bxorg\b/i, /\bhead(?:less|ed|ful)\b/i],
-    "browser-binding": [/\bbrowser-bound\b/i],
-    "automation-library": [/\b(?:playwright|selenium|webdriver|puppeteer)\b/i],
+    "display-mechanism": [/\bxvfb[a-z]*\b/i, /\bxorg[a-z]*\b/i, /\bhead(?:less|ed|ful)[a-z]*\b/i],
+    "browser-binding": [/\bbrowser-bound[a-z]*\b/i],
+    "automation-library": [/\b(?:playwright|selenium|webdriver|puppeteer)[a-z]*\b/i],
   };
 }
 

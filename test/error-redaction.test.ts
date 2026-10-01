@@ -732,3 +732,212 @@ describe("COMPOSITION: the two seams are never composed, and cannot double-redac
     assert.ok(SHARED_TERMS.has("browser") === false, "bare `browser` must NOT be a SHARED term — sharing it would redacted it out of prose");
   });
 });
+
+/**
+ * ── THE DERIVED-FORM CLASS (`term` + letters) ─────────────────────────────────
+ *
+ * A prior lane closed the duplicated concept-word list and recorded what it
+ * could NOT fix, verbatim: "`\b` boundary forms are still holes, unchanged by me.
+ * `chromeless`, `headlessly`, `xorgs`, `zodish` survive BOTH the old and new
+ * rules (the word is inside a longer token). Fixing needs prefix-tolerant
+ * matching, which is a widening on a delete rule with unmeasured cost."
+ *
+ * THE FOUR EXAMPLES IT NAMED ARE, MEASURED, WORTHLESS — and that part of its
+ * reasoning was right. All four occur exactly once each in the whole tree, in
+ * `.brain/verbatim-goals.md`, which is the prose of the lane writing them down.
+ * Zero occurrences in `src/`, and a mangled variant of an already-redacted word
+ * discloses nothing a caller did not already have.
+ *
+ * BUT THE CLASS IS NOT THE FOUR WORDS. The class is DERIVATION — any declared
+ * term plus trailing letters — and its plural member is LIVE IN SHIPPED DATA:
+ * `selectors` sits in EIGHT shipped `manifest.json` description fields
+ * (claude x2, conol, grok, t3chat, venice x2, xiaomimimo), every one of which is
+ * republished through `consumerProse()` at `src/prompt/registry.ts:1001` and
+ * served on `GET /registry`. The `conol` sentence is the cleanest possible proof
+ * that this is a HOLE and not a policy: in ONE string the seam translates
+ * `headed` to `display-attached` and walks straight past `selectors`.
+ *
+ * It is live on the error seam too, in a thrown Error at
+ * `src/prompt/driver.ts:723` ("the profile has no picker selectors") and in a
+ * consumer-facing `reason` at `src/runtime/capability-probe.ts:114`/`:414`.
+ *
+ * AND THE FAIL-CLOSED CLAIM WAS FALSE FOR THIS MEMBER. `RESIDUAL_INTERNAL` is
+ * documented as the last gate before the wire and as failing closed; it is built
+ * from the same boundary-anchored pattern, so it cannot see `selectors` either.
+ * Measured: the re-check lets that message out untouched. A gate that cannot
+ * see the leak is not a gate.
+ */
+describe("DERIVED FORMS: a declared term plus trailing letters is the SAME word", () => {
+  /** The derived forms that are attested or plausible, split by WHY each is
+   *  here — so a future failure names which category regressed. `plural` is the
+   *  one measured live in shipped data; the rest are the handed-over examples
+   *  plus the shapes English actually derives. */
+  const DERIVED: ReadonlyArray<readonly [string, string]> = [
+    // LIVE in shipped manifest descriptions — the plural is the real class.
+    ["plural", "selectors"],
+    ["plural", "browsers"],
+    ["plural", "locators"],
+    ["plural", "chromes"],
+    ["plural", "chromiums"],
+    ["plural", "playwrights"],
+    ["plural", "cdps"],
+    ["plural", "zods"],
+    // The four the prior lane handed over, verbatim.
+    ["suffix", "chromeless"],
+    ["suffix", "headlessly"],
+    ["suffix", "xorgs"],
+    ["suffix", "zodish"],
+    ["suffix", "headfully"],
+    ["suffix", "xorgish"],
+    ["suffix", "chromelessness"],
+  ];
+
+  test("the ERROR seam deletes every derived form, not just the bare term", () => {
+    const leaked: string[] = [];
+    for (const [kind, form] of DERIVED) {
+      // A REAL internal message, shaped like driver.ts:723's — long enough to
+      // clear the 24-char diagnosis floor, so a survivor is the seam's choice
+      // and not the length gate quietly hiding a regression.
+      const out = redactInternalError(`${form} was never a word the caller may read here`, { site: "gemini" });
+      if (new RegExp(`\\b${form}\\b`, "i").test(out)) {
+        leaked.push(`${kind} "${form}" -> ${JSON.stringify(out)}`);
+      }
+    }
+    assert.deepEqual(
+      leaked,
+      [],
+      `a derived form of a declared term reached a consumer verbatim. The bare term is redacted and its\n` +
+        `own inflection is not, so the seam redacts half a word:\n  ${leaked.join("\n  ")}`,
+    );
+  });
+
+  test("the PROSE seam translates every derived form it owns", () => {
+    // PROSE'S OWNERSHIP IS NARROWER THAN THE ERROR SEAM'S, and that is the whole
+    // reason the two seams exist as they do. `browser`, `locator` and `selector`
+    // are ordinary English in a capability description — "selectors may be
+    // combined with a comma" is a legitimate sentence — so prose must NOT redact
+    // them or their plurals, and the counterweight test below pins that. The eight
+    // shipped descriptions that still read `selectors` are therefore NOT a prose
+    // bug; they are a consequence of prose deliberately never owning that word.
+    // The forms asserted HERE are the ones prose does own: derivations of a
+    // CONCEPT_TERM.
+    const PROSE_OWNED = [
+      "chromes", "chromiums", "playwrights", "cdps", "zods", // plurals of a concept term
+      "chromeless", "headlessly", "headfully", "xorgish", "zodish", // the four handed over
+      "chromelessness", "browser-bounded", // longer derivations
+    ];
+    const leaked: string[] = [];
+    for (const form of PROSE_OWNED) {
+      const out = consumerProse(`probe ${form} probe`);
+      if (new RegExp(`\\b${form}\\b`, "i").test(out)) leaked.push(`"${form}" -> ${JSON.stringify(out)}`);
+    }
+    assert.deepEqual(
+      leaked,
+      [],
+      `consumerProse left a derived form of a concept term it OWNS in a description a consumer will read:\n  ${leaked.join("\n  ")}`,
+    );
+  });
+
+  test("the PROSE seam still TRANSLATES rather than deleting (the honesty rule)", () => {
+    // A derived form must be handled the way the bare term is: replaced with a
+    // phrase a description can still be built from. If a widening turned the
+    // prose seam into a delete, the description would lose its sentence and the
+    // redaction would be the second lie the file's header forbids.
+    for (const [form, mustSurvive] of [
+      ["chromeless", "operator-attached"],
+      ["headlessly", "display-attached"],
+      ["chromes", "operator-attached"],
+      ["zodish", "internal implementation detail"],
+    ] as const) {
+      const out = consumerProse(`probe ${form} probe`);
+      assert.ok(
+        out.includes(mustSurvive),
+        `the derived form "${form}" was not TRANSLATED to "${mustSurvive}": ${JSON.stringify(out)}. ` +
+          `A prose redaction that deletes the sentence is a second lie.`,
+      );
+    }
+  });
+
+  test("the PROSE seam still leaves the ordinary derived English alone (the counterweight)", () => {
+    // THE FAIL-SAFE HALF. `browser`, `locator` and `selector` are ordinary words
+    // a capability description may legitimately use, so prose must not redact
+    // them OR their plurals. If a future widening reaches these, the derived-form
+    // gate above has become the 276-token defect: a gate that catches ordinary
+    // words catches nothing.
+    for (const s of [
+      "the browser refused the request",
+      "browsers are not shared between requests",
+      "the selector is invalid for this query",
+      "selectors may be combined with a comma",
+      "the locator returned no rows",
+      "locators are scoped to the document",
+    ]) {
+      assert.equal(consumerProse(s), s, `consumerProse mangled ordinary English: ${JSON.stringify(s)} -> ${JSON.stringify(consumerProse(s))}`);
+    }
+  });
+
+  test("MEASURED: the derived-form widening adds only KNOWN-SAFE tokens to the shipped corpus", () => {
+    // THE NUMBER THAT LICENSES THE WIDENING, recomputed at test time so it
+    // cannot rot into a claim. This is the discipline the repo already learned
+    // the hard way: a redaction widened "until it catches everything" caught 276
+    // ordinary words (Answer, Capability, Search, Tool, Image, Response, model,
+    // session) and was rejected. So the cost is MEASURED HERE, over the REAL
+    // corpus — every string out of every shipped `capabilities/*/manifest.json`,
+    // which is exactly what `consumerProse` is asked to rewrite — and the delta
+    // must be exactly the derived forms of a declared term and nothing else.
+    //
+    // A bare delta count would be enough to cry wolf invisibly (a new colliding
+    // token could replace a safe one), so the assertion is on the SET.
+    const TERMS = [...CONCEPT_TERMS, "browser", "locator", "selector", "localStorage", "cookie jar", "profile.ts", "ui2api"];
+    const alt = TERMS.map((t) => t.replace(/[\\^$*+?()[\]{}|]/g, "\\$&")).join("|");
+    const BARE = new RegExp(`^(?:${alt})$`, "i");
+    const WIDE = new RegExp(`^(?:${alt})[a-z]+$`, "i");
+
+    const corpus = new Set<string>();
+    for (const dir of readdirSync(join(REPO_ROOT, "capabilities"), { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      let m: unknown;
+      try {
+        m = JSON.parse(readFileSync(join(REPO_ROOT, "capabilities", dir.name, "manifest.json"), "utf8"));
+      } catch {
+        continue;
+      }
+      const grab = (o: unknown): void => {
+        if (typeof o === "string") {
+          for (const w of o.split(/[^A-Za-z0-9_-]+/)) if (w) corpus.add(w);
+        } else if (Array.isArray(o)) o.forEach(grab);
+        else if (o && typeof o === "object") Object.values(o).forEach(grab);
+      };
+      grab(m);
+    }
+    assert.ok(corpus.size > 500, `the shipped corpus collapsed to ${corpus.size} tokens — this gate would pass vacuously`);
+
+    // Every token the widened rule eats that the bare rule did not.
+    const delta = [...corpus].filter((w) => WIDE.test(w) && !BARE.test(w)).sort();
+    // …each one must be a DERIVATION OF A DECLARED TERM, checked by stripping
+    // trailing letters back to a term. That is the property that makes the
+    // widening safe by construction rather than by count.
+    const notADerivation = delta.filter((w) => {
+      let s = w;
+      while (s.length > 0) {
+        if (BARE.test(s)) return false;
+        s = s.slice(0, -1);
+      }
+      return true;
+    });
+    assert.deepEqual(
+      notADerivation,
+      [],
+      `the derived-form widening eats ${delta.length} new tokens from the shipped corpus ` +
+        `(${corpus.size} total), and ${notADerivation.length} are NOT a derivation of a declared term: ` +
+        `${notADerivation.join(", ")}.\nA redaction that catches ordinary words catches nothing — the 276-token ` +
+        `defect. Full delta: ${delta.join(", ")}`,
+    );
+    // Disclosed, not asserted into silence: the measured delta and its size, so
+    // a reader sees the number rather than trusting the mechanism.
+    console.log(
+      `[derived-form gate] corpus ${corpus.size} tokens; widened rule newly eats ${delta.length}: ${delta.join(", ") || "(none)"}; ` +
+        `${notADerivation.length} are not a derivation of a declared term`,
+    );
+  });
+});

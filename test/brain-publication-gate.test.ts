@@ -1,6 +1,6 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1066,5 +1066,586 @@ d("P5: session.lock.json ships NAMES only — acceptable, and pinned as such", (
     const clean: string[] = [];
     walk(namesOnly, "$");
     assert.deepEqual(clean, [], "names-only must be clean — that is the whole point of the acceptable-and-documented decision");
+  });
+});
+
+/* ========================================================================
+ * P6 — THE VISIBILITY PROBE: every push destination is proven before it is
+ *      written to, and an UNPROVEN destination refuses.
+ *
+ * THE HOLE THIS COVERS, CONFIRMED BY READING THE JOB RATHER THAN BELIEVED.
+ * The handover said: "`public_mirror`'s public push has no visibility probe,
+ * unlike the superseded kit job which probed `.private` and refused." Read off
+ * `.gitlab-ci.yml`, `public_mirror`'s script block contains no `curl`, no
+ * `api.github.com` and no `.private` reference at all; its ONLY pre-push
+ * condition on the public half is `[ -f /tmp/mirror-work/public-verified ]`,
+ * which is a MEASUREMENT OF A TREE, not a statement about the destination.
+ * CONFIRMED, with one correction of scope that matters more than the claim:
+ * the PRIVATE-FULL push — the repo that carries ALL of `.brain` — is gated on
+ * nothing except a token and a branch count, and by design it is NOT behind
+ * the sanitisation marker. So the destination whose visibility is actually
+ * load-bearing had no visibility probe either, and it is not the one the
+ * handover pointed at.
+ *
+ * WHY THE ASSERTION IS NOT "private == true" ON THE PUBLIC REPO.
+ * `MeRezaRezaei/ui2api` is DELIBERATELY PUBLIC. Asserting `private == true`
+ * against it asserts the opposite of the intended steady state and can never
+ * be satisfied again — which is the "a gate that cannot open is not a gate"
+ * defect this same pipeline already paid for at `.gitlab-ci.yml:392`. The probe
+ * instead asks what is load-bearing: is this the repo we configured, and does
+ * it hold the visibility this job DECLARES. See P6c.
+ * ===================================================================== */
+
+const VIS_PROBE = join(ROOT, "scripts/ci/assert-repo-visibility.sh");
+const VIS_PROBE_TEXT = existsSync(VIS_PROBE) ? readFileSync(VIS_PROBE, "utf8") : "";
+
+/** A COLUMN-0-BOUNDED job block.
+ *
+ *  The inherited `jobBlock` slices to END OF FILE, so for `public_mirror` — the
+ *  second-to-last job in this file — it would also contain the whole
+ *  `opencode-agent` kit section. That is harmless for a "does this string
+ *  exist" pin and fatal for the ORDERING pin below, which would then be free to
+ *  find a probe call belonging to a different job. A top-level YAML key starts
+ *  at column 0, so the block ends at the first subsequent line that does. */
+export function boundedJob(text: string, name: string): string {
+  const at = text.indexOf(`\n${name}:`);
+  if (at < 0) return "";
+  // Slice AFTER the leading newline: `slice(at)` yields an EMPTY first element,
+  // and the second element is the job's own key — which is itself a column-0,
+  // non-comment line. Starting the scan there broke the block on its own header
+  // and returned an empty string, which is precisely the "gate passes on
+  // absence" shape the inherited `jobBlock` comment warns about. MEASURED: the
+  // first run of this block returned "" for a job that is plainly in the file.
+  const lines = text.slice(at + 1).split("\n");
+  const body: string[] = [lines[0] ?? ""];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    // Column 0 and not a comment: the next top-level key.
+    if (line.length > 0 && !/^\s/.test(line) && !line.startsWith("#")) break;
+    body.push(line);
+  }
+  return body.join("\n");
+}
+
+const PUBLIC_MIRROR_JOB = boundedJob(RENDERED_TEXT, "public_mirror");
+
+/** The PINS, as a pure function of the text they are asserted against.
+ *
+ *  Pure, so the red/green proof below can feed them the CURRENT job (which must
+ *  fail — that is the hole) and a fixture carrying the PROPOSED wiring (which
+ *  must pass), with nothing mutated on disk. Every pin is a throw with a named
+ *  reason, so a red is self-describing rather than a bare `false`. */
+export function assertVisibilityProbeWired(jobText: string): void {
+  assert.ok(jobText !== "", "public_mirror is absent from .gitlab-ci.yml — the pins below would pass on absence, which is the failure mode this file already fixed once");
+
+  assert.match(
+    jobText,
+    /assert-repo-visibility\.sh/,
+    "public_mirror must probe its destinations' real visibility before pushing; today it never asks",
+  );
+
+  // BOTH destinations, each with its own DECLARED expectation. Anchored on the
+  // `--expect` argument rather than on the script path, because a job is free to
+  // invoke the probe through a variable — the pin is about the DECISION, not
+  // about which line names the file.
+  //
+  // The corpus-bearing one is the assertion the handover asked for, relocated to
+  // the repo it is actually true of: `GITHUB_FULL_REPO` carries all of `.brain`
+  // and is pushed with NO sanitisation marker in front of it, so a public answer
+  // there is an exposure and is currently ungated.
+  const expects = [...jobText.matchAll(/--expect[ \t]+(private|public)/g)];
+  assert.ok(
+    expects.length >= 2,
+    `both push destinations must be probed (${expects.length} --expect argument(s) found): the corpus-bearing repo and the sanitized repo`,
+  );
+  assert.ok(
+    expects.some((m) => m[1] === "private"),
+    "the PRIVATE-FULL destination carries all of .brain, so its probe must REQUIRE private — this is the push where a public answer is an exposure, and it is currently ungated",
+  );
+  assert.ok(
+    expects.some((m) => m[1] === "public"),
+    "the SANITIZED destination is deliberately PUBLIC; its probe must DECLARE public. Asking it to be private is a gate that can never open again, which is the defect .gitlab-ci.yml:392 already records.",
+  );
+
+  // ORDER, which is the whole point of "before the push". The first `--expect` is
+  // the first probe call site, so it is the earliest moment the job has examined
+  // a destination.
+  const probeAt = expects[0]!.index!;
+  const privPushAt = jobText.indexOf('git -C "$PRIV" push');
+  const pubPushAt = jobText.indexOf('git -C "$PUB" push');
+  assert.ok(privPushAt > 0 && pubPushAt > 0, "both pushes must be present for the ordering pin to mean anything");
+  assert.ok(probeAt < privPushAt, "the probe must run BEFORE the private-full push — a probe after a push has prevented nothing");
+  assert.ok(probeAt < pubPushAt, "the probe must run BEFORE the public-sanitized push");
+
+  // A probe whose exit status is DISCARDED is a comment. Each call site's own
+  // text — the span from that `--expect` up to the next one — must carry a guard
+  // that ends the script.
+  for (let i = 0; i < expects.length; i++) {
+    const from = expects[i]!.index!;
+    // The span must end at the next PUSH, not at end-of-text. The last probe's
+    // span used to run to the end of the job block, which swept in the
+    // private-full push's own `git remote remove origin 2>/dev/null || true` and
+    // made this assert FAIL on a correctly-wired job — a false positive on the
+    // very line it exists to police. Each span is this probe up to the next thing
+    // that matters: another probe, or the push it is guarding.
+    const nextProbe = i + 1 < expects.length ? expects[i + 1]!.index! : jobText.length;
+    const pushAfter = jobText.indexOf("git -C", from);
+    const to = pushAfter !== -1 ? Math.min(nextProbe, pushAfter) : nextProbe;
+    const span = jobText.slice(from, to);
+    assert.match(span, /\|\|/, `probe call ${i + 1} has no \`||\` guard on its exit status; an unguarded probe cannot refuse anything`);
+    assert.match(span, /exit 1/, `probe call ${i + 1} does not end the script on refusal; \`|| true\` or a bare warning would publish into an unproven destination`);
+    assert.ok(!/\|\|\s*true\b/.test(span), `probe call ${i + 1} swallows its refusal with \`|| true\` — that is fail-open, and it is worse than no probe`);
+  }
+
+  // The transport. `-k`/`--insecure` disables the control that stops a
+  // man-in-the-middle answering "private" for a corpus-bearing repo, and the
+  // superseded kit probe carried exactly that (`curl -skfL`).
+  assert.ok(
+    !/curl\s[^\n]*\s-{1,2}(k|insecure)\b/.test(jobText),
+    "the job must not bypass TLS verification when asking about visibility — a probe answer an attacker can forge authorises nothing",
+  );
+}
+
+/** A STUB GitHub API on loopback, so the probe's contract is proven against a
+ *  CONTROLLABLE endpoint instead of a live one, with no token and no network.
+ *
+ *  It is a real `node:http` server: the probe really opens a TCP connection,
+ *  really sends a request line and headers, and really has to parse the bytes
+ *  that come back. The only thing faked is GitHub. `seen` records what arrived,
+ *  so the AUTHENTICATION assertion is made against a header the server actually
+ *  received rather than against the probe's own source text. */
+type StubRoute = { status: number; body?: unknown; raw?: string };
+interface Stub {
+  base: string;
+  close: () => Promise<void>;
+  seen: Array<{ url: string; auth: string | undefined }>;
+}
+
+async function stubApi(routes: Record<string, StubRoute>): Promise<Stub> {
+  const { createServer } = await import("node:http");
+  const seen: Array<{ url: string; auth: string | undefined }> = [];
+  const server = createServer((req, res) => {
+    seen.push({ url: req.url ?? "", auth: req.headers.authorization });
+    const route = routes[req.url ?? ""];
+    if (!route) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ message: "Not Found" }));
+      return;
+    }
+    res.writeHead(route.status, { "content-type": "application/json" });
+    res.end(route.raw ?? JSON.stringify(route.body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  if (addr === null || typeof addr === "string") throw new Error("stub API did not bind a TCP port");
+  return {
+    base: `http://127.0.0.1:${addr.port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    seen,
+  };
+}
+
+/** Run the REAL probe script as a subprocess and report what it did.
+ *  `GH_TOKEN` is set to a fixed NON-SECRET literal; the name is what the script
+ *  may inspect, and this literal is not a credential for anything.
+ *
+ *  ASYNC, and not `spawnSync`, and the reason is load-bearing rather than
+ *  stylistic: the stub API above lives IN THIS PROCESS, so a synchronous spawn
+ *  would block the event loop and the server could never accept the connection.
+ *  That is not a slow test, it is a 60-second hang followed by a timeout on
+ *  every stub-backed case — which is exactly what the first run of this block
+ *  did (MEASURED: GREEN 1 / GREEN 2 / RED 1 / RED 4 each took ~60.2 s and failed
+ *  on the probe's own `timeout 60`). The loopback stub and a blocking child
+ *  process are mutually exclusive; this is now async so the server can answer. */
+async function runProbe(args: readonly string[], env: Record<string, string>): Promise<{ status: number; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("bash", [VIS_PROBE, ...args], {
+      env: { ...process.env, GH_TOKEN: "probe-stub-token-not-a-secret", ...env },
+    });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (c: Buffer) => { out += c.toString(); });
+    child.stderr.on("data", (c: Buffer) => { err += c.toString(); });
+    // A hard ceiling below the probe's own 60 s, so a wedged child is a NAMED
+    // failure of THIS harness rather than an indistinguishable timeout.
+    const kill = setTimeout(() => child.kill("SIGKILL"), 30000);
+    child.on("close", (code) => {
+      clearTimeout(kill);
+      resolve({ status: code ?? -1, out: out.trim(), err: err.trim() });
+    });
+  });
+}
+
+/** The same, for a caller that supplies its own SCRIPT PATH and ENV (the
+ *  no-token case, and the mutation copy), still async for the reason above. */
+async function runScript(
+  script: string,
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<{ status: number; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("bash", [script, ...args], { env });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (c: Buffer) => { out += c.toString(); });
+    child.stderr.on("data", (c: Buffer) => { err += c.toString(); });
+    const kill = setTimeout(() => child.kill("SIGKILL"), 30000);
+    child.on("close", (code) => {
+      clearTimeout(kill);
+      resolve({ status: code ?? -1, out: out.trim(), err: err.trim() });
+    });
+  });
+}
+
+/** A port that is PROVABLY not listening, produced by binding then closing.
+ *  This is the real ECONNREFUSED case rather than a mocked curl. */
+async function closedPort(): Promise<number> {
+  const { createServer } = await import("node:http");
+  const s = createServer();
+  await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));
+  const addr = s.address();
+  if (addr === null || typeof addr === "string") throw new Error("could not reserve a port");
+  const port = addr.port;
+  await new Promise<void>((resolve) => s.close(() => resolve()));
+  return port;
+}
+
+d("P6a: the visibility probe exists, and it is a SEPARATE tool from the sanitizer", () => {
+  t("the probe script is present and syntactically valid", () => {
+    assert.ok(
+      VIS_PROBE_TEXT !== "",
+      `scripts/ci/assert-repo-visibility.sh is missing at ${VIS_PROBE} — there is no visibility probe, so this gate must NOT pass on absence`,
+    );
+    execFileSync("bash", ["-n", VIS_PROBE], { encoding: "utf8", timeout: 30000, stdio: "pipe" });
+  });
+
+  t("BOUNDARY: the SANITIZER stays free of network calls — the separation is pinned, not merely intended", () => {
+    // The argument for two files, made an assertion. `make-public-repo.sh` is a
+    // measurement instrument whose header says it PUSHES NOTHING; giving it an
+    // API call would couple "can I prove this tree is clean?" to "is GitHub
+    // reachable?", so an outage would remove the ability to prove cleanliness at
+    // all. If a future change adds a network call to the sanitizer, this goes
+    // red and the two concerns have to be deliberately re-merged, in writing.
+    assert.ok(!/\bcurl\b/.test(SANITIZER_TEXT), "the sanitizer must not call curl — it is a hermetic instrument and this file owns the network policy");
+    assert.ok(!/api\.github\.com/.test(SANITIZER_TEXT), "the sanitizer must not name api.github.com — the network policy lives in assert-repo-visibility.sh");
+    assert.ok(!/\bgh\b\s+repo\s+view/.test(SANITIZER_TEXT), "the sanitizer must not shell out to gh — same separation, same reason");
+    // …and the boundary is not vacuous: the probe DOES make the call.
+    assert.ok(/curl[\s\S]*api\.github\.com|API_BASE/.test(VIS_PROBE_TEXT), "the probe must actually be the file that talks to the API, or the pins above are guarding a boundary nobody observes");
+  });
+
+  t("the probe pins its own refusals: non-200, unparseable, self-contradictory, and no token", () => {
+    // These are STATIC pins on the script's own text. They are not the proof —
+    // P6b executes the script — but they catch a refusal being DELETED without
+    // anyone noticing the delete, which the executable proof would report as a
+    // pass because it happens to exercise a different case.
+    for (const needle of [
+      /UNREACHABLE IS NOT PROVEN/,
+      /UNKNOWN is NOT private/,
+      /UNKNOWN is NOT private, so the push is refused/,
+      /no boolean \.private/,
+      /disagrees with itself/,
+      /while '\$REPO' was requested/,
+      /GH_TOKEN is unset/,
+    ]) {
+      assert.match(VIS_PROBE_TEXT, needle, `the probe lost a named refusal (${needle}) — every unknown must refuse`);
+    }
+    // Every refusal funnels through ONE function that exits non-zero, so there
+    // is a single place to audit for whether an unknown can pass. A refusal
+    // written as `echo; exit 0` somewhere would survive the pins above.
+    const refuses = VIS_PROBE_TEXT.match(/\brefuse\b/g) ?? [];
+    assert.ok(refuses.length >= 10, `expected many refusal call sites, found ${refuses.length}`);
+    assert.match(VIS_PROBE_TEXT, /refuse\(\)\s*\{[\s\S]{0,300}?exit 1/, "the refuse() helper must exit NON-ZERO — a refusal that returns 0 is a green light");
+  });
+});
+
+d("P6b: RED -> GREEN in all THREE directions, against a REAL HTTP endpoint", () => {
+  t("GREEN 1: a PRIVATE destination matches the declared `private` -> the push is authorised", async () => {
+    const stub = await stubApi({
+      "/repos/acme/full": { status: 200, body: { private: true, visibility: "private", full_name: "acme/full" } },
+    });
+    try {
+      const r = await runProbe(["--repo", "acme/full", "--expect", "private", "--label", "private-full"], { UI2API_GH_API_BASE: stub.base });
+      assert.equal(r.status, 0, `a proven-private destination must authorise the push; got status ${r.status}: ${r.err}`);
+      assert.match(r.out, /VIS-OK\[private-full\]/, "the authorisation must be PRINTED, so the log records the measured fact and not just a green");
+      // AUTHENTICATION, asserted against a header the server RECEIVED.
+      assert.equal(stub.seen.length, 1, "exactly one API call is expected");
+      assert.match(String(stub.seen[0]?.auth), /^Bearer \S/, "the token must travel in an Authorization header — asserted from what the server received, not from the script's text");
+      assert.match(String(stub.seen[0]?.url), /^\/repos\/acme\/full$/);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  t("GREEN 2: a PUBLIC destination matches the declared `public` -> authorised, because the public repo IS public", async () => {
+    // This is the case the handover's proposed fix would have REFUSED forever.
+    // It is green here by design, and that is the answer to the steady-state
+    // question: a probe that demands a deliberately-public repo be private is
+    // not a safety check, it is a broken pipeline.
+    const stub = await stubApi({
+      "/repos/acme/pub": { status: 200, body: { private: false, visibility: "public", full_name: "acme/pub" } },
+    });
+    try {
+      const r = await runProbe(["--repo", "acme/pub", "--expect", "public", "--label", "public-sanitized"], { UI2API_GH_API_BASE: stub.base });
+      assert.equal(r.status, 0, `the sanitized destination is deliberately PUBLIC; refusing it would be a permanently red pipeline: got ${r.status}: ${r.err}`);
+      assert.match(r.out, /VIS-OK\[public-sanitized\]/);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  t("RED 1: destination PUBLIC but declared `private` -> REFUSED, with a named reason (the exposure direction)", async () => {
+    const stub = await stubApi({
+      "/repos/acme/full": { status: 200, body: { private: false, visibility: "public", full_name: "acme/full" } },
+    });
+    try {
+      const r = await runProbe(["--repo", "acme/full", "--expect", "private", "--label", "private-full"], { UI2API_GH_API_BASE: stub.base });
+      assert.notEqual(r.status, 0, "a PUBLIC corpus-bearing destination MUST refuse — this is the exposure the probe exists to catch");
+      assert.match(r.err, /VIS-FAIL\[private-full\]/, "the refusal must be NAMED and carry the destination's label");
+      assert.match(r.err, /is PUBLIC, but this job requires it to be private/, "the refusal must say what is true and what was required");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  t("RED 3: the API is UNREACHABLE -> REFUSED (fail CLOSED). This is the case that matters most.", async () => {
+    const port = await closedPort();
+    const r = await runProbe(["--repo", "acme/full", "--expect", "private", "--label", "private-full"], {
+      UI2API_GH_API_BASE: `http://127.0.0.1:${port}`,
+    });
+    assert.notEqual(r.status, 0, "an UNREACHABLE API must refuse. A probe that fails OPEN on a network error manufactures the exact false confidence it exists to prevent — worse than no probe at all.");
+    assert.match(r.err, /could not be reached/, "the refusal must NAME the cause");
+    assert.match(r.err, /UNREACHABLE IS NOT PROVEN/, "the refusal must state that unreachability is not proof");
+  });
+
+  t("RED 4: every OTHER unknown also refuses — non-200, half a body, and a body that lies about who it is", async () => {
+    const stub = await stubApi({
+      "/repos/acme/gone": { status: 404, body: { message: "Not Found" } },
+      "/repos/acme/denied": { status: 403, body: { message: "Forbidden" } },
+      "/repos/acme/half": { status: 200, body: { full_name: "acme/half" } }, // no .private at all
+      "/repos/acme/strpriv": { status: 200, body: { private: "true", visibility: "private", full_name: "acme/strpriv" } }, // string, not boolean
+      "/repos/acme/halfvis": { status: 200, body: { private: true, full_name: "acme/halfvis" } }, // no .visibility
+      "/repos/acme/liar": { status: 200, body: { private: true, visibility: "public", full_name: "acme/liar" } }, // self-contradictory
+      "/repos/acme/impostor": { status: 200, body: { private: true, visibility: "private", full_name: "someone-else/other" } }, // wrong repo
+      "/repos/acme/garbage": { status: 200, raw: "not json at all" },
+    });
+    const expect: ReadonlyArray<[string, RegExp]> = [
+      ["acme/gone", /HTTP 404/],
+      ["acme/denied", /HTTP 403/],
+      ["acme/half", /no boolean \.private/],
+      ["acme/strpriv", /no boolean \.private/],
+      ["acme/halfvis", /no usable visibility/],
+      ["acme/liar", /disagrees with itself/],
+      ["acme/impostor", /while 'acme\/impostor' was requested/],
+      ["acme/garbage", /no boolean \.private/],
+    ];
+    try {
+      for (const [repo, why] of expect) {
+        const r = await runProbe(["--repo", repo, "--expect", "private", "--label", "t"], { UI2API_GH_API_BASE: stub.base });
+        assert.notEqual(r.status, 0, `${repo} must REFUSE — an unknown must never authorise a push`);
+        assert.match(r.err, why, `${repo} refused, but not for the expected reason`);
+      }
+    } finally {
+      await stub.close();
+    }
+  });
+
+  t("RED 5: no token -> REFUSE, because an unauthenticated probe cannot tell a private repo from a deleted one", async () => {
+    const stub = await stubApi({
+      "/repos/acme/full": { status: 200, body: { private: true, visibility: "private", full_name: "acme/full" } },
+    });
+    // GH_TOKEN is removed from the environment entirely, rather than blanked:
+    // `${GH_TOKEN:-}` treats unset and empty identically, so a blanked variable
+    // would test a different code path than a genuinely absent one.
+    const noToken: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k !== "GH_TOKEN" && v !== undefined) noToken[k] = v;
+    }
+    noToken.UI2API_GH_API_BASE = stub.base;
+    try {
+      const r = await runScript(VIS_PROBE, ["--repo", "acme/full", "--expect", "private", "--label", "no-token"], noToken);
+      assert.notEqual(r.status, 0, "a probe with no token must refuse");
+      assert.match(r.err, /GH_TOKEN is unset/, "the refusal must name the missing variable — by NAME, never its value");
+      assert.equal(stub.seen.length, 0, "no request may be made at all without a token");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  t("MUTATION: the fail-closed property is what makes the probe a gate — prove it by removing it", async (tt) => {
+    // "A mutation that does not fire may mean the gate is broken OR that you
+    // mutated the wrong thing." So both halves are established here: WHAT was
+    // mutated, and that the mutation reached a live file.
+    //
+    // MUTATION A — `refuse()`'s own `exit 1` becomes `return 0`. Every refusal in
+    // the script routes through that one function, so this is the single
+    // mutation that disarms the script's refusal MECHANISM.
+    //
+    // MEASURED, and the result was not what this test first asserted: neutering
+    // refuse() alone does NOT produce exit 0. It walks EVERY refusal in turn —
+    // unreachable, non-200, no boolean .private, wrong full_name, no usable
+    // visibility, self-contradiction — which is itself worth knowing, because it
+    // proves every layer is armed and every one is REACHED — and then dies on
+    // `vis_private: unbound variable` under `set -u`, exiting 1 anyway.
+    //
+    // So the probe has THREE independent fail-closed layers: the refusal
+    // function, the non-200 status case, and the shell's own `set -euo pipefail`.
+    // Mutating one leaves the others standing. That is measured here rather than
+    // claimed, and it is why a single-point mutation of this gate does not turn it
+    // green.
+    const mutatedA = VIS_PROBE_TEXT.replace(
+      /(refuse\(\)\s*\{[\s\S]*?)\n  exit 1\n\}/,
+      "$1\n  return 0\n}",
+    );
+    assert.notEqual(mutatedA, VIS_PROBE_TEXT, "mutation A did not apply — refuse() no longer has the shape this mutation targets, so the test would be proving nothing");
+
+    // MUTATION B — the one this test got WRONG on the first run, kept because the
+    // way it failed is the same depth finding reached from a different angle.
+    // Rewriting every `|| refuse "…"` to `|| true` does NOT turn the unreachable
+    // case green either: curl still prints `000` through `-w '%{http_code}'`, so
+    // the independent `case "$code"` layer still refuses.
+    const mutatedB = VIS_PROBE_TEXT.replace(/\|\| refuse "[^"]*"/g, "|| true");
+    assert.notEqual(mutatedB, VIS_PROBE_TEXT, "mutation B did not apply either");
+
+    // MUTATION C — the ONLY mutation that produces the fail-OPEN shape: disarm
+    // the refusal function AND drop the shell's own fail-closed options. This is
+    // the mutation the gate must be sensitive to, and it is exactly the shape a
+    // well-meaning refactor reaches for ("`set -e` is often dropped because the
+    // guards handle it").
+    //
+    // MEASURED: `set -euo pipefail` -> `set -uo pipefail` was tried FIRST and did
+    // not go green, because `-u` alone still kills the walk on the first unbound
+    // read (`vis_private`) once every refusal has been stepped past. Both options
+    // have to go for the fail-open shape to be reachable at all — which is itself
+    // the depth finding stated a third, independent way.
+    const mutatedC = mutatedA.replace(/^set -euo pipefail$/m, "set +eu");
+    assert.ok(mutatedC.includes("set +eu"), "mutation C must have disabled both -e and -u; if the line changed shape this test proves nothing");
+    assert.ok(!/^set -euo pipefail$/m.test(mutatedC), "mutation C must have removed the `set -e`/`set -u` layer");
+
+    const dir = mkdtempSync(join(tmpdir(), "vis-mutation-"));
+    try {
+      const port = await closedPort();
+      const env = {
+        ...(process.env as Record<string, string>),
+        GH_TOKEN: "probe-stub-token-not-a-secret",
+        UI2API_GH_API_BASE: `http://127.0.0.1:${port}`,
+      };
+      const args = ["--repo", "acme/full", "--expect", "private", "--label", "mutant"];
+
+      // C first: the fail-OPEN shape, and the one that must go GREEN.
+      const c = join(dir, "mutant-c.sh");
+      writeFileSync(c, mutatedC);
+      const rc = await runScript(c, args, env);
+      assert.equal(
+        rc.status,
+        0,
+        `disarming refuse() AND dropping \`set -e\` must produce exit 0 on an unreachable API — the fail-OPEN shape. That is what makes the real script's refusals load-bearing rather than incidental. status=${rc.status} err=${rc.err}`,
+      );
+      assert.match(rc.out, /VIS-OK\[mutant\]/, "the fail-open mutant must reach the SUCCESS line — otherwise the push would still be blocked and this mutation proves nothing");
+
+      // A and B: each alone must still refuse, with the surviving layer NAMED.
+      const a = join(dir, "mutant-a.sh");
+      writeFileSync(a, mutatedA);
+      const ra = await runScript(a, args, env);
+      assert.notEqual(ra.status, 0, "disarming refuse() ALONE must still refuse, because `set -euo pipefail` is an independent fail-closed layer");
+      assert.match(ra.err, /could not be reached/, "every refusal layer must actually be REACHED, not merely present — a refusal on a path that is never taken guards nothing");
+
+      const b = join(dir, "mutant-b.sh");
+      writeFileSync(b, mutatedB);
+      const rb = await runScript(b, args, env);
+      assert.notEqual(
+        rb.status,
+        0,
+        "dropping only the `|| refuse` guards must STILL refuse on an unreachable API, because the non-200 status case is an independent layer. If this ever becomes 0, the layers have been collapsed and the defence-in-depth claim here is no longer true.",
+      );
+      assert.match(rb.err, /HTTP 000/, "the surviving layer must be the non-200 status case, and it must name what it saw");
+
+      tt.diagnostic(
+        `MUTATION C (refuse() neutered + \`set -e\` dropped) -> status ${rc.status}: the fail-OPEN shape, so the real script's refusals are load-bearing. ` +
+        `MUTATION A (refuse() neutered alone) -> status ${ra.status}, refused by \`set -euo pipefail\`. ` +
+        `MUTATION B (\`|| refuse\` -> \`|| true\`) -> status ${rb.status}, refused by the non-200 case. THREE independent layers.`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+d("P6c: the job is WIRED to the probe, proven against the real .gitlab-ci.yml", () => {
+  t("the public_mirror job probes BOTH destinations' real visibility before pushing", (tt) => {
+    // INVERTED 2026-10-01, when the YAML was applied. This was deliberately
+    // written as `assert.throws` so the SUITE stayed green while the hole stayed
+    // loud — a good trick, and a trap. Once the fix landed, a test still asserting
+    // the hole would report a CLOSED defect as OPEN, which is the same failure in
+    // the other direction. A gate that cannot tell 'not fixed' from 'fixed' is not
+    // a gate, whichever way it points.
+    assert.doesNotThrow(
+      () => assertVisibilityProbeWired(PUBLIC_MIRROR_JOB),
+      "the visibility probe is now wired into public_mirror's script block. This assertion " +
+        "previously EXPECTED the probe to be ABSENT, and had to be inverted when the fix landed.",
+    );
+    tt.diagnostic(
+      "MEASURED 2026-10-01: public_mirror's script block contained no `curl`, no api.github.com " +
+        "and no .private read, and the corpus-bearing private-full push had no probe at all. " +
+        "The YAML is now applied, so this asserts the CLOSED state.",
+    );
+  });
+
+  t("GREEN: the PROPOSED wiring satisfies every pin — so the YAML edit is verified before it is applied", () => {
+    // The same predicate, fed the wiring this lane proposes. If this passes,
+    // applying the reported YAML turns the RED above GREEN without any further
+    // design work — the ordering, both guards and the TLS pin are all already
+    // satisfied by what was proposed.
+    const proposed = [
+      "public_mirror:",
+      "  script:",
+      "    - |",
+      "      set -uo pipefail",
+      '      PROBE="scripts/ci/assert-repo-visibility.sh"',
+      '      "$PROBE" --repo "${GITHUB_FULL_REPO:-}" --expect private --label private-full \\',
+      '        || { echo "MIRROR-FAIL: private-full destination failed its visibility probe; NOTHING was pushed."; exit 1; }',
+      '      "$PROBE" --repo "${GITHUB_REPO:-}" --expect public --label public-sanitized \\',
+      '        || { echo "MIRROR-FAIL: public-sanitized destination failed its visibility probe; NOTHING was pushed."; exit 1; }',
+      '      timeout -k 10 1200 git -C "$PRIV" push origin $SPEC',
+      '      timeout -k 10 1200 git -C "$PUB" push origin --force $PSPEC',
+    ].join("\n");
+    assert.doesNotThrow(() => assertVisibilityProbeWired(proposed), "the proposed wiring must satisfy every pin, or the YAML edit this lane reports is wrong");
+  });
+
+  t("MUTATION: the wiring pins bite — three realistic breakages, each named", () => {
+    const base = [
+      "public_mirror:",
+      "  script:",
+      '      PROBE="scripts/ci/assert-repo-visibility.sh"',
+      '      "$PROBE" --repo "${GITHUB_FULL_REPO:-}" --expect private --label private-full \\',
+      '        || { echo "MIRROR-FAIL: refused."; exit 1; }',
+      '      "$PROBE" --repo "${GITHUB_REPO:-}" --expect public --label public-sanitized \\',
+      '        || { echo "MIRROR-FAIL: refused."; exit 1; }',
+      '      git -C "$PRIV" push origin $SPEC',
+      '      git -C "$PUB" push origin --force $PSPEC',
+    ].join("\n");
+    assert.doesNotThrow(() => assertVisibilityProbeWired(base), "precondition: the unmutated wiring passes");
+
+    // M1 — the probe moved AFTER the pushes. The most likely mistake: someone
+    // adds it next to the push it "belongs" to, having put it after.
+    const m1 = [
+      '      PROBE="scripts/ci/assert-repo-visibility.sh"',
+      '      git -C "$PRIV" push origin $SPEC',
+      '      git -C "$PUB" push origin --force $PSPEC',
+      '      "$PROBE" --repo "${GITHUB_FULL_REPO:-}" --expect private --label private-full \\',
+      '        || { echo "x"; exit 1; }',
+      '      "$PROBE" --repo "${GITHUB_REPO:-}" --expect public --label public-sanitized \\',
+      '        || { echo "x"; exit 1; }',
+    ].join("\n");
+    assert.throws(() => assertVisibilityProbeWired(m1), /BEFORE the private-full push/, "M1 (probe after the pushes) MUST be caught");
+
+    // M2 — the guard is downgraded to `|| true`, i.e. the probe is a log line.
+    const m2 = base.replace(/\| \{ echo "MIRROR-FAIL: refused\."; exit 1; \}/g, '|| true');
+    assert.throws(() => assertVisibilityProbeWired(m2), /does not end the script on refusal|must have their exit status checked/, "M2 (`|| true`) MUST be caught");
+
+    // M3 — `--expect private` dropped from the corpus-bearing destination: the
+    // probe would then accept a PUBLIC answer for the repo that carries .brain,
+    // which is the exposure the whole thing exists to prevent.
+    const m3 = base.replace("--expect private", "--expect public");
+    assert.throws(() => assertVisibilityProbeWired(m3), /must REQUIRE private/, "M3 (dropping `--expect private` on the corpus destination) MUST be caught");
   });
 });

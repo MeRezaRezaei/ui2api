@@ -220,9 +220,37 @@ function termPattern(term: string): string {
  * prefix of any shared term, so the assembled pattern matches the pre-change one
  * on every word it used to match. `test/error-redaction.test.ts` proves that
  * against the frozen original rather than trusting the claim.
+ *
+ * THE `[a-z]*` SUFFIX, AND WHY IT IS NARROWER THAN IT LOOKS. This used to end
+ * at `\b`, and a prior lane recorded the consequence as an unfixable residual:
+ * "`chromeless`, `headlessly`, `xorgs`, `zodish` survive BOTH the old and new
+ * rules (the word is inside a longer token)". The trailing-letter suffix closes
+ * that class, and the CLASS was worth closing even though those four examples
+ * were not — because the class's plural member is LIVE IN SHIPPED DATA:
+ * `selectors` sits in eight shipped `manifest.json` description fields republished
+ * through `consumerProse` on `GET /registry`, and in a thrown Error at
+ * `src/prompt/driver.ts:723`. It also made `RESIDUAL_INTERNAL` honest: that gate
+ * is documented as failing closed, and it could not see `selectors` either,
+ * because it was built from this same boundary-anchored pattern.
+ *
+ * IT IS NOT THE 276-TOKEN WIDENING, and the difference is the whole licence.
+ * A prefix rule over arbitrary prose (`[A-Z][a-z]+`, "redact any capitalised
+ * token") caught 276 ordinary words — Answer, Capability, Search, Tool, Image,
+ * Response, model, session — and was rejected because a gate that catches 276
+ * ordinary words catches nothing. This one fires ONLY on a term this file
+ * declares: the alternation is unchanged, and `[a-z]*` can only extend a span
+ * that already started inside it. Measured cost over the shipped corpus (3,853
+ * tokens from every manifest.json under `capabilities/`, the exact strings
+ * `consumerProse` rewrites): it newly eats 2 tokens, `selectors` and `Selectors`,
+ * and 0 tokens that are not a derivation of a declared term. Recomputed at test
+ * time in `test/error-redaction.test.ts` so it cannot rot into a claim.
+ *
+ * WHAT IT CANNOT DO: it does not cross `-`, `_`, `.` or any non-letter, so
+ * `google-chrome` still leaves `google- was` exactly as before, and the
+ * byte-stability gate against the frozen pre-change alternation still holds.
  */
 export const INTERNAL_WORD_RE = new RegExp(
-  `\\b(?:${[...CONCEPT_TERMS, ...ERROR_ONLY_TERMS].map(termPattern).join("|")})\\b`,
+  `\\b(?:${[...CONCEPT_TERMS, ...ERROR_ONLY_TERMS].map(termPattern).join("|")})[a-z]*\\b`,
   "gi",
 );
 

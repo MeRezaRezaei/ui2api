@@ -777,45 +777,72 @@ describe("CONSUMER PROSE: the mechanism nouns are derived from exec surfaces, an
     const mutants: ReadonlyArray<readonly [string, string, string, string, RegExp]> = [
       [
         "chrome family reverted to the exact-match `real Chrome` form",
-        "/\\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\\b/gi",
-        "/\\breal Chrome\\b/gi",
+        "[/\\bchrome(?:[-_]?(?:browser|stable|beta|driver))?[a-z]*\\b/gi",
+        "[/\\breal Chrome\\b/gi",
         "google-chrome",
         /\bgoogle-chrome\b/,
       ],
       [
         "chromium family removed entirely",
-        "[/\\bchromium(?:[-_]browser)?\\b/gi, \"an operator-attached session\"],",
+        "[/\\bchromium(?:[-_]browser)?[a-z]*\\b/gi, \"an operator-attached session\"],",
         "",
         "Chromium",
         /\bChromium\b/,
       ],
       [
         "display family reverted to the case-sensitive `Xvfb` form",
-        "[/\\b(?:xvfb|xorg)\\b/gi, \"a virtual display\"],",
+        "[/\\b(?:xvfb|xorg)[a-z]*\\b/gi, \"a virtual display\"],",
         "[/\\bXvfb\\b/g, \"a virtual display\"],",
         "xvfb",
         /\bxvfb\b/,
       ],
       [
         "headless family reverted to the case-sensitive two-word form",
-        "[/\\bhead(?:less|ed|ful)\\b/gi, \"display-attached\"],",
+        "[/\\bhead(?:less|ed|ful)[a-z]*\\b/gi, \"display-attached\"],",
         "[/\\bheadless\\b/g, \"display-attached\"],",
         "headful",
         /\bheadful\b/,
       ],
       [
         "cdp exception reverted to the case-sensitive `CDP` form",
-        "[/\\bcdp\\b/gi, \"the attach endpoint\"],",
+        "[/\\bcdp[a-z]*\\b/gi, \"the attach endpoint\"],",
         "[/\\bCDP\\b/g, \"the attach endpoint\"],",
         "cdp",
         /\bcdp\b/,
       ],
       [
         "automation-library family deleted",
-        "[/\\b(?:playwright|selenium|webdriver|puppeteer)\\b/gi, \"a session driven by the service operator\"],",
+        "[/\\b(?:playwright|selenium|webdriver|puppeteer)[a-z]*\\b/gi, \"a session driven by the service operator\"],",
         "",
         "Playwright",
         /\bPlaywright\b/,
+      ],
+      // THE DERIVED-FORM SUFFIX, REVERTED. This is the mutation that keeps the
+      // derived-form class load-bearing rather than decorative: a prior lane
+      // recorded `\b`-boundary forms as an unfixable residual, and this mutant is
+      // the proof that the `[a-z]*` suffix is what closed it. Drop the suffix and
+      // the PLURAL of a declared term walks straight past — which is not a
+      // hypothetical, it is what eight shipped manifest descriptions do today.
+      [
+        "derived-form suffix dropped from the chrome family (re-opens the plural hole)",
+        "[/\\bchrome(?:[-_]?(?:browser|stable|beta|driver))?[a-z]*\\b/gi, \"an operator-attached session\"],",
+        "[/\\bchrome(?:[-_]?(?:browser|stable|beta|driver))?\\b/gi, \"an operator-attached session\"],",
+        "chromeless",
+        /\bchromeless\b/,
+      ],
+      [
+        "derived-form suffix dropped from the display family",
+        "[/\\b(?:xvfb|xorg)[a-z]*\\b/gi, \"a virtual display\"],",
+        "[/\\b(?:xvfb|xorg)\\b/gi, \"a virtual display\"],",
+        "xorgs",
+        /\bxorgs\b/,
+      ],
+      [
+        "derived-form suffix dropped from the headless family",
+        "[/\\bhead(?:less|ed|ful)[a-z]*\\b/gi, \"display-attached\"],",
+        "[/\\bhead(?:less|ed|ful)\\b/gi, \"display-attached\"],",
+        "headlessly",
+        /\bheadlessly\b/,
       ],
     ];
     for (const [label, current, reverted, siblingText, sibling] of mutants) {

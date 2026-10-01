@@ -417,6 +417,29 @@ public_mirror:
       export GIT_ASKPASS=/tmp/.askpass.sh
       printf '#!/bin/sh\necho "$GH_TOKEN"\n' > "$GIT_ASKPASS" && chmod 700 "$GIT_ASKPASS"
 
+      # THE VISIBILITY PROBE. Every destination is PROVEN — reached, identified,
+      # and holding the visibility this job DECLARES — before ANY push follows.
+      # It is deliberately NOT `private == true` on $GITHUB_REPO: that repo is
+      # deliberately PUBLIC, so such an assertion could never be satisfied again
+      # and would be a permanently red pipeline — the same "a gate that cannot open
+      # is not a gate" defect the public-verified marker already records. The
+      # exposure-facing assertion lives on $GITHUB_FULL_REPO, which carries all of
+      # .brain and is pushed with NO sanitisation marker in front of it. That is the
+      # destination whose visibility is actually load-bearing, and it had no probe
+      # until now.
+      #
+      # FAIL-CLOSED: an unreachable API, a non-200, an unparseable body, a
+      # destination we cannot name, or a missing token all REFUSE. A probe that
+      # fails OPEN on a network error would manufacture the exact false confidence
+      # it exists to prevent, so this is a refusal and not a warning.
+      PROBE="scripts/ci/assert-repo-visibility.sh"
+      "$PROBE" --repo "${GITHUB_FULL_REPO:-}" --expect private --label private-full \
+        || { echo "MIRROR-FAIL: the private-full destination failed its visibility probe; NOTHING was pushed."; \
+             echo "            A repo whose privacy cannot be proven must not receive the corpus."; exit 1; }
+      "$PROBE" --repo "${GITHUB_REPO:-}" --expect public --label public-sanitized \
+        || { echo "MIRROR-FAIL: the public-sanitized destination failed its visibility probe; NOTHING was pushed."; \
+             echo "            The push must not land in a destination nobody has identified."; exit 1; }
+
       echo "== PRIVATE FULL -> github/$GITHUB_FULL_REPO =="
       git -C "$PRIV" remote remove origin 2>/dev/null || true
       git -C "$PRIV" remote add origin "https://github.com/$GITHUB_FULL_REPO.git"
