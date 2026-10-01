@@ -98,6 +98,16 @@ verify:
   variables:
     WIGOLO_REPO: "$CI_PROJECT_DIR/wigolo"
     UI2API_REGISTRY_LIVE: "1"
+    # FULL HISTORY IS REQUIRED, not an optimisation. GitLab's default checkout
+    # depth is 20, and on a shallow clone every history-spanning gate in this
+    # suite is measuring a FICTION while asserting totality — it cannot see the
+    # commits it is meant to inspect. Measured on pipeline 1028: the
+    # credential-leak gate reported "37 paths" against a floor of 49 measured on
+    # a full clone, and the difference was the missing 611 commits, not a
+    # collapsed corpus. test/clone-depth.test.ts now fails this job outright if
+    # the history is truncated, so a shallow runner can never quietly turn a
+    # totality claim into a partial one.
+    GIT_DEPTH: "0"
     # GOAL 147: the credential-leak gate's live half shells out to `gh`. It is
     # opt-in (UI2API_GH_LIVE=1) so the unit suite never depends on the network,
     # exactly like the registry knob above; without it the offline half still holds
