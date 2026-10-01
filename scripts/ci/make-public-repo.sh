@@ -318,7 +318,7 @@ scan_object_content() { # $1=repo $2=extended-regex
              | awk '{print $1}' | sort -u)
   echo "$n"
 }
-scan_blob_content_excluding() { # $1=repo $2=extended-regex $3=path-regex-to-skip
+scan_object_content_excluding() { # $1=repo $2=extended-regex $3=path-regex-to-skip
   # Same total-history content scan, but a blob is only counted if its path does
   # NOT match the skip. Used for the ONE class where the sanitizer's own tooling
   # must be excluded, because it necessarily contains the patterns it searches
@@ -424,7 +424,7 @@ check "brain paths (all commits, by name)" "$p_priv" "$p_pub" yes
 # class 2 — the OPERATOR'S WORDS. This is the class that must be zero, and it is
 # what the single combined "brain markers" number was really trying to say.
 c_priv="$(scan_object_content "$PRIV" "$CORPUS_CONTENT_RE")"
-read -r c_pub c_self <<<"$(scan_blob_content_excluding "$PUB" "$CORPUS_CONTENT_RE" "$SELFMATCH_PATH_RE")"
+read -r c_pub c_self <<<"$(scan_object_content_excluding "$PUB" "$CORPUS_CONTENT_RE" "$SELFMATCH_PATH_RE")"
 check "operator corpus CONTENT (their words)" "$c_priv" "$c_pub" yes
 # Declared, counted, never silent: the sanitizer's own two files necessarily
 # contain the patterns they search for. Printed every run so a reader can see it
