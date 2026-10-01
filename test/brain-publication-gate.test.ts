@@ -438,7 +438,7 @@ d("P2 (text): the kit's shell carries the same CONTRACT — read as text, not ex
     assert.ok(!/GHPRIV\(\)\s*\{\s*echo true/.test(MIRROR_JOB), "GHPRIV must not be stubbed to a constant true");
   });
 
-  t("HONESTY: the shell is NOT executed by this gate — its inputs are a live API call and a token", () => {
+  t("HONESTY: the shell is NOT executed by this gate — its inputs are a live API call and a token", { skip: !MIRROR_JOB_PRESENT && `no mirror job to inspect: not installed here, and the kit is absent at ${KIT}` }, () => {
     // Stated as an assertion so it cannot be quietly deleted. If a future
     // refactor makes the shell hermetically runnable (e.g. by extracting the
     // rule into a script this repo can invoke), this pin goes red and the
