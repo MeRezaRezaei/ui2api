@@ -51,17 +51,32 @@ between "this service offers 4" and "this service hides 18":
 | `advertisement.record` / `recordGeneratedAt` / `recordAgeDays` | the dated record the promise is derived from |
 | `withheld[]` | each withheld model: `{ model, class, reason }` |
 
-The classes, and the action each one names:
+The classes, and the action each one names. A `class` on a withheld model is one
+of two different things, and the table below marks which is which: a **measured
+class** is a member of the record's own nine-member vocabulary (the same list as
+`VERIFICATION_CLASSES` in `src/prompt/verification-class.ts`, which is where the
+classifier and its per-class preconditions live), while a **reader sentinel** is
+emitted by the serving code, never appears in the record, and means the record
+had nothing to say.
 
-| class | what was measured | what the action is |
-| --- | --- | --- |
-| `ANSWERS` | HTTP 200 with real answer text | advertised on `/v1/models` |
-| `SIGN-OUT` | a named 502 saying sign-in is required (or the page that landed IS a login page) | a human logs in; not a code fix |
-| `WALL-CHALLENGE` | a named 502 at an idle pool on an anti-bot interstitial (Cloudflare, Vercel checkpoint) | the wigolo bypass tier, never a retry loop |
-| `COMPOSER-DRIFT` | a named 502 at an idle pool on a loaded page with no composer | the site's profile/selector needs a retune |
-| `CONTENDED-TIMEOUT` | no response while the pool was NOT idle | a queue fact, never a property of the model |
-| `NO-RECORD` | the sweep never reached this model | measure it |
-| `UNMEASURED` | no class was established | measure it |
+| class | kind | what was measured | what the action is |
+| --- | --- | --- | --- |
+| `ANSWERS` | measured | HTTP 200 with real answer text | advertised on `/v1/models` |
+| `SIGN-OUT` | measured | a named 502 saying sign-in is required (or the page that landed IS a login page) | a human logs in; not a code fix |
+| `WALL-CHALLENGE` | measured | a named 502 at an idle pool on an anti-bot interstitial (Cloudflare, Vercel checkpoint) | the wigolo bypass tier, never a retry loop |
+| `COMPOSER-DRIFT` | measured | a named 502 at an idle pool on a loaded page with no composer | the site's profile/selector needs a retune |
+| `CONTENDED-TIMEOUT` | measured | no response while the pool was NOT idle | a queue fact, never a property of the model |
+| `NON-ANSWER-READ` | measured | a 2xx at an idle pool carrying text the service itself reports is NOT the answer | find which node the site served that text from, retune the profile against a capture — never `ANSWERS` |
+| `ANSWER-UNREADABLE` | measured | the service reports the answer selector matched ZERO nodes in a page that did load | retune the answer selectors from a capture; the DRIVER cannot read this model, which is not the model failing to answer |
+| `UNATTRIBUTED-NO-ANSWER` | measured | the service's own no-answer refusal at an idle pool with no page — it names its candidate causes (busy, rate-limiting, sign-in/consent wall) and asserts NONE of them | re-measure with a discriminator that separates those causes; it licenses **no** diagnosis, so not "rate-limited", not "log in", not contention |
+| `UNMEASURED` | measured | no class was established | measure it |
+| `NO-RECORD` | **reader sentinel** | nothing — the record carries no entry for this model, or its `class` field is empty | measure it |
+
+`NO-RECORD` is NOT a tenth class and is deliberately not in the record's
+vocabulary. It is a string this daemon emits on `withheld[].class` when there
+was no measurement to report, so a consumer can tell "measured and refused" from
+"never looked at" without the two collapsing into one bucket. Treat it as the
+absence of a class, not as a class.
 
 A **withheld** model is not a deleted one. It stays fully reachable:
 `GET /registry`, `GET /sites` and `POST /capability/<site>` all still serve it,

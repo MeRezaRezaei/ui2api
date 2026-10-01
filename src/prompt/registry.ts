@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, verifyStoredAccount, withAccountVerdict, type StoredAccount } from "../runtime/session-store.js";
 import { consumerAccountsSummary, consumerProse, consumerVerifiedRecord, type ConsumerAccountsSummary } from "./consumer-surface.js";
+import { VERIFICATION_CLASSES } from "./verification-class.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -586,14 +587,48 @@ export const MODEL_VERIFICATION_SCHEMA = "ui2api/model-verification/1";
  *  It is the ONLY class that earns an advertisement. */
 export const MODEL_ANSWER_CLASS = "ANSWERS";
 
-/** The closed class vocabulary this reader can interpret. */
-export const MODEL_ANSWER_CLASSES = ["ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT", "UNMEASURED"] as const;
+/** Every class the record's vocabulary can carry — DERIVED from the classifier
+ *  that defines them, so it cannot drift.
+ *
+ *  This used to be a hand-typed four-name list
+ *  ("ANSWERS", "SIGN-OUT", "CONTENDED-TIMEOUT", "UNMEASURED") under a comment
+ *  claiming it was "the closed class vocabulary this reader can interpret". That
+ *  comment was two lies at once, and both were rot:
+ *
+ *  1. THE VOCABULARY HAS NINE MEMBERS. This module never imported
+ *     `verification-class.js`, so nothing here could notice when WALL-CHALLENGE
+ *     and COMPOSER-DRIFT arrived with GOAL 158 and NON-ANSWER-READ,
+ *     ANSWER-UNREADABLE and UNATTRIBUTED-NO-ANSWER arrived later. The list was
+ *     a snapshot of the vocabulary as it stood the day the reader was written,
+ *     presented as the vocabulary.
+ *
+ *  2. "CAN INTERPRET" WAS NOT A SUBSET, SO THE SUBSET MEANT NOTHING. A row this
+ *     list omitted did not become unreadable: it fell through `withheldReason`'s
+ *     `default:` arm to `classMeaning()`, which QUOTES the record's own `classes`
+ *     entry for that class. So the reader interpreted WALL-CHALLENGE and
+ *     COMPOSER-DRIFT perfectly well, three goals' worth, while a comment claimed
+ *     it could not — and the four-name list described no capability boundary
+ *     that had ever existed.
+ *
+ *  So the list is the whole derived vocabulary, not a curated subset: every
+ *  member is interpretable, three of them with a bespoke reason from
+ *  `withheldReason` and the rest by quoting the record. A record class outside
+ *  this set is still handled (it takes the `default:` arm and is reported with
+ *  the record's own meaning) — this set is what the reader RECOGNISES, not a
+ *  whitelist that withholds the unknown. */
+export const MODEL_ANSWER_CLASSES = VERIFICATION_CLASSES;
 
 export type ModelAnswerClass = (typeof MODEL_ANSWER_CLASSES)[number];
 
 export interface WithheldModel {
   model: string;
-  /** The record's class, or "NO-RECORD" / "UNREADABLE" when it is not one. */
+  /** The record's class, or the reader sentinel "NO-RECORD" when the record
+   *  carried no class for this id (either no entry at all, or an empty `class`
+   *  field). "NO-RECORD" is NOT a VerificationClass and is not in the record's
+   *  vocabulary — it is this reader saying it had no measurement to report. An
+   *  earlier version of this comment also named "UNREADABLE", which no code path
+   *  has ever emitted; if a future unreadable-record sentinel is added, add it
+   *  here with the line that emits it. */
   class: string;
   /** Why this id is not advertised, in words a consumer can act on. */
   reason: string;
