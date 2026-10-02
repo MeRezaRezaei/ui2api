@@ -104,12 +104,27 @@ cp package.json package-lock.json "$STAGE/root/"
 
 # Belt and braces: even though the stage dir only ever receives the four
 # allow-listed paths, sweep it for the forbidden prefixes anyway.
-for bad in data node_modules wigolo .git .npm .opencode-ci .gitlab; do
-  if [ -e "$STAGE/root/$bad" ]; then
-    rm -rf "${STAGE:?}/root/$bad"
-    echo "PACKAGE-NOTE: stripped forbidden path that reached the stage dir: $bad"
+#
+# THE LIST IS NOT TYPED HERE. It is read from the single owner
+# `scripts/ci/forbidden-release-paths.txt`. This sweep used to carry its own
+# hand-written `for bad in data node_modules wigolo .git .npm .opencode-ci
+# .gitlab` — which was MISSING `.brain/`, so it would not have stripped the
+# operator's transcripts had they reached the stage dir. The stage dir only ever
+# receives four allow-listed paths, so the sweep is belt-and-braces; a belt that
+# lists fewer braces than the braces it is meant to cover is worse than no belt,
+# because it reads as coverage.
+FORBIDDEN_PATHS_FILE="$(dirname "$0")/forbidden-release-paths.txt"
+[ -f "$FORBIDDEN_PATHS_FILE" ] || fail "forbidden-path list missing: $FORBIDDEN_PATHS_FILE"
+while IFS= read -r bad; do
+  [ -n "$bad" ] || continue
+  # The list is written with PREFIXES (`data/`), the stage sweep needs a bare
+  # directory name, so strip the trailing slash rather than duplicating the list.
+  d="${bad%/}"
+  if [ -e "$STAGE/root/$d" ]; then
+    rm -rf "${STAGE:?}/root/$d"
+    echo "PACKAGE-NOTE: stripped forbidden path that reached the stage dir: $d"
   fi
-done
+done < "$FORBIDDEN_PATHS_FILE"
 
 # ----------------------------------------------------------------- manifest --
 # Hashes are computed INSIDE the stage dir, so the manifest describes the
@@ -172,7 +187,19 @@ LIST="$(tar -tzf "$TARBALL")"
 # could ship in a publicly downloadable asset, and a release tarball is exactly
 # that. It is asserted now so a future change to the file list cannot leak it
 # silently. The vault (`data/`) is here for the same reason and has always been.
-FORBIDDEN_PREFIXES=(data/ .brain/ node_modules/ wigolo/ .git/ .npm/ .opencode-ci/ .gitlab/)
+#
+# THE LIST IS NOT TYPED HERE EITHER — it is read from the single owner, the same
+# `forbidden-release-paths.txt` the stage sweep above reads. This copy was the
+# ONLY one of the three that carried `.brain/`, which is the whole point: a fact
+# with one owner is a rule, and a fact typed into whichever file you happened to
+# be editing is a hope. `publish-github-release.sh` re-checks the SERVED bytes
+# against the same file, so the last line of defence on the public asset cannot
+# drift away from this one.
+FORBIDDEN_PREFIXES=()
+while IFS= read -r bad; do
+  [ -n "$bad" ] || continue
+  FORBIDDEN_PREFIXES+=("$bad")
+done < "$FORBIDDEN_PATHS_FILE"
 for bad in "${FORBIDDEN_PREFIXES[@]}"; do
   # The `./` is OPTIONAL in the pattern and this is load-bearing. `tar -czf x .`
   # lists every entry as `./data/sessions/...`, so an anchored `^data/` matches

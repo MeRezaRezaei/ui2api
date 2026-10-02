@@ -7,6 +7,15 @@ import { pathToFileURL } from "node:url";
 import { request as httpRequest } from "node:http";
 
 import { startPromptd, poolRefusal } from "../src/prompt/http.js";
+// The malformed-body sentence is now OWNED by consumer-surface.ts and imported
+// by both emitters (http.ts throws it; openai.ts answers it on /v1). This pin
+// used to hard-code the literal, which made the TEST a second owner of the
+// wording — it would have kept passing after a reword and then failed for an
+// unrelated reason. Deriving it from the owner keeps the assertion exactly as
+// strict (the shape — HttpClientError, not a bare Error, with code
+// invalid_json — is what this mutation is about) while the wording itself is
+// pinned once, at the owner.
+import { INVALID_JSON_MESSAGE } from "../src/prompt/consumer-surface.js";
 import { ChatPool, POOL_REFUSAL_CODES, type PoolOptions, type PoolRefusalCode, type PoolWorker } from "../src/prompt/pool.js";
 import { BUILTIN_PROFILES } from "../src/profile/profile.js";
 
@@ -423,7 +432,7 @@ const PREFIX_FIX = `        req.pause();
 const PREFIX_BUG = `        req.destroy();
         reject(new HttpClientError(413, "payload_too_large"`;
 const BRANCH_FIX = /if \(e instanceof HttpClientError\) \{[\s\S]*?\n        return;\n      \}\n/;
-const BARE_JSON_FIX = `reject(new HttpClientError(400, "invalid_json", "request body is not valid JSON"));`;
+const BARE_JSON_FIX = `reject(new HttpClientError(400, "invalid_json", INVALID_JSON_MESSAGE));`;
 const BARE_JSON_BUG = `reject(new Error("invalid JSON body"));`;
 
 test("MUTATION: with the swallowing catch and the socket destroy back, the gate goes RED on exactly the two codes", async () => {

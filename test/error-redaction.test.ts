@@ -9,6 +9,7 @@ import {
   consumerAccountRefusal,
   consumerProse,
   CONCEPT_TERMS,
+  INVALID_JSON_MESSAGE,
   mechanismTermsIn,
 } from "../src/prompt/consumer-surface.js";
 
@@ -269,6 +270,59 @@ describe("ONE OWNER: the account-refusal wording is authored in exactly one plac
       /is not available for|to use the default account/,
       "the redaction seam still carries its own copy of the refusal sentence",
     );
+  });
+});
+
+/**
+ * ── ONE MALFORMED BODY, ONE SENTENCE ────────────────────────────────────────
+ *
+ * WAS: two owners for ONE caller mistake. `readJsonBody` in
+ * `src/prompt/http.ts` THROWS the sentence, and `/v1/chat/completions` in
+ * `src/prompt/openai.ts` CATCHES that throw and re-typed the same words,
+ * because `http.ts` imports `openai.ts` (handleOpenAIRoutes) and so the
+ * dependency could not point the other way without a cycle.
+ *
+ * THE CONCRETE DRIFT. Reword the sentence in `http.ts` — the natural place, it
+ * is the one that throws — and `POST /prompt` answers the new words while
+ * `POST /v1/chat/completions`, on the SAME daemon, for the SAME `{not json`
+ * body, still answers the old ones. Both already send the `invalid_json` code,
+ * so nothing in the contract gate sees it; only a client keying on the text sees
+ * two answers to one condition. Nothing caught it: `openai.ts` discards the
+ * caught error, so there was no value flowing from one copy to the other.
+ *
+ * The single owner is `INVALID_JSON_MESSAGE` in `src/prompt/consumer-surface.ts`
+ * — the module that owns consumer-readable refusal sentences, and the one place
+ * importable by BOTH emitters without a cycle.
+ *
+ * The whole-tree scan and its mutation-guard (`codeOwnersOf` counts OCCURRENCES,
+ * not files, and strips prose first) are the same ones the account-refusal gate
+ * above uses; see their comments for why counting files made an earlier version
+ * of that gate vacuous.
+ */
+describe("ONE OWNER: the malformed-body refusal is authored in exactly one place", () => {
+  test("the sentence is typed exactly once under src/", () => {
+    assert.deepEqual(
+      codeOwnersOf("request body is not valid JSON"),
+      ["src/prompt/consumer-surface.ts"],
+      "the malformed-body sentence must be typed EXACTLY ONCE in src/ — a second copy is one caller mistake answerable two ways",
+    );
+  });
+
+  test("the exported constant is that sentence (the owner's value is pinned here, once)", () => {
+    assert.equal(INVALID_JSON_MESSAGE, "request body is not valid JSON");
+  });
+
+  test("BOTH emitters import the owner rather than re-typing it", () => {
+    for (const site of ["src/prompt/http.ts", "src/prompt/openai.ts"]) {
+      const src = srcOf(site);
+      assert.match(
+        src,
+        /import\s*\{[^}]*\bINVALID_JSON_MESSAGE\b[^}]*\}\s*from\s*"\.\/consumer-surface\.js"/,
+        `${site} must import the owner — a near-copy is the duplicate this closed`,
+      );
+      // The emitter must USE the constant, not merely import it beside a copy.
+      assert.match(src, /INVALID_JSON_MESSAGE\)/, `${site} must answer with the owner's value`);
+    }
   });
 });
 

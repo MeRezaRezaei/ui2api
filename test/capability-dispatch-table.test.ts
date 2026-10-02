@@ -28,6 +28,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { CAPABILITY_DISPATCH, dispatchableSiteIds, isDispatchable } from "../src/prompt/capability-dispatch.js";
+import { CAPABILITY_RUNNERS } from "../src/prompt/http.js";
 import { buildRegistryPackages } from "../src/prompt/registry.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -115,4 +116,58 @@ test("GOAL 140: isDispatchable agrees with the table (no prototype-key confusion
     assert.equal(isDispatchable(bogus), false, `"${bogus}" must not be dispatchable`);
   }
   assert.equal(isDispatchable("duckduckgo"), true);
+});
+
+/**
+ * ── THE DISPATCH KEY SET HAS ONE OWNER, AND THE ROUTE MAP MUST MATCH IT ─────
+ *
+ * `src/prompt/http.ts`'s `CAPABILITY_RUNNERS` and `src/prompt/capability-dispatch.ts`'s
+ * `CAPABILITY_DISPATCH` are ONE fact — which site ids are dispatchable — held by
+ * two owners, and the three GOAL-140 tests above never compared them. They read
+ * `CAPABILITY_DISPATCH` (imported at :30) and the runner CLASSES in
+ * `src/capabilities/`; before this gate, NO test in the repo read
+ * `CAPABILITY_RUNNERS` at all (measured: zero references under `test/`).
+ *
+ * THE CONCRETE DRIFT. Add a package + its dispatch row — the exact edit every
+ * "add a site" instruction in this repo asks for — and forget the runner map.
+ * Then `registry.ts:1018` still reports `dispatch: "wired"` on `GET /registry`,
+ * because it derives that from `CAPABILITY_DISPATCH` alone, while the route does
+ * `new CAPABILITY_RUNNERS[site](...)` on `undefined` and answers a bare 500
+ * `internal_error`. A consumer is told the capability is wired and gets a
+ * server error. That is the "advertised, then 500" failure the dispatch table's
+ * own header says it exists to kill — re-created by the map that serves it.
+ *
+ * WHAT IS AND IS NOT DERIVED, stated precisely: the VALUES are not derived, and
+ * cannot be. `CAPABILITY_DISPATCH` holds its runner as a STRING so the table
+ * stays importable without dragging 33 runner modules (and their playwright
+ * imports) into every consumer. So the class binding stays typed at each site,
+ * and the property that can drift — the KEY SET — is what this gate pins, by
+ * comparing the two real sets rather than by grepping source.
+ */
+test("the route's runner map covers EXACTLY the dispatchable ids — no wired-but-absent site", () => {
+  const dispatchIds = Object.keys(CAPABILITY_DISPATCH).sort();
+  const runnerIds = Object.keys(CAPABILITY_RUNNERS).sort();
+
+  assert.deepEqual(
+    runnerIds,
+    dispatchIds,
+    "CAPABILITY_RUNNERS (the /capability route's site→class map) and CAPABILITY_DISPATCH (what /registry advertises as wired) must name the SAME ids. " +
+      `Only in dispatch: ${JSON.stringify(dispatchIds.filter((i) => !runnerIds.includes(i)))} — advertised as wired but the route would 500. ` +
+      `Only in runners: ${JSON.stringify(runnerIds.filter((i) => !dispatchIds.includes(i)))} — routed but not advertised.`,
+  );
+
+  // And each row's advertised runner NAME is the class the route actually uses,
+  // so the gate covers the value too without importing the runner modules: the
+  // dispatch row's `runner` string must appear as the key's class binding in
+  // http.ts. This is the one place a source read is honest, because the binding
+  // is a value in one file and a string in another and nothing else connects them.
+  const httpSrc = readFileSync(resolve(ROOT, "src", "prompt", "http.ts"), "utf8");
+  for (const id of dispatchIds) {
+    const name = CAPABILITY_DISPATCH[id]!.runner;
+    assert.match(
+      httpSrc,
+      new RegExp(`"${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:\\s*${name}\\b`),
+      `the route must bind ${id} to ${name}, the class CAPABILITY_DISPATCH advertises for it`,
+    );
+  }
 });

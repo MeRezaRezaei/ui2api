@@ -163,33 +163,55 @@ function parseFlags(argv: string[]): Flags {
   return f;
 }
 
-// Flags that CONSUME the next argv token as their value (mirror parseFlags
-// above). requirementsSiteArg needs this so a flag's VALUE is never misread as
-// the <site> positional — e.g. `--data-dir /tmp/d` must not yield "/tmp/d".
-const VALUE_TAKING_FLAGS = new Set([
-  "--root",
-  "--out",
-  "--cookies",
-  "--max-tasks",
-  "--author",
-  "--use",
-  "--registry",
-  "--data-dir",
-  "--port",
-  "--registry-repo",
-  "--base-url",
-  "--engine",
-  "--site",
-  "--profile",
-  "--timeout-ms",
-  "--pool-min",
-  "--pool-max",
-  "--account",
-  "--identity",
-  "--identity-prefix",
-  "--model",
-  "--lang",
-]);
+// Flags that CONSUME the next argv token as their value. requirementsSiteArg
+// needs this so a flag's VALUE is never misread as the <site> positional — e.g.
+// `--data-dir /tmp/d` must not yield "/tmp/d".
+//
+// ── DERIVED FROM THE PARSER, NOT RESTATED BESIDE IT ────────────────────────
+// This set used to be a hand-typed literal whose comment said only "mirror
+// parseFlags above". That made the SAME fact — which flags take a value — owned
+// twice: once by parseFlags (which decides what actually consumes a token) and
+// once by this list (which decides what firstNonFlagArg skips). Two owners, and
+// the only thing holding them together was a comment, which is not a gate.
+//
+// THE CONCRETE FAILURE it invited. Add one value-taking flag to parseFlags and
+// forget this list — the single most ordinary edit to this file — and the flag
+// is parsed correctly while firstNonFlagArg treats its VALUE as the positional.
+// `ui2api requirements --tenant acme gemini` then answers with the report for
+// site "acme" (nonexistent) instead of "gemini", exits on the wrong site's
+// verdict, and prints no hint that a flag was swallowed. Nothing errors; the
+// tool quietly reports the wrong thing. That is the same shape as the `--apply`
+// defect above it: a parsed-correctly flag whose second consumer still believed
+// the old world.
+//
+// So the set is now read out of the parser's OWN source: every
+// `argv[i] === "--x")` line whose body immediately assigns `argv[++i]` (with or
+// without the `Number(...)` wrapper). The pattern requires the assignment to
+// follow the flag test DIRECTLY — no gap to cross — so a BOOLEAN flag can never
+// reach across to a later line's value and be captured. parseFlags is a plain
+// module-local function declaration, so `.toString()` is its real source, and
+// this file is compiled by tsc and never bundled, so there is no minifier to
+// hide it from.
+//
+// MEASURED at this fold: the derived set and the hand-typed literal it replaced
+// were identical (22 flags, the same 22 names), so this is a pure
+// drift-ELIMINATION with no behaviour change.
+//
+// `valueTakingFlagsFrom` is exported and PURE so the mirror property can be
+// pinned by feeding it a SYNTHETIC parser — test/cli-argv.test.ts asserts both
+// directions against a fake source, which is the edit the old hand-typed
+// arrangement could not survive. A pin that only re-reads the real source would
+// pass just as happily against the old literal; that is the difference between
+// testing the property and restating it.
+export function valueTakingFlagsFrom(parserSource: string): Set<string> {
+  return new Set(
+    [...parserSource.matchAll(/argv\[i\]\s*===\s*"(--[\w-]+)"\)\s*f\.\w+\s*=\s*(?:Number\()?argv\[\+\+i\]/g)].map(
+      (m) => m[1]!,
+    ),
+  );
+}
+
+const VALUE_TAKING_FLAGS = valueTakingFlagsFrom(parseFlags.toString());
 
 // GOAL 44: the pure flag-aware first-positional reader shared by every
 // free-string positional command. Iterates argv, skipping `--flag` tokens and

@@ -64,7 +64,7 @@ import { defaultSiteId, resolveProfile, resolvePackagedProfile, resolvePackagedP
 import { readdirSync } from "node:fs";
 import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount, vaultRoot } from "../runtime/session-store.js";
 import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
-import { consumerAccountRefusal, consumerPoolRefusal } from "./consumer-surface.js";
+import { consumerAccountRefusal, consumerPoolRefusal, INVALID_JSON_MESSAGE } from "./consumer-surface.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -104,7 +104,23 @@ import { ZenmuxCapabilities } from "../capabilities/zenmux.js";
 // package field would turn any registry content into executable code. The
 // registry decides WHICH site; this map decides WHICH class, and only ids that
 // appear in CAPABILITY_DISPATCH can reach it.
-const CAPABILITY_RUNNERS: Readonly<Record<string, CapabilityRunner>> = {
+//
+// EXPORTED so `test/capability-dispatch-table.test.ts` can compare its KEY SET
+// against `CAPABILITY_DISPATCH`'s with `deepEqual` instead of grepping this
+// file's source. The two tables are one fact — which site ids are dispatchable
+// — and they were two owners that nothing compared: this map listed the same 33
+// ids and NO test read it at all. Adding a package + its dispatch row and
+// forgetting this one left `/registry` reporting `dispatch: "wired"`
+// (`registry.ts` derives that from CAPABILITY_DISPATCH alone) while the route
+// did `new undefined(...)` and answered a bare 500 — which is the "advertised,
+// then 500" failure this module's own header exists to prevent.
+//
+// The VALUES stay typed here and are not derived: CAPABILITY_DISPATCH holds the
+// runner as a STRING on purpose, so the dispatch table stays importable without
+// pulling 33 runner modules (and their playwright imports) into every consumer
+// of it. What must agree is the KEY SET, and that is exactly what the gate
+// checks. `dispatchableSiteIds()` is the owner; this map is its implementation.
+export const CAPABILITY_RUNNERS: Readonly<Record<string, CapabilityRunner>> = {
   "adapta": AdaptaCapabilities,
   "araprat": ArapratCapabilities,
   "blackbox": BlackboxCapabilities,
@@ -730,7 +746,7 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
         // taking the blame for the caller's typo. Same named 400, same code,
         // and no internal text is echoed. This `catch` deliberately does NOT
         // re-wrap the HttpClientError thrown two lines above.
-        reject(new HttpClientError(400, "invalid_json", "request body is not valid JSON"));
+        reject(new HttpClientError(400, "invalid_json", INVALID_JSON_MESSAGE));
       }
     });
     req.on("error", reject);

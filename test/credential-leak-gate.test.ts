@@ -921,3 +921,149 @@ d("GOAL 164/173: corpus containment for the PUBLIC DESTINATION, under the decide
   });
 });
 
+
+/**
+ * ── THE RELEASE EXCLUSION LIST HAS ONE OWNER, AND EVERY READER DERIVES ──────
+ *
+ * A SECOND corpus-leak surface, in the same family as the history filter above
+ * and gated in the same file for the same reason: the thing that must never
+ * ship is the operator's private corpus, and the list that keeps it out of a
+ * publicly downloadable artifact is a security control, not a style choice.
+ *
+ * WAS: the forbidden-path list had THREE owners across TWO files, and had
+ * already drifted:
+ *
+ *   scripts/ci/package-release.sh         stage sweep      — MISSED `.brain/`
+ *   scripts/ci/package-release.sh         tar-listing scan — HAD  `.brain/`
+ *   scripts/ci/publish-github-release.sh  served-byte scan — MISSED `.brain/`
+ *
+ * Only the middle copy carried the entry, and it was the copy nothing else
+ * agreed with. The consequence is concrete and was live: the third one is the
+ * check on the bytes GitHub actually serves, so a release tarball carrying
+ * `.brain/` printed `served asset exclusions re-checked: clean` and
+ * `RELEASE-OK`. The stage sweep would not have stripped it either. The packer's
+ * own tar-listing scan would still have caught it at build time — which is
+ * exactly why the gap survived: the one gate that worked was also the one
+ * nobody thought to check for agreement with the other two.
+ *
+ * THE OWNER is `scripts/ci/forbidden-release-paths.txt`, mirroring how
+ * `public-repo-paths.txt` is owned above. Three readers, one list.
+ *
+ * THE PIN is deliberately NOT "the list contains .brain/". That assertion
+ * passes just as happily if a fourth reader is added with its own literal, and
+ * the defect was never the absence of an entry — it was the DISAGREEMENT
+ * between copies. So the gates below are structural: every reader must name the
+ * owner file, and no reader may contain a hand-typed list at all.
+ */
+/** Drops PROSE so a "no hand-typed list" pin cannot be tripped by a comment
+ *  QUOTING the old list. This bit for real while writing the gate below: the
+ *  explanatory comment recording the pre-fix sweep (`for bad in data
+ *  node_modules wigolo ...`) is itself that exact string, so a naive scan
+ *  reported the FIXED script as still carrying its own list. A comment is not a
+ *  duplicate owner, and the duplicate owner is what the gate is for. */
+function stripShellProse(src: string): string {
+  return src
+    .split("\n")
+    .map((l) => l.replace(/#.*$/, ""))
+    .join("\n");
+}
+
+d("RELEASE EXCLUSIONS: one owner, three deriving readers", () => {
+  const OWNER = join(ROOT, "scripts/ci/forbidden-release-paths.txt");
+  // Read the CODE, not the prose: these scripts document the pre-fix lists in
+  // comments, and a scan that counts comments reports a fixed script as broken.
+  const PACKER = stripShellProse(readFileSync(join(ROOT, "scripts/ci/package-release.sh"), "utf8"));
+  const PUBLISHER = stripShellProse(readFileSync(join(ROOT, "scripts/ci/publish-github-release.sh"), "utf8"));
+  const READERS: readonly [string, string][] = [
+    ["scripts/ci/package-release.sh", PACKER],
+    ["scripts/ci/publish-github-release.sh", PUBLISHER],
+  ];
+
+  t("the owner file exists and yields paths", () => {
+    assert.ok(existsSync(OWNER), "scripts/ci/forbidden-release-paths.txt must exist — it is the single owner of the release exclusion list");
+    const paths = parseCorpusPaths(readFileSync(OWNER, "utf8"));
+    assert.ok(paths.length > 0, "the owner file must yield at least one forbidden path");
+  });
+
+  t("the owner's list still carries the two classes that must never ship", () => {
+    // The entries that make this a SECURITY control rather than a tidy-up: the
+    // real-credential vault, and the operator's raw transcripts.
+    const paths = parseCorpusPaths(readFileSync(OWNER, "utf8"));
+    assert.ok(paths.includes("data/"), "the session vault (real cookies + Bearer tokens) must stay excluded");
+    assert.ok(paths.includes(".brain/"), "the operator's raw transcripts must stay excluded — this is the entry the other two copies had dropped");
+  });
+
+  for (const [file, src] of READERS) {
+    t(`${file} READS the owner rather than carrying its own list`, () => {
+      assert.match(src, /forbidden-release-paths\.txt/, `${file} must derive its forbidden-path list from the single owner`);
+      assert.doesNotMatch(
+        src,
+        /FORBIDDEN_PREFIXES=\(data\//,
+        `${file} still TYPES a forbidden-path list — that is the duplicate owner this closed`,
+      );
+    });
+  }
+
+  t("the SERVED-asset check USES the derived list, not a literal alternation", () => {
+    // Added after the first version of this gate FAILED a mutation: restoring
+    // the hard-coded `data|node_modules|...` alternation in the publisher left
+    // every assertion above GREEN, because the script still *named* the owner
+    // file (it still built FORBIDDEN_ALT) while no longer USING it. Asserting
+    // "reads the owner" is not the property; the property is "the bytes GitHub
+    // serves are checked against the owner's list". Naming without using is
+    // exactly how a fix is faked, so the check is pinned at the grep itself.
+    assert.match(
+      PUBLISHER,
+      /grep \-qE "\^\\\.\/\?\(\$\{FORBIDDEN_ALT\}\)\/"/,
+      "the served-asset check must match against ${FORBIDDEN_ALT} — a literal alternation here is a second owner that can miss .brain/",
+    );
+    // …and no hard-coded alternation of forbidden paths survives anywhere.
+    assert.doesNotMatch(
+      PUBLISHER,
+      /data\|node_modules\|wigolo/,
+      "the publisher still TYPES its own alternation — the copy that had no .brain alternative",
+    );
+  });
+
+  t("the packer's tar-listing check uses the loop variable, not an inline list", () => {
+    assert.match(
+      PACKER,
+      /grep \-qE "\^\\\.\/\?\$\{bad\}"/,
+      "the packer's exclusion scan must match the per-entry loop variable",
+    );
+  });
+
+  t("the packer's STAGE sweep also derives — it is a third copy site, not a fourth owner", () => {
+    // Two loops in one script is exactly the shape that hid the gap, so both
+    // are counted here: the stage sweep reads the file into the same loop.
+    const reads = PACKER.match(/FORBIDDEN_PATHS_FILE/g)?.length ?? 0;
+    assert.ok(reads >= 2, `both the stage sweep and the tar-listing scan must read the owner file (saw ${reads} references)`);
+    assert.doesNotMatch(
+      PACKER,
+      /for bad in data node_modules/,
+      "the stage sweep still carries its own hand-written list — and that copy was the one missing .brain/",
+    );
+  });
+
+  t("MUTATION: the derived served-asset regex actually catches .brain/ (executed, not asserted)", () => {
+    // Structural pins above prove the wiring; this one proves the WIRING WORKS.
+    // The published pattern is reproduced here exactly as the script builds it,
+    // including the deslash-BEFORE-escape order — which was measured, not
+    // assumed: escaping first (with `/` in the class) leaves a trailing backslash
+    // on every entry, turning the separator into a literal `\|` and the whole
+    // pattern into an invalid regex that matches NOTHING. A vacuous gate that
+    // never matches is worse than no gate, because it reports clean.
+    const paths = parseCorpusPaths(readFileSync(OWNER, "utf8"));
+    const alt = paths
+      .map((p) => p.replace(/\/$/, "").replace(/[.[\*^$\\]/g, (c) => `\\${c}`))
+      .join("|");
+    const re = new RegExp(`^\\./?(${alt})/`);
+    // The case the three-copy drift lost.
+    assert.ok(re.test("./.brain/verbatim-goals.md"), "the derived pattern MUST catch .brain/ — this is the regression the drift allowed");
+    assert.ok(re.test("./data/sessions/kimi/state.json"), "and it must still catch the vault");
+    // Prefix semantics: `data` must not swallow `database`, and `.git` must not
+    // match `Xgit` (which is what the escaping is FOR).
+    assert.ok(!re.test("./database/schema.sql"), "`data/` is a PREFIX — it must not match database/");
+    assert.ok(!re.test("./Xgit/config"), "`.git` must be escaped — it must not match Xgit/");
+  });
+});

@@ -160,8 +160,32 @@ echo "  sha downloaded: $GOT"
 [ "$GOT" = "$ASSET_SHA256" ] || { echo "PUBLISH-FAIL: sha mismatch — what GitHub serves is NOT what we built"; exit 1; }
 
 # The downloaded archive's own exclusions, re-checked on the bytes GitHub holds.
-if tar -tzf "$TMPD/$ASSET_NAME" | grep -qE '^\./?(data|node_modules|wigolo|\.git|\.npm|\.opencode-ci|\.gitlab)/'; then
+# This is the LAST line of defence on a publicly downloadable asset, and it used
+# to carry its own hand-typed list — `data|node_modules|wigolo|.git|.npm|
+# .opencode-ci|.gitlab` — with NO `.brain` alternative. So an archive containing
+# the operator's raw transcripts printed "served asset exclusions re-checked:
+# clean" and RELEASE-OK. It is now built from the same single owner the packer
+# reads (`scripts/ci/forbidden-release-paths.txt`), so the check on the served
+# bytes cannot drift away from the check on the built archive.
+FORBIDDEN_PATHS_FILE="$(dirname "$0")/forbidden-release-paths.txt"
+[ -f "$FORBIDDEN_PATHS_FILE" ] || { echo "PUBLISH-FAIL: forbidden-path list missing: $FORBIDDEN_PATHS_FILE"; exit 1; }
+# Build the alternation from the list. ORDER MATTERS and was measured, not
+# assumed: the trailing slash must be stripped BEFORE the regex-escape pass. The
+# first version of this escaped first and its character class included `/`, so
+# `data/` became `data\/`, the later `s#/$##` then removed the `/` and left a
+# trailing BACKSLASH on every entry — which turned the separator into a literal
+# `\|` and made the whole pattern an invalid regex that matched nothing. It was
+# caught by running the derivation, not by reading it.
+FORBIDDEN_ALT="$(sed -e '/^#/d' -e '/^[[:space:]]*$/d' -e 's#/$##' "$FORBIDDEN_PATHS_FILE" \
+  | sed -e 's/[.[\*^$\\]/\\&/g' \
+  | tr '\n' '|' \
+  | sed 's/|$//')"
+[ -n "$FORBIDDEN_ALT" ] || { echo "PUBLISH-FAIL: forbidden-path list is empty — refusing to declare a served asset clean"; exit 1; }
+# `./` is OPTIONAL in the pattern and that is load-bearing: `tar -czf x .` lists
+# every entry as `./data/sessions/...`, so an anchored `^data/` matches NOTHING
+# and this check passes vacuously on exactly the archive it was written to catch.
+if tar -tzf "$TMPD/$ASSET_NAME" | grep -qE "^\./?(${FORBIDDEN_ALT})/"; then
   echo "PUBLISH-FAIL: the SERVED asset contains a forbidden path"; exit 1
 fi
-echo "  served asset exclusions re-checked: clean"
+echo "  served asset exclusions re-checked: clean ($(printf '%s' "$FORBIDDEN_ALT" | tr '|' ' '))"
 echo "RELEASE-OK: $RELEASE_TAG verified at $RB_URL"

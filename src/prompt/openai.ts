@@ -53,6 +53,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ChatPool } from "./pool.js";
 import { redactInternalError } from "./error-redaction.js";
+import { INVALID_JSON_MESSAGE } from "./consumer-surface.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import {
   chatSurfaceStatus,
@@ -927,7 +928,10 @@ export async function handleOpenAIRoutes(
     try {
       body = (await readJsonBody(req)) as Record<string, unknown>;
     } catch {
-      return openAiError2(res, 400, "request body is not valid JSON");
+      // The SAME sentence the thrower used (INVALID_JSON_MESSAGE, owned by
+      // consumer-surface.ts). This used to re-type the words, which made one
+      // caller mistake answerable in two ways on one daemon — see the owner.
+      return openAiError2(res, 400, INVALID_JSON_MESSAGE);
     }
     const stream = Boolean(body.stream);
     // `stream_options.include_usage` was accepted and dropped. It is the one

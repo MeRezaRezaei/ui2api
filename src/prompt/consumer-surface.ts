@@ -693,3 +693,25 @@ export function consumerPoolRefusal(code: PoolRefusalCodeName): string {
  *  (the consumer surface must not depend on the pool's implementation module,
  *  only on the vocabulary it is allowed to speak). */
 export type PoolRefusalCodeName = "pool_saturated" | "pool_queue_timeout" | "pool_closed";
+
+// ── ONE MALFORMED BODY, ONE SENTENCE ────────────────────────────────────────
+// The caller's own typo — a body that is not JSON at all — is ONE condition,
+// and it used to have TWO owners, one per endpoint:
+//
+//   src/prompt/http.ts   readJsonBody THROWS this sentence
+//   src/prompt/openai.ts /v1/chat/completions CATCHES that throw and emits
+//                        its OWN copy of the same sentence
+//
+// The second site is not a reuse: it discards the caught error and re-typed the
+// words, because `http.ts` imports `openai.ts` (handleOpenAIRoutes) and so the
+// dependency could not point the other way without a cycle. The cost of that
+// shape is that the two copies are only kept in step by a human reading both —
+// reword one and `POST /prompt` answers "request body is not valid JSON" while
+// `POST /v1/chat/completions` still answers whatever the other copy says, for
+// the same caller mistake on the same daemon. A client that keys on the text
+// (rather than the `invalid_json` code both already send) sees two answers.
+//
+// `consumer-surface.ts` is where a consumer-readable refusal sentence belongs,
+// and it is importable by BOTH sites without a cycle: it depends on nothing in
+// `src/prompt/` but the runtime account projection.
+export const INVALID_JSON_MESSAGE = "request body is not valid JSON";

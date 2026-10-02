@@ -1,0 +1,32 @@
+# THE forbidden-path list for a RELEASE artifact — ONE owner, three readers.
+#
+# This file exists because the list had THREE owners and had already drifted:
+#
+#   scripts/ci/package-release.sh          stage sweep      — MISSED .brain/
+#   scripts/ci/package-release.sh          tar-listing scan — HAD  .brain/
+#   scripts/ci/publish-github-release.sh   served-byte scan — MISSED .brain/
+#
+# So a release tarball carrying the operator's raw transcripts passed the
+# "served asset exclusions re-checked: clean" gate on the PUBLICLY DOWNLOADABLE
+# asset, and the stage sweep would not have stripped it either. The tar-listing
+# scan was the only copy that carried the entry, and a single copy is not a
+# rule — it is a fact one person happened to type.
+#
+# WHY A DATA FILE rather than a sourced shell array: `publish-github-release.sh`
+# runs from its own directory in a job that may not have the other script's
+# context, and the two scripts are otherwise independent. A plain data file is
+# read the same way by all of them and is greppable by the gate in
+# test/release-exclusion-single-source.test.ts, which asserts that every reader
+# DERIVES from here and that none of them re-types a list.
+#
+# ONE PATH PER LINE, relative to the archive root, no leading `./`, NO comments
+# beyond this header, no blank lines. The trailing slash is part of the value:
+# these are PREFIXES, so `data` must not be allowed to match `database/`.
+data/
+.brain/
+node_modules/
+wigolo/
+.git/
+.npm/
+.opencode-ci/
+.gitlab/

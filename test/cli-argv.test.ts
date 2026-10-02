@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { addAllModeArg, declaredAuthorUse, firstNonFlagArg, HELP_LINES, importIdentityArg, promptTextArg, requirementsSiteArg } from "../src/cli.js";
+import { addAllModeArg, declaredAuthorUse, firstNonFlagArg, HELP_LINES, importIdentityArg, promptTextArg, requirementsSiteArg, valueTakingFlagsFrom } from "../src/cli.js";
 
 test("GOAL 44: prompt positional-first works — text before a flag is the text", () => {
   assert.equal(promptTextArg(["prompt", "hello", "--json"]), "hello");
@@ -70,6 +70,68 @@ test("GOAL 44: both orders ask the SAME text across flag shapes (∧ wiring anch
   assert.equal(requirementsSiteArg(["requirements", "--json", "gemini"]), "gemini");
   assert.equal(requirementsSiteArg(["requirements", "gemini", "--json"]), "gemini");
   assert.equal(requirementsSiteArg(["requirements", "--json"]), "");
+});
+
+// ── WHICH FLAGS TAKE A VALUE IS ONE FACT, AND IT HAS ONE OWNER ───────────────
+// It used to have two: parseFlags' if-chain (which decides what actually
+// consumes a token) and a hand-typed VALUE_TAKING_FLAGS literal beside it (which
+// decides what firstNonFlagArg skips), held together by a comment saying
+// "mirror parseFlags above" — which is prose, not a gate.
+//
+// THE MUTATION THIS EXISTS TO KILL. Add `--tenant` to parseFlags as a
+// value-taking flag and the OLD arrangement silently mis-scopes the site
+// positional: `requirements --tenant acme gemini` reports on site "acme"
+// instead of "gemini", exits on the wrong site's verdict, prints no hint. Both
+// copies look right; only the parser was edited.
+//
+// So the pin below does NOT re-read the real source and compare it to a literal
+// (that would pass just as happily against the old hand-typed set — restating
+// the fact instead of testing it). It feeds `valueTakingFlagsFrom` a SYNTHETIC
+// parser and asserts the flag added there is picked up. Against the old
+// arrangement these assertions cannot even be written: there was no derivation
+// to call. MUTATION PROOF: replace the derivation with a hard-coded literal and
+// both the synthetic cases below go red.
+test("the value-taking flag set is DERIVED from the parser, so adding a flag to parseFlags alone can never be missed", () => {
+  // A synthetic parser: one plain value-taking flag, one wrapped in Number(),
+  // and one boolean that must NOT be captured.
+  const synthetic = [
+    'if (argv[i] === "--tenant") f.tenant = argv[++i];',
+    'if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;',
+    'if (argv[i] === "--verbose") f.verbose = true;',
+  ].join("\n");
+  const got = valueTakingFlagsFrom(synthetic);
+  // THE MUTATION CASE: a value-taking flag that exists ONLY in the parser.
+  assert.ok(got.has("--tenant"), "a value-taking flag in the parser must reach the set — this is the drift the old literal could not survive");
+  assert.ok(got.has("--port"), "the Number()-wrapped form must be captured too (--port, --timeout-ms, --pool-min, --pool-max)");
+  assert.ok(!got.has("--verbose"), "a BOOLEAN flag must never be captured");
+  assert.equal(got.size, 2, "exactly the two value-taking flags, nothing else — the set must not widen by accident");
+
+  // A boolean flag IMMEDIATELY followed by a value-taking one must not let the
+  // boolean reach across and capture its neighbour's `argv[++i]`.
+  const adjacent = ['if (argv[i] === "--headed") f.headed = true;', 'if (argv[i] === "--site") f.site = argv[++i];'].join("\n");
+  const gotAdjacent = valueTakingFlagsFrom(adjacent);
+  assert.ok(!gotAdjacent.has("--headed"), "a boolean must not be captured by reaching across to the next line's value");
+  assert.ok(gotAdjacent.has("--site"), "the neighbouring value-taking flag is still captured");
+});
+
+test("the derived set is the parser's real flag set — the wiring is derived, not a literal beside it", () => {
+  const cli = readFileSync("src/cli.ts", "utf8");
+  // The set is BUILT by the pure helper off parseFlags' own source.
+  assert.match(
+    cli,
+    /const VALUE_TAKING_FLAGS = valueTakingFlagsFrom\(parseFlags\.toString\(\)\);/,
+    "VALUE_TAKING_FLAGS must be derived from parseFlags' own source — a hand-typed literal beside the parser is the defect this closed",
+  );
+  // And no second, restated literal list survives.
+  assert.ok(
+    !/const VALUE_TAKING_FLAGS = new Set\(\s*\[/.test(cli),
+    "VALUE_TAKING_FLAGS must not be a hand-typed literal again",
+  );
+  // Behaviour is unchanged by the derivation: the two representative shapes the
+  // GOAL-43/44 pins rely on still resolve identically.
+  assert.equal(firstNonFlagArg(["--site", "gemini"]), "");
+  assert.equal(firstNonFlagArg(["--data-dir", "/tmp/d"]), "");
+  assert.equal(firstNonFlagArg(["--json", "hello"]), "hello");
 });
 
 // --- GOAL 80: `profile import --account email` is a real knob, not a dead
