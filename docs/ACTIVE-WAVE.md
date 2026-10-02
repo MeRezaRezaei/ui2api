@@ -212,18 +212,36 @@ the disagreement is named.
    other runners were folded onto the helper; this one was not. Remains: return
    araprat's posting caps through the shared helper (or prove the wording
    difference is load-bearing, in which case say why at the call site).
-4. **A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.**
-   VERIFIED OPEN 2026-10-03 — this is the true state, and the old entry was right
-   about it. `INTERNAL_WORD_RE` (`src/prompt/error-redaction.ts:253`) closes the
-   trailing-LETTER class with `[a-z]*`; `:250-252` states the limit in its own
-   words — "it does not cross `-`, `_`, `.` or any non-letter" — and a digit is a
-   non-letter, so `chrome2` still survives. `[a-z]*` was applied and measured at
-   0 false positives over 3,853 tokens (`error-redaction.ts:244-249`);
-   `\w*` was NOT applied because it widens past what could be honestly measured.
-   The gate that must be satisfied before widening is already shipped:
-   `test/error-redaction.test.ts` recomputes the corpus cost at test time, so a
-   widening can be measured rather than asserted. **This is the one item here
-   whose constraint is a measurement, not a refactor — do not widen it blind.**
+4. ~~**A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.**~~
+   **RESOLVED 2026-10-03 — and the item above was half wrong, which is why it
+   survived a fold.** It named the right MECHANISM (`\b` falls between a declared
+   term and what follows it) and the wrong CLASS twice over.
+   - The four forms the earlier lane handed over — `chromeless`, `headlessly`,
+     `xorgs`, `zodish` — were already closed by `[a-z]*` and were never the
+     residual. Measured: 0 survivors across the whole term × suffix enumeration.
+   - The digit class (`chrome2`, `selenium3`) is **cosmetic**: 3 occurrences
+     repo-wide, every one of them THIS FILE quoting the defect at itself. Zero in
+     `src/`, zero in shipped manifests.
+   - The `_` class was the **real leak, and nobody had named it.** `_` is a `\w`
+     character, so `\b` falls between `xorg` and `_lock` and neither half
+     matched. `chromium_headless_shell` — Playwright's ACTUAL binary directory
+     name (`~/.cache/ms-playwright/chromium_headless_shell-1228/`, named verbatim
+     in shipped test fixtures) — reached a consumer **intact**, together with the
+     build number. Also `browser_download_url`, `ui2api_driver_error`,
+     `cdp_pipe`, `zod_v4`, `xorg_lock`. Note the absolute-path spelling did NOT
+     leak (the path rule eats it and the message falls to the fallback), so the
+     hole only opened on the pathless form a classifier's `reason` takes — which
+     is exactly why it was invisible.
+   - **CLOSED** by widening the suffix class `[a-z]*` → `[a-z0-9_]*`, the narrowest
+     rule that closes it (`-` and `.` still excluded, so the reverted `google-`
+     defect cannot recur). Cost MEASURED over 25,614 real string literals from
+     every shipped `.ts`/`.js`/`.mjs`/`.sh` under `src/`, `test/`, `scripts/`,
+     `capabilities/`, `docs/`: 98 messages change (0.385%), **90 distinct spans,
+     every one internal, 0 ordinary words** — so it is not the 276-token defect
+     in a new costume. Gate + mutation proof in `test/error-redaction.test.ts`
+     (reverting to `[a-z]*` reopens 7 forms; dropping only `_` reopens 6).
+   - The earlier lane's refusal was not idle: "do not widen it blind" was correct
+     and the measurement is what made it safe. What was wrong was the target.
 5. **No reconstruction runbook consumer is automated.** VERIFIED OPEN 2026-10-03.
    `scripts/ci/make-public-repo.sh` only PRODUCES the map (`:189-190` private-full,
    `:354-359` public-sanitized) and nothing in the tree CONSUMES it.

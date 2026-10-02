@@ -222,7 +222,7 @@ function termPattern(term: string): string {
  * against the frozen original rather than trusting the claim.
  *
  * THE `[a-z]*` SUFFIX, AND WHY IT IS NARROWER THAN IT LOOKS. This used to end
- * at `\b`, and a prior lane recorded the consequence as an unfixable residual:
+ * at `\b`, and a prior lane recorded the consequence as a residual:
  * "`chromeless`, `headlessly`, `xorgs`, `zodish` survive BOTH the old and new
  * rules (the word is inside a longer token)". The trailing-letter suffix closes
  * that class, and the CLASS was worth closing even though those four examples
@@ -233,24 +233,90 @@ function termPattern(term: string): string {
  * is documented as failing closed, and it could not see `selectors` either,
  * because it was built from this same boundary-anchored pattern.
  *
+ * That lane's judgement — "naming the shape of a leak you have not fixed is more
+ * useful than a fix you cannot measure" — was RIGHT about its own examples and
+ * it correctly refused `\w*` blind. It was wrong about which class was open. The
+ * class it named was already closed; the open one was `_` and digits, measured
+ * below.
+ *
  * IT IS NOT THE 276-TOKEN WIDENING, and the difference is the whole licence.
  * A prefix rule over arbitrary prose (`[A-Z][a-z]+`, "redact any capitalised
  * token") caught 276 ordinary words — Answer, Capability, Search, Tool, Image,
  * Response, model, session — and was rejected because a gate that catches 276
  * ordinary words catches nothing. This one fires ONLY on a term this file
- * declares: the alternation is unchanged, and `[a-z]*` can only extend a span
- * that already started inside it. Measured cost over the shipped corpus (3,853
- * tokens from every manifest.json under `capabilities/`, the exact strings
- * `consumerProse` rewrites): it newly eats 2 tokens, `selectors` and `Selectors`,
- * and 0 tokens that are not a derivation of a declared term. Recomputed at test
- * time in `test/error-redaction.test.ts` so it cannot rot into a claim.
+ * declares: the alternation is unchanged, and the suffix class can only extend a
+ * span that already started inside it. Measured cost over the shipped corpus
+ * (3,853 tokens from every manifest.json under `capabilities/`, the exact strings
+ * `consumerProse` rewrites): the `[a-z]*` step newly eats 2 tokens, `selectors`
+ * and `Selectors`, and 0 tokens that are not a derivation of a declared term.
+ * Recomputed at test time in `test/error-redaction.test.ts` so it cannot rot into
+ * a claim. The later `[a-z0-9_]*` step is measured separately, over a much larger
+ * corpus, immediately below.
  *
- * WHAT IT CANNOT DO: it does not cross `-`, `_`, `.` or any non-letter, so
- * `google-chrome` still leaves `google- was` exactly as before, and the
- * byte-stability gate against the frozen pre-change alternation still holds.
+ * WHAT IT CANNOT DO: it does not cross `-` or `.`, so `google-chrome` still
+ * leaves `google- was` exactly as before, and the byte-stability gate against
+ * the frozen pre-change alternation still holds.
+ *
+ * ── WHY `_` AND DIGITS JOINED THE CLASS (measured, and it is a REAL leak) ──────
+ *
+ * The four examples the earlier lane handed over — `chromeless`, `headlessly`,
+ * `xorgs`, `zodish` — are CLOSED by `[a-z]*` and never were the residual. They
+ * are not why this widened, and naming them as the motivation would be a lie
+ * about the measurement. The residual was the OTHER neighbour of `\b`: `_` and a
+ * digit are `\w`, so `\b` sits BETWEEN `xorg` and `_lock` and neither half
+ * matched. `docs/ACTIVE-WAVE.md` recorded that half as a digit suffix
+ * (`chrome2`, `selenium3`).
+ *
+ * THAT HALF WAS COSMETIC. Those two strings occur 3 times in the whole tree and
+ * every occurrence is `docs/ACTIVE-WAVE.md` quoting the defect at itself. Zero
+ * in `src/`, zero in shipped manifests. Nothing to close.
+ *
+ * THE `_` HALF WAS A REAL LEAK, and it is the reason for this change. A real
+ * internal identifier that crosses `_` out of a declared term and reaches the
+ * wire verbatim:
+ *
+ *   - `chromium_headless_shell` — Playwright's ACTUAL binary directory name
+ *     (`~/.cache/ms-playwright/chromium_headless_shell-1228/`). It is named
+ *     verbatim in shipped test fixtures (`test/gate-wiring.test.ts`,
+ *     `test/wigolo-engine.test.ts`, `test/helpers/browser-launchability.ts`) and
+ *     a bare `redactInternalError` handed a launch failure mentioning it returns
+ *     it INTACT, not the fallback. It discloses the browser tier AND the exact
+ *     build number — reconnaissance, and precisely what the file header calls
+ *     the DOM-locator language.
+ *   - `browser_download_url`, `ui2api_driver_error`, `cdp_pipe`, `zod_v4`,
+ *     `xorg_lock` — all internal, all leaking.
+ *
+ * Note the absolute-path variant of the same fault does NOT leak: with a leading
+ * `/home/...` the path rule deletes the whole fragment and the message falls to
+ * the fallback. The leak needs the artifact name WITHOUT the path, which is
+ * exactly how a classifier's `reason` string is shaped. A hole that only opens
+ * on the pathless spelling is still a hole.
+ *
+ * MEASURED COST, over 25,482 string literals lifted from every `.ts`/`.js`/`.mjs`
+ * /`.sh` file under `src/`, `test/`, `scripts/`, `capabilities/` and `docs/` —
+ * the real text, not the hand-picked sentence. The widened rule changes 98 of
+ * them (0.385%), and every span it newly eats is one of exactly 18, all of them
+ * internal: `CHROME_BIN`, `CHROME_CHROMIUM_PATHS`, `CHROME_CONFIG_DIR`,
+ * `CHROME_DIR`, `CHROME_OWNER_UID_UNRESOLVED`, `CHROME_POINT_OF_USE`,
+ * `CHROME_PROFILE_DIR`, `CHROME_SYSTEM_PATHS`, `CHROME_UNIT_REL`, `CHROME_USER`,
+ * `CHROME_USER_ENV`, `UI2API_`, `UI2API_CHROME_USER`, `XVFB_DISPLAY`,
+ * `browser_download_url`, `chromium_headless_shell`,
+ * `playwright_chromiumdev_profile`, `ui2api_driver_error`. ZERO are ordinary
+ * words, so this is not the 276-token defect in a new costume.
+ *
+ * The residual mangling is DISCLOSED rather than denied: `$CHROME_USER` becomes
+ * `$`. That is a worse string — and it is the right trade, because the seam's job
+ * is deletion, not readability, and a bare `$` in an operator-facing log is
+ * harmless where a leaked `chromium_headless_shell-1228` on `/v1` is not. The
+ * one mangling that would have mattered — `google-` — cannot happen, because `-`
+ * is still not crossed.
+ *
+ * MUTATION-PROVEN, twice, in both directions (`test/error-redaction.test.ts`):
+ * dropping `_` from the class re-opens 6 forms, and reverting to the old `[a-z]*`
+ * re-opens 7. A gate that cannot see either revert is a decoration.
  */
 export const INTERNAL_WORD_RE = new RegExp(
-  `\\b(?:${[...CONCEPT_TERMS, ...ERROR_ONLY_TERMS].map(termPattern).join("|")})[a-z]*\\b`,
+  `\\b(?:${[...CONCEPT_TERMS, ...ERROR_ONLY_TERMS].map(termPattern).join("|")})[a-z0-9_]*\\b`,
   "gi",
 );
 

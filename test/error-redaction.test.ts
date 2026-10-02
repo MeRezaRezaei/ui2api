@@ -995,3 +995,226 @@ describe("DERIVED FORMS: a declared term plus trailing letters is the SAME word"
     );
   });
 });
+
+/**
+ * ── THE `_`/DIGIT CLASS: the residual that was actually open ───────────────────
+ *
+ * The prior block above is about `[a-z]*`. This one is about the OTHER neighbour
+ * of `\b`, and it exists because the two were confused.
+ *
+ * `_` and a digit are `\w`, so `\b` falls BETWEEN `xorg` and `_lock`. Neither
+ * half matched, and both looked like the "inside a longer token" residual the
+ * earlier lane wrote down. Only one of them was:
+ *
+ *   - the LETTER class (`chromeless`, `headlessly`, `xorgs`, `zodish`) was
+ *     already closed by `[a-z]*`, and `docs/ACTIVE-WAVE.md` records it as still
+ *     open. That record is stale and this block is the correction.
+ *   - the DIGIT class (`chrome2`, `selenium3`) is COSMETIC: 3 occurrences in the
+ *     whole tree, every one of them `docs/ACTIVE-WAVE.md` quoting the defect at
+ *     itself. Zero in `src/`, zero in shipped manifests.
+ *   - the `_` class is a REAL LEAK, and it is what this gate pins.
+ *
+ * WHY A LEAK, MEASURED AND NOT ASSERTED. The named forms below are not invented
+ * probe strings: `chromium_headless_shell` is Playwright's ACTUAL binary
+ * directory name (`~/.cache/ms-playwright/chromium_headless_shell-1228/`) and it
+ * is named verbatim in shipped test fixtures. Each is asserted here through the
+ * PUBLIC function, so the gate cannot pass by inspecting a regex source while the
+ * wired seam still leaks.
+ */
+describe("THE UNDERSCORE/DIGIT CLASS: `_` and a digit are \\w, so \\b breaks between", () => {
+  /**
+   * The real leaks, split by WHY each is here. `real` = a name this codebase or
+   * Playwright actually uses, attested in the tree. `derived` = the shape, so a
+   * future term added to CONCEPT_TERMS is covered by the same rule rather than
+   * needing a new row here.
+   */
+  const UNDERSCORE_LEAKS: ReadonlyArray<readonly [string, string]> = [
+    // REAL, attested in shipped code — Playwright's own artifact directory name.
+    ["real", "chromium_headless_shell"],
+    ["real", "browser_download_url"],
+    ["real", "ui2api_driver_error"],
+    // REAL shapes: a term, then a `_`-joined qualifier.
+    ["derived", "xorg_lock"],
+    ["derived", "cdp_pipe"],
+    ["derived", "zod_v4"],
+    ["derived", "playwright_chromiumdev_profile"],
+    ["derived", "headless_shell"],
+    // The digit class, closed because it is free — not because it was a leak.
+    ["digit", "chrome2"],
+    ["digit", "xorg9"],
+  ];
+
+  test("the ERROR seam deletes every `_`-joined form of a declared term", () => {
+    const leaked: string[] = [];
+    for (const [kind, form] of UNDERSCORE_LEAKS) {
+      // Shaped like a classifier's `reason` — the pathless spelling, which is the
+      // one that actually leaks. With a leading `/home/...` the path rule eats
+      // the fragment and the message falls to the fallback, so the path variant
+      // would prove nothing here.
+      const out = redactInternalError(`driver failed: ${form} reported an unexpected condition while preparing the page`, {
+        site: "gemini",
+      });
+      if (out.includes(form)) leaked.push(`${kind} "${form}" -> ${JSON.stringify(out)}`);
+    }
+    assert.deepEqual(
+      leaked,
+      [],
+      `an underscore-joined form of a declared term reached a consumer verbatim. \`_\` is a \\w character, so the\n` +
+        `boundary anchor falls BETWEEN the term and its qualifier and neither half matched:\n  ${leaked.join("\n  ")}\n` +
+        `A leak that only opens on the pathless spelling is still a leak — the absolute-path variant is\n` +
+        `eaten by the path rule and would have hidden this.`,
+    );
+  });
+
+  test("NON-VACUITY: the leak is REAL in the tree, not a string this test invented", () => {
+    // The anti-vacuity half. If `chromium_headless_shell` were a shape I made up
+    // for the test, the gate above would be pinning a fiction and the whole
+    // justification for the widening would be fictional too. So it must be
+    // findable in SHIPPED code — asserted against the tree, not against a list.
+    const shipped = srcTsFiles()
+      .concat(
+        readdirSync(join(REPO_ROOT, "test"))
+          .filter((f) => f.endsWith(".ts"))
+          .map((f) => join(REPO_ROOT, "test", f)),
+      )
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+    for (const form of ["chromium_headless_shell", "browser_download_url", "ui2api_driver_error"]) {
+      assert.ok(
+        shipped.includes(form),
+        `"${form}" is asserted as a REAL leak but appears nowhere in src/ or test/. Either the fixture ` +
+          `moved or the claim was invented — and an invented leak justifies nothing.`,
+      );
+    }
+  });
+
+  test("MUTATION-PROVEN: the gate sees the rule WEAKENED in either direction", () => {
+    // A gate that cannot see its own reverts is a decoration. Both reverts are
+    // checked by REBUILDING the alternation from the same vocabulary, so this
+    // asserts the property (the underscore is load-bearing) rather than a string.
+    const alt = [...CONCEPT_TERMS, "browser", "locator", "selector", "localStorage", "cookie jar", "profile.ts", "ui2api"]
+      .map((t) => t.replace(/[\\^$*+?()[\]{}|]/g, "\\$&"))
+      .join("|");
+    const OPEN_FORMS = ["xorg_lock", "cdp_pipe", "zod_v4", "browser_download_url", "ui2api_driver_error", "chromium_headless_shell"];
+
+    // A form LEAKS when the rule does NOT match it — so a revert "reopens" a form
+    // by failing to match it. The polarity is the whole assertion, so it is
+    // stated rather than left to a reader to infer.
+    // Revert 1: `_` dropped from the class. All six must reopen.
+    const noUnderscore = new RegExp(`\\b(?:${alt})[a-z0-9]*\\b`, "i");
+    const reopenedByNoUnderscore = OPEN_FORMS.filter((f) => !noUnderscore.test(f));
+    assert.equal(
+      reopenedByNoUnderscore.length,
+      OPEN_FORMS.length,
+      `dropping \`_\` from the suffix class reopened only ${reopenedByNoUnderscore.length} of ${OPEN_FORMS.length} ` +
+        `(${reopenedByNoUnderscore.join(", ")}). If this fires, the underscore is NOT what closes these — so the ` +
+        `widening's stated justification is wrong, not just its size.`,
+    );
+
+    // Revert 2: the whole widening undone, back to the pre-existing `[a-z]*`.
+    const letterOnly = new RegExp(`\\b(?:${alt})[a-z]*\\b`, "i");
+    const reverted = [...OPEN_FORMS, "chrome2"];
+    const reopenedByLetterOnly = reverted.filter((f) => !letterOnly.test(f));
+    assert.equal(
+      reopenedByLetterOnly.length,
+      reverted.length,
+      `reverting to the pre-existing \`[a-z]*\` reopened only ${reopenedByLetterOnly.length} of ${reverted.length} ` +
+        `(${reopenedByLetterOnly.join(", ")}). The gate must be able to see its own revert.`,
+    );
+
+    // …and the shipped rule closes all of them, which is the positive half.
+    const shippedRe = new RegExp(INTERNAL_WORD_RE.source, "i");
+    const stillOpen = reverted.filter((f) => !shippedRe.test(f));
+    assert.deepEqual(stillOpen, [], `the SHIPPED rule still lets these through: ${stillOpen.join(", ")}`);
+  });
+
+  test("MEASURED: the widening eats only INTERNAL spans from the real corpus", () => {
+    // THE COST, recomputed at test time so it cannot rot into a claim — and over
+    // a corpus an order of magnitude larger than the 3,853-token manifest set:
+    // every string literal in every shipped `.ts`/`.js`/`.mjs`/`.sh` file under
+    // src/, test/, scripts/, capabilities/ and docs/. A widening justified by a
+    // measurement must ship the measurement.
+    const alt = [...CONCEPT_TERMS, "browser", "locator", "selector", "localStorage", "cookie jar", "profile.ts", "ui2api"]
+      .map((t) => t.replace(/[\\^$*+?()[\]{}|]/g, "\\$&"))
+      .join("|");
+    const OLD = new RegExp(`\\b(?:${alt})[a-z]*\\b`, "gi");
+    const NEW = new RegExp(`\\b(?:${alt})[a-z0-9_]*\\b`, "gi");
+
+    const literals: string[] = [];
+    for (const rel of ["src", "test", "scripts", "capabilities", "docs"]) {
+      const walk = (dir: string): void => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const abs = join(dir, e.name);
+          if (e.isDirectory()) {
+            walk(abs);
+          } else if (/\.(?:ts|tsx|mjs|js|sh)$/.test(e.name)) {
+            let src: string;
+            try {
+              src = readFileSync(abs, "utf8");
+            } catch {
+              continue;
+            }
+            for (const m of src.matchAll(/"([^"\n]{10,300})"|'([^'\n]{10,300})'|`([^`]{10,300})`/g)) {
+              literals.push(m[1] ?? m[2] ?? m[3] ?? "");
+            }
+          }
+        }
+      };
+      walk(join(REPO_ROOT, rel));
+    }
+    assert.ok(
+      literals.length > 5000,
+      `the measured corpus collapsed to ${literals.length} literals — this gate would pass vacuously`,
+    );
+
+    // EVERY span the widened rule eats that the old one did not, named.
+    const spans = new Map<string, number>();
+    for (const lit of literals) {
+      for (const m of lit.matchAll(NEW)) {
+        OLD.lastIndex = 0;
+        if (!OLD.test(m[0])) spans.set(m[0], (spans.get(m[0]) ?? 0) + 1);
+      }
+    }
+    // Each must be a derivation of a DECLARED term: strip trailing characters back
+    // to a term. That is the property that makes the widening safe by
+    // construction rather than by count — the 276-token defect failed exactly
+    // here, and it is the check that catches it.
+    const bare = new RegExp(`^(?:${alt})$`, "i");
+    const notADerivation = [...spans.keys()].filter((w) => {
+      let s = w;
+      while (s.length > 0) {
+        if (bare.test(s)) return false;
+        s = s.slice(0, -1);
+      }
+      return true;
+    });
+    assert.deepEqual(
+      notADerivation,
+      [],
+      `the widening eats ${spans.size} distinct new spans from ${literals.length} real literals, and ` +
+        `${notADerivation.length} are NOT a derivation of a declared term: ${notADerivation.join(", ")}.\n` +
+        `A redaction that catches ordinary words catches nothing — the 276-token defect.\n` +
+        `Full span list: ${[...spans.keys()].sort().join(", ")}`,
+    );
+    console.log(
+      `[underscore-class gate] corpus ${literals.length} literals; widened rule newly eats ` +
+        `${spans.size} distinct spans across ${[...spans.values()].reduce((a, b) => a + b, 0)} sites: ` +
+        `${[...spans.keys()].sort().join(", ")}; ${notADerivation.length} are not a derivation of a declared term`,
+    );
+  });
+
+  test("the widening does NOT mangle a hyphenated compound (the `google-` defect)", () => {
+    // The failure mode that got two sibling widenings REVERTED: a compound entry
+    // left a meaningless fragment. `-` is still not in the suffix class, so
+    // `google-chrome` behaves exactly as it did before this change — the leading
+    // fragment is not eaten.
+    const out = redactInternalError("driver failed: google-chrome reported an unexpected condition here", {
+      site: "gemini",
+    });
+    assert.ok(
+      out.includes("google-"),
+      `the hyphen compound was re-shaped by the widening: ${JSON.stringify(out)}. \`-\` must stay outside the ` +
+        `suffix class — eating into a hyphenated compound is what produced the reverted "google-" defect.`,
+    );
+  });
+});
