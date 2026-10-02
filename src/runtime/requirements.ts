@@ -25,7 +25,7 @@ import { resolveChromeOwner } from "./chrome-owner.js";
 //   - verdict vocabulary is the verbatim's own: ready / working / on-hold /
 //     not-ready.
 import { execFileSync } from "node:child_process";
-import { readdirSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { resolveChromeExec, bundledChromiumPath } from "./browser.js";
 import {
@@ -164,7 +164,11 @@ export interface RequirementsDeps {
   userExists: (user: string) => boolean;
   ui2apiUserDataDir: () => string | null;
   ui2apiUserHome: (user: string) => string;
-  copiedProfileProbe: (user: string) => "present" | "missing" | "unreadable";
+  // `copiedProfileProbe` USED TO BE HERE, as a required seam returning
+  // "present" | "missing" | "unreadable" for its own hand-built profile path.
+  // It is GONE, and that deletion is the fix: the profile path now comes from
+  // the `chromeOwner` seam below — the same resolver `launchBrowser()` uses — so
+  // this module can no longer assert a fact about a directory nothing launches.
   detectDisplay: () => DisplayInfo | null;
   chromeResolve: () => string | null;
   /** GOAL 132: the Chrome point of use. A seam like every other probe here —
@@ -192,7 +196,22 @@ export interface RequirementsDeps {
    *  would delete the last `??` from this file, and it is declined precisely
    *  because the guard is the field's only wiring — a `??` that can never fire
    *  is the defect; a `??` that is the implementation is not. */
-  chromeOwner?: () => { user: string; profile: string | null; missing: string | null };
+  chromeOwner?: () => {
+    user: string;
+    profile: string | null;
+    missing: string | null;
+    /**
+     * Present-but-not-inspectable (the dir is 0700 and owned by the chrome user,
+     * so a check run by anyone else cannot list it). OPTIONAL so an existing
+     * fixture that does not model the case still typechecks and still means
+     * "readable" — the real resolver always supplies it.
+     *
+     * `browser-home` reads it because treating "correctly 0700" as a readiness
+     * FAILURE is the false negative chrome-owner.ts:53-58 documents: it would
+     * send an operator chasing a perfectly healthy setup.
+     */
+    profileExistsButUnreadable?: boolean;
+  };
   chromeVersion: (exec: string) => string | null;
   bundledChromium: () => string | null;
   probeAttachPort: (port: number) => Promise<boolean>;
@@ -232,19 +251,27 @@ function defaultChromeVersion(exec: string): string | null {
   }
 }
 
-// The machine-owned browser home: the ui2api user's copied Chrome profile
-// (wave-19 seam: launched with --user-data-dir=/home/ui2api/.ui2api-chrome).
-// "present" = the dir exists AND is non-empty AND readable from this session;
-// EACCES is reported honestly as "unreadable", never as "missing".
-function defaultCopiedProfileProbe(user: string): "present" | "missing" | "unreadable" {
-  const dir = join(ui2apiUserHome(user), ".ui2api-chrome");
-  try {
-    return readdirSync(dir).length > 0 ? "present" : "missing";
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    return err?.code === "ENOENT" ? "missing" : "unreadable";
-  }
-}
+// NO `defaultCopiedProfileProbe` ANY MORE, and its absence is the fix.
+//
+// It used to answer "does the machine-owned browser home exist?" by building its
+// OWN path — `join(ui2apiUserHome(user), ".ui2api-chrome")` — and that path was
+// NOT the path anything provisions or launches. MEASURED on this box:
+//   - live + launched:  /home/ui2api/.config/ui2api-chrome  (systemd
+//     `ui2api-chrome.service` MainPID 1895, `--user-data-dir=` read out of
+//     /proc/1895/cmdline; and `resolveChromeOwner().profile`, which feeds
+//     `userChromeProfile()` -> `launchBrowser()` in src/runtime/browser.ts)
+//   - probed by the readiness gate: /home/ui2api/.ui2api-chrome
+// `.ui2api-chrome` was a stale 187M orphan (dir mtime 2026-09-22) left over from
+// a "wave-19 seam" that nothing provisions; the live profile is the 154M
+// `.config` one, written to minutes before this was measured. So the gate was
+// not merely vacuous — it was PASSING FOR THE WRONG REASON, on a dead directory,
+// and would have kept saying "present" if the real profile were deleted outright.
+//
+// The path now has exactly ONE owner, `resolveChromeOwner()` in
+// src/runtime/chrome-owner.ts, which is also what `launchBrowser()` consumes — so
+// the readiness gate and the launch seam cannot disagree by construction. There
+// is no second spelling to keep in sync, and `test/chrome-profile-path-truth`
+// fails if one is reintroduced.
 
 // The attach probe is the ONLY network this module performs: a short HTTP GET
 // against the CDP endpoint of an ALREADY-RUNNING Chrome. Never launches one.
@@ -379,35 +406,45 @@ function browserHomeCheck(deps: RequirementsDeps): RequirementsCheck {
       reason: `ui2api OS user "${user}" missing — sudo useradd -m ${user} (machine-owned browser home + login data, verbatim 1495)`,
     };
   }
-  const home = deps.ui2apiUserHome(user);
   const dataDir = deps.ui2apiUserDataDir();
-  const copied = deps.copiedProfileProbe(user);
+  // THE PROFILE PATH IS NOT BUILT HERE. It is read from the same resolver the
+  // launch seam uses, so "the readiness gate passed" and "Chrome will launch
+  // against a real profile" cannot be two different claims about two different
+  // directories. `owner.missing` is itself composed from the owner module's
+  // candidate list, so the remedy names the paths that are actually tried.
+  const owner = (deps.chromeOwner ?? resolveChromeOwner)();
   const problems: string[] = [];
   if (dataDir === null) {
     // HONEST remedy only: ui2apiUserDataDir() reads NO env knob (it probes the
-    // ui2api user's XDG dir, xhost-capture.ts:169-183) — UI2API_DATA_DIR feeds
-    // only the vault (resolveDataDir), so it can never flip this check and is
-    // never printed here (GOAL 41 fold).
+    // ui2api user's XDG data dir, xhost-capture.ts:169-183) — UI2API_DATA_DIR
+    // feeds only the vault (resolveDataDir), so it can never flip this check and
+    // is never printed here (GOAL 41 fold).
     problems.push(
       `ui2api data dir not usable from this session (${user}'s XDG data dir unwritable) — run one setup pass as root/sudo -u ${user}`
     );
   }
-  if (copied === "missing") {
+  // Only an ABSENT profile is a failure. A 0700 dir owned by the chrome user
+  // that this session may not list is the CORRECT state — refusing to read it is
+  // the point — so it is reported as a note on a pass, never as a fail, because
+  // that false negative would send an operator chasing a healthy setup
+  // (chrome-owner.ts:53-58 says so in its own words).
+  if (owner.profile === null) {
     problems.push(
-      `copied Chrome profile dir ${home}/.ui2api-chrome missing or empty — run the copy-of-official-Chrome setup (the machine-owned browser home)`
-    );
-  } else if (copied === "unreadable") {
-    problems.push(
-      `copied Chrome profile dir ${home}/.ui2api-chrome unreadable from this session (permission denied) — run the check with read access (root or the owning group)`
+      `machine-owned browser home: no Chrome profile for "${owner.user}" — ${owner.missing ?? "the owner resolver returned no profile"}`
     );
   }
   if (problems.length > 0) {
     return { id: "browser-home", status: "fail", reason: problems.join("; ") };
   }
+  const unreadableNote = owner.profileExistsButUnreadable
+    ? " (present, 0700 — not readable from this session, which is correct)"
+    : "";
   return {
     id: "browser-home",
     status: "pass",
-    detail: `ui2api user "${user}" present — data dir ${dataDir}; copied Chrome profile ${home}/.ui2api-chrome present`,
+    detail:
+      `ui2api user "${user}" present — data dir ${dataDir}; ` +
+      `machine-owned browser home ${owner.profile}${unreadableNote}`,
   };
 }
 
@@ -760,7 +797,6 @@ export function defaultRequirementsDeps(overrides: Partial<RequirementsDeps> = {
     userExists,
     ui2apiUserDataDir,
     ui2apiUserHome,
-    copiedProfileProbe: defaultCopiedProfileProbe,
     detectDisplay: detectDisplayInfo,
     chromeResolve: defaultChromeResolve,
     missingSharedLibraries: defaultMissingSharedLibraries,

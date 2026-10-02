@@ -64,7 +64,10 @@ function makeDeps(overrides: Partial<RequirementsDeps> = {}): RequirementsDeps {
     userExists: () => true,
     ui2apiUserDataDir: () => "/home/ui2api/.local/share/ui2api",
     ui2apiUserHome: () => "/home/ui2api",
-    copiedProfileProbe: () => "present",
+    // NO `copiedProfileProbe` — it is gone from RequirementsDeps. The fixture
+    // below asserts the profile through `chromeOwner`, the same seam the
+    // production default reads, which is what makes "the gate passed" and "the
+    // launch seam will use this profile" the SAME claim instead of two.
     detectDisplay: () => ({ display: ":20", source: "env" }),
     chromeResolve: () => "/usr/bin/google-chrome-stable",
     // GOAL 132: the Chrome point of use is an INJECTED seam, so the fixture
@@ -232,12 +235,26 @@ test("display headless: UI2API_CHROME_PATH resolved by the ladder + cache missin
 
 // --- (d) machine-owned browser home ---
 
-test("browser-home: ui2api user present + data dir + copied profile → pass", async () => {
+test("browser-home: ui2api user present + data dir + owner profile → pass naming THE RESOLVED path", async () => {
   await withCleanEnv(async () => {
     const { checks } = await runOsChecks(makeDeps());
     const c = checks.find((x) => x.id === "browser-home")!;
     assert.equal(c.status, "pass");
-    assert.match(c.detail ?? "", /\/home\/ui2api\/\.ui2api-chrome present/);
+    // THE ASSERTION THAT CLOSES THE "GREEN BECAUSE THEY DISAGREE" HOLE.
+    //
+    // This used to be a regex on the literal `/home/ui2api/.ui2api-chrome` — the
+    // DEAD spelling — while `test/posture-gate-truth.test.ts` asserted
+    // `/home/ui2api/.config/ui2api-chrome`, the LIVE one. Both were green, and
+    // they were green BECAUSE they disagreed: each pinned a string, neither
+    // pinned the fact, and the gate itself was probing a directory nothing
+    // provisions or launches.
+    //
+    // It now derives the expected path FROM THE SAME `chromeOwner` seam the
+    // check reads, so the test and the check cannot drift apart, and it asserts
+    // the literal `.ui2api-chrome` is gone rather than merely unused.
+    const owner = makeDeps().chromeOwner!();
+    assert.ok(c.detail!.includes(owner.profile!), `browser-home must name the resolved owner profile ${owner.profile}`);
+    assert.doesNotMatch(c.detail ?? "", /\.ui2api-chrome/, "the dead dot-spelling is back in the readiness verdict");
   });
 });
 
@@ -262,23 +279,58 @@ test("browser-home: data dir not usable from this session → fail named, and th
   });
 });
 
-test("browser-home: copied Chrome profile missing → fail naming '.ui2api-chrome' + the copy-of-official-Chrome fix", async () => {
+test("browser-home: NO owner profile → fail naming the resolver's own missing reason", async () => {
   await withCleanEnv(async () => {
-    const { checks } = await runOsChecks(makeDeps({ copiedProfileProbe: () => "missing" }));
+    const { checks } = await runOsChecks(
+      makeDeps({
+        chromeOwner: () => ({
+          user: "ui2api",
+          profile: null,
+          // The real `resolveChromeOwner()` composes this from its own
+          // PROFILE_CANDIDATES, so the remedy names the paths ACTUALLY TRIED
+          // rather than a second hand-written spelling of one of them.
+          missing: "no Chrome profile found for ui2api — expected one of /home/ui2api/.config/ui2api-chrome",
+        }),
+      })
+    );
     const c = checks.find((x) => x.id === "browser-home")!;
     assert.equal(c.status, "fail");
-    assert.match(c.reason ?? "", /copied Chrome profile dir \/home\/ui2api\/\.ui2api-chrome missing or empty/);
-    assert.match(c.reason ?? "", /copy-of-official-Chrome/); // the named fix that can actually flip this check
+    assert.match(c.reason ?? "", /machine-owned browser home: no Chrome profile for "ui2api"/);
+    assert.match(c.reason ?? "", /\/home\/ui2api\/\.config\/ui2api-chrome/, "the resolver's candidate path must survive into the remedy");
   });
 });
 
-test("browser-home: copied profile unreadable (EACCES) → honest 'unreadable', never 'missing'", async () => {
+test("browser-home: profile present but 0700-unreadable → PASS with an honest note, never a false FAIL", async () => {
+  // This is a BEHAVIOUR CHANGE, and it is the second half of the fix.
+  //
+  // The old check reported EACCES as `status: "fail"` with the remedy "run the
+  // check with read access (root or the owning group)". But the profile is
+  // SUPPOSED to be 0700 and owned by the chrome user — that is the whole point
+  // of the dedicated-user design — so on any box where an operator runs
+  // `ui2api requirements` as themselves rather than as ui2api, the gate
+  // reported FAIL on a perfectly healthy setup. chrome-owner.ts:53-58 already
+  // named that exact false negative and refused to make it.
+  //
+  // MEASURED here: `ui2api requirements` on this box, run as the operator, gets
+  // EACCES on /home/ui2api/.config/ui2api-chrome (0700, uid 1010). Under the old
+  // semantics the fixed gate would have gone RED the moment it started measuring
+  // the RIGHT directory.
   await withCleanEnv(async () => {
-    const { checks } = await runOsChecks(makeDeps({ copiedProfileProbe: () => "unreadable" }));
+    const { checks } = await runOsChecks(
+      makeDeps({
+        chromeOwner: () => ({
+          user: "ui2api",
+          profile: "/home/ui2api/.config/ui2api-chrome",
+          missing: null,
+          profileExistsButUnreadable: true,
+        }),
+      })
+    );
     const c = checks.find((x) => x.id === "browser-home")!;
-    assert.equal(c.status, "fail");
-    assert.match(c.reason ?? "", /unreadable from this session \(permission denied\)/);
-    assert.doesNotMatch(c.reason ?? "", /missing/);
+    assert.equal(c.status, "pass");
+    assert.match(c.detail ?? "", /\/home\/ui2api\/\.config\/ui2api-chrome/);
+    assert.match(c.detail ?? "", /not readable from this session, which is correct/);
+    assert.doesNotMatch(c.detail ?? "", /unreadable.*fail/i);
   });
 });
 
