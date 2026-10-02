@@ -396,7 +396,7 @@ This is a publication-safety change, so it is not left to a future reader:
       # It carries no secrets — these are the author's own host addresses, which
       # the sanitizer is removing from the public copy precisely by naming them.
       {
-        echo "# ui2api commit-map provenance — the inputs the map alone cannot carry"
+        echo "# commit-map provenance — the inputs the map alone cannot carry"
         echo "sanitized_from_commit: $CI_COMMIT_SHA"
         echo "sanitized_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "git_filter_repo_version: $(git filter-repo --version 2>/dev/null || echo unknown)"
