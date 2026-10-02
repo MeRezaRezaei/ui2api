@@ -9,7 +9,9 @@ Rule of this file: **a decision that is not written down was not made.** If you 
 fork yourself, append it here — the reviewer's job is to check a record, not to answer an
 interview.
 
-Index: [ADR-001](#adr-001--inject-snapshot-returns-a-verdict-and-throws-only-on-a-total-refusal)
+Index:
+- [ADR-001](#adr-001--inject-snapshot-returns-a-verdict-and-throws-only-on-a-total-refusal)
+- [ADR-002](#adr-002--do-not-gate-docsmd-citations-the-only-scoping-that-goes-green-makes-the-sibling-class-blind)
 
 ---
 
@@ -131,3 +133,116 @@ The throw is the part that reaches them today. Measured, all 22 sites (`grep -rc
   `storageRegistered` could mean "the replay ran", not "the registration was taken"). That
   would *strengthen* the verdict and is a reason to revisit the field's meaning, not the
   decision.
+
+---
+
+## ADR-002 — do NOT gate `docs/*.md` citations; the only scoping that goes green makes the sibling class blind
+
+- **Date:** 2026-10-02
+- **Goal:** GOAL 184
+- **Status:** accepted (Option B — consciously not built)
+- **Class:** one level over the class `test/phantom-gate-citation.test.ts` gates — a source
+  comment citing a **document** that does not exist, rather than a test file that does not exist
+- **Deliberately absent:** no gate file, no baseline, no allow-list. This ADR is the deliverable.
+
+### Context
+
+`test/phantom-gate-citation.test.ts` (GOAL 182) fails when `src/` or `scripts/` cites a
+`test/*.test.ts` that does not exist. It found **three real phantoms**, one on the credential
+path. The natural next rung is the same shape one level over: a source comment citing a
+`docs/*.md` that does not exist.
+
+GOAL 184 was opened to decide whether to build it, and to build it only if the answer was
+yes. **The answer is no**, and the reason is not "there are no bugs" — it is that **the only
+scoping which makes this gate green is the same scoping which would have hidden the sibling
+gate's one real find.** That is a measured result, not a preference.
+
+### Measurement (2026-10-02, this lane, re-derived independently)
+
+19 unique `docs/*.md` citations from `src/` + `scripts/` (nested paths included); **13 resolve,
+6 do not.** Restricting to single-segment names reproduces the briefed shape exactly: **13
+unique, 9 resolve, 4 do not.** `src/` alone: **6 unique, 6/6 resolve.**
+
+**Every single unresolved citation — under every regex variant tried — lives in exactly one
+file: `scripts/ci/public-repo-paths.txt`.** That file is the auditable path-exclusion list fed
+to `git filter-repo --paths-from-file`; its 6 misses are the pre-relocation locations of the
+verbatim corpus (moved to `.brain/` on 2026-09-25). **Zero true phantoms exist on the claim
+surface.**
+
+### Why the obvious construction fails — watched, not assumed
+
+The proposed escape was "parse citations in comment/prose context only, so a path-list is
+excluded by construction". **This was built and run against the real tree. It fails: 6
+unresolved, all inside `#` comment lines** (lines 37–48 of `public-repo-paths.txt` are a
+`#`-commented table of those very paths). Comment-context parsing does not separate a
+path-list from a claim, because a path-list *documents its own entries in comments*. The
+proposed construction does not work.
+
+### The only construction that goes green, and what it costs
+
+Classifying by **what a file IS** — a prose surface (`.ts/.mts/.mjs/.js/.sh/.service`) versus
+a data file — is green with **zero baseline**: 9 unique citations, 0 unresolved. It is
+tempting and it is still wrong, because measured, it makes **9 citation-carrying files
+invisible**, and among them:
+
+- **`scripts/ci/forbidden-release-paths.txt`** — the file holding
+  `test/phantom-gate-citation.test.ts`'s **one real, named phantom**
+  (`release-exclusion-single-source.test.ts`). A gate scoped this way would have been blind to
+  the exact defect that proved the sibling class is real.
+- **`scripts/audit/*`** — the dated evidence archives, which the sibling gate deliberately
+  keeps visible-but-exempt (a file claiming an exemption must carry a date).
+
+So the scoping that makes GOAL 184 green is one that would have **deleted the sibling gate's
+only true positive**. A gate bought by going blind somewhere else is not insurance; it is the
+same vacuous-gate failure this repo has already produced twice, one level down.
+
+### The cost argument, stated plainly
+
+- **Zero live instances.** The class is real but empty. A gate over an empty class cannot be
+  validated by the thing gates are for (catching the bug), only by a mutation test — and a
+  mutation-proven green gate is exactly what "we wrote a test for our regex" looks like.
+- **Asymmetric blast radius.** A phantom *test* citation makes a reader believe a **check
+  exists** and skip writing it — that is how GOAL 182 found a credential-path hole. A phantom
+  *doc* citation makes a reader open a file that is not there; they then read the code. The
+  first silently suppresses a safety property; the second is an inconvenience. Insurance is
+  worth buying against the silent failure.
+- **This repo's own evidence.** Two gates have already shipped vacuous here. The strongest
+  predictor of a third is that it was written to be green before it was written to bite.
+- **Docs churn is slow and human.** 17 top-level files, 2 subdirs. `src/` carries **6**
+  citations across 6 files — small enough that a reader meets every one of them organically.
+  The audit archives are dated evidence and are *supposed* to name files that no longer exist.
+
+### Alternatives considered and rejected
+
+- **Option A, comment/prose-scoped.** Built and measured: reds on all 6. Rejected.
+- **Option A, extension-scoped ("what it IS").** Green with zero baseline, but blind to
+  `forbidden-release-paths.txt` and `scripts/audit/*`. Rejected as self-defeating.
+- **Option A, content-shape classifier** (classify a file as a path-list by its density of
+  bare path lines). Rejected: `public-repo-paths.txt` is **10 non-comment lines in 132** — it
+  is *mostly comments*. Content shape cannot separate it from a claiming file, and inventing a
+  threshold is an allow-list wearing a derivation's clothes.
+- **Option A with a 6-entry baseline.** Explicitly out of bounds by the goal, and by this
+  repo's history: a gate whose first act is to be silenced will be silenced again.
+
+### Evidence that would make this decision wrong
+
+This is a real result and it is **reversible**. Build the gate when **any** of these holds:
+
+1. **A `docs/*.md` citation in `src/` or `scripts/` actually goes stale** — a real phantom on
+   the claim surface. Insurance stops being insurance at the first claim; that is the signal.
+2. **A bulk `docs/` move or rename** (a second corpus relocation like 2026-09-25's). One event
+   would invalidate many citations at once and make the class worth gating *before* anyone
+   notices. This is the most likely trigger.
+3. **The citation surface grows past ~50 sites across >25 files** — past the point where
+   "every citation is met organically while reading the file" stops being true.
+4. **A construction appears that excludes `public-repo-paths.txt` by content while keeping
+   `forbidden-release-paths.txt` visible** — i.e. one that can tell a *path-list* from a
+   *claiming file* without an allow-list. That is the finding that would overturn this ADR, and
+   it is the only one that makes building it cheap rather than merely possible.
+
+### What was NOT done, on purpose
+
+No test file was added, so `package.json` (`scripts["test:unit"]`) and `README.md`'s two
+file-count figures are **deliberately untouched** — this lane owns both, and adding a gate for
+a class chosen *not* to gate would have been the vacuous outcome this ADR argues against.
+`test/phantom-gate-citation.test.ts` and `test/injection-verdict.test.ts` still pass.
