@@ -1,6 +1,11 @@
-# ACTIVE WAVE — 2026-10-02T06:20Z (SIXTH)
+# ACTIVE WAVE — 2026-10-02T06:40Z (SEVENTH)
 
-No lanes in flight. The next wave starts from the OPEN list at the bottom.
+| task_id | lane | owns |
+| --- | --- | --- |
+| `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | open item #1 — LIVE: requirements.ts probes a path nothing provisions or launches; two tests are green BECAUSE they disagree |
+
+Collect with `get_delegation_status` on 1-2 ids at a time, re-armed until
+terminal. **A turn must never end with a task still `running`.**
 
 ## EVERY WAVE SO FAR — collected and merged
 
