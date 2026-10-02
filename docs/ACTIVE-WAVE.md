@@ -3,6 +3,7 @@
 | task_id | lane | owns |
 | --- | --- | --- |
 | `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | open item #1 — LIVE: requirements.ts probes a path nothing provisions or launches; two tests are green BECAUSE they disagree |
+| `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | open item #2 — 3 reds in wigolo-engine: the maybe() guard asks is the DAEMON alive, not can the BROWSER launch |
 
 Collect with `get_delegation_status` on 1-2 ids at a time, re-armed until
 terminal. **A turn must never end with a task still `running`.**
