@@ -5,6 +5,8 @@
 | `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | open item #1 — LIVE: requirements.ts probes a path nothing provisions or launches; two tests are green BECAUSE they disagree |
 | `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | MERGED: `aa4e650` — the maybe() guard asked is the DAEMON alive, not can the BROWSER launch |
 
+| `e51f0a5b-5f39-4119-aab0-a875b1686a26` | the swallowed warm-up failure | open item #2 — http.ts:893 discards a real spawn failure, and three suites DOCUMENT the resulting silence as if it were the design |
+
 Collect with `get_delegation_status` on 1-2 ids at a time, re-armed until
 terminal. **A turn must never end with a task still `running`.**
 
