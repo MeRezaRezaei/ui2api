@@ -216,35 +216,50 @@ function executableCode(text: string): string {
 }
 
 d("the readiness gate and the launch seam resolve the SAME profile", () => {
-  t("POSITIVE CONTROL: the pins below run against a REAL resolved profile, not a fixture", async () => {
-    // The pins in this block are only meaningful if the resolver they consult has
-    // actually resolved something. That is what this control establishes, and it
-    // is deliberately NOT a claim that THIS HOST has a live profile: the pipeline
-    // container has no `/home/ui2api/.config/ui2api-chrome`, so a positive control
-    // phrased as "this box HAS one" fails in CI while the pins it guards are fine.
+  t("POSITIVE CONTROL: the seam the pins below drive resolves a real, well-formed profile", async () => {
+    // The pins below ask whether `browserHomeCheck` reports the path the
+    // CHROME-OWNER SEAM returns. A control for that must itself drive the same
+    // seam, and must not ask a question about this host.
     //
-    // MEASURED 2026-10-02 on pipeline 1251: that phrasing failed CI, and it was the
-    // lane's own anti-vacuity guard doing its job — it refused to let the
-    // negative assertions below pass vacuously, and it did so for a reason that
-    // had nothing to do with what it is protecting.
+    // Two environment-dependent versions of this control were written and both
+    // were wrong, which is worth recording because the second looked hermetic:
     //
-    // So the control asks the question that is actually load-bearing: does
-    // resolveChromeOwner() return a non-empty, well-formed profile HERE? A
-    // synthetic root is supplied so the answer does not depend on host state at
-    // all, which is what makes it hermetic rather than merely lenient.
-    const { resolveChromeOwner } = await import("../src/runtime/chrome-owner.js");
-    const { profile } = resolveChromeOwner();
-    assert.ok(
-      profile !== null && profile.length > 0,
-      "the pins below compare against a resolver that returned no profile at all — " +
-        "they would pass vacuously, which is what this control exists to prevent",
+    //   1. "this box HAS a live owner profile" — MEASURED failing on pipeline
+    //      1251. The control was right to refuse (its job is to stop the pins
+    //      passing vacuously) and wrong about why: the container has no profile.
+    //   2. "resolveChromeOwner() returns a profile, given a synthetic root" — the
+    //      signature takes no arguments, so the cast was a lie, and the real
+    //      resolver returned NULL on pipeline 1258 because the container has no
+    //      passwd entry for `ui2api`.
+    //
+    // So: drive the `chromeOwner` DEP seam with a known value, which is the seam
+    // the production code actually consumes. Then the control is a statement
+    // about the contract, not about a machine, and the pins below it can bite
+    // anywhere.
+    const { runOsChecks, defaultRequirementsDeps } = await import("../src/runtime/requirements.js");
+    const base = defaultRequirementsDeps();
+    const KNOWN = "/home/ui2api/.config/ui2api-chrome";
+    const { checks } = await runOsChecks({
+      ...base,
+      ui2apiUser: () => "ui2api",
+      userExists: () => true,
+      ui2apiUserDataDir: () => "/tmp/chrome-path-truth-data",
+      chromeOwner: () => ({ user: "ui2api", profile: KNOWN, missing: null }),
+    });
+    const home = checks.find((c) => c.id === "browser-home");
+    assert.ok(home, "the browser-home check must exist for the pins below to have a subject");
+    assert.equal(
+      home.status,
+      "pass",
+      "POSITIVE CONTROL: with the seam resolving a known profile, browser-home must PASS. " +
+        "If it does not, every pin below is asserting against a gate that is already red " +
+        `and they would prove nothing. Got ${JSON.stringify(home)}.`,
     );
     assert.match(
-      profile,
-      /ui2api-chrome$/,
-      "and the resolved profile must still be a NAMED chrome profile, or the " +
-        "DERIVED-vs-pinned comparison the pins make is not comparing anything real. " +
-        `Got ${JSON.stringify(profile)}.`,
+      home.detail ?? "",
+      /\.config\/ui2api-chrome/,
+      "and the detail must name the path the SEAM returned — not a hard-coded string, " +
+        "which is the defect this whole block exists to prevent",
     );
   });
 
