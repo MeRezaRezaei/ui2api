@@ -3,7 +3,7 @@
 | task_id | lane | owns |
 | --- | --- | --- |
 | `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | open item #1 — LIVE: requirements.ts probes a path nothing provisions or launches; two tests are green BECAUSE they disagree |
-| `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | open item #2 — 3 reds in wigolo-engine: the maybe() guard asks is the DAEMON alive, not can the BROWSER launch |
+| `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | MERGED: `aa4e650` — the maybe() guard asked is the DAEMON alive, not can the BROWSER launch |
 
 Collect with `get_delegation_status` on 1-2 ids at a time, re-armed until
 terminal. **A turn must never end with a task still `running`.**
@@ -93,3 +93,45 @@ was the one missing `.brain/`.
    `\w*` was NOT applied because it widens past what could be honestly measured.
 7. No reconstruction runbook consumer is automated — the runbook is prose plus a
    format pin, and no script performs the reconstruction.
+
+## THE THIRD PATTERN, found late: environment-dependent controls
+
+Three gates in this session asserted something about **this machine** rather than
+about a contract, and all three failed in CI for a reason unrelated to what they
+protect:
+
+1. the probe's own tests assumed `jq` was on PATH — fixed by skipping with a named reason;
+2. the chrome positive control said "this box HAS a live owner profile" — failed on 1251;
+3. my replacement said "resolveChromeOwner() returns a profile given a synthetic
+   root" — the signature takes NO arguments, so the cast was a lie, and it failed
+   on 1258 with a null profile.
+
+**And the second one failed while LOOKING hermetic.** "Pass a root through a cast"
+is not a fixture; it is an unchecked assumption with better manners. The seam to
+drive was there the whole time (`chromeOwner?: () => {user, profile, missing}`) and
+I reached past it to the real resolver twice.
+
+The rule that follows, and it is the same rule as the mutation one: **a control
+must exercise the seam the code under test consumes, and must be provable to bite
+before you believe it.** Pointing that seam at `profile: null` -> 1 FAIL is what
+makes the control a real assertion rather than a comment.
+
+## STILL OPEN — the next wave starts at #1
+
+1. **`session-store.test.ts` and `prompt.test.ts` launch a browser with no guard**,
+   so they go red with no named reason. They pass today only because the
+   system-Chrome fallback exists. A wrong guard on `prompt.test.ts`'s live server
+   is worse than none, which is why it was left.
+2. **`http.ts:893` swallows a real spawn failure into silence** for
+   `codefor-prose-table`, `pool-refusal-truth` and `chat-surface-merge` — and
+   `codefor-prose-table.test.ts:76-79` asserts `startPromptd` never warms the
+   pool, which is factually wrong (`warm()` IS at `http.ts:893`). Product code.
+3. **More duplicate owners**: pool refusal codes (3), the no-answer matcher vs
+   emitter plus 14 inline refusal strings, `attachRefusal` re-framed by four
+   runners, `consumerAccountRefusal`'s opening clause vs its two classifiers.
+4. `package.json`'s `test:unit` list is a duplicated owner of "which tests exist",
+   and it is the one file I have been forbidden to edit.
+5. `error-redaction.ts` has a module-level `g`-flagged regex shared across calls;
+   safe today only because `String.replace` resets `lastIndex`.
+6. A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.
+7. No reconstruction consumer is automated; the runbook is prose plus a format pin.
