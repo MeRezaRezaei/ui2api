@@ -215,6 +215,19 @@ function executableCode(text: string): string {
     .join("\n");
 }
 
+/* A CANARY, and the reason it is not a realistic path is the whole point.
+ * This pin asks whether `browserHomeCheck` REPORTS THE PROFILE THE SEAM GAVE IT.
+ * If the seam returns a value the code could plausibly have hard-coded — the real
+ * `/home/ui2api/.config/ui2api-chrome` — then a hard-coded implementation and a
+ * correct one produce IDENTICAL output, and the pin is green either way. Measured:
+ * rebuilding the dead `.ui2api-chrome` path gave 4 FAIL, but hard-coding the
+ * CORRECT path gave 16/16 GREEN. The pin could not tell a gate from a coincidence.
+ *
+ * A path that exists nowhere, and that no one would ever hard-code, makes the two
+ * distinguishable: consume the seam and the detail names the canary; build your own
+ * and it cannot. */
+const KNOWN_PROFILE = "/nonexistent-canary-home/.config/canary-owner-profile";
+
 d("the readiness gate and the launch seam resolve the SAME profile", () => {
   t("POSITIVE CONTROL: the seam the pins below drive resolves a real, well-formed profile", async () => {
     // The pins below ask whether `browserHomeCheck` reports the path the
@@ -238,7 +251,7 @@ d("the readiness gate and the launch seam resolve the SAME profile", () => {
     // anywhere.
     const { runOsChecks, defaultRequirementsDeps } = await import("../src/runtime/requirements.js");
     const base = defaultRequirementsDeps();
-    const KNOWN = "/home/ui2api/.config/ui2api-chrome";
+    const KNOWN = KNOWN_PROFILE;
     const { checks } = await runOsChecks({
       ...base,
       ui2apiUser: () => "ui2api",
@@ -257,9 +270,10 @@ d("the readiness gate and the launch seam resolve the SAME profile", () => {
     );
     assert.match(
       home.detail ?? "",
-      /\.config\/ui2api-chrome/,
-      "and the detail must name the path the SEAM returned — not a hard-coded string, " +
-        "which is the defect this whole block exists to prevent",
+      /canary-owner-profile/,
+      "and the detail must name the CANARY the SEAM returned. A hard-coded string here \n" +
+        "is the defect this whole block exists to prevent, and only a value that \n" +
+        "exists nowhere can tell the two apart.",
     );
   });
 
@@ -270,22 +284,29 @@ d("the readiness gate and the launch seam resolve the SAME profile", () => {
     // The expectation is computed from the REAL resolver, so if chrome-owner.ts
     // ever moves the profile again, this test follows it instead of failing for a
     // reason an operator would not recognise.
-    const { runOsChecks } = await import("../src/runtime/requirements.js");
-    const base = (await import("../src/runtime/requirements.js")).defaultRequirementsDeps();
-    const owner = resolveChromeOwner();
+    const { runOsChecks, defaultRequirementsDeps } = await import("../src/runtime/requirements.js");
+    // THE SEAM, NOT THE HOST. This pin previously read the REAL resolver and fed
+    // its answer in, which made it a test about THIS MACHINE wearing a test's
+    // clothes: in the pipeline container resolveChromeOwner() returns null (no
+    // passwd entry for `ui2api`) and the pin failed on pipeline 1268 with
+    // "the owner's profile exists, so the gate must pass" — an assertion about a
+    // profile that does not exist there.
+    //
+    // The property under test is that `browserHomeCheck` REPORTS THE PROFILE THE
+    // SEAM GAVE IT, rather than building one. A known profile through the seam
+    // tests exactly that, on any machine, and it is strictly stronger: a
+    // hard-coded path inside browserHomeCheck would pass a comparison against the
+    // live resolver whenever the two happened to agree, and fail only when they
+    // had already drifted.
+    const owner = { user: "ui2api", profile: KNOWN_PROFILE, missing: null as string | null };
 
     const { checks } = await runOsChecks({
-      ...base,
+      ...defaultRequirementsDeps(),
       // host-reading seams pinned so the verdict is decided by the owner seam only
       ui2apiUser: () => owner.user,
       userExists: () => true,
       ui2apiUserDataDir: () => "/tmp/chrome-path-truth-data",
-      chromeOwner: () => ({
-        user: owner.user,
-        profile: owner.profile,
-        missing: owner.missing,
-        profileExistsButUnreadable: owner.profileExistsButUnreadable,
-      }),
+      chromeOwner: () => owner,
     });
 
     const browserHome = checks.find((c) => c.id === "browser-home")!;
