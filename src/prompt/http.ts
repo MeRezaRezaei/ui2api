@@ -50,6 +50,7 @@ import {
   ChatPool,
   DEFAULT_REQUEST_TIMEOUT_MS,
   POOL_REFUSAL_CODES,
+  type BrowserLiveness,
   type PoolRefusalCode,
   type PoolStatus,
 } from "./pool.js";
@@ -847,6 +848,108 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
   assertUsableStoredAccount(dataDir, host, match);
 }
 
+/* ---- GOAL 176: BOOT WARM IS BEST-EFFORT, BUT ITS FAILURE IS NOT SILENT ----
+ *
+ * THE DEFECT, measured: boot warm ran as
+ *   `if (!opts.pool) await pool.warm().catch(() => undefined);`
+ * which discards EVERY outcome identically. A missing Chrome binary, a refused
+ * attach port, an EACCES on the profile and "the site is merely down" were one
+ * indistinguishable result: silence. The daemon then answered /status and
+ * /health as a healthy service while having opened no page at all — the
+ * GOAL-156/157 property INVERTED (green gate, service that cannot serve).
+ *
+ * WHAT IS DELIBERATELY NOT CHANGED: the daemon still STARTS. "Keep going" is
+ * correct — one unreachable site must never take the whole service down (that
+ * is precisely the GOAL-156 outage class), and a request opens its own page on
+ * demand. Turning the swallow into a hard refusal would be a REGRESSION, not a
+ * fix.
+ *
+ * WHAT IS ADDED: the outcome is MEASURED and REPORTED on the two surfaces that
+ * already report pool state (/status and /health), with a NAMED reason.
+ *
+ * THE HONEST LIMIT, stated so nobody over-reads this block: the pool's own
+ * `warm()` absorbs a per-page spawn failure internally (a request may still
+ * open a page on demand), so the rejection message that used to be discarded
+ * here is not even reachable from here — there is nothing to forward. What IS
+ * reachable, and is a measurement rather than an assumption, is the pool's state
+ * AFTER the attempt. So the verdict is built from facts: did the attempt leave
+ * an idle page, what does the pool's own honest liveness probe say, and is the
+ * pool in attach mode (the most common boot-warm failure — nothing listening on
+ * UI2API_ATTACH_PORT). That is strictly more than the old silence, and it never
+ * invents a cause it did not measure.
+ */
+export type BootWarmStatus = {
+  /** Did THIS daemon attempt a boot warm? False for a pre-built pool (test seam). */
+  attempted: boolean;
+  /** Did the attempt leave the pool with at least one idle page? */
+  ok: boolean;
+  /** Idle pages measured immediately after the attempt. */
+  idlePages: number;
+  /** The pool's own measured browser liveness at that moment, or null if unknown. */
+  browser: BrowserLiveness | null;
+  /** NAMED cause. NEVER empty: a failure says why, a success says why it is fine. */
+  reason: string;
+  /** ISO stamp of the measurement; null when no warm was attempted (nothing measured). */
+  measuredAt: string | null;
+};
+
+export function bootWarmBlock(input: {
+  st: PoolStatus;
+  attempted: boolean;
+  attached: boolean;
+  thrown?: unknown;
+}): BootWarmStatus {
+  const st = input.st;
+  const idle = st.idle ?? 0;
+  const browser = st.browser ?? null;
+  const attachNote = input.attached
+    ? ` the pool is in ATTACH mode (UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "?"}) — nothing was listening there, so no page could be opened.`
+    : "";
+  if (!input.attempted) {
+    return {
+      attempted: false,
+      // NOT a verdict: nothing was attempted, so no failure is claimed. `ok` is
+      // true here only in the sense of "this daemon has no boot-warm verdict".
+      ok: true,
+      idlePages: idle,
+      browser,
+      reason:
+        "no boot warm was attempted: a pre-built pool was handed to startPromptd through the `pool` seam, so there is no boot-warm outcome to report",
+      measuredAt: null,
+    };
+  }
+  const measuredAt = new Date().toISOString();
+  if (input.thrown !== undefined) {
+    const msg = input.thrown instanceof Error ? input.thrown.message : String(input.thrown);
+    return {
+      attempted: true,
+      ok: false,
+      idlePages: idle,
+      browser,
+      reason: `boot warm THREW (${msg}) — the daemon started anyway because a request opens its own page on demand, but the warm attempt did not succeed`,
+      measuredAt,
+    };
+  }
+  if (idle > 0) {
+    return {
+      attempted: true,
+      ok: true,
+      idlePages: idle,
+      browser,
+      reason: `boot warm left ${idle} idle page(s); browser=${browser} — ${st.browserProbe}`,
+      measuredAt,
+    };
+  }
+  return {
+    attempted: true,
+    ok: false,
+    idlePages: 0,
+    browser,
+    reason: `boot warm completed but left NO idle page (min is always >= 1, so at least one was requested); browser=${browser} — ${st.browserProbe}.${attachNote} The daemon is up and a request still opens its own page on demand — this is a RECORD, not a refusal.`,
+    measuredAt,
+  };
+}
+
 export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer> {
   const token = opts.token ?? process.env[TOKEN_ENV] ?? "";
   // GOAL 100: the SAME bind address the listener uses, resolved up front so the
@@ -888,9 +991,22 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       dataDir,
       reaperIntervalMs: opts.reaperIntervalMs,
     });
-  // Warm lazily on first use per site; if boot warm failed (site changed / site
-  // down), keep going — requests will open pages on demand.
-  if (!opts.pool) await pool.warm().catch(() => undefined);
+  // GOAL 176: boot warm stays BEST-EFFORT — a site that is merely unreachable
+  // must never keep the daemon down, because a request opens its own page on
+  // demand — but its outcome is now MEASURED and reported on /status + /health
+  // (`bootWarm`) with a NAMED cause, instead of being discarded into silence.
+  let bootWarm: BootWarmStatus;
+  if (opts.pool) {
+    bootWarm = bootWarmBlock({ st: pool.status, attempted: false, attached: pool.attached });
+  } else {
+    let thrown: unknown;
+    try {
+      await pool.warm();
+    } catch (e) {
+      thrown = e;
+    }
+    bootWarm = bootWarmBlock({ st: pool.status, attempted: true, attached: pool.attached, thrown });
+  }
   // GOAL 87: the liveness reaper, started EXPLICITLY. Without it a page that
   // died while idle kept reporting warm/idle forever (the only liveness check
   // lived inside release()), and the respawn only happened when a REQUEST
@@ -1183,7 +1299,7 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // GOAL 100: disclose the daemon's OWN posture (auth mode + active
         // trust knobs) so "is it safe to expose this?" is answerable without
         // reading the source. Shapes/counts only — never a token value.
-        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st), posture: daemonPosture(process.env, bindAddr) });
+        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st), posture: daemonPosture(process.env, bindAddr), bootWarm });
       }
       // GOAL 87 — the bounded request ring, read-only. Same localhost-only +
       // optional-bearer posture as every other route here (it lives behind the
@@ -1272,6 +1388,14 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
           advertisement: modelAdvertisementSummary(verification, Object.keys(profilesById)),
           vault,
           pool: st,
+          // GOAL 176: the boot-warm OUTCOME, with its named cause. Deliberately
+          // NOT folded into `ok`: the daemon really is serving (a request opens
+          // its own page on demand), and a cold pool is already an explicit,
+          // deliberate "not an outage" case in `poolStuckness` above — folding
+          // this in would contradict that decision and cry wolf on every boot
+          // whose default site is briefly unreachable. It is reported so the
+          // operator can SEE it; turning it into a refusal is a different goal.
+          bootWarm,
           posture: daemonPosture(process.env, bindAddr),
           liveness: livenessBlock(st),
         });

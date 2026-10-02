@@ -73,13 +73,23 @@
  *      wire code wins, using the measured case where the SAME sentence is
  *      `unknown_model` on /v1 and `unknown_site` on /prompt.
  *
- * NO BROWSER IS LAUNCHED anywhere in this file. `startPromptd` never calls
- * `pool.warm()` (http.ts:530 constructs, :546 only starts the reaper), and every
- * pool here is pre-built through the GOAL-87 test seam with a synthetic worker,
- * so no code path can reach `launchBrowser`. The pool refusals are produced by a
- * saturated pre-built ChatPool; the 504 by a driver whose ask() never settles.
- * Real generator output, real PHP execution, real daemon over loopback — no
- * hand-typed fixture stands in for behaviour anywhere.
+ * NO BROWSER IS LAUNCHED anywhere in this file — and that is now ENFORCED, not
+ * asserted in prose (the old version of this comment claimed it and cited two
+ * source lines, both of which had rotted; a comment nobody runs cannot hold a
+ * claim). Two mechanisms hold it:
+ *   - the three pool-shaped daemons below hand `startPromptd` a PRE-BUILT pool
+ *     through the `pool` seam, which is never warmed by the daemon at all;
+ *   - the token-gated daemons own their pool and therefore DO run a boot warm,
+ *     so this file pins `UI2API_ATTACH_PORT=1` (nothing listens — the attach is
+ *     refused before any page is opened). Remove that pin and a boot warm would
+ *     really spawn a Chrome; the `GOAL176 boot-warm record` test below reads
+ *     `/status` and fails, because a spawned page makes the recorded outcome
+ *     read ok.
+ * The boot-warm outcome itself is a RECORDED, NAMED failure (not a refusal) —
+ * pinned here so the daemon's own surface is what proves it. The pool refusals
+ * are produced by a saturated pre-built ChatPool; the 504 by a driver whose
+ * ask() never settles. Real generator output, real PHP execution, real daemon
+ * over loopback — no hand-typed fixture stands in for behaviour anywhere.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -207,6 +217,13 @@ function rawCall(port: number, method: string, path: string, raw: Buffer, token?
 }
 
 const VAULT = mkdtempSync(join(tmpdir(), "u2a-codefor-pool-"));
+
+// GOAL 176 — the daemons below that do NOT take a pre-built pool through the
+// `pool` seam DO run a boot warm (startPromptd warms a pool it owns). Pinning
+// `UI2API_ATTACH_PORT=1` — nothing listens there — makes that warm fail fast
+// without a browser, which is what keeps this file browser-free. It is read
+// when the ChatPool is constructed, so it must be set before the first daemon.
+process.env.UI2API_ATTACH_PORT = "1";
 
 /** A pre-built pool already AT capacity: acquire() parks or refuses, never spawns. */
 function cappedPool(opts: Partial<PoolOptions>, driver: unknown): ChatPool {
@@ -657,4 +674,30 @@ test("codeFor: the two dead codes are FIXED — every declared daemon code now r
       `table entry ${fixed} is unreachable: codeFor() only runs for Shape-1 bodies, and a typed refusal arrives Shape-2 with the daemon's own code`,
     );
   }
+});
+
+// ── GOAL 176: the boot-warm record, read off THIS file's own daemon ─────────
+//
+// The header of this file used to claim "NO BROWSER IS LAUNCHED anywhere in
+// this file" from two source-line citations that had both rotted — the claim
+// was true only by accident. It is now enforced: the daemons that own their
+// pool really DO run a boot warm, `UI2API_ATTACH_PORT=1` keeps that warm from
+// ever reaching a browser, and this test reads the daemon's own surface to prove
+// both. Remove the attach pin and a boot warm really spawns a Chrome — the
+// recorded outcome flips to ok and this test goes red, which is the point.
+test("GOAL176 boot-warm record: this file's own daemon reports the warm failure with a named cause, and still serves", async () => {
+  await withDaemon({ token: "codefor-pin-token" }, async (port) => {
+    const T = "codefor-pin-token";
+    const res = await call(port, "GET", "/status", undefined, T);
+    assert.equal(res.status, 200, "/status must answer — a failed boot warm is a RECORD, never a refusal");
+    const bw = (res.body as { bootWarm?: { attempted: boolean; ok: boolean; idlePages: number; reason: string } }).bootWarm;
+    assert.ok(bw, "/status must carry a bootWarm block");
+    assert.equal(bw.attempted, true, "this daemon owns its pool, so a boot warm WAS attempted (the old comment denied it)");
+    assert.equal(bw.ok, false, "the warm opened no page (attach refused), so the record must not read ok");
+    assert.equal(bw.idlePages, 0, "the record is the pool's own measurement, not an assumption");
+    assert.match(bw.reason, /ATTACH mode/, "the reason must name the measured cause; this is also the pin that no browser was launched");
+    // And the daemon is still a serving daemon — recording is not refusing.
+    const sites = await call(port, "GET", "/sites", undefined, T);
+    assert.equal(sites.status, 200, "the daemon still serves after a failed boot warm");
+  });
 });
