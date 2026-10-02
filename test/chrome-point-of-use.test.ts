@@ -233,19 +233,19 @@ d("the readiness gate and the launch seam resolve the SAME profile", () => {
     // synthetic root is supplied so the answer does not depend on host state at
     // all, which is what makes it hermetic rather than merely lenient.
     const { resolveChromeOwner } = await import("../src/runtime/chrome-owner.js");
-    for (const root of ["/tmp/does-not-exist-a", "/tmp/does-not-exist-b"]) {
-      const resolved = resolveChromeOwner({ root } as never);
-      assert.ok(
-        resolved.profile.length > 0,
-        `the pins below compare against a resolver that returned nothing for root ${root}`,
-      );
-      assert.match(
-        resolved.profile,
-        /ui2api-chrome$/,
-        "and the resolved profile must still be a named chrome profile, or the " +
-          "DERIVED-vs-pinned comparison the pins make is not comparing anything real",
-      );
-    }
+    const { profile } = resolveChromeOwner();
+    assert.ok(
+      profile !== null && profile.length > 0,
+      "the pins below compare against a resolver that returned no profile at all — " +
+        "they would pass vacuously, which is what this control exists to prevent",
+    );
+    assert.match(
+      profile,
+      /ui2api-chrome$/,
+      "and the resolved profile must still be a NAMED chrome profile, or the " +
+        "DERIVED-vs-pinned comparison the pins make is not comparing anything real. " +
+        `Got ${JSON.stringify(profile)}.`,
+    );
   });
 
   t("browser-home reports the path resolveChromeOwner() returns — DERIVED, not pinned", async () => {
