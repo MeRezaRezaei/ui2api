@@ -19,6 +19,15 @@ sites/*/server/
 sites/server/
 
 # Dependencies / build
+#
+# GOAL 150: `.ci-verdict/` is per-RUN STATE — the machine-readable record of
+# whether the browser-dependent half of the suite actually ran, stamped with the
+# CI job id that produced it. Committing it would ship a claim about one run on
+# one machine as if it were a property of the repository, and a checked-in
+# verdict is exactly the "silently absent coverage that reads as green" defect
+# in a new disguise: it would satisfy a gate without any browser being launched.
+.ci-verdict/
+
 # Secrets — the credential red line.
 #
 # CRITICAL, found by CI (pipeline 193) and NOT by me: `.env` was NEVER ignored by

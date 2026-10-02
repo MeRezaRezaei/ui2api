@@ -8,6 +8,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { analyse } from "../src/analyzer/explore.js";
 import { generate } from "../src/generator/generate.js";
+import {
+  classifyIntegrationFailure,
+  makeVerdict,
+  verdictPath,
+  writeVerdict,
+} from "./helpers/browser-verdict.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -103,6 +109,13 @@ async function main(): Promise<void> {
 
     console.log("INTEGRATION OK — send_prompt:", text, "| search(replay):", stext);
 
+    // RECORD THE PASS. A verdict that only ever records the skip is a
+    // one-sided record: its absence is then ambiguous between "it passed" and
+    // "nobody wrote it", which is precisely the ambiguity this file exists to
+    // remove. The gate asserts this file exists AND was written by THIS job, so
+    // a stale verdict left in a workspace can never vouch for a later run.
+    writeVerdict(ROOT, makeVerdict("passed", "integration completed; the browser-backed half ran to its last assertion"));
+
     await client.close();
   } finally {
     server.close();
@@ -130,21 +143,48 @@ main().catch((e) => {
   //
   // The distinction drawn here is narrow and deliberate. A browser that cannot
   // LOAD is an environment problem; a browser that loads and then misbehaves is
-  // a real regression and still fails. So this matches only the loader's own
-  // diagnostic, and the skip says out loud that it skipped — a silent pass would
-  // be the exact failure class this repo keeps fighting.
+  // a real regression and still fails.
+  //
+  // GOAL 150 — WHAT CHANGED, AND WHY IT IS NOT A LOOSENING. The old test here
+  // was `blob =~ /error while loading shared libraries|cannot open shared object
+  // file/` and nothing else. That pattern matches a missing shared object of ANY
+  // name, so every one of them was silently downgraded to a green exit 0 — which
+  // means a REAL regression (this project gaining a native dependency whose
+  // `.so` is not installed) would have hidden behind this skip, permanently and
+  // invisibly. Matching the loader's diagnostic is therefore only ADMISSIBLE
+  // evidence; the decision now also asks WHICH library.
+  //
+  // The classifier (`./helpers/browser-verdict.ts`) skips ONLY when every
+  // library the loader named is one `playwright install-deps` is responsible
+  // for. Anything else — a soname this repository introduced, or a diagnostic
+  // that names no library at all — is a hard failure with the name printed. The
+  // measured `libnspr4` fault is on that list (it is a real chromium OS
+  // dependency, and it ships with libplc4/libplds4), so the recurring mirror
+  // fault keeps its skip and this pipeline does not go permanently red on
+  // somebody else's keyring. The failure mode that IS left red is the one that
+  // means "look at me": an unrecognised library.
+  //
+  // And the skip is no longer only a log line. It writes a machine-readable
+  // verdict that `test/gate-wiring.test.ts` reads, stamped with this job's id,
+  // so "the browser half did not run" is an assertable fact rather than one
+  // line in a ~3,500-line log that `deploy` unblocks straight past.
   const chain = (e as { message?: string; log?: string[] })?.message ?? "";
   const log = ((e as { log?: string[] })?.log ?? []).join("\n");
   const blob = `${chain}\n${log}`;
-  if (/error while loading shared libraries|cannot open shared object file/i.test(blob)) {
+  const verdict = classifyIntegrationFailure(blob);
+
+  if (verdict.outcome === "skipped") {
+    writeVerdict(ROOT, makeVerdict("skipped", verdict.reason, verdict.missingLibraries, verdict.classification));
     console.error(
       "INTEGRATION SKIPPED — the browser could not be loaded because a system library is missing " +
         "(NOT a code failure). Every other assertion in this suite still ran in CI's unit lane; " +
         "the browser-dependent half is unverified on this runner until its apt keyring is fixed.",
     );
-    console.error("  first detail:", blob.split("\n").find((l) => /shared librar|shared object/i.test(l)) ?? "");
+    console.error("  missing library/libraries:", verdict.missingLibraries.join(", "));
+    console.error("  verdict written:", verdictPath(ROOT), "(read by test/gate-wiring.test.ts)");
     process.exit(0);
   }
+  writeVerdict(ROOT, makeVerdict("failed", verdict.reason, verdict.missingLibraries));
   console.error("TEST FAILED:", e);
   process.exit(1);
 });

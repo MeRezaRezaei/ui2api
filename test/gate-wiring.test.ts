@@ -49,6 +49,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,6 +78,17 @@ import {
   testFilesOnDisk,
   unrunTestFiles,
 } from "./doc-numbers-truth.test.js";
+import {
+  OS_DEP_LIBRARIES,
+  VERDICT_DIR,
+  classifyIntegrationFailure,
+  makeVerdict,
+  osDepStems,
+  readVerdict,
+  sonameStem,
+  verdictPath,
+  verdictProblems,
+} from "./helpers/browser-verdict.js";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PKG = packageJson(ROOT);
@@ -453,5 +465,310 @@ test("SHIPPED SET: files on disk but not yet in the index are reported, so the R
     TRACKED.size > 0 ? [...TRACKED].filter((f) => !UNTRACKED.includes(f)).length : 0,
     TRACKED.size,
     "the shipped set and the in-flight set must not overlap",
+  );
+});
+
+// ============================ rule 7: the browser half's OUTCOME is a fact ====
+//
+// GOAL 150. The gap: `test/integration.ts` caught one narrow class of failure —
+// the dynamic loader cannot LOAD the browser — printed ONE loud `stderr` line
+// and called `process.exit(0)`. So `npm test` was green, `deploy` unblocked, and
+// the only evidence that the browser-dependent half never ran was one line in a
+// ~3,500-line log. Nothing asserted the skip did not happen.
+//
+// Rule 7 makes that outcome a machine-readable fact with four parts, and each
+// part is a different way the previous arrangement could rot:
+//
+//   R7a THE CLASSIFIER — the skip decision is a pure function of the error text,
+//       so the transient-mirror case and the regression case are separated by
+//       DATA (which library is missing) rather than by a human reading a log.
+//   R7b THE BOUNDARY — the list of libraries that may be skipped is fail-closed
+//       and well-formed. Off the list is a failure, never a skip.
+//   R7c THE WIRING — `test/integration.ts` actually calls the classifier and
+//       actually writes a verdict on BOTH outcomes. This is the GOAL-145 lesson
+//       (gates that are correct but never run) pointed at this very mechanism.
+//   R7d THE RECORD — in a CI job the verdict MUST exist, MUST be well-formed,
+//       and MUST be stamped by THIS job. A missing or foreign verdict fails.
+//
+// R7d needs NO CI CONFIGURATION CHANGE, and that is deliberate. Every CI config
+// already runs `npm test` before `npm run test:unit` — R6 above PINS that order —
+// so the verdict exists by the time this file reads it. A mechanism that needed a
+// new CI step could have been silently dropped from one config and stayed green;
+// this one cannot be, because it depends on an order a sibling rule already holds.
+
+test("R7a the loader's diagnostic is only ADMISSIBLE evidence — WHICH library decides skip vs fail", () => {
+  // (1) The MEASURED fault. `libnspr4` is a real chromium OS dependency, so it
+  // keeps its skip and the pipeline does not go permanently red on a foreign
+  // mirror keyring. This is the exact text pipelines 1056/1061 produced.
+  const measured =
+    "browserType.launch: Executable doesn't exist\n" +
+    "error while loading shared libraries: libnspr4.so: cannot open shared object file: No such file or directory";
+  const skip = classifyIntegrationFailure(measured);
+  assert.equal(skip.outcome, "skipped", `the measured libnspr4 fault must stay a skip; got ${JSON.stringify(skip)}`);
+  assert.equal(skip.classification, "os-library-provisioning");
+  assert.deepEqual(skip.missingLibraries, ["libnspr4.so"], "the skip must NAME the library, not just claim to be one");
+
+  // (2) A regression wearing the same costume: the diagnostic is byte-identical
+  // in shape, the library is not Debian's. The OLD predicate skipped this too —
+  // which is the hole. It must now be a hard failure naming the library.
+  const ours =
+    "error while loading shared libraries: libui2api-native.so: cannot open shared object file: No such file or directory";
+  const fail = classifyIntegrationFailure(ours);
+  assert.equal(fail.outcome, "failed", `a library this repo introduced must NOT be skipped; got ${JSON.stringify(fail)}`);
+  assert.equal(fail.classification, "none");
+  assert.match(fail.reason, /libui2api-native\.so/, "the failure must name the library so the fault is actionable");
+
+  // (3) A browser that LOADS and then misbehaves — the case the narrow match was
+  // always protecting. Untouched: no loader diagnostic, so it fails.
+  const misbehaves =
+    "TimeoutError: locator.click: Timeout 30000ms exceeded.\n" +
+    "Call log: - waiting for locator('div.composer')";
+  const hard = classifyIntegrationFailure(misbehaves);
+  assert.equal(hard.outcome, "failed", "a browser that loaded and misbehaved is a real regression");
+  assert.deepEqual(hard.missingLibraries, []);
+
+  // (4) An arbitrary assertion failure with no loader text at all.
+  assert.equal(classifyIntegrationFailure("expected >=3 actions, got 0").outcome, "failed");
+
+  // (5) The genuinely ambiguous shape: a loader diagnostic that names NO
+  // library. Skipping here would manufacture exactly the invisibility this rule
+  // exists to remove — an unnameable skip cannot be told from a regression by
+  // anyone, including a future reader of the log. Fail-closed.
+  const unnamed = classifyIntegrationFailure("error while loading shared libraries: something went wrong");
+  assert.equal(unnamed.outcome, "failed", "an unnamed provisioning fault must fail rather than skip");
+  assert.match(unnamed.reason, /no shared object was named/);
+});
+
+test("R7b the skippable set is fail-closed and well-formed: a typo cannot silently become a permanent red", () => {
+  // Sorted + deduplicated + non-empty. A list that rots into an unsorted
+  // duplicate is still CORRECT behaviourally, so nothing above would catch it;
+  // this is the shape pin, and it is what makes a reviewer's diff readable.
+  assert.deepEqual(
+    [...OS_DEP_LIBRARIES],
+    [...new Set(OS_DEP_LIBRARIES)].sort(),
+    "OS_DEP_LIBRARIES must be sorted and free of duplicates so a diff shows only real changes",
+  );
+  assert.ok(OS_DEP_LIBRARIES.length > 0, "the allowlist must not be emptied — an empty list makes every loader fault a red");
+
+  // Every entry is a SONAME STEM: it ends at `.so` and carries no ABI suffix.
+  // An entry like `libcups.so.2` would silently stop matching after a Debian
+  // point release bumps the suffix — a list that rots into unopenability is
+  // exactly the "a gate that cannot open is not a gate" defect this repo has
+  // already paid for once (the `public-verified` marker).
+  for (const lib of OS_DEP_LIBRARIES) {
+    assert.match(lib, /^[A-Za-z0-9_+.-]+\.so$/, `"${lib}" is not a bare soname stem — store it unversioned`);
+    assert.equal(sonameStem(lib), lib, `"${lib}" must be its own stem`);
+  }
+
+  // Version tolerance, which is the property that keeps the list from rotting
+  // into a permanent red on a newer base image: `libcups.so.2` and
+  // `libcups.so.2.0.0` both resolve to the stem `libcups.so`.
+  assert.equal(sonameStem("libcups.so.2"), "libcups.so");
+  assert.equal(sonameStem("libcups.so.2.0.0"), "libcups.so");
+  assert.equal(sonameStem("libnspr4.so"), "libnspr4.so", "the 4 in libnspr4 is part of the name, not an ABI suffix");
+
+  // THE MEASURED CASE IS ON THE LIST. If this ever fails, the recurring mirror
+  // fault turns the pipeline permanently red — the exact trade this design was
+  // built to avoid — and the failure names the fix rather than just going red.
+  const stems = osDepStems();
+  for (const measured of ["libnspr4.so", "libplc4.so", "libplds4.so", "libnss3.so", "libsmime3.so"]) {
+    assert.ok(stems.has(measured), `the measured browser-load fault's package family must be skippable: ${measured} is not on the list`);
+  }
+
+  // NON-VACUITY: the detector is not a no-op. An unknown stem is refused.
+  assert.ok(!stems.has("libui2api-native.so"), "a library this project introduced must never be on the skippable list");
+});
+
+test("R7c the verdict file's CONTRACT rejects a hand-written or truncated skip", () => {
+  // A valid skip validates.
+  const good = { ...makeVerdict("skipped", "runner provisioning fault", ["libnspr4.so"], "os-library-provisioning") };
+  assert.deepEqual(verdictProblems(good), [], `a legitimate skip must validate; got ${JSON.stringify(verdictProblems(good))}`);
+
+  // A valid pass validates.
+  assert.deepEqual(verdictProblems(makeVerdict("passed", "integration completed")), []);
+
+  // A skip that CLAIMS the provisioning classification for a library the list
+  // does not carry. This is the shape a hand-written "everything is fine" file
+  // would take, and the validator must refuse it even though the file is
+  // internally consistent — which is the whole point of the cross-check.
+  const forged = { ...makeVerdict("skipped", "trust me", ["libui2api-native.so"], "os-library-provisioning") };
+  assert.ok(
+    verdictProblems(forged).some((p) => /outside the OS list/.test(p)),
+    `a forged skip must be named; got ${JSON.stringify(verdictProblems(forged))}`,
+  );
+
+  // A skip with no evidence of what was missing.
+  assert.ok(
+    verdictProblems(makeVerdict("skipped", "it skipped")).some((p) => /empty missingLibraries/.test(p)),
+    "a skip must name the library it skipped over",
+  );
+
+  // A PASS carrying missingLibraries — the contradiction a stale/merged file
+  // could produce.
+  assert.ok(
+    verdictProblems({ ...makeVerdict("passed", "fine"), missingLibraries: ["libnspr4.so"] }).some((p) =>
+      /only a skip may do/.test(p),
+    ),
+    "a pass must not carry missing libraries",
+  );
+
+  // Structural rubbish: not an object, an array, a bad schema, a bad suite.
+  assert.ok(verdictProblems(null).length > 0);
+  assert.ok(verdictProblems([]).length > 0);
+  assert.ok(verdictProblems("passed").length > 0);
+  assert.ok(verdictProblems({ ...makeVerdict("passed", "x"), schema: 2 }).some((p) => /schema must be 1/.test(p)));
+  assert.ok(verdictProblems({ ...makeVerdict("passed", "x"), suite: "other" }).some((p) => /suite must be/.test(p)));
+  assert.ok(verdictProblems({ ...makeVerdict("passed", "x"), reason: "  " }).some((p) => /non-empty string/.test(p)));
+  assert.ok(verdictProblems({ ...makeVerdict("passed", "x"), job: null }).some((p) => /job must be an object/.test(p)));
+  assert.ok(
+    verdictProblems({ ...makeVerdict("passed", "x"), job: { ciJobId: 7, ciPipelineId: null, ciCommitSha: null } }).some((p) =>
+      /job\.ciJobId/.test(p),
+    ),
+    "a job stamp must be strings or null",
+  );
+
+  // Read-side: an absent file is NOT a contract failure (a bare local unit run
+  // owes none) but a MALFORMED one is. R7d owns the "is one owed" decision.
+  const parsed = readVerdict(ROOT);
+  if (parsed.present) {
+    assert.deepEqual(
+      parsed.problems,
+      [],
+      `a verdict file is present at ${parsed.path} and must be valid: ${parsed.problems.join("; ")}`,
+    );
+  }
+});
+
+test("R7d IN CI the browser half's verdict must exist, be valid, and be stamped by THIS job", (t) => {
+  const read = readVerdict(ROOT);
+
+  // Outside a CI job there is nothing to demand: `npm run test:unit` alone on a
+  // developer's box never ran the integration lane, so the absence of a verdict
+  // is correct rather than a gap. This is reported, never silently swallowed.
+  const thisJob = process.env.CI_JOB_ID;
+  if (!thisJob) {
+    t.diagnostic(
+      read.present
+        ? `a verdict from a non-CI run is present at ${read.path} (outcome ${(read.value as { outcome?: string })?.outcome}) and was validated above`
+        : `no verdict at ${read.path} and no CI_JOB_ID in scope: this is a bare local unit run, where one is not owed`,
+    );
+    return;
+  }
+
+  // ---- CI. From here on the record is OWED, and its absence is the failure
+  // this rule exists to prevent. `.gitlab-ci.yml` runs `npm test` before
+  // `npm run test:unit`, and R6 pins that order, so a missing verdict means the
+  // integration lane never reached its writer (a hard crash), or was removed
+  // from the chain. Both are red-worthy and neither is guessable from a log.
+  assert.ok(
+    read.present,
+    `CI job ${thisJob} owes a browser-half verdict at ${read.path}, and there is none. ` +
+      `The integration lane either never ran, crashed before recording, or stopped writing it — ` +
+      `and "no record" is exactly the state that used to read as green.`,
+  );
+  assert.deepEqual(read.problems, [], `the verdict this job produced is not valid: ${read.problems.join("; ")}`);
+
+  const verdict = read.value as { outcome: string; job: { ciJobId: string | null }; reason: string; missingLibraries: string[] };
+
+  // SAME-RUN PROOF. A workspace can outlive a job; a verdict file from an
+  // earlier run would otherwise vouch for this one. Requiring the stamp to
+  // match `$CI_JOB_ID` means the only verdict that satisfies this gate is one
+  // written by the job asking.
+  assert.equal(
+    verdict.job.ciJobId,
+    thisJob,
+    `the verdict at ${read.path} was stamped by job ${JSON.stringify(verdict.job.ciJobId)}, not by this job ${thisJob} — ` +
+      `it is stale, and a stale record must never stand in for this run's browser half`,
+  );
+
+  // The DEGRADED case is reported, not failed. This is the deliberate trade and
+  // it is the answer to "wouldn't a hard fail be simpler": a known OS library
+  // missing is somebody else's keyring, and a permanently red pipeline for a
+  // foreign mirror signature is the same training-people-to-ignore-red mistake
+  // as the artifacts uploader burst. What is NOT allowed is for it to be silent,
+  // so it prints on every run and lands in a readable file. A browser half that
+  // ran is a `passed` verdict; a browser half that did not is a `skipped` one
+  // carrying the library that stopped it — and both are first-class facts.
+  if (verdict.outcome === "skipped") {
+    t.diagnostic(
+      `DEGRADED: the browser-dependent half did NOT run in job ${thisJob}. ` +
+        `missing=${JSON.stringify(verdict.missingLibraries)} reason=${verdict.reason}`,
+    );
+  } else {
+    assert.equal(verdict.outcome, "passed", `job ${thisJob} recorded outcome ${JSON.stringify(verdict.outcome)}`);
+    assert.deepEqual(verdict.missingLibraries, [], "a passed verdict must carry no missing libraries");
+  }
+});
+
+test("R7e the verdict is NEVER committed: it is per-run state, not a shipped fact", () => {
+  // Two independent checks, because either alone is insufficient. `git
+  // check-ignore` proves the ignore rule exists (it is what a clean runner
+  // depends on); the index query proves nothing is tracked RIGHT NOW. A stale
+  // index entry that a later commit could resurrect is what the first check
+  // prevents.
+  const ignoreFile = readFileSync(join(ROOT, ".gitignore"), "utf8");
+  assert.ok(
+    ignoreFile.split("\n").some((l) => l.trim() === `${VERDICT_DIR}/`),
+    `.gitignore must ignore ${VERDICT_DIR}/ — a per-run verdict committed to the repo would be a claim about a run that happened once, on one machine`,
+  );
+  assert.ok(verdictPath(ROOT).startsWith(join(ROOT, VERDICT_DIR)), "the verdict must live under the ignored directory");
+
+  // Nothing tracked may live under the verdict directory.
+  let tracked: string;
+  try {
+    tracked = execFileSync("git", ["ls-files", "--", VERDICT_DIR], { cwd: ROOT, encoding: "utf8", timeout: 10_000 });
+  } catch {
+    tracked = ""; // no index (or no git): nothing can be tracked there, so the rule above carries the check.
+  }
+  assert.equal(
+    tracked.trim(),
+    "",
+    `files under ${VERDICT_DIR}/ are tracked in the index and must not be: ${tracked.trim().split("\n").join(", ")}`,
+  );
+});
+
+test("R7 MUTATION: a classifier that skipped EVERY loader fault is reported, and the wiring pin is not a no-op", () => {
+  // THE MUTATION, named: the pre-GOAL-150 predicate. It matches the loader
+  // diagnostic and nothing else, exactly as `test/integration.ts` used to, so
+  // every missing shared object on the machine became a green exit 0.
+  const OLD_PREDICATE = /error while loading shared libraries|cannot open shared object file/i;
+  const ours = "error while loading shared libraries: libui2api-native.so: cannot open shared object file: No such file or directory";
+
+  // Precondition: the mutation really does reproduce the old behaviour. Without
+  // this the mutation test could pass for the wrong reason.
+  assert.equal(OLD_PREDICATE.test(ours), true, "precondition: the old predicate does match this blob");
+  assert.equal(classifyIntegrationFailure(ours).outcome, "failed", "precondition: the current classifier refuses it");
+
+  // The mutated predicate still skips. Asserting THAT it skips is the point: it
+  // documents that the old code was one regex looser than the new code, and
+  // that the difference is exactly the regression the new code now catches.
+  assert.equal(OLD_PREDICATE.test(ours), true);
+
+  // And the wiring pin is not vacuous: the classifier is reached from real
+  // source, not merely importable.
+  const integrationSrc = readFileSync(join(ROOT, "test", "integration.ts"), "utf8");
+  assert.ok(
+    /classifyIntegrationFailure\s*\(/.test(integrationSrc),
+    "test/integration.ts no longer calls the classifier — its skip decision is back to an inline regex nobody can test",
+  );
+  // BOTH outcomes record. A verdict that only ever records the skip is
+  // one-sided, and its absence is then ambiguous between "passed" and "never
+  // ran" — the exact ambiguity this rule removes.
+  const writes = integrationSrc.match(/writeVerdict\s*\(/g) ?? [];
+  assert.ok(
+    writes.length >= 2,
+    `test/integration.ts must record a verdict on BOTH the pass and the skip path; found ${writes.length} writeVerdict call(s)`,
+  );
+  assert.ok(
+    /makeVerdict\(\s*"passed"/.test(integrationSrc),
+    "test/integration.ts must record the PASS outcome, not only the skip",
+  );
+  assert.ok(
+    /makeVerdict\(\s*"skipped"/.test(integrationSrc),
+    "test/integration.ts must record the SKIP outcome",
+  );
+  assert.ok(
+    /makeVerdict\(\s*"failed"/.test(integrationSrc),
+    "test/integration.ts must record the HARD-FAILURE outcome",
   );
 });
