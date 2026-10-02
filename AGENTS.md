@@ -422,8 +422,20 @@ to `src/prompt/http.ts` moved three of its cited lines in under ten minutes with
 to any knob. A pin that fires on that teaches the next maintainer to skip the file, which
 is the failure mode AGENTS.md itself warns about. `test/ci-contract-knob-cites.test.ts`
 holds both halves — the file pin is fatal, the drift count is measured and disclosed.
-At this fold, measured: **62 rows, 62/62 file-correct, 0 wrong-file, 0 bare-path cells,
+At this fold, measured: **68 rows, 68/68 file-correct, 0 wrong-file, 4 bare-path cells,
 0 rows for a knob nothing reads, and every knob read in `src/`+`scripts/` has a row.**
+
+**THE 4 BARE-PATH CELLS ARE NAMED, AND THE COUNT IS NOW ASSERTED.**
+`UI2API_DEFAULT_MIN_INTERVAL_MS`, `UI2API_SITE_MIN_INTERVAL_MS`,
+`UI2API_INFRA_ADDRESSES` and `UI2API_PUBLIC_DEST_REPO` cite a FILE rather than a
+`file:line`, because each is read at more than one place (a pool pacing knob in
+two files, and the two publication knobs in a shell script plus a test helper) —
+so one line number would be a lie. This paragraph previously claimed **62 rows and
+0 bare-path cells** and was wrong on both counts; the figures were asserted only
+as `>= 40`, so nothing caught it, and four rows arrived during this session's own
+work. `test/ci-contract-knob-cites.test.ts` now re-derives the row count and the
+bare-cell count from the table itself and asserts this paragraph states them, so
+this sentence cannot drift again.
 
 | knob | purpose | default | read at |
 | --- | --- | --- | --- |

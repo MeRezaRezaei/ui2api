@@ -52,6 +52,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as ciScan from "./helpers/ci-contract-scan.js";
 
 import {
   GATE_CHAIN,
@@ -771,4 +772,60 @@ test("R7 MUTATION: a classifier that skipped EVERY loader fault is reported, and
     /makeVerdict\(\s*"failed"/.test(integrationSrc),
     "test/integration.ts must record the HARD-FAILURE outcome",
   );
+});
+
+/* ========================================================================
+ * R8 — the knob table's SELF-MEASUREMENT must be true.
+ *
+ * MEASURED 2026-10-02: `AGENTS.md` claimed "62 rows, 0 bare-path cells". The
+ * real figures, derived by the gate's own helpers, were **68 rows and 4
+ * bare-path cells** — and four of those rows arrived during this session's own
+ * work, because adding a knob is a normal task and nothing made the paragraph
+ * that COUNTS them follow.
+ *
+ * The existing gate asserted `>= 40` rows, which is the right instinct (a floor
+ * catches a collapse) and the wrong threshold (a floor can never catch a
+ * paragraph that is behind). So the paragraph is now compared to the
+ * measurement, exactly.
+ *
+ * This is the same defect as the four falsified count sentences found in
+ * `capabilities/model-verification.json` an hour earlier, in a file this
+ * project treats as its own instrumentation. A self-measurement that is
+ * asserted as a floor is not a measurement.
+ * ====================================================================== */
+test("R8 the knob table's own stated figures EQUAL the measurement, not a floor", () => {
+  const { knobTableRows, knobsReadInCode, knobsInTable } = ciScan;
+  const rows = knobTableRows(ROOT);
+  const bare = rows.filter((r) => r.line === null);
+  const read = knobsReadInCode(ROOT);
+  const documented = knobsInTable(ROOT);
+
+  // The paragraph under test names its own figures; read them back rather than
+  // restating them here, so there is exactly ONE place to update when a row is
+  // added and this gate tells you if you forgot.
+  const para = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+  const claim = /measured:\s*\*\*(\d+) rows,[^]*?(\d+) bare-path cells/.exec(para);
+  assert.ok(claim, "AGENTS.md must state its own measured row count and bare-cell count");
+
+  assert.equal(
+    Number(claim[1]),
+    rows.length,
+    `AGENTS.md claims ${claim[1]} knob rows; ${rows.length} are actually present. ` +
+      "The paragraph is a MEASUREMENT and the gate holds it to one — an `>= 40` " +
+      "floor could never catch a paragraph that is behind, which is how it got to " +
+      `${claim[1]} while the truth was ${rows.length}.`,
+  );
+  assert.equal(
+    Number(claim[2]),
+    bare.length,
+    `AGENTS.md claims ${claim[2]} bare-path cells; ${bare.length} rows cite a file with no ` +
+      `line. The bare cells are: ${bare.map((r) => r.knob).join(", ")}. They are DISCLOSED, ` +
+      "not errors — a knob read in two places cannot honestly cite one line.",
+  );
+
+  // The floor that already existed, kept because it catches a different failure.
+  assert.ok(rows.length >= 40, `the table collapsed to ${rows.length} rows`);
+  // And the property that matters most: nothing read in code is undocumented.
+  const undocumented = [...read].filter((k) => !documented.has(k));
+  assert.deepEqual(undocumented, [], "a knob read by shipped code with no table row is invisible");
 });
