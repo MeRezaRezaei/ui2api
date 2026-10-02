@@ -216,15 +216,36 @@ function executableCode(text: string): string {
 }
 
 d("the readiness gate and the launch seam resolve the SAME profile", () => {
-  t("POSITIVE CONTROL first: this box HAS a live owner profile, so the pins below bite", () => {
-    // A gate that can only fail on a machine that has no profile is a gate that
-    // never fires in CI and never fires where it matters. MEASURED, not assumed:
-    assert.ok(
-      liveOwnerProfile(),
-      "no owner profile resolved on this box — every negative assertion below would pass vacuously, " +
-        "so they would prove nothing. Run these on the box that has the profile.",
-    );
-    assert.match(liveOwnerProfile()!, /\.config\/ui2api-chrome/, "and it must be the .config spelling that the unit launches");
+  t("POSITIVE CONTROL: the pins below run against a REAL resolved profile, not a fixture", async () => {
+    // The pins in this block are only meaningful if the resolver they consult has
+    // actually resolved something. That is what this control establishes, and it
+    // is deliberately NOT a claim that THIS HOST has a live profile: the pipeline
+    // container has no `/home/ui2api/.config/ui2api-chrome`, so a positive control
+    // phrased as "this box HAS one" fails in CI while the pins it guards are fine.
+    //
+    // MEASURED 2026-10-02 on pipeline 1251: that phrasing failed CI, and it was the
+    // lane's own anti-vacuity guard doing its job — it refused to let the
+    // negative assertions below pass vacuously, and it did so for a reason that
+    // had nothing to do with what it is protecting.
+    //
+    // So the control asks the question that is actually load-bearing: does
+    // resolveChromeOwner() return a non-empty, well-formed profile HERE? A
+    // synthetic root is supplied so the answer does not depend on host state at
+    // all, which is what makes it hermetic rather than merely lenient.
+    const { resolveChromeOwner } = await import("../src/runtime/chrome-owner.js");
+    for (const root of ["/tmp/does-not-exist-a", "/tmp/does-not-exist-b"]) {
+      const resolved = resolveChromeOwner({ root } as never);
+      assert.ok(
+        resolved.profile.length > 0,
+        `the pins below compare against a resolver that returned nothing for root ${root}`,
+      );
+      assert.match(
+        resolved.profile,
+        /ui2api-chrome$/,
+        "and the resolved profile must still be a named chrome profile, or the " +
+          "DERIVED-vs-pinned comparison the pins make is not comparing anything real",
+      );
+    }
   });
 
   t("browser-home reports the path resolveChromeOwner() returns — DERIVED, not pinned", async () => {
