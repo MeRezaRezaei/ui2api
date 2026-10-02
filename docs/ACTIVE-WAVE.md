@@ -2,10 +2,10 @@
 
 | task_id | lane | owns |
 | --- | --- | --- |
-| `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | open item #1 — LIVE: requirements.ts probes a path nothing provisions or launches; two tests are green BECAUSE they disagree |
-| `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | MERGED: `aa4e650` — the maybe() guard asked is the DAEMON alive, not can the BROWSER launch |
+| `da1395db-bdd8-4c40-94d8-51bb62d585df` | chrome profile path divergence | **CLOSED** — see CLOSED #1. The probe is gone, the path has one owner, `test/chrome-profile-path-truth.test.ts` now exists and compares every restatement |
+| `b4f765a7-3c34-4466-a4b2-0f8f2473a3cf` | browser-dependent UNIT tests | MERGED: `aa4e650` — the maybe() guard asked is the DAEMON alive, not can the BROWSER launch. **CLOSED for wigolo** (CLOSED #2); `session-store`/`prompt` survive as OPEN #1 |
 
-| `e51f0a5b-5f39-4119-aab0-a875b1686a26` | the swallowed warm-up failure | open item #2 — http.ts:893 discards a real spawn failure, and three suites DOCUMENT the resulting silence as if it were the design |
+| `e51f0a5b-5f39-4119-aab0-a875b1686a26` | the swallowed warm-up failure | **CLOSED** — see CLOSED #3. GOAL 178 made `warm()` return a `WarmOutcome` carrying the thrown error verbatim |
 
 Collect with `get_delegation_status` on 1-2 ids at a time, re-armed until
 terminal. **A turn must never end with a task still `running`.**
@@ -71,30 +71,82 @@ was the one missing `.brain/`.
 - Artifacts-uploader 500s are a burst, not a rate; `github_release`'s artifact is
   kept deliberately (it is the only copy on the RELEASE-SKIP path).
 
-## OPEN — next wave should start at #1
+## CLOSED SINCE THE LAST RECONCILIATION — the record, not the work list
 
-1. **Chrome profile path divergence** — `.config/ui2api-chrome` in six places vs
-   `.ui2api-chrome` in `requirements.ts`. LIVE: the readiness gate probes a path
-   nothing provisions or launches, and two tests hard-code each spelling so they
-   are green BECAUSE they disagree. Needs `sudo` to determine which profile is
-   live.
-2. **The browser-dependent unit tests have no guard** — `wigolo-engine.test.ts`'s
-   `maybe()` checks DAEMON health, which says nothing about browser
-   launchability, so 3 tests die inside the test. `session-store.test.ts` and
-   `prompt.test.ts` have no guard at all.
-3. **More duplicate owners**: pool refusal codes (3), the no-answer matcher vs
-   emitter plus 14 inline refusal strings, `attachRefusal` re-framed by four
-   runners, `consumerAccountRefusal`'s opening clause vs its two classifiers
-   (a reword turns 400 into 500).
-4. `package.json`'s `test:unit` list is a duplicated owner of "which tests exist",
-   and it is the one file I have been forbidden to edit.
-5. `error-redaction.ts` has a module-level `g`-flagged regex shared across calls;
-   safe today only because `String.replace` resets `lastIndex`.
-6. A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.
-   `[a-z]*` was applied and measured at 0 false positives over 3853 tokens;
-   `\w*` was NOT applied because it widens past what could be honestly measured.
-7. No reconstruction runbook consumer is automated — the runbook is prose plus a
-   format pin, and no script performs the reconstruction.
+The two "STILL OPEN" lists this file used to carry were written across earlier
+sessions and **duplicated each other** (7 + 7 entries, 7 unique). Reconciled
+against the code on 2026-10-03: **3 of the 7 were fully stale, 2 were half
+stale**, and the genuinely-open residue is the single list at the end of this
+file. Closed here so the record is not lost — **a list nobody trusts is a list
+nobody reads**, and an item deleted without a trace is an item that gets
+re-opened.
+
+1. **Chrome profile path divergence — CLOSED.** `defaultCopiedProfileProbe` is
+   gone from `src/runtime/requirements.ts` (its absence is the fix; the doc block
+   at `requirements.ts:254-288` is the record). The path now has ONE owner,
+   `resolveChromeOwner()` (`src/runtime/chrome-owner.ts:251`), which is what
+   `launchBrowser()` consumes, so the readiness gate and the launch seam cannot
+   disagree by construction. The `.ui2api-chrome` spelling was MEASURED under
+   `sudo -n` to be a 187M dead orphan (`requirements.ts:265-272`), not guessed.
+   The cross-language restatements are compared against the derived value by
+   `test/chrome-profile-path-truth.test.ts` (325 lines) — which `requirements.ts:277-279`
+   admits **did not exist** when the comment first named it.
+2. **`wigolo-engine.test.ts`'s `maybe()` asked the wrong question — CLOSED.**
+   `test/wigolo-engine.test.ts:131-176` replaces it with `guardBrowser`, which
+   probes the REAL seam (`ctx.dom.extract`) — a daemon that is healthy but whose
+   browser tier cannot launch now produces a NAMED red, not a silent skip (GOAL 151).
+   **The `session-store.test.ts` / `prompt.test.ts` half of this item did NOT
+   close** and survives as open item #1.
+3. **`http.ts:893` swallowed a real spawn failure — CLOSED.** GOAL 178 made the
+   cause MEASURED rather than inferred: `warm()` returns a `WarmOutcome`
+   (`src/prompt/pool.ts:232`, `:586`) carrying the thrown error verbatim, and
+   `BootWarmStatus.outcome` (`src/prompt/http.ts:906`) forwards it. The catch
+   is deliberately untouched — the daemon still starts. Gated by
+   `test/boot-warm-real-cause.test.ts:80,101,127,148`. The ledger's separate claim
+   that `codefor-prose-table.test.ts:76-79` "asserts `startPromptd` never warms
+   the pool, which is factually wrong" is **superseded**: that file's header
+   (`:83-95`) now explains the pre-built-pool seam AND pins
+   `UI2API_ATTACH_PORT=1` so a boot warm cannot really spawn a Chrome.
+4. **`package.json`'s `test:unit` as a duplicated owner — CLOSED BY DECISION.**
+   The design named `scripts["test:unit"]` the SINGLE owner and derived
+   everything else from it: `test/doc-numbers-truth.test.ts:224` fails any doc
+   that hand-types a second owner, `:89` derives the file list from the script,
+   `:346-356` asserts on-disk == script in BOTH directions (so a file dropped from
+   both still moves the derived count), and `:359` is the mutation test. The
+   "forbidden to edit" constraint was never the blocker — the gate reads it.
+5. **`error-redaction.ts`'s module-level `g`-flagged regex — CLOSED.** The
+   scrub's `INTERNAL_WORD_RE` (`error-redaction.ts:252`) is `g`-flagged but used
+   only through `.replace()`; the gate `RESIDUAL_INTERNAL` (`:337`) is built from
+   `INTERNAL_WORD_RE_NON_GLOBAL` (`:262`), a SEPARATE non-global instance over the
+   SAME vocabulary, precisely because `.test()` on a `g` regex advances
+   `lastIndex` (doc block `:257-262`). Every `g`-flagged regex in `MECHANICAL`
+   (`:265-279`) is consumed exclusively at `:303`. **The digit-suffix half of this
+   item did NOT close** and survives as open item #4.
+
+### And three of the four "more duplicate owners" closed
+
+- **pool refusal codes (3) — CLOSED.** `POOL_REFUSAL_CODES` (`src/prompt/pool.ts:191`)
+  lives next to the throw; `src/prompt/http.ts:52` imports it and `:790-793` labels
+  from it. A reword can no longer desync the emitter from the labeller (GOAL 145).
+  The CODE is deliberately hand-written, not derived — it is a published contract
+  string a PHP consumer branches on (`pool.ts:186-190`).
+- **`attachRefusal` re-framed by four runners — CLOSED.** One helper,
+  `src/runtime/file-attach.ts:115`. `youtube.ts:640`, `duckduckgo.ts:594`,
+  `kimi.ts:660` and `gemini.ts:569` all CALL it; they are consumers, not owners.
+- **`consumerAccountRefusal`'s opening clause vs its two classifiers — CLOSED.**
+  `src/prompt/error-redaction.ts:29-45` imports the owner from `consumer-surface.ts`
+  and never re-types it, because redaction is not a licence for a second owner.
+  Pinned two ways by `test/error-redaction.test.ts:224` (the clause is typed in
+  exactly ONE file under `src/`) and `:344`/`:347` (the redaction path emits the
+  owner's bytes). **The no-answer matcher half did NOT close** — open item #2.
+
+### One duplicate owner was only PARTLY consolidated
+
+- **The 14 inline login-gated refusal strings — MOSTLY CLOSED.** Twenty runners
+  now call the single `loginGatedResult()` (`src/capabilities/gated.ts:38`).
+  `src/capabilities/araprat.ts:247` keeps a private near-duplicate of the same
+  sentence with `Aparat` and a literal URL hard-coded where the helper takes
+  `${siteId}`. Second owner survives — open item #3.
 
 ## THE THIRD PATTERN, found late: environment-dependent controls
 
@@ -118,22 +170,66 @@ must exercise the seam the code under test consumes, and must be provable to bit
 before you believe it.** Pointing that seam at `profile: null` -> 1 FAIL is what
 makes the control a real assertion rather than a comment.
 
-## STILL OPEN — the next wave starts at #1
+## OPEN — ONE LIST, the next wave starts at #1
 
-1. **`session-store.test.ts` and `prompt.test.ts` launch a browser with no guard**,
-   so they go red with no named reason. They pass today only because the
-   system-Chrome fallback exists. A wrong guard on `prompt.test.ts`'s live server
-   is worse than none, which is why it was left.
-2. **`http.ts:893` swallows a real spawn failure into silence** for
-   `codefor-prose-table`, `pool-refusal-truth` and `chat-surface-merge` — and
-   `codefor-prose-table.test.ts:76-79` asserts `startPromptd` never warms the
-   pool, which is factually wrong (`warm()` IS at `http.ts:893`). Product code.
-3. **More duplicate owners**: pool refusal codes (3), the no-answer matcher vs
-   emitter plus 14 inline refusal strings, `attachRefusal` re-framed by four
-   runners, `consumerAccountRefusal`'s opening clause vs its two classifiers.
-4. `package.json`'s `test:unit` list is a duplicated owner of "which tests exist",
-   and it is the one file I have been forbidden to edit.
-5. `error-redaction.ts` has a module-level `g`-flagged regex shared across calls;
-   safe today only because `String.replace` resets `lastIndex`.
-6. A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.
-7. No reconstruction consumer is automated; the runbook is prose plus a format pin.
+**This replaces the two duplicated "STILL OPEN" lists this file used to end
+with.** Those were 7 + 7 entries over the same 7 unique items, written across
+earlier sessions. Reconciled against the code on 2026-10-03: everything that
+closed is recorded with its closing `file:line` in the CLOSED section above, and
+what follows is the residue — **only items proved still open**, each with the
+evidence that it is. Nothing here is closed on the strength of a `grep` hit or
+the ledger's age; where the code and the old wording disagreed, the code won and
+the disagreement is named.
+
+1. **`session-store.test.ts` and `prompt.test.ts` launch a browser with no
+   guard**, so they go red with no named reason. VERIFIED OPEN 2026-10-03: grep
+   for `browserLaunchable` / `maybe(` / `skip` over both files returns NOTHING —
+   unlike `wigolo-engine.test.ts`, which now has `guardBrowser` (`:157`). They
+   pass today only because the system-Chrome fallback exists. **The reason this
+   one is genuinely still open and not an oversight:** a wrong guard on
+   `prompt.test.ts`'s live server is worse than none. The seam to use is
+   `test/helpers/browser-verdict.ts` (the defect class `wigolo-engine.test.ts:150-152`
+   was rebuilt to end) — a guard must exercise the seam the code under test
+   consumes AND be provable to bite before it is believed.
+2. **The no-answer MATCHER is a hand-typed mirror of the EMITTER, and the comment
+   says otherwise.** VERIFIED OPEN 2026-10-03. The emitter template is
+   `src/prompt/error-redaction.ts:94`
+   (`` `${c.site} did not return an answer${ms} — …` ``); the matcher is a literal
+   regex, `src/prompt/verification-class.ts:167`
+   (`/did not return an answer(?: within \d+\s*ms)?/i`). The doc comment at
+   `verification-class.ts:157-166` claims the pattern is "taken from the single
+   template that produces it" — **nothing derives it**, and a reword of the
+   emitter leaves the matcher matching nothing while both stay green. Worse, the
+   emitter sentence is restated a THIRD time as a string literal in
+   `test/verification-class.test.ts:413` and `test/error-redaction.test.ts:141`,
+   so three files hold one sentence. This is the same class as the closed
+   `consumerAccountRefusal` item: the fix is a derivation from the owner, plus a
+   gate that fails when the three disagree.
+3. **`src/capabilities/araprat.ts:247` is a second owner of the login-gated
+   refusal.** VERIFIED OPEN 2026-10-03. It is a near-verbatim private copy of
+   `gated.ts:38 loginGatedResult()` — same sentence, with `Aparat` and a literal
+   `https://www.aparat.com` where the helper takes `${siteId}` and `<url>`. Twenty
+   other runners were folded onto the helper; this one was not. Remains: return
+   araprat's posting caps through the shared helper (or prove the wording
+   difference is load-bearing, in which case say why at the call site).
+4. **A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.**
+   VERIFIED OPEN 2026-10-03 — this is the true state, and the old entry was right
+   about it. `INTERNAL_WORD_RE` (`src/prompt/error-redaction.ts:253`) closes the
+   trailing-LETTER class with `[a-z]*`; `:250-252` states the limit in its own
+   words — "it does not cross `-`, `_`, `.` or any non-letter" — and a digit is a
+   non-letter, so `chrome2` still survives. `[a-z]*` was applied and measured at
+   0 false positives over 3,853 tokens (`error-redaction.ts:244-249`);
+   `\w*` was NOT applied because it widens past what could be honestly measured.
+   The gate that must be satisfied before widening is already shipped:
+   `test/error-redaction.test.ts` recomputes the corpus cost at test time, so a
+   widening can be measured rather than asserted. **This is the one item here
+   whose constraint is a measurement, not a refactor — do not widen it blind.**
+5. **No reconstruction runbook consumer is automated.** VERIFIED OPEN 2026-10-03.
+   `scripts/ci/make-public-repo.sh` only PRODUCES the map (`:189-190` private-full,
+   `:354-359` public-sanitized) and nothing in the tree CONSUMES it.
+   `docs/RECONSTRUCTION-RUNBOOK.md` is prose plus a format pin (its §8.1 records
+   that the script's own orientation comment was wrong before 2026-10-01 — which
+   is the argument for a consumer that executes the procedure rather than a human
+   reading it). Note `scripts/ops/resume-state.sh` is NOT this consumer: it
+   resumes a *session*, not a *repository*, and conflating the two is the kind of
+   gate that looks present and fires on nothing.
