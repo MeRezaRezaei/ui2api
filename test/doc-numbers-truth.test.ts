@@ -20,6 +20,15 @@
 //    carrying a deliberately WRONG number, and must report it as a failure. A
 //    pin that cannot fail is not a pin.
 //
+// ONE RULE WAS INVERTED, not relaxed. `checkReadmeFileCount` used to REQUIRE
+// README to print the file count ("carries no machine-checkable unit-test file
+// count to pin"). That requirement is what kept a hand-maintained second copy
+// of a number `package.json` already owns alive — the exact duplication this
+// repository deletes elsewhere. README now states no figure; instead it names
+// `scripts["test:unit"]` as the single owner and gives the command that derives
+// the count, so the rule now demands THAT. See the predicate for the reasoning
+// and for the mutation that proves all three states still fail or pass.
+//
 // SCOPE, and the fix for the scope's last remaining hole: the rules in THIS file
 // read `README.md` + `AGENTS.md`, and that is a hand-maintained pair — which is
 // why the same rot this file removed from AGENTS.md was free in `docs/AUDIT.md`,
@@ -170,6 +179,12 @@ export function realRunnerCount(): number {
 /**
  * The README's unit-test file count must equal the real, derived count.
  * The claim is a bare number in a backticked `npm run test:unit` line.
+ *
+ * The figure itself is deliberately GONE from the README now (see
+ * `statesFileCountDerivation`), so this extractor can legitimately return an
+ * empty list — which is exactly what the second rule of `checkReadmeFileCount`
+ * has to handle. It is kept, unchanged, as the anti-rot sensor: if a figure is
+ * ever typed in the README it must be the derived one.
  */
 export function readmeFileCountClaim(doc: string): number[] {
   const out: number[] = [];
@@ -179,18 +194,66 @@ export function readmeFileCountClaim(doc: string): number[] {
   return out;
 }
 
+/**
+ * Does the doc state HOW to derive the unit-test file count?
+ *
+ * This REPLACED the old second rule ("the doc must print a figure"). That rule
+ * encoded the exact duplication being removed: a hand-maintained copy of a
+ * number `package.json` already owns is a second thing to forget, and the
+ * second copy is what rotted (GOAL 110 measured the README claiming 38/69, 37/69
+ * and 84/126 against a live list of 69/83/126). Requiring the copy is how the
+ * copy got required in the first place.
+ *
+ * Dropping the figure is not free, though, so the rule moved rather than
+ * disappeared: a doc that prints no count must leave the DERIVATION behind, so
+ * a reader holding a stale number in their head has something to check it
+ * against. Today the README does exactly that — it names
+ * `scripts["test:unit"]` as the single owner and prints the `node -e` one-liner
+ * that derives the count.
+ *
+ * Two CONJUNCTS, because either alone is weak: naming the owner without a
+ * command is a pointer, not a derivation, and a bare command without naming the
+ * owner leaves a number with no statement of who maintains it.
+ *
+ * Anchored on the derivation COMMAND rather than on prose, so rewording the
+ * surrounding sentence cannot silently satisfy (or break) the rule. The bound
+ * (`{0,400}`) keeps the command and the `*.test.ts` match on the SAME one-liner
+ * rather than letting any two unrelated passages pair up.
+ */
+export function statesFileCountDerivation(doc: string): boolean {
+  const namesOwner = /scripts\[(?:`|"|\\")?test:unit/.test(doc);
+  const carriesCommand = /node\s+-e\b[\s\S]{0,400}?\.test\\?\.ts/.test(doc);
+  return namesOwner && carriesCommand;
+}
+
+/**
+ * The README's unit-test file count, in two directions.
+ *
+ *   1. every figure the doc DOES print must equal the real derived count
+ *      (unchanged — this is the anti-rot half, and it is never relaxed), and
+ *   2. a doc that prints NO figure must say how to derive it instead.
+ *
+ * Both halves are load-bearing and both have a MUTATION test below: a wrong
+ * figure still fails, a figure-less/derivation-less doc still fails, and the
+ * real README passes with zero problems.
+ */
 export function checkReadmeFileCount(doc: string): string[] {
   const real = realTestFileCount();
   const problems: string[] = [];
-  for (const claimed of readmeFileCountClaim(doc)) {
+  const claimedCounts = readmeFileCountClaim(doc);
+  for (const claimed of claimedCounts) {
     if (claimed !== real) {
       problems.push(
         `README claims ${claimed} hermetic unit-test files; package.json scripts["test:unit"] actually references ${real}`,
       );
     }
   }
-  if (readmeFileCountClaim(doc).length === 0) {
-    problems.push("README carries no machine-checkable unit-test file count to pin");
+  if (claimedCounts.length === 0 && !statesFileCountDerivation(doc)) {
+    problems.push(
+      "README carries no machine-checkable unit-test file count to pin AND does not say how to " +
+        "derive it — either print the derived count, or name scripts[\"test:unit\"] as the single " +
+        "owner and give the command that prints it",
+    );
   }
   return problems;
 }
@@ -254,13 +317,24 @@ export function findForbidden(doc: string): string[] {
 
 // ------------------------------------------------------------------ tests ---
 
-test("README's unit-test file count equals the real package.json test:unit file list", () => {
+test("the README's unit-test file count is either the real derived one or absent with the derivation stated", () => {
   const problems = checkReadmeFileCount(README);
   assert.deepEqual(problems, [], problems.join("; "));
-  assert.equal(
-    readmeFileCountClaim(README)[0],
-    realTestFileCount(),
-    "README must print the derived count, not a remembered one",
+  // The anti-rot half, asserted directly on the claim set rather than on a typed
+  // copy: WHATEVER the README prints must be the derived number. Zero figures
+  // is allowed and is the current state — the count is not restated, and
+  // `statesFileCountDerivation` (asserted below) is what the doc owes instead.
+  for (const claimed of readmeFileCountClaim(README)) {
+    assert.equal(
+      claimed,
+      realTestFileCount(),
+      `README prints ${claimed} hermetic unit-test files; any figure typed here must equal the derivation`,
+    );
+  }
+  assert.ok(
+    statesFileCountDerivation(README),
+    "the README states no figure, so it must name scripts[\"test:unit\"] as the single owner and " +
+      "give the command that prints the count — otherwise there is nothing to check a remembered number against",
   );
 });
 
@@ -341,14 +415,60 @@ test("the araprat line is disambiguated (3 verified + login-gated, not 'ALL THRE
 
 test("MUTATION: a doc with a WRONG file count fails checkReadmeFileCount", () => {
   const real = realTestFileCount();
-  const mutated = README.replace(
-    `${real} hermetic unit-test files`,
-    `${real + 1} hermetic unit-test files`,
+  // Planted into the REAL README, not string-replaced out of it. The figure it
+  // used to carry is deliberately gone, so the old
+  // `README.replace("<real> hermetic unit-test files", ...)` became a NO-OP and
+  // died on its own "the mutation must actually alter the doc text" guard — a
+  // mutation that changes nothing proves nothing. Appending a wrong claim is the
+  // SAME defect (the doc asserting a count that is not the live one) against the
+  // SAME real document, so this pin keeps exactly its old meaning.
+  assert.deepEqual(checkReadmeFileCount(README), [],
+    "precondition: the real README is clean, so a failure below can only come from the planted claim");
+  const mutated = `${README}\n\nThe repo ships ${real + 1} hermetic unit-test files today.\n`;
+  assert.ok(
+    readmeFileCountClaim(mutated).includes(real + 1),
+    "precondition: the planted doc really does claim the wrong count",
   );
-  assert.notEqual(mutated, README, "the mutation must actually alter the doc text");
   const problems = checkReadmeFileCount(mutated);
   assert.equal(problems.length, 1, `the pin must catch a wrong count; got ${JSON.stringify(problems)}`);
   assert.match(problems[0], new RegExp(`claims ${real + 1}[\\s\\S]*actually references ${real}`));
+});
+
+test("MUTATION: all three states of the file-count rule are pinned — wrong figure, no figure and no derivation, and the real README", () => {
+  const real = realTestFileCount();
+  const OWNER_CLAIM = "\n`package.json`'s `scripts[\"test:unit\"]` file list is its single owner.\n";
+  const DERIVATION =
+    "\nDerive it with `node -e 'console.log(1)'` over the test/*.test.ts match.\n";
+
+  // (1) NO figure AND NO derivation → LOUD. A minimal doc is the honest input
+  //     here because that is precisely the state being described.
+  const bare = "# Suite\n\n`npm run test:unit` runs the hermetic suite. No browser needed.\n";
+  assert.deepEqual(readmeFileCountClaim(bare), [], "precondition: the bare doc really states no figure");
+  assert.equal(statesFileCountDerivation(bare), false,
+    "precondition: the bare doc really states no derivation");
+  const bareProblems = checkReadmeFileCount(bare);
+  assert.equal(bareProblems.length, 1,
+    `a doc with neither the count nor the derivation must fail; got ${JSON.stringify(bareProblems)}`);
+  assert.match(bareProblems[0], /how to\s+derive|derive it|derivation/i,
+    "the failure must name the derivation as what is missing, not demand a re-typed figure");
+
+  // (2) NO figure BUT the derivation stated → PASS. This is the real README's
+  //     shape, and it is the case the old rule used to redden.
+  const derivedOnly = `# Suite\n${OWNER_CLAIM}${DERIVATION}`;
+  assert.deepEqual(readmeFileCountClaim(derivedOnly), [], "precondition: it really states no figure");
+  assert.deepEqual(checkReadmeFileCount(derivedOnly), [],
+    "a doc that drops the figure but keeps the derivation must PASS — that is the duplication being removed");
+
+  // (3) A CORRECT figure with no derivation → PASS. Rule 1 already holds the
+  //     figure to the live value, so demanding the derivation as well would be
+  //     redundant pressure to restate the number — the thing being undone.
+  const correctOnly = `# Suite\n\nThe repo ships ${real} hermetic unit-test files today.\n`;
+  assert.deepEqual(checkReadmeFileCount(correctOnly), [],
+    "a correctly-typed figure is held by rule 1 and must not also be asked for a derivation");
+
+  // (4) The real README, end to end.
+  assert.deepEqual(checkReadmeFileCount(README), []);
+  assert.ok(statesFileCountDerivation(README));
 });
 
 test("MUTATION: a doc with a WRONG ratio fails checkRatio", () => {

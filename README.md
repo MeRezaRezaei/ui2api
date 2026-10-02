@@ -200,19 +200,22 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 167 hermetic unit-test files — no browser needed
+npm run test:unit   # the hermetic unit suite — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
-The `167` is the real length of the file list in `package.json`'s
-`scripts["test:unit"]`, not a remembered figure — derive it yourself with
+The **number** of hermetic unit-test files is deliberately not printed here:
+`package.json`'s `scripts["test:unit"]` file list is its single owner, and a
+second copy is a second thing to forget. Derive it with
 
 ```bash
 node -e 'const s=require("./package.json").scripts["test:unit"];console.log((s.match(/test\/[a-z0-9-]+\.test\.ts/g)||[]).length)'
 ```
 
-and it is pinned by `test/doc-numbers-truth.test.ts`, so a stale count here
-fails the suite instead of rotting. The per-file test *totals* (how many cases
+and if a figure is ever typed here it must equal that derivation —
+`test/doc-numbers-truth.test.ts` pins both directions (a wrong copy fails, and
+so does a state that states neither the count nor how to derive it), so the
+count cannot rot silently. The per-file test *totals* (how many cases
 each file generates at runtime) are deliberately NOT claimed here: they are
 observable only by running the suite, so a hand-typed total can only rot. Get
 the truth from the run itself — the last two lines of `npm run test:unit` print

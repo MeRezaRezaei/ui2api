@@ -62,19 +62,125 @@ test("GOAL 149: the criteria table was actually parsed (anti-vacuity)", () => {
   assert.ok(found.size >= 21, `expected >=21 criteria rows, parsed ${found.size}`);
 });
 
-test("GOAL 149: 4.1's cited test-file count equals the live package.json list", () => {
-  const live = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
+/** The live unit-test file count, derived from `package.json` — its single owner. */
+export function liveTestFileCount(): number {
+  return (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
     .scripts["test:unit"] as string)
     .split(/\s+/)
     .filter((t) => t.endsWith(".test.ts")).length;
+}
+
+/**
+ * Every `(<n>)` in the 4.1 cell, as numbers.
+ *
+ * This is the EXACT sensor the GOAL 185 incident defeated, so it is exported and
+ * kept as one function rather than inlined: the mutation test below runs this
+ * one against a planted byte, and a restatement of the regex would have let the
+ * mutation drift away from the real predicate.
+ */
+export function citedFileCounts(cell: string): number[] {
+  return [...cell.matchAll(/\((\d+)\)/g)].map((m) => Number(m[1]));
+}
+
+/**
+ * Does the cell state that the count is NOT restated here and that
+ * `package.json` owns it?
+ *
+ * Both halves are required. "not restated" alone would let the cell drop the
+ * count and say nothing about who maintains it; "package.json owns it" alone
+ * would be satisfied by any mention of the file. The real 4.1 cell says both:
+ * it states `scripts["test:unit"]` is the sole owner and that any figure typed
+ * in README is pinned against the live list.
+ */
+export function statesCountOwnership(cell: string): boolean {
+  const namesOwner = /package\.json/.test(cell);
+  const claimsOwnership = /(sole|single) owner|owns\b/i.test(cell);
+  return namesOwner && claimsOwnership;
+}
+
+/**
+ * The 4.1 file-count rule, in two directions. All three states are pinned by the
+ * test below, including the one this gate previously could not express.
+ *
+ *   1. every `(<n>)` the cell cites must equal the live count (UNCHANGED — the
+ *      anti-rot half; this is the cell that said 84 while the truth was 126), and
+ *   2. the cell must state the ownership claim.
+ *
+ * What is GONE is `assert.ok(cited.length > 0)`. The figure was deleted from §4.1
+ * on purpose, because `package.json` owns it and a second copy is a second thing
+ * to forget — so demanding one demanded the duplication.
+ *
+ * AND THE DIAGNOSTIC MATTERS AS MUCH AS THE RULE. The reason this gate is
+ * written this way is the GOAL 185 incident recorded in this file's header: an
+ * invisible ESC byte made `cited.length === 0`, which under the old
+ * `assert.ok` printed "4.1 cites no parenthesised count any more — re-pin it"
+ * about a number that was present AND CORRECT on disk. A diagnostic that says
+ * "re-pin it" is an instruction to manufacture the second copy, which is exactly
+ * the defect being removed. So neither message below may ever say "re-pin", and
+ * the two failure messages name DIFFERENT missing things — one names the
+ * numbers, the other names the missing ownership sentence — so a reader can
+ * always tell which half is unhappy. A test asserts the "re-pin" wording cannot
+ * come back.
+ */
+export function checkReadinessFileCountCell(cell: string, live: number): string[] {
+  const problems: string[] = [];
+  for (const n of citedFileCounts(cell)) {
+    if (n !== live) {
+      problems.push(
+        `4.1 cites (${n}) but package.json scripts["test:unit"] lists ${live} test files`,
+      );
+    }
+  }
+  if (!statesCountOwnership(cell)) {
+    problems.push(
+      "4.1 states neither the count nor who owns it: it must say that README restates no figure and " +
+        `that package.json's scripts["test:unit"] is the single owner (live: ${live})`,
+    );
+  }
+  return problems;
+}
+
+test("GOAL 149: 4.1 cites no drifted count, and states that package.json owns the count", () => {
+  const live = liveTestFileCount();
   const cell = cells(readiness()).get("4.1") ?? "";
-  // Every `(<n>)` in the cell must be the live number, so the count cannot rot
-  // silently again. This is the cell that said 84 while the truth was 126.
-  const cited = [...cell.matchAll(/\((\d+)\)/g)].map((m) => Number(m[1]));
-  assert.ok(cited.length > 0, "4.1 cites no parenthesised count any more — re-pin it");
-  for (const n of cited) {
-    assert.equal(n, live,
-      `4.1 cites (${n}) but package.json lists ${live} test files`);
+  assert.ok(cell.length > 0, "4.1 row missing — the criteria table no longer parses");
+  assert.deepEqual(checkReadinessFileCountCell(cell, live), [],
+    "the real 4.1 cell must pass both halves: no drifted figure, and the ownership claim stated");
+
+  const OWNED = "`package.json` `scripts[\"test:unit\"]` is the sole owner of the file count";
+
+  // CASE 1 — states the claim AND cites a figure that is CORRECT → PASS. The
+  // anti-rot half must accept this, so a future editor who legitimately adds the
+  // figure back with the right number is not pushed into inventing a second
+  // source of truth.
+  assert.deepEqual(checkReadinessFileCountCell(`${OWNED} (${live})`, live), []);
+  // Precondition, so case 2 is not passing for the wrong reason.
+  assert.deepEqual(citedFileCounts(`${OWNED} (${live})`), [live]);
+
+  // CASE 2 — states the claim AND cites a WRONG figure → FAIL, on the numbers.
+  const wrong = checkReadinessFileCountCell(`${OWNED} (${live + 1})`, live);
+  assert.equal(wrong.length, 1, `a wrong cited count must fail; got ${JSON.stringify(wrong)}`);
+  assert.match(wrong[0], new RegExp(`cites \\(${live + 1}\\)[\\s\\S]*lists ${live}`));
+
+  // CASE 3 — states NEITHER the claim nor a figure → FAIL, on the missing claim.
+  const silent = checkReadinessFileCountCell("the gate file exists", live);
+  assert.equal(silent.length, 1, `a silent cell must fail; got ${JSON.stringify(silent)}`);
+  assert.match(silent[0], /single owner/);
+  // And the same when it cites a number but not the ownership sentence: the
+  // number alone is exactly the duplication this rule exists to prevent.
+  const numberOnly = checkReadinessFileCountCell(`the suite runs (${live}) hermetic files`, live);
+  assert.equal(numberOnly.length, 1,
+    `a cell that restates the count without stating ownership must fail; got ${JSON.stringify(numberOnly)}`);
+  assert.match(numberOnly[0], /single owner/);
+
+  // THE TRAP, made unpinnable-in-reverse: no failure this gate can emit may
+  // tell a maintainer to re-pin the figure. That instruction is what would
+  // manufacture the second copy over a state that is already correct.
+  for (const problems of [wrong, silent, numberOnly, ...checkReadinessFileCountCell("stale (84)", 84)]) {
+    for (const p of problems) {
+      assert.ok(!/re-?pin/i.test(p),
+        `this gate emitted a "re-pin" instruction, which manufactures the second copy: ${JSON.stringify(p)}`);
+    }
   }
 });
 
@@ -134,7 +240,7 @@ test("GOAL 149: operator_ack is the operator's alone and this gate cannot satisf
 // `.brain/PRODUCTION_READINESS.md`, and two raw ANSI escape sequences landed
 // inside a table cell — in criterion 4.1, the very row this file gates.
 //
-// The corruption was worse than ugly, it was MISLEADING. The 4.1 gate below
+// The corruption was worse than ugly, it was MISLEADING. The 4.1 gate
 // (`/\((\d+)\)/` vs the live package.json count) stopped matching through the
 // invisible bytes and therefore reported:
 //
@@ -147,6 +253,14 @@ test("GOAL 149: operator_ack is the operator's alone and this gate cannot satisf
 // "fixing" it by hand-duplicating the fact manufactures the second copy. The
 // failure mode was not "a document is corrupt"; it was "a document is corrupt
 // AND the gate is confidently wrong about it".
+//
+// The figure was later deleted from §4.1 ON PURPOSE (README and §4.1 no longer
+// restate it; `package.json` owns it), which retired the
+// `assert.ok(cited.length > 0)` that produced the message quoted above — the
+// quoted message is therefore a HISTORICAL record of what this gate emitted, not
+// a string it can still produce. `checkReadinessFileCountCell` replaces it, and a
+// test in this file asserts no failure it emits can say "re-pin", so the
+// instruction that manufactured the duplicate cannot come back through this gate.
 //
 // It is fixed. A follow-up lane then scanned all 102 committed `.md` files and
 // found ZERO raw ESC bytes and zero textual escape notations anywhere else.
@@ -184,10 +298,12 @@ test("GOAL 149: operator_ack is the operator's alone and this gate cannot satisf
 // DESIGN NOTE — WHY THIS FILE, AND WHY RAW BYTES.
 //
 // WHICH FILE. `.brain/PRODUCTION_READINESS.md` is this file's SUBJECT, and the
-// bytes broke this file's OWN assertion (the 4.1 `assert.ok(cited.length > 0)`
-// above, whose message is the misleading diagnostic quoted in this header). The
-// escape landed in the one document whose evidence column this gate exists to
-// read, so the corruption and its symptom live in the same file as the sensor.
+// bytes broke this file's OWN assertion (the 4.1 assertion that used to read
+// `assert.ok(cited.length > 0)` and whose message is the misleading diagnostic
+// quoted in this header — since replaced by `checkReadinessFileCountCell`, but
+// which was the sensor the incident defeated). The escape landed in the one
+// document whose evidence column this gate exists to read, so the corruption and
+// its symptom live in the same file as the sensor.
 // `test/doc-numbers-truth.test.ts` was the other candidate and was NOT chosen:
 // its own header reserves an attribution boundary ("pointing them at every
 // derived surface would change which file a failure is attributed to"), so
@@ -370,13 +486,21 @@ test("GOAL 185 MUTATION: a planted raw ESC byte in a real committed file is repo
   const anchor = clean.indexOf(needle);
   assert.ok(anchor > 0, "precondition: could not find the 4.1 criteria row to plant into");
 
-  // Plant BETWEEN the `(` and its digits, because that is where the incident's
-  // escapes sat and it is the only position that actually breaks the gate: an
-  // ESC earlier in the line leaves the `(166)` intact and the regex still
-  // matches, which would make this "reproduction" prove nothing.
+  // Plant immediately AFTER a `(`, because that is where the incident's escapes
+  // sat: between the bracket and its digits. An ESC earlier in the line leaves a
+  // `(<n>)` run intact and the regex still matches, which would make this
+  // "reproduction" prove nothing.
+  //
+  // WHAT IS INSIDE THOSE PARENS CHANGED, AND IT DOES NOT MATTER HERE. 4.1 no
+  // longer restates the file count (package.json owns it), so the first paren on
+  // the row is the `(28/28)` in "every hand-typed suite total and `(28/28)`-style
+  // shape asserted ABSENT". The ESC bite is independent of what the parens hold:
+  // the byte must be found, named and located on its line. The regex-defeat
+  // shape — the part that needs a COUNT inside them — is reproduced below on a
+  // synthetic row built to carry the real live count.
   const paren = clean.indexOf(Buffer.from("(", "utf8"), anchor);
-  assert.ok(paren > anchor, "precondition: the 4.1 row cites no parenthesised count to split");
-  const at = paren + 1; // immediately after the `(`: `(` ESC [ 3 1 m `166)`
+  assert.ok(paren > anchor, "precondition: the 4.1 row has no '(' to plant after");
+  const at = paren + 1; // immediately after the `(`
   const COLOURED_RED = Buffer.from([ESC, 0x5b, 0x33, 0x31, 0x6d]); // ESC [ 3 1 m
   assert.equal(COLOURED_RED[0], ESC, "precondition: the planted sequence really starts with ESC");
   const planted = Buffer.concat([
@@ -396,20 +520,40 @@ test("GOAL 185 MUTATION: a planted raw ESC byte in a real committed file is repo
   assert.equal(reported, expected,
     `the finding must name the offending line (expected ${expected}, got ${reported})`);
 
-  // And the planted byte MUST reproduce the incident's exact misleading
-  // diagnostic, measured against the REAL 4.1 predicate in THIS file rather than
-  // a restatement of it. On the clean row the predicate extracts a count; on the
-  // planted row it extracts NOTHING and `cited.length === 0` — which is exactly
-  // the condition that made the gate say "re-pin it" about a correct number.
-  const rowOf = (s: string): string => s.split("\n")[expected - 1] ?? "";
-  const PARENTHESISED = /\((\d+)\)/g;
-  const citedIn = (s: string): number[] =>
-    [...rowOf(s).matchAll(PARENTHESISED)].map((m) => Number(m[1]));
-  assert.ok(citedIn(clean.toString("utf8")).length > 0,
-    "precondition: the clean 4.1 row does cite a parenthesised count");
-  assert.deepEqual(citedIn(planted.toString("utf8")), [],
+  // THE MISLEADING DIAGNOSTIC, reproduced against the REAL sensor.
+  //
+  // The precondition that used to live here — "the clean 4.1 row cites a
+  // parenthesised count" — became FALSE when §4.1 stopped restating the figure.
+  // It is not re-pinned, because doing so would have meant typing the number back
+  // into the doc, i.e. manufacturing the second copy this whole change removes.
+  //
+  // It also was not the right place for the claim. The incident's shape is a
+  // property of the SENSOR — "a decoded-string regex cannot see through an ESC
+  // byte, so a correct count goes unreported" — not a property of one row's
+  // content. So it is reproduced on a row BUILT to carry the live count, driven
+  // through `citedFileCounts`, the very function the 4.1 gate uses. Same sensor,
+  // same byte, same position, real live number.
+  const live = liveTestFileCount();
+  const synthetic = (body: string): string =>
+    `| 4.1 | every derivable numeric claim in README/AGENTS is machine-checked | \`pass\` | ` +
+    `${body} | \`test/doc-numbers-truth.test.ts\` | GOAL 110 |`;
+  // `String.fromCharCode(ESC)`, NOT a template interpolation: `${ESC}` would
+  // stringify the NUMBER 27 to "27" and plant nothing. The byte is always
+  // BUILT, never spelled — neither as an interpolated number nor as an escape
+  // sequence written into a string literal here, which is a raw ESC byte in a
+  // committed file and the exact defect this whole file is about.
+  const ESC_STR = String.fromCharCode(ESC);
+  const cleanRow = synthetic(`README cites (${live}) hermetic unit-test files`);
+  assert.deepEqual(citedFileCounts(cleanRow), [live],
+    "precondition: the synthetic clean row does cite the live count");
+
+  const rowParen = cleanRow.indexOf("(");
+  assert.ok(rowParen > 0, "precondition: the synthetic row has no '(' to split");
+  const atChar = rowParen + 1; // the same position as the real-row plant above
+  const plantedRow = cleanRow.slice(0, atChar) + `${ESC_STR}[31m` + cleanRow.slice(atChar);
+  assert.deepEqual(citedFileCounts(plantedRow), [],
     "precondition: the planted byte does not reproduce the incident's misleading-diagnostic shape");
   // Stated as the assertion that misled a maintainer, so the point survives:
-  assert.equal(citedIn(planted.toString("utf8")).length, 0,
+  assert.equal(citedFileCounts(plantedRow).length, 0,
     "a correct number is present but unreported — this is the incident, not a synthetic case");
 });
