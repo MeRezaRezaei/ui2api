@@ -70,6 +70,34 @@ export interface ChromeOwner {
   missing: string | null;
 }
 
+/**
+ * THE ONE passwd LOOKUP, and it is NSS (`getent passwd`), not `/etc/passwd`.
+ *
+ * Recorded decision, with its reasoning, because the two answers used to
+ * coexist and this file had to pick one:
+ *
+ *   * `/etc/passwd` is only the FIRST file of the passwd DATABASE. On any host
+ *     where accounts come from LDAP/SSSD/other NSS (the corporate/per-customer
+ *     boxes this env knob exists for — `UI2API_CHROME_USER` names a per-customer
+ *     service account), a real account has NO `/etc/passwd` line at all.
+ *   * The two implementations disagreed exactly there. The launch guard
+ *     (`isChromeOwnerProcess`, browser.ts) read `/etc/passwd`, got no line, and
+ *     answered "-1"; the readiness gate (`runningAsOwner`, right here) read
+ *     `getent`, got the REAL uid, and answered "yes, this is the owner". So the
+ *     guard REFUSED while the gate said the same running process WAS the owner —
+ *     two owners of one fact, stating opposite things about one process.
+ *   * `getent` is what `id -u` and libc itself use, so it agrees with the
+ *     kernel's notion of "who is this user" on every host, and it is equally
+ *     unspoofable by an environment variable: nothing an operator can set in
+ *     `UI2API_*` changes WHICH passwd database `getent` reads. (It is resolved
+ *     through `PATH`, so a hostile `PATH` could shadow the binary — accepted and
+ *     recorded, because the alternative silently refuses to recognise an owner
+ *     that demonstrably exists, which is the fail-closed regression this file's
+ *     whole design exists to avoid.)
+ *
+ * `test/chrome-owner-uid-single-owner.test.ts` pins that this stays the ONLY
+ * place a name is resolved to a uid: a second implementation is a second answer.
+ */
 function passwdEntry(user: string): { home: string; uid: string } | null {
   try {
     const out = execFileSync("getent", ["passwd", user], { encoding: "utf8", timeout: 5000 }).trim();
@@ -84,6 +112,74 @@ function passwdEntry(user: string): { home: string; uid: string } | null {
 /** The user that owns the Chrome we drive. Data, not a hardcode. */
 export function chromeOwnerUser(): string {
   return (process.env[CHROME_USER_ENV] ?? "").trim() || DEFAULT_CHROME_USER;
+}
+
+/**
+ * "This name resolved to no uid" — the sentinel. It is a STRING on purpose, not
+ * `Number(-1)`, so it is visibly a marker and not a uid the kernel could hand
+ * out. A real process's `process.getuid()` is never `-1` (uid 0 is root), so the
+ * sentinel can only ever be matched by an injected one; that is exactly what
+ * `test/chrome-owner-launch-refusal.test.ts` drives, and it is why the sentinel
+ * is not a quiet admission path.
+ */
+export const CHROME_OWNER_UID_UNRESOLVED = "-1";
+
+const ownerUidCache = new Map<string, string>();
+
+/**
+ * THE owner's uid, resolved HERE and nowhere else. Cached per name because this
+ * is on the launch path: the previous `/etc/passwd` implementation cached its
+ * read for the same reason, and `getent` costs a process spawn rather than a file
+ * read, so the cache matters MORE here, not less.
+ *
+ * Only the UID is cached. `passwdEntry()` itself stays uncached, so a home
+ * directory created after this process started is still SEEN by
+ * `resolveChromeOwner()` — caching the whole entry would have traded a stale-uid
+ * bug for a stale-home bug, which is the fail-closed regression the guard must
+ * never introduce on a correctly-configured box.
+ *
+ * The cost of that choice is ONE extra lookup per name per process (the caller
+ * usually wants `home` too, and it must stay fresh); it is not an optimisation to
+ * hand this function an already-resolved entry. Doing that would put a second
+ * reader of the uid back in `resolveChromeOwner`, which is the defect.
+ */
+export function chromeOwnerUid(user: string = chromeOwnerUser()): string {
+  const cached = ownerUidCache.get(user);
+  if (cached !== undefined) return cached;
+  const raw = passwdEntry(user)?.uid ?? "";
+  const uid = /^\d+$/.test(raw) ? raw : CHROME_OWNER_UID_UNRESOLVED;
+  ownerUidCache.set(user, uid);
+  return uid;
+}
+
+/**
+ * ⛔ THE SINGLE OWNER of "is this process the chrome owner?" — one comparison,
+ * derived everywhere else.
+ *
+ * Before this existed there were THREE implementations of the same question:
+ * the launch guard (browser.ts, reading `/etc/passwd`), the readiness gate
+ * (`runningAsOwner` below, reading `getent`) and the daemon's sudo decision
+ * (`isThisProcessOwner`, chrome-daemon.ts, reading `getent` a second time). Any
+ * two of them could answer differently about ONE running process — and they did,
+ * on any host whose owner account lives in NSS rather than `/etc/passwd` (see
+ * `passwdEntry` above). Three answers to one question is the defect; this is the
+ * one answer.
+ *
+ * FAIL CLOSED, deliberately, on the two shapes that used to leak:
+ *   * `uid` missing/undefined (a non-POSIX process, no `getuid`) is NOT the owner
+ *     — "I cannot prove I am" is not "I am".
+ *   * a THROWING uid read is the caller's try/catch to make, because the read
+ *     happens at the call site; every call site in `src/` does exactly that.
+ *   * an owner name that resolves to no uid can only match uid `-1`, which no
+ *     real process has — so a MISSING owner user is never admitted, and the
+ *     sentinel never becomes a bypass.
+ */
+export function isUidTheChromeOwner(
+  uid: number | string | undefined | null,
+  user: string = chromeOwnerUser(),
+): boolean {
+  if (uid === undefined || uid === null) return false;
+  return String(uid) === chromeOwnerUid(user);
 }
 
 /** The resolved owner, with everything a caller needs to report honestly. */
@@ -121,9 +217,12 @@ export function resolveChromeOwner(): ChromeOwner {
     }
   }
 
+  // DERIVED, never re-derived: the same one comparison the launch guard and the
+  // daemon's sudo decision use. Reading `entry.uid` here as well would be the
+  // third answer to one question.
   let runningAsOwner = false;
   try {
-    runningAsOwner = process.getuid?.() === Number(entry?.uid ?? -1);
+    runningAsOwner = isUidTheChromeOwner(process.getuid?.(), user);
   } catch {
     runningAsOwner = false;
   }

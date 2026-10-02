@@ -2,7 +2,7 @@ import { chromium, type Browser } from "playwright";
 import { resolve, dirname } from "node:path";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolveChromeOwner } from "./chrome-owner.js";
+import { resolveChromeOwner, isUidTheChromeOwner, chromeOwnerUser } from "./chrome-owner.js";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 
@@ -156,35 +156,34 @@ export function bundledChromiumPath(): string | null {
 // never downloaded, reuse the SYSTEM Chrome via `channel: "chrome"`. That keeps
 // every flow working on hosts that only have a normal Chrome installed.
 /** True when THIS process runs as the user that owns the Chrome profile. The
- *  browser may only be born in that identity — see the refusal in launchBrowser. */
+ *  browser may only be born in that identity — see the refusal in launchBrowser.
+ *
+ *  THE COMPARISON IS NOT WRITTEN HERE. It used to be: this function resolved the
+ *  owner's uid by reading `/etc/passwd` itself, while `resolveChromeOwner()`
+ *  (chrome-owner.ts) resolved the SAME uid through `getent` — two answers to one
+ *  question, which on any host whose owner account lives in NSS rather than
+ *  `/etc/passwd` meant the launch guard said "not the owner" (its "-1") while the
+ *  readiness gate said this same process WAS the owner. The guard is the code
+ *  that protects the point of use, so it must not be the one that guesses.
+ *  `isUidTheChromeOwner()` is now the single owner of that comparison and its
+ *  reasoning (NSS over `/etc/passwd`, and why) is recorded beside it;
+ *  `test/chrome-owner-uid-single-owner.test.ts` fails if a second comparison
+ *  reappears anywhere in `src/`.
+ *
+ *  What stays HERE is the uid READ, because that is the syscall and this is the
+ *  launch seam: it is the real identity (`os.userInfo()` reflects the REAL uid,
+ *  not $USER, which an operator can set to anything and which would make this
+ *  check trivially bypassable), and a read that throws must fail CLOSED rather
+ *  than escape into the launch path. */
 function isChromeOwnerProcess(): boolean {
-  const owner = process.env.UI2API_CHROME_USER ?? "ui2api";
+  // `os.userInfo()` reflects the REAL uid, not $USER, which an operator can set
+  // to anything and which would make this check trivially bypassable.
   try {
-    // `os.userInfo()` reflects the REAL uid, not $USER, which an operator can set
-    // to anything and which would make this check trivially bypassable.
-    return typeof process.getuid === "function" && String(process.getuid()) === ownerUid(owner);
+    return isUidTheChromeOwner(process.getuid?.());
   } catch {
     return false;
   }
 }
-
-function ownerUid(name: string): string {
-  // /etc/passwd is the only source that cannot be spoofed by an env var, and it
-  // is what `id -u` reads. A cache avoids a file read per launch attempt.
-  try {
-    const cached = uidCache.get(name);
-    if (cached !== undefined) return cached;
-    const line = readFileSync("/etc/passwd", "utf8")
-      .split("\n")
-      .find((l) => l.split(":")[0] === name);
-    const uid = line ? String(line.split(":")[2]) : "-1";
-    uidCache.set(name, uid);
-    return uid;
-  } catch {
-    return "-1";
-  }
-}
-const uidCache = new Map<string, string>();
 
 export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Promise<Browser> {
   const launchOpts = buildLaunchOptions(overrides);
@@ -246,7 +245,7 @@ export async function launchBrowser(retries = 3, overrides: LaunchOpts = {}): Pr
     }
     throw new Error(
       `refusing to spawn a browser: this process is not the chrome owner ` +
-        `(${process.env.UI2API_CHROME_USER ?? "ui2api"}), and the only supported browser is ` +
+        `(${chromeOwnerUser()}), and the only supported browser is ` +
         `that user's daemon. Spawning here produced 23 orphaned Chrome processes on this host. ` +
         `Run as that user, or set UI2API_ATTACH_PORT to attach to its existing Chrome.`
     );

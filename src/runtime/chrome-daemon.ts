@@ -2,7 +2,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve, dirname } from "node:path";
-import { resolveChromeOwner, type ChromeOwner } from "./chrome-owner.js";
+import { resolveChromeOwner, isUidTheChromeOwner, type ChromeOwner } from "./chrome-owner.js";
 import { resolvedHeadless, CHROME_SYSTEM_PATHS, CHROME_CHROMIUM_PATHS } from "./browser.js";
 
 /**
@@ -193,12 +193,18 @@ function chromeExec(): string | null {
   return null;
 }
 
-/** Is THIS process already running as the named user? Compares real uids. */
+/** Is THIS process already running as the named user? Compares real uids.
+ *
+ *  DERIVED, not re-derived: this used to run its own `getent passwd` and compare
+ *  `process.getuid()` to the parsed uid, i.e. a THIRD implementation of the
+ *  question the launch guard and the readiness gate each answered too. It now
+ *  asks the one resolver in chrome-owner.ts, so the answer that decides
+ *  `sudo -u` here can never disagree with the answer that decides the launch
+ *  refusal. It is the fact that distinguishes spawning directly from wrapping
+ *  the spawn in `sudo` — see the MEASURED BUG note at the call site. */
 function isThisProcessOwner(user: string): boolean {
   try {
-    const out = execFileSync("getent", ["passwd", user], { encoding: "utf8", timeout: 5000 }).trim();
-    const uid = Number(out.split(":")[2]);
-    return Number.isFinite(uid) && process.getuid?.() === uid;
+    return isUidTheChromeOwner(process.getuid?.(), user);
   } catch {
     return false;
   }
