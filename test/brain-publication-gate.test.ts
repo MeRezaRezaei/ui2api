@@ -1,7 +1,7 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1678,5 +1678,457 @@ d("P6c: the job is WIRED to the probe, proven against the real .gitlab-ci.yml", 
     // which is the exposure the whole thing exists to prevent.
     const m3 = base.replace("--expect private", "--expect public");
     assert.throws(() => assertVisibilityProbeWired(m3), /must REQUIRE private/, "M3 (dropping `--expect private` on the corpus destination) MUST be caught");
+  });
+});
+
+/* =====================================================================
+ * P7: the RECONSTRUCTION KEY's format, pinned to filter-repo's REAL output
+ *
+ * WHY THIS BLOCK EXISTS, and why it is the highest-value thing in this file.
+ *
+ * `scripts/ci/make-public-repo.sh` publishes a `commit-map` whose entire stated
+ * purpose is the operator's own words: "they should have same ancestor to let
+ * us later on make the full repo again" (.brain/verbatim-goals.md, quoted in
+ * .gitlab-ci.yml:306-307). The bytes were flowing nowhere for 13 hours until
+ * 2026-10-01, and when they finally started flowing, the thing that CONSUMES
+ * them did not exist at all.
+ *
+ * The failure this block exists to make impossible is SPECIFIC and it has
+ * ALREADY HAPPENED, twice, in the same three lines:
+ *
+ *     make-public-repo.sh:314   "the REWRITTEN->OLD mapping"     <- WRONG
+ *     make-public-repo.sh:315   "old hash -> new hash"            <- RIGHT
+ *
+ * Two adjacent sentences in one comment block, giving opposite directions for
+ * the same artifact, and the python twenty lines below named its two
+ * comprehensions the other way round from BOTH. Nothing failed. No test read
+ * the file. A reader who trusted line 314 builds the join backwards and gets a
+ * map that maps nothing.
+ *
+ * SO THE PIN IS AGAINST THE TOOL, NOT AGAINST THE PROSE. The orientation below
+ * is not asserted from a comment, a variable name, or anybody's memory — it is
+ * MEASURED, by running the real `git filter-repo` on a fixture engineered to
+ * produce every row shape the real map can contain, and then checking which
+ * side of the rewrite each column actually holds. The documentation is then
+ * checked AGAINST that measurement. If git-filter-repo ever changes its
+ * orientation, this goes red; if a human re-writes the doc wrong, this goes
+ * red; the two cannot both be wrong in the same direction and stay green.
+ *
+ * THE THREE ROW SHAPES, because two of them are counter-intuitive and one of
+ * those two is the trap:
+ *
+ *   old == new            untouched by the filter; the commit is its own image.
+ *                         Not an error, not a duplicate, NOT a sign the map is
+ *                         broken.
+ *   new == 40 zeros       the commit became EMPTY and filter-repo PRUNED it. IT
+ *                         STILL HAS A ROW. A reader who believes pruned
+ *                         commits are omitted hunts for a missing entry instead
+ *                         of reading a zero, and concludes — wrongly — that the
+ *                         map is incomplete. `make-public-repo.sh` asserted
+ *                         exactly that ("Their union is the original 605"), and
+ *                         the assertion was false.
+ *   old != new, both real  genuinely rewritten.
+ *
+ * WHAT IS DELIBERATELY NOT PINNED HERE. The number of rows. It is a property
+ * of the repository at a moment in time and moves with every commit; a pin on
+ * it would be the hand-typed-count rot that `test/doc-numbers-truth.test.ts`
+ * exists to kill. The FIXTURE's row count is pinned, because that one is ours.
+ * ===================================================================== */
+
+const RUNBOOK = join(ROOT, "docs/RECONSTRUCTION-RUNBOOK.md");
+const RUNBOOK_TEXT = existsSync(RUNBOOK) ? readFileSync(RUNBOOK, "utf8") : "";
+
+/** filter-repo's sentinel for "this commit was pruned". Measured, not assumed:
+ *  its own source spells it `deleted_hash = b'0'*40` and the fixture below
+ *  observes forty literal zeroes in column 1. */
+export const PRUNED_SENTINEL = "0".repeat(40);
+
+/** Strip fenced code blocks, so a document can QUOTE a wrong claim in order to
+ *  correct it. See the orientation scan in `assertDocumentedFormat`. */
+export function stripFencedCode(docText: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of docText.split("\n")) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** The runbook declares its own format through machine anchors, following the
+ *  house convention `docs/SIGN_OUT_LOGIN_RUNBOOK.md` already uses for its gate
+ *  (`<!-- sign-out-count: 11 -->`). An anchor is only worth having if something
+ *  checks it, which is the rest of this block. */
+export function declaredAnchor(docText: string, name: string): string | null {
+  const m = new RegExp(`<!--\\s*${name}:\\s*(.+?)\\s*-->`).exec(docText);
+  return m === null ? null : m[1];
+}
+
+/** One measured `commit-map`, split into its header and its two columns, plus
+ *  the two sides of the rewrite it was measured against. */
+export interface MeasuredCommitMap {
+  headerFields: string[];
+  oldColumn: string[];
+  newColumn: string[];
+  preRewrite: Set<string>;
+  postRewrite: Set<string>;
+}
+
+/** Run the REAL filter-repo on a three-commit fixture built so that all three
+ *  row shapes above occur, and return what it actually wrote.
+ *
+ *  The fixture is the whole reason this block is a measurement rather than a
+ *  transcription. C1 touches only a surviving path, so it must survive
+ *  UNCHANGED (old == new). C2 touches only a path that is then removed, so its
+ *  tree becomes empty and it must be PRUNED (new == 40 zeros). C3 touches the
+ *  surviving path, so its parent moved and it must be REWRITTEN. A fixture that
+ *  failed to produce all three would make the pins below vacuous, so the caller
+ *  asserts that it did. */
+function measureRealCommitMap(): MeasuredCommitMap {
+  const dir = mkdtempSync(join(tmpdir(), "commit-map-shape-"));
+  try {
+    const g = (...args: string[]): string =>
+      execFileSync("git", args, { encoding: "utf8", cwd: dir, timeout: 120000 }).trim();
+    g("init", "--quiet", ".");
+    g("config", "user.email", "gate@example.invalid");
+    g("config", "user.name", "gate");
+    // C1 — survives untouched.
+    writeFileSync(join(dir, "keep.txt"), "one\n");
+    g("add", "-A");
+    g("commit", "--quiet", "-m", "C1 keep only");
+    const c1 = g("rev-parse", "HEAD");
+    // C2 — becomes empty once the corpus path is removed, so it is pruned.
+    mkdirSync(join(dir, ".brain"), { recursive: true });
+    writeFileSync(join(dir, ".brain", "leak.md"), "corpus\n");
+    g("add", "-A");
+    g("commit", "--quiet", "-m", "C2 corpus only");
+    const c2 = g("rev-parse", "HEAD");
+    // C3 — survives, but its parent moved, so its hash must change.
+    writeFileSync(join(dir, "keep.txt"), "one\ntwo\n");
+    g("add", "-A");
+    g("commit", "--quiet", "-m", "C3 keep again");
+    const c3 = g("rev-parse", "HEAD");
+    const preRewrite = new Set([c1, c2, c3]);
+
+    writeFileSync(join(dir, "paths.txt"), ".brain\n");
+    execFileSync("git", ["filter-repo", "--force", "--invert-paths", "--paths-from-file", "paths.txt"], {
+      encoding: "utf8",
+      cwd: dir,
+      timeout: 120000,
+      stdio: "pipe",
+    });
+
+    const raw = readFileSync(join(dir, ".git", "filter-repo", "commit-map"), "utf8");
+    const lines = raw.split("\n").filter((l) => l.trim() !== "");
+    const headerFields = lines[0].trim().split(/\s+/);
+    const rows = lines.slice(1).map((l) => l.trim().split(/\s+/));
+    const postRewrite = new Set(g("rev-list", "--all").split("\n").filter((s) => s !== ""));
+    return {
+      headerFields,
+      oldColumn: rows.map((r) => r[0]),
+      newColumn: rows.map((r) => r[1]),
+      preRewrite,
+      postRewrite,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The two claims a reader of the map depends on, checked against a
+ *  MEASUREMENT rather than against prose.
+ *
+ *  (1) ORIENTATION. Column 0 must hold shas that exist in the repo BEFORE the
+ *      rewrite, and column 1 must hold shas that exist in the repo AFTER it (or
+ *      the prune sentinel). This is the whole content of the gate, and it is
+ *      checked by SET MEMBERSHIP, so it cannot be satisfied by a comment that
+ *      happens to read well.
+ *  (2) COMPLETENESS OF THE THREE SHAPES. If the fixture did not produce an
+ *      untouched row, a pruned row and a rewritten row, the measurement is not
+ *      exercising the format and the pins are vacuous. */
+export function assertMeasuredOrientation(m: MeasuredCommitMap): void {
+  assert.ok(
+    m.oldColumn.length > 0 && m.oldColumn.length === m.newColumn.length,
+    `the measured commit-map is not two columns of equal length (old=${m.oldColumn.length}, new=${m.newColumn.length}) — reading it as old->new is not even well defined`,
+  );
+  assert.deepEqual(
+    m.headerFields,
+    ["old", "new"],
+    `git filter-repo wrote the header ${JSON.stringify(m.headerFields)}, not ["old","new"] — the documented column names are wrong and every reader who trusts them is misled`,
+  );
+  for (const sha of m.oldColumn) {
+    assert.ok(
+      m.preRewrite.has(sha),
+      `column 0 holds ${sha}, which is NOT a commit of the pre-rewrite repo — so column 0 is not the OLD/original side and the map is new->old, not old->new`,
+    );
+  }
+  for (const sha of m.newColumn) {
+    const ok = sha === PRUNED_SENTINEL || m.postRewrite.has(sha);
+    assert.ok(
+      ok,
+      `column 1 holds ${sha}, which is neither the 40-zero prune sentinel nor a commit of the post-rewrite repo — column 1 is not the NEW/rewritten side`,
+    );
+  }
+  // The three shapes, each present. Non-vacuity, and the anti-trap pin.
+  const pruned = m.newColumn.filter((s) => s === PRUNED_SENTINEL).length;
+  const untouched = m.oldColumn.filter((s, i) => s === m.newColumn[i]).length;
+  const rewritten = m.oldColumn.length - pruned - untouched;
+  assert.equal(pruned, 1, `the fixture must produce exactly one PRUNED row, got ${pruned} — the format is not being exercised`);
+  assert.equal(untouched, 1, `the fixture must produce exactly one UNTOUCHED row (old == new), got ${untouched}`);
+  assert.equal(rewritten, 1, `the fixture must produce exactly one REWRITTEN row, got ${rewritten}`);
+}
+
+/** The documentation pins, checked against the measurement.
+ *
+ *  Split from the measurement on purpose: this is the half that goes red when a
+ *  human re-writes the runbook, and it is fed the same `MeasuredCommitMap` so
+ *  the doc and the tool cannot disagree without one of them disagreeing with
+ *  reality first. */
+export function assertDocumentedFormat(
+  m: MeasuredCommitMap,
+  declaredHeader: string | null,
+  declaredFiles: string | null,
+  docText: string,
+): void {
+  assert.ok(
+    declaredHeader !== null,
+    "docs/RECONSTRUCTION-RUNBOOK.md carries no `<!-- commit-map-header: ... -->` anchor, so the " +
+      "documented column order is unpinned prose and can drift from the tool silently. " +
+      "This is the exact defect that let :314 and :315 contradict each other.",
+  );
+  const documented = declaredHeader!.split(/\s+/);
+  assert.deepEqual(
+    documented,
+    m.headerFields,
+    `the runbook documents the header as ${JSON.stringify(documented)}, but git filter-repo writes ` +
+      `${JSON.stringify(m.headerFields)}. A reader who builds the join from the doc gets it backwards.`,
+  );
+  assert.ok(
+    declaredFiles !== null,
+    "docs/RECONSTRUCTION-RUNBOOK.md carries no `<!-- commit-map-files: ... -->` anchor, so the two " +
+      "filenames are unpinned and a future rename would leave the runbook pointing at files that do not exist.",
+  );
+  for (const f of ["private-full.commit-map", "public-sanitized.commit-map"]) {
+    assert.ok(
+      declaredFiles!.split(/\s+/).includes(f),
+      `the runbook's file anchor omits ${f}, which the sanitizer actually writes`,
+    );
+    // The filename is not just documented — the sanitizer must still emit it.
+    assert.ok(
+      SANITIZER_TEXT.includes(f),
+      `the runbook documents ${f}, but scripts/ci/make-public-repo.sh no longer writes it — the doc and the tool have diverged`,
+    );
+  }
+  // The orientation, in the only phrasings the false claims actually used.
+  //
+  // SCOPED, and the scoping is the whole subtlety. A blunt `docText.includes(...)`
+  // is WRONG here, and it was wrong on first write: the runbook QUOTES
+  // `REWRITTEN->OLD` twice — once in a table row whose verdict column says
+  // **WRONG**, once inside a fenced `**Before**` block showing what the file used
+  // to say. A document that corrects a false claim has to be able to REPRODUCE
+  // it, so the naive scan forbids the very thing the doc is for, and the fix is
+  // to make it delete the runbook's evidence instead of its correction.
+  //
+  // So the rule is scoped the way a reader actually reads: FENCED CODE IS
+  // QUOTATION (someone else's text, shown), and PROSE IS THIS DOCUMENT'S OWN
+  // CLAIM. Fences are stripped first. In what remains, a line may name a false
+  // orientation ONLY if that same line marks it as false — because a line that
+  // states the wrong direction without saying it is wrong is asserting it, and
+  // that is the defect.
+  const prose = stripFencedCode(docText);
+  const CORRECTION = /WRONG|false|False|Before|correct|Correct|contradict|✗|before 2026/i;
+  for (const line of prose.split("\n")) {
+    for (const forbidden of ["REWRITTEN->OLD", "rewritten->old", "new->old", "NEW->OLD", "new -> old"]) {
+      if (!line.includes(forbidden)) continue;
+      assert.ok(
+        CORRECTION.test(line),
+        `the runbook's own PROSE states the false orientation ${JSON.stringify(forbidden)} without marking it false ` +
+          `(offending line: ${JSON.stringify(line.trim().slice(0, 120))}). The map is old->new, measured by the ` +
+          `filter-repo run above. A fenced quotation may reproduce the old wording; this document's own voice may not assert it.`,
+      );
+    }
+  }
+}
+
+d("P7: the reconstruction key's FORMAT is pinned to git filter-repo's real output", () => {
+  t("the runbook exists — a map nobody can consume is not durability", () => {
+    assert.ok(
+      RUNBOOK_TEXT !== "",
+      `docs/RECONSTRUCTION-RUNBOOK.md is missing at ${RUNBOOK}. The commit-map is published by CI and ` +
+        `regenerable only under a specific unpinned tool version; with no procedure, the artifact is bytes ` +
+        `on a 90-day artifact TTL and the operator's "later on make the full repo again" has no consumer.`,
+    );
+  });
+
+  t("the sanitizer still writes BOTH halves of the key, and the bare-clone path it probes is the one that exists", () => {
+    assert.ok(SANITIZER_TEXT !== "", "the sanitizer must exist for this contract to have a subject");
+    for (const f of ["private-full.commit-map", "public-sanitized.commit-map"]) {
+      assert.ok(SANITIZER_TEXT.includes(f), `the sanitizer no longer writes ${f}`);
+    }
+    // Both halves are `--mirror` (hence BARE) clones, so filter-repo's metadata
+    // lands in $PUB/filter-repo and not $PUB/.git/filter-repo. The script probes
+    // both, which is right; this pins that the bare form is the one it will
+    // actually find, so a future `--mirror` removal is a visible change rather
+    // than a silent fall-through to the second candidate.
+    assert.match(SANITIZER_TEXT, /--mirror/, "the halves are --mirror clones; a non-mirror clone changes where filter-repo writes its metadata");
+    assert.match(SANITIZER_TEXT, /"\$PUB\/filter-repo\/commit-map"/, "the bare-clone metadata path must stay probed");
+  });
+
+  t("the sanitizer's OWN consumption of the map reads column 0 as the ORIGINAL sha", () => {
+    // The inverted comprehension is exactly the drift class this block is for, so
+    // the fix is pinned rather than trusted. `pub_old` must be built from r[0].
+    // It was dead code (assigned, never read anywhere in the repo), so pinning
+    // the name pins the intent without pinning any behaviour.
+    assert.match(
+      SANITIZER_TEXT,
+      /pub_old\s*=\s*\{r\[0\]\s+for\s+r\s+in\s+pub\}/,
+      "the sanitizer's `pub_old` must be built from column 0 — column 0 is the ORIGINAL sha, measured by P7's filter-repo run. Building it from r[1] is the inversion that made the report's join backwards.",
+    );
+    assert.match(
+      SANITIZER_TEXT,
+      /pub_new\s*=\s*\{r\[1\]\s+for\s+r\s+in\s+pub\}/,
+      "the sanitizer's `pub_new` must be built from column 1",
+    );
+    // …and the header must be excluded, or the report's row count is one too
+    // high and reads as a partition that is not there.
+    assert.match(
+      SANITIZER_TEXT,
+      /\["old",\s*"new"\]/,
+      "the sanitizer must recognise filter-repo's `old new` header row and exclude it from the data rows",
+    );
+  });
+
+  t("MEASURED: the real tool's orientation is old->new, with all three row shapes", { skip: !FILTER_REPO_AVAILABLE && "git filter-repo is not on PATH; the contract cannot be proven without the tool that implements it" }, () => {
+    // The load-bearing assertion of the whole file. Everything else checks that
+    // the documentation matches THIS.
+    assertMeasuredOrientation(measureRealCommitMap());
+  });
+
+  t("the runbook documents the format the tool actually writes", { skip: !FILTER_REPO_AVAILABLE && "git filter-repo is not on PATH" }, () => {
+    assertDocumentedFormat(
+      measureRealCommitMap(),
+      declaredAnchor(RUNBOOK_TEXT, "commit-map-header"),
+      declaredAnchor(RUNBOOK_TEXT, "commit-map-files"),
+      RUNBOOK_TEXT,
+    );
+  });
+
+  t("MUTATION: every orientation pin bites — the failures below are the ones that already shipped", () => {
+    const real = FILTER_REPO_AVAILABLE ? measureRealCommitMap() : null;
+    // Anti-vacuity: the unmutated inputs pass. Without this, a mutation test
+    // that "passes" because everything throws is indistinguishable from one
+    // that works.
+    if (real !== null) {
+      assert.doesNotThrow(() => assertMeasuredOrientation(real), "precondition: the real measurement passes");
+      assert.doesNotThrow(
+        () =>
+          assertDocumentedFormat(
+            real,
+            "old new",
+            "private-full.commit-map public-sanitized.commit-map",
+            "column 0 is old, column 1 is new",
+          ),
+        "precondition: a correct document passes",
+      );
+    }
+
+    // M1 — THE SHIPPED DEFECT. The doc documents the map backwards, exactly as
+    // make-public-repo.sh:314 and :679 did. The single most valuable mutation
+    // here, because it is not hypothetical: it shipped.
+    if (real !== null) {
+      assert.throws(
+        () => assertDocumentedFormat(real, "new old", "private-full.commit-map public-sanitized.commit-map", ""),
+        /builds the join from the doc gets it backwards/,
+        "M1 (runbook documents `new old`) MUST be caught — this is the exact wording that shipped in make-public-repo.sh:314",
+      );
+    }
+
+    // M2 — the doc drops its anchor and reverts to unpinned prose. The silent
+    // decay this block exists to stop: nothing fails, the doc is just wrong.
+    if (real !== null) {
+      assert.throws(
+        () => assertDocumentedFormat(real, null, "private-full.commit-map public-sanitized.commit-map", ""),
+        /unpinned prose/,
+        "M2 (runbook loses its `commit-map-header` anchor) MUST be caught — otherwise the orientation rots with nothing watching",
+      );
+    }
+
+    // M3 — the doc keeps the correct anchor but its own PROSE starts asserting
+    // the false direction. This is the mutation the scoped scan exists for: the
+    // anchor alone would pass, which is exactly the silent-drift case.
+    if (real !== null) {
+      assert.throws(
+        () =>
+          assertDocumentedFormat(
+            real,
+            "old new",
+            "private-full.commit-map public-sanitized.commit-map",
+            "The commit-map is a REWRITTEN->OLD mapping, column 0 is the rewritten sha.",
+          ),
+        /own PROSE states the false orientation/,
+        "M3 (runbook PROSE asserts `REWRITTEN->OLD` while its anchor says `old new`) MUST be caught",
+      );
+    }
+
+    // M3b — the SAME sentence inside a fence is a legitimate quotation, and must
+    // NOT trip. Without this, the only way to make M3 pass would be to delete
+    // the evidence, which is the failure the scoping exists to avoid.
+    if (real !== null) {
+      assert.doesNotThrow(
+        () =>
+          assertDocumentedFormat(
+            real,
+            "old new",
+            "private-full.commit-map public-sanitized.commit-map",
+            "**Before** (`make-public-repo.sh:314`):\n\n```bash\n# ... the REWRITTEN->OLD mapping.\n```\n",
+          ),
+        "M3b (the false wording inside a fenced quotation) MUST be allowed — the runbook has to be able to show what was wrong",
+      );
+    }
+
+    // M4 — the doc names a file the sanitizer stopped writing.
+    if (real !== null) {
+      assert.throws(
+        () => assertDocumentedFormat(real, "old new", "public-sanitized.commit-map", ""),
+        /omits private-full\.commit-map/,
+        "M4 (runbook drops one of the two map files from its anchor) MUST be caught",
+      );
+    }
+
+    // M5 — the tool renames its header, data untouched. The minimal version-drift
+    // risk, and it isolates ONE variable: the column NAMES change while every
+    // sha still sits where it did. Set-membership cannot see this — only the
+    // header pin can — which is why both checks exist.
+    if (real !== null) {
+      const headerOnly: MeasuredCommitMap = { ...real, headerFields: ["new", "old"] };
+      assert.throws(
+        () => assertMeasuredOrientation(headerOnly),
+        /wrote the header/,
+        "M5 (filter-repo's header names become `new old`, data unchanged) MUST be caught — the column NAMES are pinned, not just the data",
+      );
+    }
+
+    // M5b — the tool TRANSPOSES THE DATA, which is the shipped defect happening
+    // again for real. Both columns are swapped wholesale and both sha sets with
+    // them, so the row count still agrees and only the DIRECTION is wrong. This
+    // is the mutation that the header check alone would miss and that
+    // set-membership catches, and its message is the one that shipped.
+    if (real !== null) {
+      const transposed: MeasuredCommitMap = {
+        headerFields: real.headerFields,
+        oldColumn: real.newColumn,
+        newColumn: real.oldColumn,
+        preRewrite: real.postRewrite,
+        postRewrite: real.preRewrite,
+      };
+      assert.throws(
+        () => assertMeasuredOrientation(transposed),
+        /column 0 is not the OLD\/original side|not a commit of the pre-rewrite repo/,
+        "M5b (filter-repo transposes its DATA) MUST be caught — this is exactly the defect that shipped as REWRITTEN->OLD",
+      );
+    }
   });
 });

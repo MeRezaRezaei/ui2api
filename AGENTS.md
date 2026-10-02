@@ -356,6 +356,7 @@ The code lives in **three** repositories, and exactly one of them is public.
   since `origin` IS GitLab. The variable is still required (it is not inferred from
   a remote), but the stated reason is stale and this line records the correction.
 - Full detail, verification commands and gotchas: **`docs/GIT_WIRING.md`**.
+- **The commit-map is the operator's stated reconstruction mechanism** ("they should have same ancestor to let us later on make the full repo again"). Its format, the procedure that consumes it, the worked verification, and — stated precisely — what it does NOT let you do are in **`docs/RECONSTRUCTION-RUNBOOK.md`**. Read that before assuming the map restores anything: it is a SHA correspondence (`old -> new`, pinned by `test/brain-publication-gate.test.ts` block P7, which runs the real `git filter-repo` so the orientation cannot rot), **not** a content diff, and the content lives only in the `ui2api-full` private repo.
 
 ## THE CHROME POINT OF USE — read this before touching any browser code
 

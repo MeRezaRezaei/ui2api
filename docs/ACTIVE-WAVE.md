@@ -45,8 +45,13 @@ tests were environment-dependent · `4027a06` the empty commit-map artifact + jq
 
 ## STILL OPEN
 
-- **No reconstruction runbook** for the commit-map (wave 4). The map is
-  regenerable but byte-identical only under the same unpinned `git-filter-repo`.
+- **The unpinned `git-filter-repo` is still unpinned.** The reconstruction
+  runbook now exists — **`docs/RECONSTRUCTION-RUNBOOK.md`**, with the map's
+  format measured against a real `filter-repo` run, the procedure, a four-check
+  worked verification, and what the map does NOT let you do. Pinning the tool
+  version (the runbook's §7 carries the exact YAML) is a separate `.gitlab-ci.yml`
+  edit and is **not yet applied**; until it is, the map is regenerable only by
+  luck.
 - The browser-dependent half of the suite SKIPS when the loader cannot find
   `libnspr4`. The fault itself has cleared (15 consecutive INTEGRATION OK, same
   image digest), but nothing asserts the skip did NOT happen, so a recurrence

@@ -311,8 +311,42 @@ note "patterns: $(wc -l < "$MAPS/replace-text.applied.txt") literal tokens -> th
 PUB_COMMITS="$(timeout -k 5 "$T_SMALL" git -C "$PUB" rev-list --all --count)"
 note "public-sanitized commits after filter: $PUB_COMMITS (source was $SRC_COMMITS)"
 
-# filter-repo writes .git/filter-repo/commit-map — the REWRITTEN->OLD mapping.
-# That is the reconstruction key: old hash -> new hash for every surviving commit.
+# filter-repo writes .git/filter-repo/commit-map — the OLD->NEW mapping.
+#
+# THE ORIENTATION, MEASURED 2026-10-01, because the two sentences that used to
+# stand here disagreed with EACH OTHER and the first one was wrong. filter-repo
+# writes the header as `%-40s %s` over the literals ("old", "new") and each row
+# as `old new` (git-filter-repo's own source, the `commit-map` write; and
+# confirmed by running it on a 3-commit fixture). So:
+#
+#     old                                      new
+#     <pre-rewrite sha> <post-rewrite sha>
+#
+# Column 0 = OLD = the ORIGINAL commit, the one private-full still carries.
+# Column 1 = NEW = the REWRITTEN commit, the one public-sanitized carries.
+#
+# This is the reconstruction key: old hash -> new hash. The previous first
+# sentence said the opposite while the second said "old hash -> new hash", and
+# the report block below named its two comprehensions the other way round from
+# both. A key whose documented direction is wrong is worse than no key, because
+# a reader who trusts it builds the join backwards.
+#
+# THREE ROW SHAPES, all of which occur, and only the middle one is obvious:
+#   * old == new          the commit was untouched by the filter; it is its own
+#                         image. NOT an error and not a duplicate.
+#   * new == 40 zeros     the commit became EMPTY and filter-repo PRUNED it.
+#                         It HAS a row — filter-repo's `deleted_hash`. A reader
+#                         who believes pruned commits have no row will look for
+#                         a missing entry instead of a zero, and conclude the
+#                         map is incomplete when it is complete.
+#   * old != new, both real   the commit was genuinely rewritten.
+#
+# EVERY source commit gets a row, including the ones that only ever touched
+# brain paths. The map is a COMPLETE 1:1 correspondence over the source
+# history, not a list of the survivors. The procedure that consumes it is
+# docs/RECONSTRUCTION-RUNBOOK.md, and test/brain-publication-gate.test.ts block
+# P7 runs the real filter-repo to pin this orientation so it cannot rot again.
+#
 # A --mirror clone is BARE, so filter-repo's metadata dir is $PUB/filter-repo
 # (there is no $PUB/.git). Probe both so the script is not silently wrong if
 # the clone mode ever changes.
@@ -668,23 +702,62 @@ say "6. commit-map — the reconstruction key"
 timeout -k 5 "$T_SMALL" python3 - "$MAPS" "$SRC_COMMITS" <<'PY' | tee -a "$REPORT"
 import sys, os
 maps, total = sys.argv[1], int(sys.argv[2])
+# HEADER. `git rev-list` writes no header, so private-full's file is one bare
+# column of shas. filter-repo's commit-map DOES write a header line, whose
+# whitespace-split fields are the literal strings "old" and "new" — so this
+# comprehension counts the HEADER AS A ROW and is one larger than the number of
+# commits. The header is dropped explicitly below, and the row count is checked
+# against the source total, so the report cannot print two counts that silently
+# differ by one and read as a partition.
 priv = [l.split()[0] for l in open(os.path.join(maps,"private-full.commit-map")) if l.strip()]
 pub  = [l.split() for l in open(os.path.join(maps,"public-sanitized.commit-map")) if l.strip()]
-pub_new = {n for n,_ in pub}
-pub_old = {o for _,o in pub}
+pub  = [r for r in pub if r[:2] != ["old", "new"]]
+pub  = [r for r in pub if len(r) == 2]
+if len(pub) != len(priv):
+    # A differing count is not a rounding error here: it means rows were lost or
+    # the file is not what this report thinks it is. Say so instead of printing
+    # two numbers and letting the reader reconcile them.
+    print(f"MAP-SHAPE-WARN: public-sanitized has {len(pub)} data rows, private-full has "
+          f"{len(priv)} source hashes. A 1:1 map has one row per source commit; this one "
+          f"does not, so the correspondence claim below is NOT established by these files.")
+# COLUMN ORDER, corrected. These two comprehensions used to be named the other
+# way round from the file they read (col0 was called `new`, col1 `old`), which
+# is the same inversion as the comment above. They were also DEAD — assigned and
+# never read anywhere in the repo — so the rename changes no output; it is here
+# so the next reader is not handed a contradiction.
+pub_old = {r[0] for r in pub}   # column 0: the ORIGINAL / private-full sha
+pub_new = {r[1] for r in pub}   # column 1: the REWRITTEN / public-sanitized sha
+pruned  = sum(1 for r in pub if r[1] == "0"*40)
+same    = sum(1 for r in pub if r[0] == r[1])
+moved   = len(pub) - pruned - same
 print()
 print("## Commit-map: why it is the reconstruction key")
 print()
-print(f"- private-full map: {len(priv)} source hashes, identity (no rewrite).")
-print(f"- public-sanitized map: {len(pub)} rewritten->old pairs.")
+print(f"- private-full map: {len(priv)} source hashes, identity (no rewrite), one column, no header.")
+print(f"- public-sanitized map: {len(pub)} rows of `old -> new` (header excluded), for")
+print(f"  {len(priv)} source commits: {moved} rewritten, {same} unchanged, {pruned} pruned (new = 40 zeros).")
 print(f"- source total: {total}")
 print()
-print("The two maps partition the original history: a commit that touched only")
-print("brain paths survives in the private half and is dropped from the public")
+print("COLUMN 0 IS `old` — the ORIGINAL sha, the one private-full still carries.")
+print("COLUMN 1 IS `new` — the REWRITTEN sha, the one public-sanitized carries.")
+print()
+print("The two REPOSITORIES partition the original history: a commit that touched")
+print("only brain paths survives in the private half and is dropped from the public")
 print("half; a commit that touched only code survives in the public half; a commit")
-print("that touched both appears in both. Their union is the original 605. Without")
-print("the maps that guarantee is unprovable after the fact, because a rewritten")
-print("hash carries no memory of the hash it replaced.")
+print("that touched both appears in both. Every commit pruned from one half is")
+print("present in the other. It is the repos that partition, NOT the two map")
+print("FILES: filter-repo emits a row for EVERY source commit, and a pruned one")
+print("carries 40 zeros in column 1 rather than being omitted. So the old column")
+print("of the public map and the private-full column are the SAME set of shas,")
+print("which is what makes the public map a usable index back into the private")
+print("half — provided the private half is still reachable.")
+print()
+print("Without the maps that correspondence is unprovable after the fact, because a")
+print("rewritten hash carries no memory of the hash it replaced. NOTE WHAT THE MAP")
+print("IS NOT: it is a sha correspondence, not a content diff, and it does not")
+print("restore anything by itself. Recovering removed content needs the private-full")
+print("history; see docs/RECONSTRUCTION-RUNBOOK.md for the procedure and for the")
+print("git-filter-repo version constraint that byte-identical regeneration needs.")
 PY
 
 # ===========================================================================
