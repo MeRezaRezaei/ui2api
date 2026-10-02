@@ -36,8 +36,15 @@ export const CHROME_USER_ENV = "UI2API_CHROME_USER";
 /** The dedicated user on this box. */
 export const DEFAULT_CHROME_USER = "ui2api";
 
-/** Candidate profile dirs inside a user's config dir, most specific first. */
-const PROFILE_CANDIDATES = [
+/** The config dir every candidate profile lives under. EXPORTED so a consumer
+ *  derives `<config>/<candidate>` instead of restating the string `.config` —
+ *  which is how a second spelling of the whole path appears in the first place. */
+export const CHROME_CONFIG_DIR = ".config";
+
+/** Candidate profile dirs inside a user's config dir, most specific first.
+ *  EXPORTED (GOAL 177) so every other site that needs this path DERIVES it from
+ *  this one ranked list. See `chromeOwnerRelativeProfilePath()` below. */
+export const PROFILE_CANDIDATES: readonly string[] = [
   "ui2api-chrome", // ui2api's own dedicated dir, if present
   "google-chrome",
   "chromium",
@@ -88,7 +95,7 @@ export function resolveChromeOwner(): ChromeOwner {
   let profile: string | null = null;
   let profileExistsButUnreadable = false;
   if (home) {
-    const configDir = join(home, ".config");
+    const configDir = join(home, CHROME_CONFIG_DIR);
     for (const cand of PROFILE_CANDIDATES) {
       const p = join(configDir, cand);
       try {
@@ -128,7 +135,7 @@ export function resolveChromeOwner(): ChromeOwner {
   else if (!profile)
     missing =
       `no Chrome profile found for ${user} — expected one of ` +
-      `${PROFILE_CANDIDATES.map((c) => join(home, ".config", c)).join(", ")}. ` +
+      `${PROFILE_CANDIDATES.map((c) => join(home, CHROME_CONFIG_DIR, c)).join(", ")}. ` +
       `That is the only required setup: run Chrome as ${user} once (or via \`su - ${user}\` / \`sudo -u ${user}\`), ` +
       `log in (xhost + if you need to log in from your desktop), and the profile appears.`;
 
@@ -138,6 +145,27 @@ export function resolveChromeOwner(): ChromeOwner {
 /** The path to hand Chrome as --user-data-dir, when one exists. */
 export function chromeOwnerProfilePath(): string | undefined {
   return resolveChromeOwner().profile ?? undefined;
+}
+
+/**
+ * THE PROFILE PATH, RELATIVE TO THE OWNER'S HOME, DERIVED FROM ITS RANKED LIST —
+ * `.config/ui2api-chrome` on this box.
+ *
+ * GOAL 177, and this function exists because of a measured failure. Two spellings
+ * of one path coexisted: `.config/ui2api-chrome` (the provision script, the
+ * systemd unit, the profile scanner) and `.ui2api-chrome` (the readiness gate),
+ * and the gate was therefore probing a directory nothing provisions or launches.
+ * Every consumer that restated the string is a copy that can drift; this is the
+ * one place it is computed.
+ *
+ * A shell script and a systemd unit cannot import a TS module, so for those the
+ * string is necessarily restated — and that is exactly why `test/
+ * chrome-profile-path-truth.test.ts` COMPARES each restatement against this
+ * derived value instead of trusting either. Derivation where it is possible,
+ * comparison where it is not.
+ */
+export function chromeOwnerRelativeProfilePath(): string {
+  return join(CHROME_CONFIG_DIR, PROFILE_CANDIDATES[0]);
 }
 
 /**

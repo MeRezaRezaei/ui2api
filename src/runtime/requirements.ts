@@ -255,23 +255,36 @@ function defaultChromeVersion(exec: string): string | null {
 //
 // It used to answer "does the machine-owned browser home exist?" by building its
 // OWN path — `join(ui2apiUserHome(user), ".ui2api-chrome")` — and that path was
-// NOT the path anything provisions or launches. MEASURED on this box:
-//   - live + launched:  /home/ui2api/.config/ui2api-chrome  (systemd
-//     `ui2api-chrome.service` MainPID 1895, `--user-data-dir=` read out of
-//     /proc/1895/cmdline; and `resolveChromeOwner().profile`, which feeds
-//     `userChromeProfile()` -> `launchBrowser()` in src/runtime/browser.ts)
-//   - probed by the readiness gate: /home/ui2api/.ui2api-chrome
-// `.ui2api-chrome` was a stale 187M orphan (dir mtime 2026-09-22) left over from
-// a "wave-19 seam" that nothing provisions; the live profile is the 154M
-// `.config` one, written to minutes before this was measured. So the gate was
-// not merely vacuous — it was PASSING FOR THE WRONG REASON, on a dead directory,
-// and would have kept saying "present" if the real profile were deleted outright.
+// NOT the path anything provisions or launches. MEASURED on this box with
+// `sudo -n` (GOAL 177; the ui2api user's home is not readable from a normal
+// session, so this was read, never guessed):
+//   - LIVE + launched: /home/ui2api/.config/ui2api-chrome
+//     systemd `ui2api-chrome.service` MainPID 1895, `--user-data-dir=` read out
+//     of /proc/1895/cmdline, and all 11 chrome child processes carry the same
+//     flag; the dir was written seconds before the measurement (155M).
+//   - probed by the readiness gate (before this change): /home/ui2api/.ui2api-chrome
+//     a 187M DEAD ORPHAN — dir mtime 2026-09-22 12:29, and
+//     `find -newermt 2026-09-25` over it returns NOTHING while the live dir
+//     returns files from the same day. It was left by a "wave-19 seam" that
+//     nothing provisions.
+// So the gate was not merely vacuous — it was PASSING FOR THE WRONG REASON, on a
+// dead directory, and would have kept saying "present" if the real profile were
+// deleted outright. (The two spellings also BOTH EXIST on disk, which is why
+// deleting the orphan was not part of the fix: a machine fact is not this
+// module's business, and the gate must be right whether or not it is gone.)
 //
-// The path now has exactly ONE owner, `resolveChromeOwner()` in
+// The path now has exactly ONE owner: `resolveChromeOwner()` in
 // src/runtime/chrome-owner.ts, which is also what `launchBrowser()` consumes — so
 // the readiness gate and the launch seam cannot disagree by construction. There
-// is no second spelling to keep in sync, and `test/chrome-profile-path-truth`
-// fails if one is reintroduced.
+// is no second spelling here to keep in sync.
+//
+// THE COMPARISON, because "there is no second spelling HERE" is not the same as
+// "there is no second spelling": the provision script, the systemd unit and the
+// OS-wide scanner restate the path in languages that cannot import this module.
+// `test/chrome-profile-path-truth.test.ts` compares each of those against the
+// value derived from the owner. This comment used to name
+// `test/chrome-profile-path-truth` as the gate that would catch a
+// reintroduction — and that file DID NOT EXIST, which is why the gate now does.
 
 // The attach probe is the ONLY network this module performs: a short HTTP GET
 // against the CDP endpoint of an ALREADY-RUNNING Chrome. Never launches one.
