@@ -90,6 +90,7 @@ import {
   verdictPath,
   verdictProblems,
 } from "./helpers/browser-verdict.js";
+import { classifyLaunchFailure } from "./helpers/browser-launchability.js";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PKG = packageJson(ROOT);
@@ -828,4 +829,107 @@ test("R8 the knob table's own stated figures EQUAL the measurement, not a floor"
   // And the property that matters most: nothing read in code is undocumented.
   const undocumented = [...read].filter((k) => !documented.has(k));
   assert.deepEqual(undocumented, [], "a knob read by shipped code with no table row is invisible");
+});
+
+/* ========================================================================
+ * R9 — the UNIT lane's browser guard must be at the LAUNCH seam, and must
+ * not be able to go green by skipping.
+ *
+ * GOAL 151. MEASURED DEFECT: `test/wigolo-engine.test.ts` guarded its browser
+ * work with `if (!env) t.skip(...)`, where `env` came from a health-poll of the
+ * wigolo DAEMON PROCESS (`{status:"healthy"}`). That is daemon LIVENESS, not
+ * browser LAUNCHABILITY, and this box exhibits exactly the gap: the daemon was
+ * healthy and its browser tier could not launch (`chromium_headless_shell-1228`
+ * absent). So the guard let the browser work run, there was no `catch` in the
+ * bodies, and THREE tests went red from a guard whose job was to prevent red.
+ *
+ * The guard is now `guardBrowser` in `test/helpers/browser-launchability.ts`,
+ * which probes the real seam and classifies the outcome. Three ways this can rot
+ * again, one rule each:
+ *
+ *   R9a THE BOUNDARY — the classifier must separate PROVISIONING from
+ *       REGRESSION. Both are red, but a reader must be able to tell them apart,
+ *       because the remedy differs entirely (one command vs a code change).
+ *       Fail-closed: an unrecognised failure is a REGRESSION.
+ *   R9b THE SKIP BAN — the guard must THROW, never `t.skip`. A skip reports the
+ *       unit lane green with the browser half untested and nothing anywhere
+ *       recording it. MEASURED by mutation: converting the throw back into a
+ *       skip moved these tests from `fail 3` to `skipped 3` and the file GREEN.
+ *       This rule pins that, so the honest branch cannot quietly become the
+ *       dishonest one.
+ *   R9c THE WIRING — `test/wigolo-engine.test.ts` must actually USE the shared
+ *       guard, not carry its own third idiom. This is R7c pointed at the unit
+ *       lane: a correct gate that nothing calls is the GOAL-145 defect again.
+ */
+
+test("R9a the launch classifier separates provisioning from regression, and is fail-closed", () => {
+  // (1) The MEASURED fault on this box. Playwright named the absent artifact.
+  const missing = classifyLaunchFailure(
+    "wigolo extract (HTTP 500): browserType.launch: Executable doesn't exist at " +
+      "/home/me/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell",
+  );
+  assert.equal(missing.kind, "browser-provisioning", `the measured missing-shell fault is provisioning; got ${missing.reason}`);
+  assert.match(missing.reason, /chromium_headless_shell-1228/, "the reason must NAME the artifact that is absent");
+
+  // (2) The browser was PRESENT and misbehaved. A real regression, and it must
+  // not be excused as an environment fault — this is the axis that matters.
+  const regression = classifyLaunchFailure("TimeoutError: locator.click: Timeout 30000ms exceeded");
+  assert.equal(regression.kind, "launch-regression", "a browser that launched and then failed is a regression");
+  assert.match(regression.reason, /not an environment fault/);
+
+  // (3) A spawn that died is a regression too, not a missing binary.
+  assert.equal(classifyLaunchFailure("chrome exited early (code 21)").kind, "launch-regression");
+
+  // (4) The OS-library axis is DELEGATED, so there is exactly ONE answer to
+  // "is this shared object Debian's fault or ours?" in this repository. If the
+  // delegation is ever removed and the list re-typed here, these two flip.
+  const ours = classifyLaunchFailure(
+    "error while loading shared libraries: libui2api-native.so: cannot open shared object file",
+  );
+  assert.equal(ours.kind, "launch-regression", "a library THIS repo introduced is never excusable");
+  const theirs = classifyLaunchFailure(
+    "error while loading shared libraries: libnspr4.so: cannot open shared object file",
+  );
+  assert.equal(theirs.kind, "browser-provisioning", "the measured libnspr4 fault stays excusable");
+});
+
+test("R9b the unit browser guard FAILS on a missing browser — it must never SKIP", () => {
+  // The honest branch is a THROW. This is the single most important assertion in
+  // this rule, because the failure it prevents is INVISIBLE: a skip yields
+  // `skipped 3, fail 0`, a green box, and no record that the browser half of the
+  // wigolo engine went untested. Read from the real module, not a copy.
+  const src = readFileSync(join(ROOT, "test", "helpers", "browser-launchability.ts"), "utf8");
+  const fn = src.slice(src.indexOf("export async function guardBrowser"));
+  assert.ok(fn.length > 0, "guardBrowser is gone from the helper — the unit lane has no launchability guard");
+
+  // A skip is only acceptable where the SUBJECT is absent (no wigolo checkout),
+  // never where the subject's browser is dead. The helper itself must not be able
+  // to express one.
+  assert.ok(
+    !/\bt\.skip\s*\(/.test(fn),
+    "guardBrowser must never call t.skip: a skip makes the unit lane green while the browser half goes untested",
+  );
+  assert.ok(
+    /throw new Error\(\s*`browser not launchable/.test(fn) || /throw new Error\(\s*\n?\s*`browser not launchable/.test(fn),
+    "guardBrowser must throw a NAMED error when the browser cannot launch — that throw is what turns the lane red",
+  );
+
+  // AND the wiring: `test/wigolo-engine.test.ts` must route its browser work
+  // through the shared guard. A correct guard that nothing calls is the
+  // GOAL-145 defect ("six gates on disk that no script ran") pointed at the unit
+  // lane. This also pins that the OLD wrong-seam idiom is GONE rather than merely
+  // coexisting, because three incompatible `maybe()` forms was the original rot.
+  const engine = readFileSync(join(ROOT, "test", "wigolo-engine.test.ts"), "utf8");
+  assert.ok(
+    /guardBrowser\s*\(/.test(engine),
+    "test/wigolo-engine.test.ts no longer calls guardBrowser — its browser work is unguarded again",
+  );
+  assert.ok(
+    /from "\.\/helpers\/browser-launchability\.js"/.test(engine),
+    "test/wigolo-engine.test.ts must import the SHARED guard, not carry a third local idiom",
+  );
+  assert.ok(
+    !/\bconst maybe\s*=/.test(engine),
+    "the old `maybe()` wrong-seam idiom is back — it guarded daemon LIVENESS, not browser launchability",
+  );
 });

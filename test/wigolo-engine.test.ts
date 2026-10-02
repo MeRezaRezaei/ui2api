@@ -15,6 +15,7 @@ import { describe, it, after } from "node:test";
 import type { ActionMap } from "../src/types.js";
 import { createExecContext } from "../src/plugin/context.js";
 import { loadPluginFromMap } from "../src/plugin/loader.js";
+import { guardBrowser } from "./helpers/browser-launchability.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -127,16 +128,57 @@ after(async () => {
 describe("wagolo engine", () => {
   const baseUrl = env ? env.fixture.url : "";
 
-  const maybe = (t: any, fn: () => Promise<void> | void, opts?: object) => {
+  // GOAL 151. THE WRONG-SEAM DEFECT, and what replaced it.
+  //
+  // WAS: `if (!env) { t.skip(...) }`. `env` is set by the top-level await at
+  // :100-116, which health-POLLS THE DAEMON and resolves on `{status:"healthy"}`.
+  // So the guard answered "is the daemon PROCESS alive?" and used that to decide
+  // whether to run work that needs "can the daemon's BROWSER TIER launch?".
+  // MEASURED on this box, the daemon was healthy and its browser tier could not
+  // launch (`chromium_headless_shell-1228` absent), so `maybe()` returned `fn()`,
+  // the browser work ran inside the body, no `catch` existed there, and THREE
+  // tests went red from a guard whose entire purpose was to prevent red.
+  //
+  // NOW: `guardBrowser` probes the REAL seam — it asks the daemon to actually
+  // drive its browser once — and classifies the outcome. A browser that cannot
+  // launch produces a NAMED red, never a silent skip, because a skip would make
+  // `npm run test:unit` green while the browser half of this engine went
+  // entirely untested. That is the defect `test/helpers/browser-verdict.ts` was
+  // built to end; reintroducing it here through a different door would undo it.
+  //
+  // The probe is deliberately NOT `chromium.executablePath()`-shaped. MEASURED:
+  // `../wigolo`'s own `detectPlaywrightInstall()` reported `installed: true` on
+  // this very box while every headless launch failed, because it fs-checks the
+  // FULL chromium (`chromium-1228`) while a headless launch resolves to the
+  // HEADLESS SHELL (`chromium_headless_shell-1228`). A path that exists is not a
+  // browser that launches. Only the launch decides, so only the launch is asked.
+  const probeBrowserLaunch = async () => {
+    // The smallest possible real round-trip through the daemon's browser tier:
+    // one DOM extract of the fixture's heading. If this throws, the tier cannot
+    // launch, and the guard classifies the daemon's own error text.
+    const ctx = createExecContext(config as any, { baseUrl }, "wigolo");
+    return ctx.dom.extract("text h1");
+  };
+
+  const guarded = (t: any, fn: () => Promise<void> | void) => {
     if (!env) {
+      // The one skip that REMAINS, and it is not a browser fault: there is no
+      // wigolo checkout, so there is no daemon to talk to and no engine under
+      // test. Skipping is correct because the SUBJECT is absent, not because the
+      // subject failed — a distinction the old guard could not make, which is
+      // precisely why it also excused a dead browser.
       t.skip("wigolo daemon unavailable (no wigolo repo) — skipping wigolo-engine test");
       return;
     }
-    return fn();
+    // `fn` is typed `void | Promise<void>` to match the original `maybe()`
+    // signature at this call site, so it is wrapped into a promise here rather
+    // than widening the helper's contract to admit a synchronous body — the
+    // helper awaits `run()` and every body in this file is already async.
+    return guardBrowser(t, "wigolo-daemon-tier", probeBrowserLaunch, () => Promise.resolve(fn()));
   };
 
-  it("dom.extract reads through the wigolo daemon (no browser needed)", async (t) => {
-    await maybe(t, async () => {
+  it("dom.extract reads through the wigolo daemon's browser tier", async (t) => {
+    await guarded(t, async () => {
       const ctx = createExecContext(config as any, { baseUrl }, "wigolo");
       const heading = await ctx.dom.extract("text h1");
       assert.equal(heading, "UI2API Demo SPA");
@@ -144,15 +186,32 @@ describe("wagolo engine", () => {
   });
 
   it("replay runs a captured network call as a cookie-anchored request", async (t) => {
-    await maybe(t, async () => {
+    // NOT guarded, deliberately, and this is a MEASURED decision rather than an
+    // oversight. `ctx.replay` is a captured-API-call emitter: it issues a plain
+    // HTTP request carrying the saved session cookies, and the wigolo context says
+    // so in its own words ("No browser process involved"). The proof is not the
+    // comment but the run: on this box, with the browser tier unable to launch,
+    // THIS test PASSED while all three of its browser-dependent siblings failed.
+    // Guarding it would have made a test that needs no browser fail for want of
+    // one — the guard would be asserting something untrue about the code under
+    // test, and would go red on a healthy browser-hostile box for no reason.
+    //
+    // The title above used to say "(no browser needed)". That was already true and
+    // already load-bearing; it is now stated in the body too, because the guard
+    // that makes it load-bearing sits three lines above it.
+    if (!env) {
+      t.skip("wigolo daemon unavailable (no wigolo repo) — skipping wigolo-engine test");
+      return;
+    }
+    await (async () => {
       const ctx = createExecContext(config as any, { baseUrl }, "wigolo");
       const body = await ctx.replay({ url: "/api/query", method: "POST", body: { q: "hi" } });
       assert.equal(body, "{}");
-    });
+    })();
   });
 
   it("generated map tool executes through the wigolo engine", async (t) => {
-    await maybe(t, async () => {
+    await guarded(t, async () => {
       rmSync(config.dataDir, { recursive: true, force: true });
       mkdirSync(config.dataDir, { recursive: true });
       const map: ActionMap = {
@@ -185,7 +244,7 @@ describe("wagolo engine", () => {
   });
 
   it("dom.click drives an interaction and returns the page result", { timeout: CLICK_TIMEOUT }, async (t) => {
-    await maybe(t, async () => {
+    await guarded(t, async () => {
       const ctx = createExecContext(config as any, { baseUrl }, "wigolo");
       // Either the wigolo daemon's browser tier served the click (rendered page
       // markdown) or the graceful native fallback did ("" with a logged warning).
