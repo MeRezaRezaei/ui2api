@@ -519,6 +519,22 @@ export function docsMentionPath(rel: string, root: string = ROOT): boolean {
  * precisely the vacuous pass this pin exists to kill.
  */
 export const LIVENESS_PROBES: Record<string, LivenessProbe> = {
+  // The single-owner gate's exemption list is EMPTY today, so this probe is
+  // dormant until the first entry is added -- and that is the point: an
+  // allow-list nobody can check is a suppression list that grows silently. An
+  // entry is live only while the file it excuses still exists, that line is
+  // still in it, and the entry carries a NAMED reason. An entry that outlives
+  // its violation, loses its file, or goes anonymous is dead and must fail.
+  "test/chrome-owner-uid-single-owner.test.ts::ALLOW_LIST": (e) => {
+    const rel = `test/${e.fields.file ?? ""}`;
+    if (!e.fields.file || !existsSync(join(ROOT, rel))) return false;
+    const reason = (e.fields.reason ?? "").trim();
+    if (!reason) return false;
+    const line = Number(e.fields.line);
+    if (!Number.isInteger(line) || line < 1) return false;
+    const lines = readFileSync(join(ROOT, rel), "utf8").split("\n");
+    return line <= lines.length && lines[line - 1]!.trim().length > 0;
+  },
   // An entry excuses ONE line of ONE test file: the file must still exist and
   // that line must still be the offending one.
   "test/host-independence-gate.test.ts::ALLOW_LIST": (e) => {

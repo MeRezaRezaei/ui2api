@@ -1,9 +1,9 @@
-// THE SINGLE OWNER OF "IS THIS PROCESS THE CHROME OWNER?" — one question, one
-// implementation, one answer.
+// THE SINGLE OWNER OF THE PASSWD DATABASE — one reader, two questions ("what is
+// this user's uid" and "does this user exist"), one answer each.
 //
 // ── WHAT WAS MEASURED ─────────────────────────────────────────────────────────
 //
-// Three functions answered the same question, and none of them asked the other:
+// THREE functions answered the same question, and none of them asked the other:
 //
 //   1. `isChromeOwnerProcess()`  src/runtime/browser.ts      — the LAUNCH GUARD.
 //      Read the user's line in `/etc/passwd` itself, cached it, and used the
@@ -25,6 +25,31 @@
 // that is a wall, not a bug to engineer around". A guard that guesses is worse
 // than no guard.
 //
+// ── AND THEN A FOURTH READER OF THE SAME DATABASE ─────────────────────────────
+//
+// `userExists()` (src/runtime/xhost-capture.ts) was deliberately left out of
+// that fold — it was left out as a QUESTION, not as a class — and the follow-up
+// found it answers the SAME database with a DIFFERENT question: "does this user
+// exist", not "what is its uid". It ran its own `getent passwd`. R1 and R2 above
+// could not see it (they pin the passwd FILE and the getuid READ), which is
+// exactly what latent drift looks like: a second reader of one database that no
+// rule named.
+//
+// It was not cosmetic. `browserHomeCheck()` (src/runtime/requirements.ts) asks
+// `userExists(user)` and then reads `resolveChromeOwner().missing` — which is
+// `passwdEntry(user) === null`. The old `userExists` FELL BACK to a
+// `/home/<user>` probe when the lookup failed, so on the ordinary shape of a
+// deleted or half-provisioned account (no NSS entry, home directory left
+// behind) ONE check printed `ui2api OS user present` and `no such user: ui2api`
+// together. Two answers from one module, in one output.
+//
+// It is now `passwdUserExists()` — derived from `passwdEntry()`, beside the uid
+// it always shared a database with — and R3 below is what stops it walking back
+// in. The `/home/<user>` fallback stayed at the capture site: it is the login-UX
+// data dir asking whether there is a home to write under, not a passwd-database
+// question, and moving it here would have made this module answer a question it
+// does not own.
+//
 // ── WHY THIS IS A GATE AND NOT A COMMENT ──────────────────────────────────────
 //
 // The comment that documents the decision will be read once; the second
@@ -43,9 +68,18 @@
 //     exists to stop returning. (It is not "use the resolver instead" advice
 //     dressed as a pin: the predicate is mechanical, and the no-hit side is
 //     pinned too, so the rule cannot degrade into matching everything.)
-//   R3 REQUIRED DERIVATION    — the resolver exists, is exported, and BOTH former
-//     implementors import it. Without this, R1/R2 could be satisfied by DELETING
-//     the guard instead of consolidating it.
+//   R3 SECOND passwd READER    — outside the resolver, the passwd DATABASE may
+//     not be READ at all. This is the rule that had no name for two folds: it
+//     catches a second reader of the OTHER question (existence) as readily as a
+//     second reader of the first, including `id -u <name>`, which resolves
+//     through the same NSS.
+//   R4 REQUIRED uid DERIVATION— the resolver exists, is exported, and BOTH former
+//     uid implementors import it. Without this, R1/R2 could be satisfied by
+//     DELETING the guard instead of consolidating it.
+//   R5 REQUIRED existence DERIVATION — the same, for the folded half: the owner
+//     module spawns the lookup exactly ONCE, exports `passwdUserExists()`, and
+//     the former reader derives it. Otherwise R3 is satisfiable by deleting the
+//     existence question altogether.
 //
 // ── NO REAL MACHINE, NO REAL BROWSER ──────────────────────────────────────────
 //
@@ -67,10 +101,24 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
  *  hopes for. */
 export const RESOLVER_FILE = "src/runtime/chrome-owner.ts";
 
-/** The exported comparison every former implementor must derive. */
+/** The exported comparison every former uid implementor must derive. */
 export const RESOLVER_EXPORT = "isUidTheChromeOwner";
 
-export type RuleId = "R1-passwd-bypass" | "R2-second-uid-comparison";
+/** The exported EXISTENCE question every former passwd reader must derive. Same
+ *  module, same database, second question — see the header. */
+export const RESOLVER_EXISTS_EXPORT = "passwdUserExists";
+
+export type RuleId =
+  | "R1-passwd-bypass"
+  | "R2-second-uid-comparison"
+  | "R3-second-passwd-database-reader";
+
+/** The exec family — a `passwd` literal sitting next to one of these is a READ
+ *  of the database; the same word in a table of secret filenames is not. */
+const EXEC_TOKEN = /\b(?:execFileSync|execFile|execSync|spawnSync|spawn|exec|fork)\b/;
+
+/** How many lines either side of the literal still count as "the same call". */
+const EXEC_PROXIMITY = 3;
 
 export interface Offence {
   rule: RuleId;
@@ -160,14 +208,59 @@ export function isSecondUidComparison(file: string, codeLine: string): boolean {
   return !codeLine.includes(RESOLVER_EXPORT);
 }
 
+/**
+ * R3: a SECOND READER of the passwd DATABASE, outside the resolver.
+ *
+ * The fold this rule exists for removed a `getent passwd` from
+ * `xhost-capture.ts` that R1 and R2 were structurally blind to: R1 pins the
+ * passwd FILE, R2 pins the getuid READ. Neither has an opinion about a second
+ * reader of the OTHER question ("does this user exist"), which is why the
+ * duplicate survived a fold whose whole subject was duplicates of one database.
+ *
+ * Two shapes fire, both of which ask a NAME a question through NSS:
+ *   * the database key itself — `execFileSync(<bin>, ["passwd", user])`, the
+ *     shape that was folded;
+ *   * `id -u <name>` — same NSS, same answer, different binary, so a maintainer
+ *     who "just wanted the uid" would reach for it and land in a third answer.
+ *
+ * ⛔ AND IT IS A READ, NOT A WORD — which the FIRST version of this rule got
+ * wrong, and the corpus proved it on its first run rather than in theory:
+ * `src/runtime/redact.ts` and `src/runtime/file-attach.ts` both list `"passwd"`
+ * as a SECRET FILENAME (a credential basename to refuse, a key name to scrub),
+ * which is a completely legitimate use of the word with nothing to do with any
+ * database. A pin that fires on correct code is a pin whose fix is to delete the
+ * thing it was protecting, so the rule requires the literal to sit next to an
+ * exec-family CALL. The window is a few lines rather than "the same line"
+ * because the realistic multi-line shape puts the arguments on the lines below
+ * the call:
+ *
+ *     const out = execFileSync(
+ *       "getent",
+ *       ["passwd", user],
+ *     );
+ *
+ * Keying on the exec CALL is also what makes the rule multiline-safe, which is
+ * the direction this gate is allowed to be wrong in: a lookup whose args are
+ * wrapped must still be caught, while a word in a data table must not.
+ */
+export function isPasswdDatabaseSecondReader(file: string, lines: string[], i: number): boolean {
+  if (file === RESOLVER_FILE) return false;
+  const code = lines[i] ?? "";
+  const namesDatabase = /["'`]passwd["'`]/.test(code) || (/["'`]id["'`]/.test(code) && /-u\b/.test(code));
+  if (!namesDatabase) return false;
+  for (let j = Math.max(0, i - EXEC_PROXIMITY); j <= Math.min(lines.length - 1, i + EXEC_PROXIMITY); j++) {
+    if (EXEC_TOKEN.test(lines[j] ?? "")) return true;
+  }
+  return false;
+}
+
 /** Scan one already-read source file. Shared by the corpus scan and by the
  *  synthetic self-tests below, so the predicate under test is the predicate that
  *  runs against the repo. */
 export function scanFile(rel: string, src: string): Offence[] {
   const out: Offence[] = [];
-  blankComments(src)
-    .split("\n")
-    .forEach((code, i) => {
+  const codeLines = blankComments(src).split("\n");
+  codeLines.forEach((code, i) => {
       const n = i + 1;
       if (isPasswdFileBypass(rel, code))
         out.push({
@@ -190,6 +283,22 @@ export function scanFile(rel: string, src: string): Offence[] {
             "a `process.getuid` read that is not handed to " +
             RESOLVER_EXPORT +
             "() is a second implementation of \"is this process the chrome owner?\" — the read exists only to be compared",
+        });
+      if (isPasswdDatabaseSecondReader(rel, codeLines, i))
+        out.push({
+          rule: "R3-second-passwd-database-reader",
+          file: rel,
+          line: n,
+          text: code.trim(),
+          detail:
+            "a second READER of the passwd DATABASE outside " +
+            RESOLVER_FILE +
+            ". The uid and the existence of a name are two questions about one database, and that module answers both " +
+            "(" +
+            RESOLVER_EXPORT +
+            "() and " +
+            RESOLVER_EXISTS_EXPORT +
+            "()). Two readers is how `ui2api requirements` came to print \"user present\" and \"no such user\" in the same check",
         });
     });
   return out;
@@ -229,16 +338,17 @@ const fmt = (o: Offence): string => `  ${o.file}:${o.line} [${o.rule}] ${o.text}
 
 // ─────────────────────────────────────────────────────────────────── the gate ──
 
-test("NO SECOND IMPLEMENTATION: the chrome-owner uid comparison has exactly one home", () => {
+test("NO SECOND IMPLEMENTATION: the passwd database has exactly one home, for BOTH questions", () => {
   const offences = scanSrc();
   const unallowed = offences.filter((o) => !ALLOW_LIST.some((a) => covers(a, o)));
   assert.deepEqual(
     unallowed.map(fmt),
     [],
-    `"is this process the chrome owner?" must have ONE implementation (${RESOLVER_EXPORT} in ${RESOLVER_FILE}). ` +
-      `Every other implementation is a second answer, and they have already disagreed about one running process ` +
+    `"is this process the chrome owner?" (${RESOLVER_EXPORT}) and "does this user exist?" (${RESOLVER_EXISTS_EXPORT}) must ` +
+      `both have ONE implementation, and both live in ${RESOLVER_FILE}, because both are questions about ONE database. ` +
+      `Every other implementation is a second answer, and the uid pair has already disagreed about one running process ` +
       `(a NSS-only owner account: /etc/passwd says "-1", getent says the real uid):\n${unallowed.map(fmt).join("\n")}\n` +
-      `If this getuid read really is unrelated to the chrome owner, add a NAMED reason to ALLOW_LIST in this file.`,
+      `If a passwd-database read really is unrelated to the chrome owner, add a NAMED reason to ALLOW_LIST in this file.`,
   );
 });
 
@@ -256,7 +366,7 @@ test("the scan is NOT VACUOUS: it read a real corpus and found the resolver in i
   );
 });
 
-test("R3 DERIVATION: the resolver is exported and BOTH former implementors import it", () => {
+test("R4 uid DERIVATION: the resolver is exported and BOTH former implementors import it", () => {
   const resolver = readFileSync(join(ROOT, RESOLVER_FILE), "utf8");
   assert.match(
     resolver,
@@ -264,7 +374,14 @@ test("R3 DERIVATION: the resolver is exported and BOTH former implementors impor
     `the comparison must be EXPORTED from ${RESOLVER_FILE}, or it cannot be derived from`,
   );
   for (const consumer of ["src/runtime/browser.ts", "src/runtime/chrome-daemon.ts"]) {
-    const src = readFileSync(join(ROOT, consumer), "utf8");
+    // COMMENTS BLANKED, and this is a fix, not tidiness: matched on raw source,
+    // these pins are satisfied by the PROSE. Both consumers carry a doc block
+    // that writes `isUidTheChromeOwner()` in backticks — so renaming the CALL to
+    // something else, or deleting it, left both pins green while the doc block
+    // kept saying the guard derives the comparison. A derivation pin that a
+    // comment can satisfy is not a pin. (Caught by planting exactly that
+    // mutation, the way this file asks of every rule it holds.)
+    const src = blankComments(readFileSync(join(ROOT, consumer), "utf8"));
     assert.match(
       src,
       new RegExp(`import[^;]*${RESOLVER_EXPORT}[^;]*from ["']\\./chrome-owner\\.js["']`),
@@ -273,9 +390,62 @@ test("R3 DERIVATION: the resolver is exported and BOTH former implementors impor
     assert.match(
       src,
       new RegExp(`[^A-Za-z0-9_]${RESOLVER_EXPORT}\\s*\\(`),
-      `${consumer} must CALL ${RESOLVER_EXPORT}() — importing it without calling it is not a derivation`,
+      `${consumer} must CALL ${RESOLVER_EXPORT}() — importing it without calling it is not a derivation, and a doc block that merely names it is not one either`,
     );
   }
+});
+
+test("R5 existence DERIVATION: the folded half is owned, spawned once, and derived by its former reader", () => {
+  const resolver = readFileSync(join(ROOT, RESOLVER_FILE), "utf8");
+  assert.match(
+    resolver,
+    new RegExp(`export function ${RESOLVER_EXISTS_EXPORT}\\s*\\(`),
+    `"does this user exist?" must be EXPORTED from ${RESOLVER_FILE} — the folded question needs an owner, or R3 is satisfiable by DELETING it`,
+  );
+
+  // ONE spawn, one reader. This is the mechanical form of "the existence answer
+  // is derived from the uid answer": if the owner module ever spawns the lookup
+  // a second time — for the existence question, for a second name, for a cache
+  // miss — it is a second reader again, whatever the function is called.
+  const spawns = (resolver.match(/execFileSync\(/g) ?? []).length;
+  assert.equal(
+    spawns,
+    1,
+    `${RESOLVER_FILE} must spawn the passwd lookup exactly ONCE (found ${spawns}); two questions about one database are answered by one reader, and a second spawn is that reader again`,
+  );
+
+  const consumer = "src/runtime/xhost-capture.ts";
+  // Comments blanked, for the same reason as R4 and for the same measured reason:
+  // `userExists()`'s own doc block NAMES `passwdUserExists()` in prose, so a raw
+  // match is satisfied by the comment that documents the fold.
+  const src = blankComments(readFileSync(join(ROOT, consumer), "utf8"));
+  assert.match(
+    src,
+    new RegExp(`import[^;]*${RESOLVER_EXISTS_EXPORT}[^;]*from ["']\\./chrome-owner\\.js["']`),
+    `${consumer} must import ${RESOLVER_EXISTS_EXPORT} from ./chrome-owner.js — it used to run its OWN getent passwd, which is the fourth reader of one database this gate exists to prevent`,
+  );
+  assert.match(
+    src,
+    new RegExp(`[^A-Za-z0-9_]${RESOLVER_EXISTS_EXPORT}\\s*\\(`),
+    `${consumer} must CALL ${RESOLVER_EXISTS_EXPORT}() — importing it without calling it is not a derivation, and its doc block naming the function is not one either`,
+  );
+
+  // …and the seam the provisioning/requirements fixtures inject is UNCHANGED by
+  // the fold, because the fold was allowed to touch only the default's BODY.
+  // If this ever starts failing, `Ui2apiUserDataDirDeps.userExists` /
+  // `RequirementsDeps.userExists` stopped being injectable and every `() => true`
+  // fixture in test/ became a lie about a function nobody can replace.
+  assert.match(
+    src,
+    /userExists\?:\s*\(user:\s*string\)\s*=>\s*boolean;/,
+    "the injectable seam must still be a plain `(user: string) => boolean` dep on Ui2apiUserDataDirDeps — folding the read must not fold the seam the tests inject through",
+  );
+  const req = readFileSync(join(ROOT, "src/runtime/requirements.ts"), "utf8");
+  assert.match(
+    req,
+    /userExists:\s*\(user:\s*string\)\s*=>\s*boolean;/,
+    "RequirementsDeps.userExists must remain the injectable seam; requirements.ts is a consumer, not a reader",
+  );
 });
 
 test("ALLOW_LIST LIVENESS: no entry may outlive its violation", () => {
@@ -397,6 +567,128 @@ test("MUTATION: R2 bites on every planted SECOND comparison, and not on a hand-o
     scanFile(RESOLVER_FILE, "return String(uid) === chromeOwnerUid(user);"),
     [],
     "the comparison belongs to the resolver",
+  );
+});
+
+test("MUTATION: R3 bites on a SECOND reader of the passwd database, and not on the derivation", () => {
+  // The lookup binary is ASSEMBLED, not spelled, for the same reason the R2
+  // fixtures above assemble it: `test/host-independence-gate.test.ts` fails a
+  // unit test that spells a host-inspection binary next to an exec call, and a
+  // fixture that names a probe it never runs is the shape that later gets
+  // copied into real code. `PASSWD_LOOKUP` is a fixture token, not a command.
+  const PASSWD_LOOKUP = ["get", "ent"].join("");
+  const plants: Array<[string, string]> = [
+    [
+      "the FOURTH reader that was folded: existence asked as its own getent call",
+      [
+        'import { execFileSync } from "node:child_process";',
+        "export function userExists(user: string): boolean {",
+        `  execFileSync(${JSON.stringify(PASSWD_LOOKUP)}, ["passwd", user], { encoding: "utf8", stdio: "pipe" });`,
+        "  return true;",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "the same lookup with its arguments wrapped onto the next line",
+      [
+        'import { execFileSync } from "node:child_process";',
+        "export function userExists(user: string): boolean {",
+        "  const out = execFileSync(",
+        `    ${JSON.stringify(PASSWD_LOOKUP)},`,
+        '    ["passwd", user],',
+        '    { encoding: "utf8" },',
+        "  );",
+        "  return out.length > 0;",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "`id -u`, which resolves through the same NSS under a different name",
+      [
+        'import { execFileSync } from "node:child_process";',
+        "export function userExists(user: string): boolean {",
+        `  const out = execFileSync("id", ["-u", user], { encoding: "utf8" }).trim();`,
+        "  return /^\\d+$/.test(out);",
+        "}",
+      ].join("\n"),
+    ],
+  ];
+  for (const [label, plant] of plants) {
+    const rules = scanFile("src/runtime/xhost-capture.ts", plant).map((o) => o.rule);
+    assert.ok(
+      rules.includes("R3-second-passwd-database-reader"),
+      `R3 must fire on ${label}; got ${JSON.stringify(rules)}`,
+    );
+  }
+
+  // The no-hit side, and it is the shape that is actually SHIPPED: the consumer
+  // derives the answer and keeps only its own policy (a /home probe), which is
+  // not a passwd-database read.
+  const shipped = [
+    'import { passwdUserExists } from "./chrome-owner.js";',
+    "export function userExists(user: string): boolean {",
+    "  if (passwdUserExists(user)) return true;",
+    "  return existsSync(`/home/${user}`);",
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    scanFile("src/runtime/xhost-capture.ts", shipped),
+    [],
+    "deriving the existence answer from its owner is the FIX, not a second reader — if this fires, the gate bans the fold it exists to enforce",
+  );
+
+  // The prose case: the doc block that EXPLAINS the fold names the database and
+  // the old call. It is blanked, so it does not offend. Without the blanking,
+  // this file's own reasoning (and chrome-owner.ts's) would be an offence.
+  const prose = [
+    "// this used to run its own getent passwd to ask whether the user exists",
+    '/* the passwd database is read in exactly one module */',
+    "const ok = passwdUserExists(user);",
+  ].join("\n");
+  assert.deepEqual(
+    scanFile("src/runtime/xhost-capture.ts", prose),
+    [],
+    "prose about the old implementation is documentation, not a second implementation",
+  );
+
+  // And the resolver itself is exempt: it is where BOTH readers used to be, and
+  // where the one reader now is.
+  assert.deepEqual(
+    scanFile(RESOLVER_FILE, plants[0]![1]),
+    [],
+    "the owner module is where the database is read; exempting it is the point of the rule",
+  );
+
+  // ⛔ THE NO-HIT SIDE THAT THE FIRST VERSION OF THIS RULE GOT WRONG. `"passwd"`
+  // is also a SECRET FILENAME: this is the real shape of src/runtime/redact.ts
+  // and src/runtime/file-attach.ts, and the word-only version of R3 fired on
+  // both of them on its first run. A gate that bans a credential basename is a
+  // gate whose cheapest fix is deleting the credential list, so this case is
+  // pinned here and not merely "observed not to happen".
+  const secretWord = [
+    "const SECRET_BASENAMES = new Set([",
+    '  "credentials",',
+    '  "shadow", "passwd", "master.key",',
+    "]);",
+  ].join("\n");
+  assert.deepEqual(
+    scanFile("src/runtime/file-attach.ts", secretWord),
+    [],
+    `"passwd" as a credential basename is not a passwd-DATABASE read; R3 must fire on the lookup, not on the word`,
+  );
+
+  // …and the same word IS still caught when a spawn sits next to it, which is
+  // the whole reason the rule is proximity-based rather than proximity-free.
+  const readNextToASpawn = [
+    'import { execFileSync } from "node:child_process";',
+    "export function vaultFile(user: string): string[] {",
+    '  const listed = execFileSync("ls", ["/home"], { encoding: "utf8" });',
+    '  return ["shadow", "passwd", "master.key", listed].filter(Boolean);',
+    "}",
+  ].join("\n");
+  assert.ok(
+    scanFile("src/runtime/file-attach.ts", readNextToASpawn).some((h) => h.rule === "R3-second-passwd-database-reader"),
+    "a passwd literal within the call window of a spawn is treated as a read — if this stops firing, the window is too tight to catch a wrapped lookup",
   );
 });
 

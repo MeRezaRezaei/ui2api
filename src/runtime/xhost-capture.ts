@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { userInfo } from "node:os";
 import { chromium } from "playwright";
 import { buildLaunchOptions, userChromeLaunchArgs } from "./browser.js";
+import { passwdUserExists } from "./chrome-owner.js";
 import { detectProfileIdentity, ingestProfile } from "./profile-ingest.js";
 import { accountSnapshotPath, saveAccountSnapshot, slugifyIdentity, slugCollision } from "./session-store.js";
 
@@ -122,14 +123,34 @@ export function ui2apiUserHome(user: string): string {
   return `/home/${user}`;
 }
 
-/** Does the user exist on this host? getent passwd, or /home/<user> on disk. */
+/**
+ * Does the user exist on this host?
+ *
+ * FOLDED (2026-10-03): this used to run its OWN `getent passwd` to ask the
+ * passwd-DATABASE question "does this user exist". That was a FOURTH reader of
+ * one database, and it was reachable from the SAME readiness check as
+ * `resolveChromeOwner()` — so the two could print opposite verdicts about one
+ * account on a box where the account is missing but `/home/<user>` survives.
+ * The database question now belongs to its single owner:
+ * `passwdUserExists()` in chrome-owner.ts, beside the uid lookup it always
+ * shared an answer with. See the doc block there.
+ *
+ * WHAT STAYS HERE IS THE POLICY, NOT THE READ: the `/home/<user>` fallback is
+ * the login-UX data dir asking whether there is a home to write under, which is
+ * not a passwd-database question. It also covers a host with no usable
+ * `getent` at all (minimal container / musl), where a real account has a home
+ * but no reachable NSS lookup.
+ *
+ * THE INJECTABLE SEAM IS UNCHANGED, which is why folding was safe: the dep
+ * every consumer injects (`Ui2apiUserDataDirDeps.userExists` here,
+ * `RequirementsDeps.userExists` in requirements.ts) is this FUNCTION, not its
+ * body. Only the default changed; `() => true` / `() => false` fixtures in
+ * test/xhost-capture.test.ts, test/requirements.test.ts and
+ * test/chrome-point-of-use.test.ts are unaffected and never reach the lookup.
+ */
 export function userExists(user: string): boolean {
-  try {
-    execFileSync("getent", ["passwd", user], { encoding: "utf8", stdio: "pipe" });
-    return true;
-  } catch {
-    return existsSync(`/home/${user}`);
-  }
+  if (passwdUserExists(user)) return true;
+  return existsSync(`/home/${user}`);
 }
 
 // Deps for ui2apiUserDataDir, injectable so the unit tests never touch a real

@@ -96,7 +96,8 @@ export interface ChromeOwner {
  *     whole design exists to avoid.)
  *
  * `test/chrome-owner-uid-single-owner.test.ts` pins that this stays the ONLY
- * place a name is resolved to a uid: a second implementation is a second answer.
+ * place the passwd DATABASE is read: a second reader is a second answer, whether
+ * it is after the uid or after the mere existence of the name.
  */
 function passwdEntry(user: string): { home: string; uid: string } | null {
   try {
@@ -107,6 +108,42 @@ function passwdEntry(user: string): { home: string; uid: string } | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * ⛔ THE OTHER HALF of the one passwd lookup: "does this user exist" — asked of
+ * the SAME database, so it is answered HERE and nowhere else.
+ *
+ * FOLDED HERE DELIBERATELY (this was a fourth reader, in
+ * `xhost-capture.ts`'s `userExists()`, and it was left alone for one fold
+ * before being folded for a reason that was MEASURED, not assumed):
+ *
+ *   * it is not a second answer to a second question — it is a second answer to
+ *     the SAME question. "Does `ui2api` exist" is a question about the passwd
+ *     database, and this file already owns that database;
+ *   * the two readers were consumed by ONE readiness check, so a disagreement
+ *     was observable rather than theoretical. `browserHomeCheck()`
+ *     (src/runtime/requirements.ts) asks `userExists(user)` and then reads
+ *     `resolveChromeOwner().missing`, which is `passwdEntry(user) === null`.
+ *     The old `userExists` FELL BACK to a `/home/<user>` probe whenever the
+ *     lookup failed, so on a box where the account is gone (or served by an NSS
+ *     the local `getent` cannot see) but the home directory survives — the
+ *     ordinary shape of a deleted or half-provisioned account — the SAME check
+ *     printed `ui2api OS user present` AND `no such user: ui2api`. Two verdicts
+ *     about one account, in one output, from one module's two readers.
+ *
+ * The `/home/<user>` fallback did NOT move with it, on purpose: it is not a
+ * passwd-database question at all, it is the login-UX data dir asking whether
+ * there is a home to write under. `xhost-capture.ts` keeps that policy and adds
+ * it to this answer; this module keeps the fact.
+ *
+ * DERIVED, never re-read: this is `passwdEntry(user) !== null`, not a second
+ * `getent` spawn. `test/chrome-owner-uid-single-owner.test.ts` pins both halves
+ * — rule R3 (no second passwd-database reader anywhere in `src/`) and rule R5
+ * (this function exists, is exported, and the consumer derives it).
+ */
+export function passwdUserExists(user: string): boolean {
+  return passwdEntry(user) !== null;
 }
 
 /** The user that owns the Chrome we drive. Data, not a hardcode. */
