@@ -214,6 +214,44 @@ const DEFAULT_REAPER_INTERVAL_MS = 30_000;
                   cannot be measured. The honest answer, never a false "up". */
 export type BrowserLiveness = "up" | "down" | "unknown";
 
+/* GOAL 178 — the outcome of ONE boot warm, carrying the REAL cause of a failed
+ * page open instead of an inference about it.
+ *
+ * WHY THIS EXISTS: `warm()` absorbed a per-page failure with `catch { break }`,
+ * so its rejection never reached `http.ts` and NO error message existed to
+ * report. GOAL 176 made the outcome visible on /status + /health, but composed
+ * its `reason` from the pool's state read AFTER the attempt (idle pages + the
+ * pool's liveness probe + attach mode) — so a real EACCES on the profile, a
+ * missing Chrome binary and a refused attach port all read identically as
+ * "cold pool / attach mode". This type is the measurement GOAL 176 had to infer.
+ *
+ * `site` is a single string, not a list, and that is HONEST rather than
+ * premature: `warm()` warms exactly ONE site by construction (the default
+ * profile, else the first configured one), so a list here would always hold one
+ * element and would advertise a generality the method does not have. */
+export type WarmOutcome = {
+  /** The site the warm targeted; "" when there was no target at all. */
+  site: string;
+  /** Page-open attempts actually made — bounded by `min(needed, perSiteMax)`. */
+  attempts: number;
+  /** Attempts that opened a page and released it cleanly. */
+  opened: number;
+  /** Attempts that threw. */
+  failed: number;
+  /**
+   * THE REAL CAUSE of the first failure, VERBATIM from the thrown error
+   * (`Error.message`, or `String(e)` for a non-Error throw) — null when no
+   * attempt failed. Never a summary, never a guess: this is what the throw
+   * itself said, so an EACCES stays an EACCES.
+   */
+  reason: string | null;
+};
+
+/** A warm that measured nothing: no configured profile to warm. */
+function noWarmOutcome(): WarmOutcome {
+  return { site: "", attempts: 0, opened: 0, failed: 0, reason: null };
+}
+
 export interface BrowserProbe {
   state: BrowserLiveness;
   /* The named reason, always present: why this state and not another one. */
@@ -541,26 +579,49 @@ export class ChatPool {
   // is part of this pool (else the first available profile). Other sites are
   // warmed lazily on first request. Fails softly: a down site must not take the
   // whole daemon down — requests will still be served on demand.
-  async warm(): Promise<void> {
-    const target = this.opts.profiles.some((p) => p.id === this.defaultProfile)
-      ? this.defaultProfile
-      : this.opts.profiles[0]?.id ?? "";
-    if (!target) return;
-    const needed = this.min - this.idleCount(target);
-    // GOAL 156 (B): also bounded by the per-site reservation. `acquire()` past a
-    // site's cap PARKS instead of spawning, and a parked acquire does not throw
-    // — so a loop bounded only by `this.max` would park here forever and hang
-    // daemon startup (`http.ts` awaits `pool.warm()`). The cap is the real
-    // ceiling for a single-site warm-up, which is all this ever is.
-    for (let i = 0; i < Math.min(needed, this.perSiteMax); i++) {
-      try {
-        const w = await this.acquire(target);
-        await this.release(w);
-      } catch {
-        break;
-      }
+  //
+  // GOAL 178: it now RETURNS the outcome (it never threw and never will — see
+  // the catch below) so `http.ts` can report the REAL cause instead of inferring
+  // one from pool state read afterwards.
+  async warm(): Promise<WarmOutcome> {
+  const target = this.opts.profiles.some((p) => p.id === this.defaultProfile)
+    ? this.defaultProfile
+    : this.opts.profiles[0]?.id ?? "";
+  if (!target) return noWarmOutcome();
+  const needed = this.min - this.idleCount(target);
+  // GOAL 156 (B): also bounded by the per-site reservation. `acquire()` past a
+  // site's cap PARKS instead of spawning, and a parked acquire does not throw
+  // — so a loop bounded only by `this.max` would park here forever and hang
+  // daemon startup (`http.ts` awaits `pool.warm()`). The cap is the real
+  // ceiling for a single-site warm-up, which is all this ever is.
+  const ceiling = Math.min(needed, this.perSiteMax);
+  const out: WarmOutcome = { site: target, attempts: 0, opened: 0, failed: 0, reason: null };
+  for (let i = 0; i < ceiling; i++) {
+    out.attempts++;
+    try {
+      const w = await this.acquire(target);
+      await this.release(w);
+      out.opened++;
+    } catch (e) {
+      // GOAL 156 (B) / GOAL 178 — THE CATCH IS LOAD-BEARING AND MUST SURVIVE.
+      // It is what stops a boot warm from marching on past one dead site: the
+      // GOAL-156 wedge class, where a single unbounded page open held a pool
+      // slot forever (4.77h) and turned one wedged site into a whole-service
+      // outage. The `break` below is the bound; removing it re-dispatch-free but
+      // still re-attempts the same dead site `ceiling` times.
+      //
+      // GOAL 178 changed ONLY THE DISCARD, never the control flow: the cause is
+      // captured into the returned outcome and the loop breaks EXACTLY as
+      // before. `warm()` still never rejects — a daemon that cannot warm must
+      // still start (a request opens its own page on demand), which is the
+      // GOAL-176 failure mode this whole block exists to preserve.
+      out.failed++;
+      out.reason = e instanceof Error ? e.message : String(e);
+      break;
     }
   }
+  return out;
+}
 
   private idleCount(siteId: string): number {
     return this.workers.filter((w) => w.profileId === siteId && !w.busy).length;

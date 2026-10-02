@@ -1,7 +1,6 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import {
   CHROME_CONFIG_DIR,
@@ -193,7 +192,8 @@ d("the chrome profile path has exactly one spelling (GOAL 177)", () => {
     // false property in a guard is the same defect class this file hunts.
     //
     // The true, narrower property: the ABSOLUTE path embeds the owner's HOME, which
-    // is machine data (`getent`), so it may only ever come from the resolver. A
+    // is a property of the passwd database, so it may only ever come from the
+    // resolver. A
     // literal `/home/<someone>/.config/ui2api-chrome` in src/ is a copy of one
     // machine's answer, and it is the shape that made the two spellings diverge.
     const offenders: string[] = [];
@@ -219,36 +219,22 @@ d("the chrome profile path has exactly one spelling (GOAL 177)", () => {
     );
   });
 
-  t("HOST CROSS-CHECK (skips honestly when the owner is absent): the live resolver points at the DERIVED spelling", () => {
-    // The hermetic pins above compare the repo to itself. This is the one
-    // assertion that compares the repo to the MACHINE, so it is also the one
-    // that cannot run everywhere — and the honest outcome when the owner user
-    // does not exist here is a NAMED SKIP, never a pass we did not measure. The
-    // CI container has no passwd entry for `ui2api`; two earlier controls in this
-    // session failed there by asserting instead.
-    let home: string | null = null;
-    try {
-      const out = execFileSync("getent", ["passwd", DEFAULT_CHROME_USER], {
-        encoding: "utf8",
-        timeout: 5000,
-      }).trim();
-      home = out ? out.split(":")[5] : null;
-    } catch {
-      home = null;
-    }
-    if (!home) {
-      t.skip(`no passwd entry for ${DEFAULT_CHROME_USER} on this host — the live-profile cross-check cannot be measured here`);
-      return;
-    }
-    const owner = resolveChromeOwner();
-    if (!owner.profile) {
-      t.skip(`no profile resolves for ${owner.user} on this host (missing: ${owner.missing ?? "unnamed"})`);
-      return;
-    }
-    const expected = join(home, DERIVED);
-    const why = agreement(expected, owner.profile, "resolveChromeOwner().profile");
-    assert.equal(why, null, why ?? undefined);
-  });
+  // A host cross-check that used to live here was DELETED, and that is the
+  // finding rather than a cleanup. It asked `getent passwd ui2api` and then
+  // asserted the live resolver agreed with the derived spelling -- i.e. it
+  // asserted a fact about the MACHINE, from inside a hermetic suite. The GOAL
+  // 149(b) host-independence gate is right about it: that lookup's output is a
+  // property of the runner, not of the code, so the assertion could pass on a
+  // developer box and mean nothing in the CI container. The earlier shape here
+  // got this wrong twice over -- the repository has already lost a CI cycle to
+  // "a control that asserts facts about the machine".
+  //
+  // WHICH SPELLING IS LIVE IS A MEASUREMENT, AND IT IS RECORDED WHERE A
+  // MEASUREMENT BELONGS: in commit 34cb0e9, read from the running Chrome's own
+  // `--user-data-dir` in /proc/<MainPID>/cmdline -- `/home/ui2api/.config/
+  // ui2api-chrome`, with `.ui2api-chrome` a 187M orphan untouched since
+  // 2026-09-22. What belongs in a test is the property that survives on any
+  // machine, and that is what the pins above check.
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

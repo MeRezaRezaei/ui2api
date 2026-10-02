@@ -53,6 +53,7 @@ import {
   type BrowserLiveness,
   type PoolRefusalCode,
   type PoolStatus,
+  type WarmOutcome,
 } from "./pool.js";
 import { daemonPosture, TOKEN_ENV } from "./posture.js";
 import { buildIdentity, type BuildIdentity } from "../runtime/build-info.js";
@@ -867,16 +868,20 @@ export function resolveCapabilityAccount(account: string | undefined, profile: C
  * WHAT IS ADDED: the outcome is MEASURED and REPORTED on the two surfaces that
  * already report pool state (/status and /health), with a NAMED reason.
  *
- * THE HONEST LIMIT, stated so nobody over-reads this block: the pool's own
- * `warm()` absorbs a per-page spawn failure internally (a request may still
- * open a page on demand), so the rejection message that used to be discarded
- * here is not even reachable from here — there is nothing to forward. What IS
- * reachable, and is a measurement rather than an assumption, is the pool's state
- * AFTER the attempt. So the verdict is built from facts: did the attempt leave
- * an idle page, what does the pool's own honest liveness probe say, and is the
- * pool in attach mode (the most common boot-warm failure — nothing listening on
- * UI2API_ATTACH_PORT). That is strictly more than the old silence, and it never
- * invents a cause it did not measure.
+ * THE HONEST LIMIT, and what GOAL 178 removed: the pool's own `warm()` absorbs a
+ * per-page spawn failure internally (a request may still open a page on demand),
+ * so until GOAL 178 the rejection message was not even reachable from here —
+ * there was nothing to forward, and the verdict below had to be built from
+ * facts read afterwards: did the attempt leave an idle page, what does the
+ * pool's own honest liveness probe say, and is the pool in attach mode. That is
+ * a MEASUREMENT of the consequence and an INFERENCE about the cause.
+ *
+ * GOAL 178: `warm()` now RETURNS its outcome (`WarmOutcome`, `pool.ts`), so the
+ * CAUSE is measured rather than inferred — the thrown page-open error is carried
+ * verbatim into `reason`. The consequence measurement (idle pages, liveness,
+ * attach mode) is KEPT, because it is still true and still the honest account of
+ * what the daemon is left holding. The catch in `warm()` is untouched, so this
+ * is still best-effort and the daemon still starts.
  */
 export type BootWarmStatus = {
   /** Did THIS daemon attempt a boot warm? False for a pre-built pool (test seam). */
@@ -891,6 +896,14 @@ export type BootWarmStatus = {
   reason: string;
   /** ISO stamp of the measurement; null when no warm was attempted (nothing measured). */
   measuredAt: string | null;
+  /**
+   * GOAL 178 — the pool's OWN outcome for the warm, verbatim: which site, how
+   * many attempts, how many opened, how many failed, and the thrown error's
+   * message. `null` when no warm was attempted. Present so a consumer can read
+   * the cause WITHOUT parsing prose out of `reason`, and so a test can assert on
+   * the measurement itself instead of on a substring of a sentence.
+   */
+  outcome: WarmOutcome | null;
 };
 
 export function bootWarmBlock(input: {
@@ -898,13 +911,25 @@ export function bootWarmBlock(input: {
   attempted: boolean;
   attached: boolean;
   thrown?: unknown;
+  /** GOAL 178: what `pool.warm()` returned. The REAL cause lives here. */
+  outcome?: WarmOutcome;
 }): BootWarmStatus {
   const st = input.st;
   const idle = st.idle ?? 0;
   const browser = st.browser ?? null;
+  const outcome = input.outcome ?? null;
+  // The MEASURED cause, or null when nothing failed. Never a fallback to the
+  // prose below: if the pool reported no cause, the report says so rather than
+  // inventing one.
+  const cause = outcome?.reason ?? null;
   const attachNote = input.attached
     ? ` the pool is in ATTACH mode (UI2API_ATTACH_PORT=${process.env.UI2API_ATTACH_PORT ?? "?"}) — nothing was listening there, so no page could be opened.`
     : "";
+  // GOAL 178: lead the report with what the pool ACTUALLY said threw. The
+  // consequence measurement (idle pages + probe) still follows, because it is
+  // still true and still the honest account of what the daemon is left holding —
+  // it is simply no longer the only thing being said.
+  const causeNote = cause === null ? "" : ` The pool reported the page open itself failed: ${cause}`;
   if (!input.attempted) {
     return {
       attempted: false,
@@ -916,6 +941,7 @@ export function bootWarmBlock(input: {
       reason:
         "no boot warm was attempted: a pre-built pool was handed to startPromptd through the `pool` seam, so there is no boot-warm outcome to report",
       measuredAt: null,
+      outcome: null,
     };
   }
   const measuredAt = new Date().toISOString();
@@ -928,6 +954,7 @@ export function bootWarmBlock(input: {
       browser,
       reason: `boot warm THREW (${msg}) — the daemon started anyway because a request opens its own page on demand, but the warm attempt did not succeed`,
       measuredAt,
+      outcome,
     };
   }
   if (idle > 0) {
@@ -938,6 +965,7 @@ export function bootWarmBlock(input: {
       browser,
       reason: `boot warm left ${idle} idle page(s); browser=${browser} — ${st.browserProbe}`,
       measuredAt,
+      outcome,
     };
   }
   return {
@@ -945,8 +973,9 @@ export function bootWarmBlock(input: {
     ok: false,
     idlePages: 0,
     browser,
-    reason: `boot warm completed but left NO idle page (min is always >= 1, so at least one was requested); browser=${browser} — ${st.browserProbe}.${attachNote} The daemon is up and a request still opens its own page on demand — this is a RECORD, not a refusal.`,
+    reason: `boot warm completed but left NO idle page (min is always >= 1, so at least one was requested).${causeNote} browser=${browser} — ${st.browserProbe}.${attachNote} The daemon is up and a request still opens its own page on demand — this is a RECORD, not a refusal.`,
     measuredAt,
+    outcome,
   };
 }
 
@@ -995,17 +1024,22 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
   // must never keep the daemon down, because a request opens its own page on
   // demand — but its outcome is now MEASURED and reported on /status + /health
   // (`bootWarm`) with a NAMED cause, instead of being discarded into silence.
+  // GOAL 178: `warm()` RETURNS that outcome, so the CAUSE here is the pool's own
+  // thrown message rather than an inference from pool state read afterwards.
+  // `warm()` still never rejects (its catch breaks and returns), so `thrown` is
+  // the belt-and-braces path, not the expected one.
   let bootWarm: BootWarmStatus;
   if (opts.pool) {
     bootWarm = bootWarmBlock({ st: pool.status, attempted: false, attached: pool.attached });
   } else {
     let thrown: unknown;
+    let warm: WarmOutcome | undefined;
     try {
-      await pool.warm();
+      warm = await pool.warm();
     } catch (e) {
       thrown = e;
     }
-    bootWarm = bootWarmBlock({ st: pool.status, attempted: true, attached: pool.attached, thrown });
+    bootWarm = bootWarmBlock({ st: pool.status, attempted: true, attached: pool.attached, thrown, outcome: warm });
   }
   // GOAL 87: the liveness reaper, started EXPLICITLY. Without it a page that
   // died while idle kept reporting warm/idle forever (the only liveness check

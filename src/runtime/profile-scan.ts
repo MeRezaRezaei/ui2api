@@ -64,7 +64,24 @@ import type { IngestResult } from "./profile-ingest.js";
  *
  * `test/posture-scan-truth.test.ts` fails LOUD if `chrome-owner.ts` ever ranks a
  * profile dir this list does not walk — the drift is made impossible to repeat
- * silently rather than fixed once and forgotten.
+ * silently rather than fixed once and forgotten. That file was NAMED here for
+ * years before it existed (the second instance of this repo's own "a pin nobody
+ * counts" defect, after `test/chrome-profile-path-truth`); it is real now.
+ *
+ * AND IT EARNED ITS PLACE THE FIRST TIME IT RAN. It was RED on creation:
+ * `PROFILE_CANDIDATES` ranks four dirs (`ui2api-chrome`, `google-chrome`,
+ * `chromium`, `chrome`) and this list walked three of them — `chrome` was
+ * missing. `resolveChromeOwner()` picks the first ranked dir that EXISTS and
+ * holds a profile, so on a box with a real `.config/chrome` and no
+ * `.config/ui2api-chrome`, the resolver would drive `.config/chrome` while
+ * `profile scan` / `profile add-all` — the bulk-login command the README leads
+ * with — skipped it silently. Same blindness as the `ui2api-chrome` case above,
+ * one dir further out. `.config/chrome` is a defensive fallback name rather than
+ * Google's usual `.config/google-chrome`, but "we have never seen it" is not a
+ * reason to leave the point of use unscanned, and it is the same data class as
+ * the other five entries: the user's OWN config dir, gated by the same
+ * `isProfileRoot` (real `Local State` + `Default`/`Profile N`), read under the
+ * same precautions documented above.
  */
 const CANDIDATE_SUBPATHS = [
   ".config/google-chrome",
@@ -74,6 +91,8 @@ const CANDIDATE_SUBPATHS = [
   ".config/Google/Chrome",
   // This project's own point-of-use profile (chrome-owner.ts ranks it first).
   ".config/ui2api-chrome",
+  // chrome-owner.ts's fourth ranked candidate — see the gate finding above.
+  ".config/chrome",
 ] as const;
 
 /**
