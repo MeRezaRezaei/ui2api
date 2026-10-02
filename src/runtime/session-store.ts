@@ -439,9 +439,37 @@ export function storageReplayScript(snap: ProfileSnapshot): string {
   // that never reached the page - and it was indistinguishable from "the site
   // decided not to log in".
   //
-  // So the skip now ANNOUNCES itself, into a key the caller can read back. The
-  // absence of that key is what proves the replay actually ran, which is what
-  // `test/session-injection-fidelity.test.ts` asserts.
+  // So the skip now ANNOUNCES itself, into a key a caller CAN read back.
+  //
+  // GOAL 180 CORRECTION — this comment used to claim: "The absence of that key is
+  // what proves the replay actually ran, which is what
+  // `test/session-injection-fidelity.test.ts` asserts." BOTH halves were false,
+  // and the comment sat on the credential path, so it is corrected here rather
+  // than left to be believed:
+  //
+  //   1. THAT TEST FILE DID NOT EXIST. It is named in the dated audit
+  //      `scripts/audit/session-injection-fidelity-mutations.md` (2026-09-28),
+  //      which documents the gate and its mutation table in detail — so the
+  //      claim was true when written and decayed into a phantom when the file
+  //      went away and nothing checked. It now exists again, as a real
+  //      behavioural gate over the script this function emits.
+  //   2. ABSENCE OF THE MARKER DOES NOT PROVE THE REPLAY RAN. Measured, and
+  //      pinned by that gate's "MEASURED FALSITY" test: NOTHING reads
+  //      `__ui2api_replay_skipped` (written here, read in zero places across
+  //      src/ and test/), so an unobserved key is not evidence; and the replay
+  //      body below wraps each storage bucket in its own `try{}catch(e){}`, so a
+  //      setItem that throws (quota, storage denied) or an `indexedDB.open` that
+  //      errors leaves NO marker and NO credentials — a good replay and a
+  //      credential-losing replay are byte-identical from the marker's point of
+  //      view. The marker write is itself inside a `try{}catch(e){}`, so even
+  //      on the SKIP path its absence proves nothing when storage is
+  //      unavailable.
+  //
+  // WHAT THE MARKER IS FOR, stated accurately: it makes the SKIP visible to a
+  // human reading the page's console or storage — it turns a silent signed-out
+  // render into a named cause. It is a diagnostic, NOT a receipt. Nothing in the
+  // runtime reads it, and nothing should infer replay success from its absence;
+  // a real success/failure receipt does not exist yet on this path.
   return `(()=>{const ORIGIN=${origin};if(location.origin!==ORIGIN){try{console.warn("[ui2api:injection] origin-gate-mismatch: page "+location.origin+" != snapshot "+ORIGIN+" — the session was NOT replayed here, so this page is signed out")}catch(e){}try{localStorage.setItem("__ui2api_replay_skipped",location.origin+" != "+ORIGIN)}catch(e){}return;}
 const LS=${ls},SS=${ss},IDB=${idb};
 try{for(const[k,v]of LS)localStorage.setItem(k,v)}catch(e){}
@@ -455,6 +483,19 @@ for(const[k,v]of s.records){try{if(s.keyPath)st.put(v);else st.put(v,k)}catch(e)
 // Add the snapshot to a browser context BEFORE any page is opened: cookies via
 // the protocol, the rest via a document-start replay script. Never throws —
 // a failed injection must not sink the request (session may still be cookie-only).
+//
+// ⛔ GOAL 180 — THIS "Never throws" IS NOT A CHOICE, IT IS THE BUG, and the
+// throw directly below it is INERT. Read the braces: the `throw new
+// Error("cookie-injection-rejected: …")` sits INSIDE the `try` whose `catch {}`
+// swallows every exception it raises, so a rejected `addCookies` is discarded
+// exactly as it was before ROUND N+105 added the throw. MEASURED (a stub context
+// rejecting both calls): `injectSnapshot` resolves `void`, and a rejected
+// `addInitScript` is swallowed by the following `catch {}` with no name at all.
+// The caller then proceeds believing the session was replayed — which is the
+// exact "written, reported as injected, actually signed out" failure this file
+// is about. Fixing it means deleting the two swallowing `catch {}` blocks (or
+// re-throwing from them); it is NOT done here because this lane's scope is the
+// phantom-gate class, and a credential-path behaviour change needs its own goal.
 export async function injectSnapshot(context: BrowserContext, snap: ProfileSnapshot): Promise<void> {
   const cookies = (snap.cookies ?? []).filter(
     (c) => c && typeof c.name === "string" && typeof c.domain === "string"
@@ -467,6 +508,10 @@ export async function injectSnapshot(context: BrowserContext, snap: ProfileSnaps
       // leaving the caller to believe the session had been replayed when it had
       // not. Throwing is the only honest option: the request then fails visibly
       // instead of returning a signed-out page dressed as an answer.
+      //
+      // ⛔ GOAL 180 — AND IT IS SWALLOWED BY THE `catch {}` THAT ENCLOSES IT.
+      // The intent above is right and the implementation does not deliver it.
+      // Nothing on the replay path currently observes this error.
       try {
         await context.addCookies(cookies);
       } catch (e) {
