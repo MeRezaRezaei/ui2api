@@ -200,11 +200,11 @@ published npm package ships no test suite (`test/` is not in the tarball), so
 these commands need a checkout and print `INTEGRATION OK` / `X tests … pass`:
 
 ```bash
-npm run test:unit   # 165 hermetic unit-test files — no browser needed
+npm run test:unit   # 166 hermetic unit-test files — no browser needed
 npm test            # full integration test (needs the chromium browser above)
 ```
 
-The `165` is the real length of the file list in `package.json`'s
+The `166` is the real length of the file list in `package.json`'s
 `scripts["test:unit"]`, not a remembered figure — derive it yourself with
 
 ```bash

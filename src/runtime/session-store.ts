@@ -480,57 +480,197 @@ r.onsuccess=()=>{try{const db=r.result;for(const s of m.stores){const tx=db.tran
 for(const[k,v]of s.records){try{if(s.keyPath)st.put(v);else st.put(v,k)}catch(e){}}}}catch(e){}db.close()};r.onerror=()=>{}} }catch(e){}})();`;
 }
 
-// Add the snapshot to a browser context BEFORE any page is opened: cookies via
-// the protocol, the rest via a document-start replay script. Never throws —
-// a failed injection must not sink the request (session may still be cookie-only).
+// --- Session-injection verdict (GOAL 182) ---
 //
-// ⛔ GOAL 180 — THIS "Never throws" IS NOT A CHOICE, IT IS THE BUG, and the
-// throw directly below it is INERT. Read the braces: the `throw new
-// Error("cookie-injection-rejected: …")` sits INSIDE the `try` whose `catch {}`
-// swallows every exception it raises, so a rejected `addCookies` is discarded
-// exactly as it was before ROUND N+105 added the throw. MEASURED (a stub context
-// rejecting both calls): `injectSnapshot` resolves `void`, and a rejected
-// `addInitScript` is swallowed by the following `catch {}` with no name at all.
-// The caller then proceeds believing the session was replayed — which is the
-// exact "written, reported as injected, actually signed out" failure this file
-// is about. Fixing it means deleting the two swallowing `catch {}` blocks (or
-// re-throwing from them); it is NOT done here because this lane's scope is the
-// phantom-gate class, and a credential-path behaviour change needs its own goal.
-export async function injectSnapshot(context: BrowserContext, snap: ProfileSnapshot): Promise<void> {
+// WHY THIS EXISTS. `injectSnapshot` used to return `Promise<void>` and swallow
+// BOTH channel failures in `catch {}`. Its doc comment claimed "a REJECTED
+// injection is a NAMED failure, never swallowed" while an enclosing `catch {}`
+// ate the throw that said so. MEASURED (a stub context rejecting both calls): it
+// resolved `void`, and all 20+ call sites went on believing a session had been
+// replayed when nothing had been. Written, reported as injected, actually
+// signed out — the exact class this file is about.
+//
+// THE THROW IS NOT SIMPLY DELETED, because the old doc comment carried a REAL
+// product decision underneath the bug: "a failed injection must not sink the
+// request (session may still be cookie-only)". Sites here genuinely authenticate
+// from localStorage alone (kimi `access_token`, deepseek `userToken`), so one
+// refused cookie must not fail every request to that site. Deleting the swallow
+// would have been a REGRESSION across the whole capability surface.
+//
+// THE DECISION: account for BOTH channels separately and refuse only when
+// NOTHING was accepted.
+//
+//   every attempted channel accepted → verdict { outcome: "accepted" } — proceed
+//   at least one accepted, ≥1 refused → verdict { outcome: "partial", reason } —
+//                              PROCEED, with the refused channel NAMED on the
+//                              return value and warned once. This preserves the
+//                              real cookie-only / storage-only site.
+//   NOTHING accepted (every ATTEMPTED channel refused) → THROW
+//                              `${INJECTION_REFUSED}: …`
+//
+// ⛔ "NOTHING ACCEPTED" IS ABOUT ATTEMPTED CHANNELS, NOT ABOUT THE COUNT OF
+// ATTEMPTS. A cookie-free snapshot + a refused replay script injected NOTHING,
+// and reporting that as `"partial"` would be the original defect wearing a new
+// name: the request proceeds against a page that is certainly signed out. So the
+// decision reads `cookiesAttempted`, never `cookies.length === 0`. MEASURED —
+// this exact hole was in the first cut of this change and is what
+// `test/injection-verdict.test.ts` test 5 pins.
+//
+// The throw is load-bearing and needs no caller edit, but the callers are NOT
+// uniform and this comment used to overstate them. MEASURED, all 22 sites
+// (`grep -rc "injectSnapshot(" src/ scripts/`):
+//   * 21 of 22 PROPAGATE the refusal; none of them converts it into an
+//     anonymous success. `/capability/<site>` answers 500 `{ok:false,
+//     reason_code:"runner_error"}` carrying the named cause
+//     (`src/prompt/http.ts`, the `caps.run` catch), the CLI prints it and exits
+//     nonzero, and `driver.ask` rethrows it out of the retry loop.
+//   * `/prompt` is the WEAK one: the same refusal lands in the generic 500
+//     branch, which by ROUND N+117 deliberately does NOT echo internal text, so
+//     the client sees `internal_error` and the NAME exists only in the daemon
+//     journal. Still an honest failure (500, not an answer) — but the name does
+//     not reach that client.
+//   * `src/analyzer/explore.ts` is the one site that DOWNGRADES the refusal to a
+//     `console.error` and keeps going. Loud in the log, still an anonymous page
+//     for that exploration run. Deliberate: the analyser is an interactive tool
+//     whose whole job is to look at whatever the site serves.
+//
+// ⛔ AND NEITHER `outcome` VALUE IS A RECEIPT. `"accepted"` means the browser
+// ACCEPTED the mechanism — not that the page ended up authenticated. Measured by
+// `test/session-injection-fidelity.test.ts`: the replay script wraps every
+// storage bucket in its own `try{}catch(e){}`, so a `setItem` that throws leaves
+// no error anywhere, and an origin mismatch skips the replay entirely. This
+// layer can only know whether the browser took the payload; nothing here, or
+// anywhere downstream, may read `"accepted"` as "authenticated". The full
+// argument, the two alternatives considered and the evidence that would falsify
+// this design are in `docs/decisions.md` (ADR-001).
+export const INJECTION_PARTIAL_COOKIES = "cookie-injection-rejected";
+export const INJECTION_PARTIAL_STORAGE = "storage-injection-rejected";
+export const INJECTION_REFUSED = "session-injection-refused";
+
+export type InjectionOutcome = "accepted" | "partial";
+
+export interface InjectionVerdict {
+  /** The sanitized host this verdict is about (never cookie values). */
+  host: string;
+  /** How many cookies were ATTEMPTED. 0 = the snapshot is cookie-free, which is
+   *  a legitimate shape, not a failure. */
+  cookies: number;
+  /**
+   * Whether the COOKIE channel was attempted at all. Needed because
+   * `cookiesAccepted` is `true` for a cookie-free snapshot ("nothing to
+   * reject"), and a reader MUST be able to tell "the browser took N cookies"
+   * from "there were none to take" — otherwise `cookiesAccepted: true` is an
+   * inferred claim, which is the one thing this layer refuses to make.
+   */
+  cookiesAttempted: boolean;
+  /** `addCookies` resolved — or there was nothing to add. Never inferred. */
+  cookiesAccepted: boolean;
+  /** `addInitScript` resolved. Never inferred: the method returns void. */
+  storageRegistered: boolean;
+  /**
+   * `"accepted"` = every attempted channel was taken by the browser.
+   * `"partial"`  = at least one channel was taken and at least one was refused.
+   * There is no third value: when NOTHING ATTEMPTED was taken, this function
+   * throws instead of returning, so a caller can never observe a silent total
+   * failure.
+   */
+  outcome: InjectionOutcome;
+  /** NAMED, and present on every `"partial"` verdict. Absent on `"accepted"`. */
+  reason?: string;
+}
+
+// Add the snapshot to a browser context BEFORE any page is opened: cookies via
+// the protocol, the rest via a document-start replay script.
+//
+// THROWS ON EXACTLY ONE CONDITION: no ATTEMPTED channel was accepted, so the page
+// is CERTAINLY signed out and any answer read from it would be a lie. Returns a
+// verdict otherwise — `accepted`, or `partial` with the refused channel NAMED.
+// See the decision block above and `docs/decisions.md` (ADR-001).
+export async function injectSnapshot(
+  context: BrowserContext,
+  snap: ProfileSnapshot
+): Promise<InjectionVerdict> {
+  const host = sanitizeHost(snap.host);
   const cookies = (snap.cookies ?? []).filter(
     (c) => c && typeof c.name === "string" && typeof c.domain === "string"
   ) as unknown as Cookie[];
-  if (cookies.length) {
+
+  // Each channel is accounted for SEPARATELY and no failure is rethrown into a
+  // catch that could swallow it — the refusal is decided once, below, from
+  // evidence, rather than by an accident of brace nesting.
+  const refused: string[] = [];
+  const cookiesAttempted = cookies.length > 0;
+  let cookiesAccepted = !cookiesAttempted; // nothing to reject
+  if (cookiesAttempted) {
     try {
-      // ROUND N+105 — a REJECTED injection is a NAMED failure, never swallowed.
-      // `addCookies` and `addInitScript` can both reject (a malformed cookie, a
-      // context that died mid-injection) and a bare rejection here used to be lost,
-      // leaving the caller to believe the session had been replayed when it had
-      // not. Throwing is the only honest option: the request then fails visibly
-      // instead of returning a signed-out page dressed as an answer.
-      //
-      // ⛔ GOAL 180 — AND IT IS SWALLOWED BY THE `catch {}` THAT ENCLOSES IT.
-      // The intent above is right and the implementation does not deliver it.
-      // Nothing on the replay path currently observes this error.
-      try {
-        await context.addCookies(cookies);
-      } catch (e) {
-        throw new Error(
-          `cookie-injection-rejected: replaying ${cookies.length} cookie(s) for ` +
-            `${sanitizeHost(snap.host)} failed, so this page is NOT authenticated. ` +
-            `Refusing to continue as if the session had been replayed. ` +
-            `Cause: ${(e as Error).message}`
-        );
-      }
-    } catch {
-      // cookies rejected (e.g. expired) — storage replay may still work
+      await context.addCookies(cookies);
+      cookiesAccepted = true;
+    } catch (e) {
+      refused.push(
+        `${INJECTION_PARTIAL_COOKIES}: ${cookies.length} cookie(s) for ${host} were refused (${(e as Error).message})`
+      );
     }
   }
+
+  let storageRegistered = false;
   try {
     await context.addInitScript({ content: storageReplayScript(snap) });
-  } catch {
-    // nothing else to do
+    storageRegistered = true;
+  } catch (e) {
+    refused.push(
+      `${INJECTION_PARTIAL_STORAGE}: the storage replay script for ${host} was refused (${(e as Error).message})`
+    );
   }
+
+  // NOTHING was accepted means: every channel that was ATTEMPTED was refused.
+  // `addInitScript` is ALWAYS attempted, so when it refused and the cookie
+  // channel either also refused or was never attempted at all, the outcome is
+  // the same and equally total: nothing was injected. A channel that was never
+  // attempted is neither an acceptance nor a refusal, so it must not be counted
+  // as an acceptance — see the ⛔ note above; getting this wrong is how a
+  // cookie-free snapshot + a refused script becomes a silent success.
+  const nothingAccepted = !storageRegistered && (!cookiesAttempted || !cookiesAccepted);
+  if (nothingAccepted) {
+    const attempted = cookiesAttempted
+      ? `${cookies.length} cookie(s) and the storage replay script`
+      : `the storage replay script (the snapshot carries no cookies)`;
+    throw new Error(
+      `${INJECTION_REFUSED}: nothing from the stored session for ${host} could be replayed — ` +
+        `${attempted} ${cookiesAttempted ? "were" : "was"} attempted and refused, so NOTHING was ` +
+        `injected. This page is signed out, and any answer read from it would be an anonymous page ` +
+        `dressed as an answer. Refusing to continue. Causes: ${refused.join(" | ")}`
+    );
+  }
+
+  if (!refused.length) {
+    return {
+      host,
+      cookies: cookies.length,
+      cookiesAttempted,
+      cookiesAccepted,
+      storageRegistered,
+      outcome: "accepted",
+    };
+  }
+
+  // PARTIAL. The request proceeds — the accepted channel may well be the whole
+  // session — but the refusal is NAMED, returned, and warned once, so "the
+  // cookies did not land" is never an invisible fact.
+  const reason = refused.join(" | ");
+  console.warn(
+    `[ui2api:injection] partial-session-replay for ${host} — ${reason}. ` +
+      `Proceeding on the channel(s) that were accepted; authentication now depends entirely on ` +
+      `them, and no downstream code may read this as proof the session was replayed.`
+  );
+  return {
+    host,
+    cookies: cookies.length,
+    cookiesAttempted,
+    cookiesAccepted,
+    storageRegistered,
+    outcome: "partial",
+    reason,
+  };
 }
 
 // --- Identity-keyed account vault ---
