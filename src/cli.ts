@@ -460,17 +460,29 @@ export function unknownFlagRefusal(argv: string[]): string {
  * `Number("abc") || undefined` = `undefined` = "auto": a silent coercion to a
  * default, which is the same lie as an ignored flag wearing a value.
  *
- * ── WHAT THIS DOES *NOT* DECIDE, DELIBERATELY ────────────────────────────────
- * GOAL 215 leaves `--pool-min 0` AMBIGUOUS on purpose: `Number(x) || undefined`
- * means `0` currently means UNSET, and whether that is "zero" or "auto" is a
- * real product question with two defensible answers that no gate settles. So
- * this refusal fires ONLY on input that is not a number at all — absent, blank,
- * or `Number(...) === NaN`. `0` keeps meaning exactly what it means today
- * (`undefined`), and the next reader must NOT "fix" that here: resolving it is
- * the operator's call, not this seam's.
+ * ── WHAT THIS DOES *NOT* DECIDE, AND WHY IT IS NOT A PRODUCT QUESTION ─────────
+ * This refusal fires ONLY on input that is not a number at all — absent, blank,
+ * or `Number(...) === NaN`.
  *
- * Negative and fractional values are likewise untouched: they parse, they were
- * accepted before, and narrowing the rule to NaN is the whole of the mandate.
+ * `--pool-min 0` was long recorded here as AMBIGUOUS ("is 0 'zero' or 'auto'?")
+ * and deferred to the operator. THAT WAS WRONG, and the claim was falsifiable in
+ * four lines: `src/prompt/pool.ts:502-504` already answers it, and a runtime probe
+ * against a real `ChatPool` confirms it:
+ *
+ *     flag --pool-min 0  -> min=1     env UI2API_POOL_MIN=0 -> min=1
+ *     flag --pool-min 3  -> min=3     env UI2API_POOL_MIN=5 -> min=5
+ *     flag --pool-min -2 -> min=1     (clamped by Math.max(1, min))
+ *
+ * `Number("0") || undefined` makes the FLAG path `undefined`, and the env branch
+ * tests `envMin >= 1`, which `0` fails — so BOTH paths already fall to the default
+ * of 1. `0` HAS ALWAYS MEANED AUTO on this pool, and the effective floor is 1,
+ * never 0. There was no fork here; the code had already answered it.
+ *
+ * So the instruction to the next reader is the OPPOSITE of the old one: do NOT
+ * "resolve" 0 here and do NOT add a refusal for it — the behaviour is correct and
+ * already consistent, and changing it would alter documented pool pacing. Negative
+ * values are likewise untouched: they parse, they were accepted before, and
+ * clamping them is the pool's business, not this seam's.
  *
  * Pure — no I/O, no exit.
  */
@@ -2035,11 +2047,13 @@ async function main(): Promise<void> {
   // "auto" and started, so the run they asked for was not the run they got.
   // Same throw-not-log seam as above, same nonzero exit.
   //
-  // `--pool-min 0` IS NOT THIS SEAM'S BUSINESS. GOAL 215 leaves it ambiguous on
-  // purpose (`0` means UNSET today, and whether that is "zero" or "auto" is a
-  // product question), so this fires ONLY on input that is not a number at all.
-  // `0` keeps meaning exactly what it means today.
-  const badNumeric = numericFlagRefusal(process.argv.slice(2));
+// `--pool-min 0` IS NOT THIS SEAM'S BUSINESS, and not because it is ambiguous
+    // — it is NOT ambiguous. This comment used to call it a deferred product
+    // question; `src/prompt/pool.ts:502-504` had already answered it (both the flag
+    // and env paths land on the default of 1, so `0` has always meant auto, floor 1).
+    // So this fires ONLY on input that is not a number at all, and `0` keeps
+    // meaning exactly what it means today. See the long note at the seam above.
+    const badNumeric = numericFlagRefusal(process.argv.slice(2));
   if (badNumeric) throw new Error(badNumeric);
   // ── GOAL 215 SEAM 3: A FLAG THAT ONLY MEANS SOMETHING *WITH* ANOTHER ───────
   // These are CONTRADICTIONS, not inertness: the flag was typed, it is read only
