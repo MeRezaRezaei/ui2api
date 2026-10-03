@@ -422,14 +422,19 @@ to `src/prompt/http.ts` moved three of its cited lines in under ten minutes with
 to any knob. A pin that fires on that teaches the next maintainer to skip the file, which
 is the failure mode AGENTS.md itself warns about. `test/ci-contract-knob-cites.test.ts`
 holds both halves — the file pin is fatal, the drift count is measured and disclosed.
-At this fold, measured: **68 rows, 68/68 file-correct, 0 wrong-file, 4 bare-path cells,
-0 rows for a knob nothing reads, and every knob read in `src/`+`scripts/` has a row.**
+At this fold, measured: **69 rows, 69/69 file-correct, 0 wrong-file, 5 bare-path cells,
+  0 rows for a knob nothing reads, and every knob read in `src/`+`scripts/` has a row.**
+  (69, not 68: `UI2API_ACP_BIND` landed with the ACP bind gate, and its 5th bare-path cell
+  came with it — see below. A row added without updating these figures is the exact rot this
+  table has already been bitten by twice, so the count is asserted, not remembered.)
 
-**THE 4 BARE-PATH CELLS ARE NAMED, AND THE COUNT IS NOW ASSERTED.**
-`UI2API_DEFAULT_MIN_INTERVAL_MS`, `UI2API_SITE_MIN_INTERVAL_MS`,
-`UI2API_INFRA_ADDRESSES` and `UI2API_PUBLIC_DEST_REPO` cite a FILE rather than a
-`file:line`, because each is read at more than one place (a pool pacing knob in
-two files, and the two publication knobs in a shell script plus a test helper) —
+  **THE 5 BARE-PATH CELLS ARE NAMED, AND THE COUNT IS NOW ASSERTED.**
+  `UI2API_DEFAULT_MIN_INTERVAL_MS`, `UI2API_SITE_MIN_INTERVAL_MS`,
+  `UI2API_INFRA_ADDRESSES`, `UI2API_PUBLIC_DEST_REPO` and `UI2API_ACP_BIND` cite a FILE
+  rather than a `file:line`, because each is read at more than one place (a pool pacing knob
+  in two files, the two publication knobs in a shell script plus a test helper, and the ACP
+  bind knob behind the `ACP_BIND_ENV` name constant where one line number would be a lie the
+  moment the constant moves) —
 so one line number would be a lie. This paragraph previously claimed **62 rows and
 0 bare-path cells** and was wrong on both counts; the figures were asserted only
 as `>= 40`, so nothing caught it, and four rows arrived during this session's own
@@ -440,6 +445,7 @@ this sentence cannot drift again.
 | knob | purpose | default | read at |
 | --- | --- | --- | --- |
 | `UI2API_ACCOUNT` | runtime knob (generated ACP/MCP servers pick the vault account) | — | `src/generator/acp-template.ts:59` |
+| `UI2API_ACP_BIND` | **TRUST** deliberately widen the ACP JSON-RPC surface's bind off loopback. Unset = `127.0.0.1` (matching `ACP_BIND_HOST`) and a wider bind is REFUSED — `resolveAcpBindHost` throws before the socket exists. **Why this one is not like `UI2API_HUB_BIND`:** the hub's wider bind exposes only a READ inventory, but this surface has **no auth at all** (the sole mention of auth in `src/agent/acp.ts` is the refusal string itself — there is no token check to find) and `tools/call` forwards straight into `plugin.tools`, driving a real browser through the operator's own logged-in session on any site a package names. So a wider bind hands anyone who can reach the port a logged-in browser, not a catalogue — hardening the hub door beside it moves the risk rather than removing it. **It is an equal-host opt-in, not a "bind anywhere" switch:** a non-loopback host is accepted only when `UI2API_ACP_BIND` is set to that EXACT same string, so setting it to one host does not authorize another, and setting it does nothing unless the request asks for precisely that host. A loopback value (`127.0.0.1`/`localhost`/`::1`) is always allowed and needs no opt-in. The honest alternative — and what the refusal text recommends — is to keep loopback and reach the port through a tunnel | `127.0.0.1` — loopback unless the knob names the exact requested host | `src/agent/acp.ts` |
 | `UI2API_AI_PROFILE` | **DEAD — nothing reads it.** The header once named this as the override knob; the working one is `UI2API_AI_SITE` (GOAL 63). Listed so a reader who meets the name in git history is told it does nothing; the cite below is the comment that records its death | — | `src/profile/profile.ts:15` |
 | `UI2API_AI_SITE` | the working override knob: a builtin site id OR a `*.json` profile path | — | `src/profile/profile.ts:462` |
 | `UI2API_ATTACH_MAX_BYTES` | **TRUST** max bytes a file-upload may read (GOAL 88 gate); the name const, the real read is `file-attach.ts:227`-style via `[ATTACH_MAX_BYTES_ENV]` | 20 MiB | `src/runtime/file-attach.ts:54` |

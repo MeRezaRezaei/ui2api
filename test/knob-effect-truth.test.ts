@@ -617,8 +617,13 @@ function declaresUnbacked(row: DocRow): boolean {
  *  deliberately does not invent the marker for it, because a gate that rewrites
  *  the doc it checks is not a gate. */
 const EXPECTED_TRUST: readonly string[] = [
-  "UI2API_ATTACH_MAX_BYTES",
-  "UI2API_ATTACH_PORT",
+    // UI2API_ACP_BIND landed with the ACP bind gate: the ACP JSON-RPC surface
+    // executes tools, so a wider bind hands the caller a real browser — and it
+    // has no auth. Registered here BY HAND on purpose: A4.2 exists so a posture
+    // knob cannot join the TRUST set silently, and this record is that step.
+    "UI2API_ACP_BIND",
+    "UI2API_ATTACH_MAX_BYTES",
+    "UI2API_ATTACH_PORT",
   "UI2API_ATTACH_ROOTS",
   "UI2API_CHROME_NO_SANDBOX",
   "UI2API_HUB_BIND",
