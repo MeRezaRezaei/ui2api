@@ -94,6 +94,97 @@ export function newChatResetVerified(signals: NewChatResetSignals): boolean {
   return signals.answerRegionEmpty === true || signals.composerEmpty === true;
 }
 
+/**
+ * How often the consent-wall wait re-reads the overlay's visibility.
+ *
+ * Short enough that a wall rendering at t=200ms is observed at t=200ms rather
+ * than at the ceiling; long enough that 18 visibility reads over an 1800ms
+ * ceiling is noise next to one round trip to a chat site. It does NOT change
+ * the no-wall cost, which is bounded by the ceiling either way.
+ */
+export const CONSENT_WALL_POLL_MS = 100;
+
+/**
+ * The consent-wall wait — the ONE blind wait in the send path that may safely
+ * become a bounded poll. Injected signal seam so the timing is measurable
+ * without a browser or a real clock (same idiom as `newChatResetVerified`).
+ *
+ * The contract, and the reason this differs from `preComposeDelayMs`:
+ *   - Acting on the wall means "click the site's own accept button, dwell
+ *     settleMs, re-send". It can never dispatch the PROMPT sooner, because the
+ *     prompt's own send happens before this wait and is untouched.
+ *   - The wait may only END EARLY on the wall being OBSERVED VISIBLE, and only
+ *     while the probe is honest. `isVisible` throwing is read as "not visible"
+ *     (an unreadable signal is never a licence to skip the ceiling).
+ *   - The CEILING IS A CEILING. A wall that never appears consumes the full
+ *     `ceilingMs` and not one millisecond more: the last sleep is clamped to the
+ *     remaining budget, so this can shave dead time but can never add to it.
+ */
+export interface ConsentWallSignals {
+  /**
+   * Is the site's own accept affordance visible RIGHT NOW?
+   *
+   * It takes the REMAINING BUDGET and must not exceed it. That parameter is the
+   * whole reason the ceiling holds: the loop's deadline check happens before the
+   * next read, but a read that starts with 200ms left would still overrun by its
+   * own timeout if the probe were unbounded. Handing the remaining budget to the
+   * probe is what makes "never more than the ceiling" true rather than aspirational
+   * — measured, not assumed: with an unbounded 700ms probe the ceiling was
+   * overshot to 2300ms against 1800ms, which is a REGRESSION against the flat
+   * 1800ms wait this replaces.
+   */
+  isVisible: (budgetMs: number) => Promise<boolean>;
+  /** Sleep for `ms` (virtual clock in tests). */
+  sleep: (ms: number) => Promise<void>;
+  /** Current reading of the clock in ms (virtual clock in tests). */
+  now: () => number;
+}
+
+export interface ConsentWallVerdict {
+  /** The wall was OBSERVED visible within the ceiling. */
+  visible: boolean;
+  /** Virtual ms actually spent waiting — never more than the ceiling. */
+  waitedMs: number;
+  /** How many visibility reads were spent getting here. */
+  polls: number;
+}
+
+export async function awaitConsentWall(
+  ceilingMs: number,
+  signals: ConsentWallSignals,
+  pollMs: number = CONSENT_WALL_POLL_MS,
+): Promise<ConsentWallVerdict> {
+  const startedAt = signals.now();
+  const deadline = startedAt + Math.max(0, ceilingMs);
+  let polls = 0;
+
+  // ONE read happens unconditionally, even at a zero ceiling, because a wall that
+  // is ALREADY visible costs nothing to observe and must not be missed. The flat
+  // wait this replaces also read once, so skipping it would be a behaviour change
+  // dressed as an optimisation.
+  polls += 1;
+  const firstBudget = Math.max(0, deadline - signals.now());
+  if (await signals.isVisible(firstBudget).catch(() => false)) {
+    return { visible: true, waitedMs: signals.now() - startedAt, polls };
+  }
+
+  for (;;) {
+    // The deadline is checked BEFORE a read, not after: a read is the only thing
+    // in this loop that costs real time, so discovering we are out of budget only
+    // once the read has been paid for is exactly what overshot the ceiling.
+    const remaining = deadline - signals.now();
+    if (remaining <= 0) {
+      return { visible: false, waitedMs: signals.now() - startedAt, polls };
+    }
+    await signals.sleep(Math.min(pollMs, remaining));
+    polls += 1;
+    const budget = Math.max(0, deadline - signals.now());
+    if (await signals.isVisible(budget).catch(() => false)) {
+      return { visible: true, waitedMs: signals.now() - startedAt, polls };
+    }
+  }
+}
+
 export interface ChatDriverOptions {
   /* Reuse an externally-owned browser (the daemon pool's). When set, close()
      only tears down this driver's context+page, never the browser. */
@@ -540,9 +631,19 @@ export class ChatDriver {
       // this only answers the site's prompt, exactly like the user would.
       if (!this.profile.urlTemplate && this.profile.consentWall?.accept) {
         const wall = this.profile.consentWall;
-        await this.page!.waitForTimeout(wall.waitMs ?? 1800);
         const accept = this.page!.locator(wall.accept).first();
-        const wallVisible = await accept.isVisible({ timeout: 1500 }).catch(() => false);
+        // Poll for the site's OWN overlay at a short interval and proceed the
+        // moment it is actually visible, up to the SAME ceiling the blind wait
+        // used. Safe where the pre-compose dwell is not: this runs AFTER the
+        // prompt was dispatched, so acting on it can only mean "acknowledge and
+        // re-send" — it can never send the prompt earlier than we already do.
+        // The click + settleMs that follow are unchanged, so the site's own
+        // post-accept re-arm window is the same as before.
+        const { visible: wallVisible } = await awaitConsentWall(wall.waitMs ?? 1800, {
+          isVisible: (budgetMs) => accept.isVisible({ timeout: budgetMs }).catch(() => false),
+          sleep: (ms) => this.page!.waitForTimeout(ms),
+          now: () => Date.now(),
+        });
         if (wallVisible) {
           await accept.click({ timeout: 3000 }).catch(() => undefined);
           await this.page!.waitForTimeout(wall.settleMs ?? 900);
