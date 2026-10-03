@@ -13,7 +13,26 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UNIT_SRC="$REPO_DIR/scripts/ops/units"
 UNIT_DIR=/etc/systemd/system
 DO_START=1
-[[ "${1:-}" == "--no-start" ]] && DO_START=0
+# ONLY --no-start is accepted, and everything else is now REFUSED rather than
+# ignored. MEASURED DEFECT (the `--acp` shape, in shell): this used to test only
+# `$1` and fall through, so a mistyped `--no-sytem` — or any stray extra
+# argument — still reached `systemctl restart ui2api-xvfb` and
+# `ui2api-chrome`. The operator who believed they had opted out got the live
+# display and the live Chrome restarted, and nothing said so: a flag that is
+# neither honoured nor refused fails SILENTLY. deploy.sh and restart-policy.sh
+# already exit 2 on an unknown argument; this one now matches them.
+case "${1:-}" in
+  "") ;;
+  --no-start) DO_START=0 ;;
+  *) echo "[services] unknown argument: $*" >&2
+     echo "[services] usage: $0 [--no-start]" >&2
+     exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  echo "[services] too many arguments: $*" >&2
+  echo "[services] usage: $0 [--no-start]" >&2
+  exit 2
+fi
 
 say() { printf '[services] %s\n' "$*"; }
 

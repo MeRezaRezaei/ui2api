@@ -45,7 +45,25 @@ XVFB_DISPLAY="${UI2API_XVFB_DISPLAY:-99}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DO_SYSTEMD=1
-[[ "${1:-}" == "--no-systemd" ]] && DO_SYSTEMD=0
+# ONLY --no-systemd is accepted, and everything else is REFUSED rather than
+# ignored — the `--acp` shape, in shell. This used to test only `$1` and fall
+# through, so a mistyped `--no-sytemd` still delegated to install-services.sh,
+# which installs and RESTARTS the three live units. The operator who believed
+# they had opted out got the real point of use restarted with nothing saying so.
+# deploy.sh, restart-policy.sh and install-services.sh all exit 2 here; so does
+# this one now.
+case "${1:-}" in
+  "") ;;
+  --no-systemd) DO_SYSTEMD=0 ;;
+  *) echo "[provision] unknown argument: $*" >&2
+     echo "[provision] usage: $0 [--no-systemd]" >&2
+     exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  echo "[provision] too many arguments: $*" >&2
+  echo "[provision] usage: $0 [--no-systemd]" >&2
+  exit 2
+fi
 
 say() { printf '[provision] %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -137,6 +155,33 @@ if [[ "$DO_SYSTEMD" -eq 1 ]] && have systemctl; then
     echo "[provision] refusing: no installer at $INSTALL_SERVICES" >&2
     echo "[provision] that installer is the only thing that reads $UNIT_SRC." >&2
     exit 1
+  fi
+
+  # THE THREE PORTS/DISPLAYS ABOVE, WHEN THEY WERE ACTUALLY ASKED FOR.
+  # DAEMON_PORT / XVFB_DISPLAY / API_PORT are read into locals that are used ONLY
+  # to print — see the header comment: install-services.sh copies the unit files
+  # verbatim, so nothing in this script can move what gets installed.
+  #
+  # MEASURED DEFECT: that warning used to print ONLY on the throwaway-user branch
+  # below. So on the PRODUCTION path — CHROME_USER=ui2api, the common one — an
+  # operator who exported a port or a display got NO output at all, no change,
+  # and a green run: a knob accepted, carried, and doing nothing, reported by its
+  # own default as if it were in effect. It now prints on EVERY path whenever one
+  # of the three was exported into this shell.
+  #
+  # WHY THE CONDITION IS `-v UI2API_…` AND NOT THE LOCALS. test/knob-effect-truth.test.ts
+  # classifies EVERY non-message line that touches an INERT local as a real effect
+  # (A3), so a condition written as `if [[ "$DAEMON_PORT" != 9222 ]]` reads to that
+  # gate as the knob having become live — which would demand reclassifying it in
+  # AGENTS.md and GOAL 213, i.e. claiming an effect this script does not have.
+  # `-v` tests EXISTENCE and expands nothing, so the locals stay print-only and the
+  # INERT record stays true. (The first version of this block used the locals and
+  # the gate caught it: exactly what it is for.)
+  if [[ -v UI2API_DAEMON_PORT || -v UI2API_PROMPTD_PORT || -v UI2API_XVFB_DISPLAY ]]; then
+    say "NOTE: a CDP port / promptd port / display was exported into this script. These three are read here for REPORTING ONLY — nothing in this script applies them."
+    say "  you exported: CDP :$DAEMON_PORT, promptd :$API_PORT, DISPLAY=:$XVFB_DISPLAY"
+    say "  what lands:  CDP :9222, promptd :9797, DISPLAY=:99 — install-services.sh copies scripts/ops/units/*.service verbatim and those units hardcode their own values."
+    say "  to move one: edit that unit's Environment=/ExecStart line, then re-run scripts/ops/install-services.sh."
   fi
 
   # HONEST NOTE ON $CHROME_USER. The shipped units are NOT parameterized by it.

@@ -143,15 +143,42 @@ export function defaultSmokeDeps(overrides: Partial<SmokeDeps> = {}): SmokeDeps 
   const dataDir = resolveDataDir();
   const registryBaseUrl = process.env.UI2API_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
   const packagesRoot = defaultPackagesRoot();
+  // THE MERGE ORDER IS THE WHO FIX. `dataDir` / `registryBaseUrl` /
+  // `packagesRoot` are PLAIN VALUES, but each is consumed INSIDE a seam that
+  // takes NO arguments: `installAnon: () => installPackage(..., registryBaseUrl,
+  // packagesRoot)` and `ask: (profile, prompt) => defaultAsk(profile, prompt,
+  // dataDir)`. Those arrows close over the LOCALS above, so a caller that
+  // overrode the plain values — which is exactly what `ui2api smoke
+  // --data-dir/--registry/--out` does (src/cli.ts passes them as `deps`) — got
+  // its override stored in the returned object and then IGNORED by the only code
+  // that reads it. `...overrides` landing LAST is not enough: it replaces the
+  // VALUE FIELDS, never the closures that consume them.
+  //
+  // MEASURED (the silent no-op this fixes): with
+  // `defaultSmokeDeps({registryBaseUrl:"http://127.0.0.1:1",
+  // packagesRoot:"/tmp/PROBE-root"})`, calling `deps.installAnon()` fetched the
+  // REAL registry and rewrote the REPO's `capabilities/duckduckgo/*` (171 lines
+  // changed), and `/tmp/PROBE-root` was never created — a dead URL and an
+  // explicit target root, both accepted, both ignored, exit 0.
+  //
+  // So the seams are built from the OVERRIDDEN values, and the same shape
+  // `defaultRequirementsDeps` already gets right (there the consumers take
+  // `dataDir` as a PARAMETER and are called as `deps.listAccounts(deps.dataDir,
+  // …)`, so an override flows through by construction). With no overrides these
+  // three resolve to the locals above, so the default path is byte-identical.
+  const mergedDataDir = overrides.dataDir ?? dataDir;
+  const mergedRegistryBaseUrl = overrides.registryBaseUrl ?? registryBaseUrl;
+  const mergedPackagesRoot = overrides.packagesRoot ?? packagesRoot;
   return {
-    dataDir,
-    registryBaseUrl,
-    packagesRoot,
-    checkOs: () => checkRequirements({ deps: { dataDir } }),
-    anonymousProfile: defaultAnonymousProfile,
-    installAnon: () => installPackage(SMOKE_ANON_SITE, registryBaseUrl, packagesRoot),
-    ask: (profile, prompt) => defaultAsk(profile, prompt, dataDir),
-    ...overrides,
+    dataDir: mergedDataDir,
+    registryBaseUrl: mergedRegistryBaseUrl,
+    packagesRoot: mergedPackagesRoot,
+    checkOs: overrides.checkOs ?? (() => checkRequirements({ deps: { dataDir: mergedDataDir } })),
+    anonymousProfile: overrides.anonymousProfile ?? defaultAnonymousProfile,
+    installAnon:
+      overrides.installAnon ??
+      (() => installPackage(SMOKE_ANON_SITE, mergedRegistryBaseUrl, mergedPackagesRoot)),
+    ask: overrides.ask ?? ((profile, prompt) => defaultAsk(profile, prompt, mergedDataDir)),
   };
 }
 

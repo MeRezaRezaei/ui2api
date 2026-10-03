@@ -61,17 +61,44 @@ BODY_CAP_BYTES="${RESTART_POLICY_BODY_CAP_BYTES:-20000000}"
 # the mode the operator asked for is never re-derived by this wrapper.
 CALLER_ARGS=("$@")
 APPLY=0
-APPLY_FLAG="--dry-run"
 MODE="dry-run"
+# MEASURED DEFECT, fixed here (the shape of the `--acp` bug, in shell): MODE is
+# what this script reports, so there is deliberately NO second copy of the mode
+# kept as a flag STRING. One used to be (`APPLY_FLAG`), assigned on both the
+# --apply and the default path and read NOWHERE — a value carried and doing
+# nothing, i.e. a second source of truth that cannot drift from MODE because
+# nothing ever reads it. If you are adding a mode, add it to MODE, not to a
+# parallel flag string.
+#
+# WHY THE VALUE-TAKING FLAGS ARE GUARDED BELOW. `shift 2` with one argument left
+# FAILS and does NOT reduce $#, so the loop below re-read the same argument
+# forever. MEASURED: `RESTART_POLICY_RUN_TIMEOUT=8 bash scripts/ops/restart-policy.sh
+# --base-url` spun 4,859,524 iterations in 12s, printed NOTHING, and had to be
+# killed from outside — and the whole-run `timeout` lower down could not catch it,
+# because the parse loop runs BEFORE that wrapper is set up. A hang that produces
+# no named failure is the one outcome this file's own header promises never
+# happens. So a value-taking flag with a missing (or empty) value now exits 2,
+# the usage-error code already documented above.
 while [ $# -gt 0 ]; do
   case "$1" in
-    --apply) APPLY=1; APPLY_FLAG="--apply"; MODE="apply"; shift ;;
+    --service|--base-url|--vault-site|--max-restarts)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "FATAL: $1 needs a non-empty value (see --help for every flag)" >&2
+        exit 2
+      fi
+      case "$1" in
+        --service) SERVICE="$2" ;;
+        --base-url) BASE_URL="$2" ;;
+        --vault-site) VAULT_SITE="$2" ;;
+        --max-restarts) MAX_RESTARTS="$2" ;;
+      esac
+      shift 2 ;;
+    --apply) APPLY=1; MODE="apply"; shift ;;
     --dry-run) APPLY=0; MODE="dry-run"; shift ;;
-    --service) SERVICE="${2:-}"; shift 2 ;;
-    --base-url) BASE_URL="${2:-}"; shift 2 ;;
-    --vault-site) VAULT_SITE="${2:-}"; shift 2 ;;
-    --max-restarts) MAX_RESTARTS="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+    # The help range now runs to the end of the defaults table (through
+    # BODY_CAP_BYTES), so `--help` shows every knob and its default instead of
+    # stopping at the header. No assertion anywhere pinned the old range.
+    -h|--help) sed -n '2,59p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done

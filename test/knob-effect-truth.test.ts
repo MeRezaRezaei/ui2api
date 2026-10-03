@@ -12,7 +12,7 @@
 //      knob a reader trusts is inert.
 //
 // A knob that is read but has no behavioural effect is a documentation lie that
-// an operator pays for. This gate is the answer, in three assertions:
+// an operator pays for. This gate is the answer, in five assertions:
 //
 //   A1  DOCUMENTATION COVERAGE, two-way. Every `UI2API_*` actually READ from the
 //       environment has a row in AGENTS.md's environment-knob table, and every
@@ -25,13 +25,29 @@
 //   A3  INERT STAYS INERT. The three knobs known INERT are still consumed only
 //       by messages, so the day someone wires one for real the gate says
 //       "reclassify" instead of leaving a stale INERT record.
+//   A4  TRUST STAYS MARKED. A knob marked TRUST weakens the daemon's trust
+//       posture, and the marker is the ONLY signal a reader gets — so the mark
+//       must survive, and a marked knob must still actually be read (an
+//       unbacked marked row warns about a knob that cannot fire).
+//   A5  DORMANT STAYS DECLARED. A documented knob that is read NOWHERE must
+//       SAY so, so a genuinely dead knob is documented as dead rather than left
+//       looking configurable.
 //
 // HOUSE RULES (inherited from test/skills-truth.test.ts, which owns the
 // comment-stripping approach this file follows, and from
 // test/ci-contract-knob-cites.test.ts, whose precedent is the reason this file
 // is narrow on purpose):
-//   * DERIVE, NEVER HAND-TYPE. The knob set, the read sites and AGENTS.md's
-//     table are all computed from the repo at test time.
+//   * DERIVE, NEVER HAND-TYPE — with the two EXCEPTIONS named below, because a
+//     derived-only assertion provably cannot catch two real edits. The knob set,
+//     the read sites and AGENTS.md's table are all computed from the repo at
+//     test time, and no test here pins a COUNT. The exceptions are the two
+//     CLASSIFICATION RECORDS a doc marker needs, both reasoned at their
+//     declaration: `EXPECTED_TRUST` (A4 — a gate that derives the marked set from
+//     AGENTS.md passes on the very marker deletion it exists to catch) and the
+//     DORMANT member pin (A5.2 — a row that is deleted from the table declares
+//     nothing, so removing it would otherwise be silent). Both are declared
+//     names in code, never derived counts, and both fail LOUD on a change rather
+//     than adapting to it.
 //   * Assertions live inside real top-level `test(...)` calls, NEVER in a bare
 //     `describe` body (test/assertions-are-counted.test.ts).
 //   * A gate that misfires gets skipped, and a skipped gate is worse than none —
@@ -213,27 +229,44 @@ export function envReads(): Map<string, string[]> {
   };
   for (const f of FILES) {
     const s = stripComments(f.rel, readFileSync(f.abs, "utf8"));
+    // Comment stripping blanks characters with SPACES and keeps every newline, so
+    // a match offset still maps back to the file's own line number. Every site
+    // string therefore carries `rel:line`, which is what lets a failure NAME the
+    // exact line that reads a knob instead of only the file.
+    const nl: number[] = [0];
+    for (let i = 0; i < s.length; i++) if (s[i] === "\n") nl.push(i + 1);
+    const at = (idx: number) => `${f.rel}:${lineAt(nl, idx)}`;
     for (const m of s.matchAll(/process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*"([^"]+)"\s*\]|\[\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\])/g)) {
       const dotted = m[1];
       const literal = m[2];
       const constRef = m[3];
-      if (dotted) { if (dotted.startsWith("UI2API_")) add(dotted, `${f.rel} process.env.${dotted}`); }
-      else if (literal) { if (literal.startsWith("UI2API_")) add(literal, `${f.rel} process.env["${literal}"]`); }
+      if (dotted) { if (dotted.startsWith("UI2API_")) add(dotted, `${at(m.index)} process.env.${dotted}`); }
+      else if (literal) { if (literal.startsWith("UI2API_")) add(literal, `${at(m.index)} process.env["${literal}"]`); }
       else if (constRef) {
         const resolved = NAME_CONST_BY_NAME.get(constRef);
         // An unresolvable bracket constant is NOT silently dropped — a read whose
         // name cannot be derived is exactly the blind spot A2 exists to close.
-        if (resolved) add(resolved, `${f.rel} process.env[${constRef}]`);
-        else if (constRef.startsWith("UI2API_")) add(constRef, `${f.rel} process.env[${constRef}]`);
-        else add(`<unresolved:${constRef}>`, `${f.rel} process.env[${constRef}]`);
+        if (resolved) add(resolved, `${at(m.index)} process.env[${constRef}]`);
+        else if (constRef.startsWith("UI2API_")) add(constRef, `${at(m.index)} process.env[${constRef}]`);
+        else add(`<unresolved:${constRef}>`, `${at(m.index)} process.env[${constRef}]`);
       }
     }
-    for (const m of s.matchAll(/\benv[A-Za-z0-9_]*\(\s*["'](UI2API_[A-Z0-9_]+)["']/g)) add(m[1]!, `${f.rel} env...('${m[1]}')`);
+    for (const m of s.matchAll(/\benv[A-Za-z0-9_]*\(\s*["'](UI2API_[A-Z0-9_]+)["']/g)) add(m[1]!, `${at(m.index)} env...('${m[1]}')`);
     if (/\.sh$/.test(f.rel)) {
-      for (const m of s.matchAll(/\$\{?(UI2API_[A-Z0-9_]+)/g)) add(m[1]!, `${f.rel} $${m[1]}`);
+      for (const m of s.matchAll(/\$\{?(UI2API_[A-Z0-9_]+)/g)) add(m[1]!, `${at(m.index)} $${m[1]}`);
     }
   }
   return out;
+}
+
+/** 1-based line for a character offset, given the precomputed newline offsets. */
+function lineAt(newlineOffsets: number[], idx: number): number {
+  let lo = 0, hi = newlineOffsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (newlineOffsets[mid]! <= idx) lo = mid; else hi = mid - 1;
+  }
+  return lo + 1;
 }
 
 const ENV_READS = envReads();
@@ -532,4 +565,458 @@ test("A3: UI2API_PROMPTD_PORT is NOT inert repo-wide — the classification is p
   const realUse = lines.findIndex((l, i) => i > read && l.includes("$API_PORT") && !isMessageLine(l));
   assert.ok(realUse > read, `non-vacuity: ${rel} must use API_PORT in a live (non-message) way after reading it`);
   assert.deepEqual(inertUses("API_PORT").filter((u) => !isMessageLine(u.text)), [], "…while the PROVISION script's API_PORT stays message-only");
+});
+
+// ================================================ A4 — TRUST stays TRUST-marked
+
+/** The marker AGENTS.md puts in a knob-table row's PURPOSE cell. `**TRUST**`
+ *  bold rather than the bare word, because the purpose cells also say "trust
+ *  posture" in ordinary prose (`UI2API_TRUST`'s own row) — matching the bare word
+ *  would sweep those rows into the marked set. */
+const TRUST_MARKER = "**TRUST**";
+
+/** The rows AGENTS.md CURRENTLY marks. Derived at run time; never a hand-typed
+ *  count, so the count moving is not by itself a failure. */
+function trustRows(): DocRow[] {
+  return DOC_ROWS.filter((r) => r.purpose.includes(TRUST_MARKER));
+}
+
+/** Phrases a row may use to DECLARE why a marked knob has no live read. These
+ *  are the same honesty shapes A1/A3 already accept (`nothing reads it`,
+ *  `NOT AN ENV KNOB`, `family prefix`) plus the two marker-specific ones
+ *  (`message-only`, the A3 INERT class; and an explicit `DEAD`). A marked knob
+ *  with NO live read and NO such declaration is a warning about a knob that
+ *  cannot fire — the exact rot this category exists to catch. */
+const DECLARED_UNBACKED = ["message-only", "INERT", "DEAD", ...DECLARED_NOT_READ] as const;
+
+function declaresUnbacked(row: DocRow): boolean {
+  return DECLARED_UNBACKED.some((p) => row.purpose.includes(p));
+}
+
+/** The gate's OWN record of which knobs weaken the trust posture.
+ *
+ *  WHY THIS IS DECLARED RATHER THAN DERIVED, when everything else here is
+ *  derived: a derived-only TRUST gate would be CIRCULAR. `trustRows()` reads the
+ *  marker out of AGENTS.md, so deleting the marker deletes it from the derived
+ *  set too — and the gate would pass on exactly the edit it exists to catch.
+ *  There is no second source for the marker anywhere in the repo (the code has
+ *  no idea which of its knobs are posture-weakening), so the gate's own record
+ *  has to BE that second source — the same house shape A3 uses for its three
+ *  INERT knobs. Measured 2026-10-03 by the scan below: 11 marked rows.
+ *
+ *  BOTH directions are asserted against it (A4.1 declared->observed catches a
+ *  dropped marker; A4.2 observed->declared catches a silently ADDED one), and
+ *  NO COUNT is pinned, so the set moving is reported as a named row rather than
+ *  as an opaque `expected 11 to equal 12`.
+ *
+ *  REPORTED, NOT FIXED (AGENTS.md is out of scope for this file): the row for
+ *  `UI2API_TRUST` itself — the knob literally named TRUST, whose purpose cell
+ *  reads "trust posture (what the daemon will attach/replay)" — carries NO
+ *  marker. Whether that is deliberate (the knob is named TRUST, so the marker
+ *  would read as a stutter) or an oversight is an AGENTS.md call; this gate
+ *  deliberately does not invent the marker for it, because a gate that rewrites
+ *  the doc it checks is not a gate. */
+const EXPECTED_TRUST: readonly string[] = [
+  "UI2API_ATTACH_MAX_BYTES",
+  "UI2API_ATTACH_PORT",
+  "UI2API_ATTACH_ROOTS",
+  "UI2API_CHROME_NO_SANDBOX",
+  "UI2API_HUB_BIND",
+  "UI2API_INFRA_ADDRESSES",
+  "UI2API_SINGLE_PROCESS",
+  "UI2API_TOKEN",
+  "UI2API_USER_DATA_DIR",
+  "UI2API_WIGOLO_ALLOW_REMOTE",
+  "UI2API_WIGOLO_ALLOW_REMOTE_TOKEN",
+];
+
+/** Rows the gate expects to carry the marker but which no longer do. Pure, so
+ *  the negative test below drives THIS function rather than a copy of it. */
+function unmarkedExpectation(rows: DocRow[], expected: readonly string[]): string[] {
+  const marked = rows.filter((r) => r.purpose.includes(TRUST_MARKER));
+  return expected
+    .filter((k) => !marked.some((r) => r.knob === k))
+    .map((k) => `${k} (AGENTS.md:${rows.find((r) => r.knob === k)?.line ?? "no row"})`);
+}
+
+/** Marked rows that are neither read nor declared-unread. Pure, same reason. */
+function unbackedTrustRows(rows: DocRow[], reads: Map<string, string[]>): string[] {
+  return rows
+    .filter((r) => r.purpose.includes(TRUST_MARKER))
+    .filter((r) => !reads.has(r.knob) && !declaresUnbacked(r))
+    .map((r) => `${r.knob} (AGENTS.md:${r.line})`);
+}
+
+test("A4: every posture-weakening knob KEEPS its TRUST marker in AGENTS.md's knob table", () => {
+  const marked = trustRows();
+  assert.ok(
+    marked.length >= 8,
+    `non-vacuity: only ${marked.length} TRUST-marked rows parsed out of ${DOC_ROWS.length} — the marker shape changed, or the whole marked class was dropped`,
+  );
+  const unmarked = unmarkedExpectation(DOC_ROWS, EXPECTED_TRUST);
+  assert.deepEqual(
+    unmarked,
+    [],
+    "these knobs weaken the daemon's trust posture but their AGENTS.md row NO LONGER carries the " +
+      `${TRUST_MARKER} marker: the marker is the only signal a reader has, and the day it is dropped ` +
+      "the knob looks as safe as any other. Restore the marker, or move the knob out of EXPECTED_TRUST " +
+      "with a stated reason if it genuinely no longer weakens posture.",
+  );
+});
+
+test("A4: a NEWLY marked posture knob must be recorded in the gate, not added silently", () => {
+  const marked = trustRows();
+  const unrecorded = marked
+    .filter((r) => !EXPECTED_TRUST.includes(r.knob))
+    .map((r) => `${r.knob} (AGENTS.md:${r.line})`);
+  assert.deepEqual(
+    unrecorded,
+    [],
+    "these rows carry the TRUST marker but are NOT in the gate's EXPECTED_TRUST record: a knob that " +
+      "weakens trust posture is a deliberate classification, so add it to EXPECTED_TRUST in this file " +
+      "in the same commit that marked it — otherwise the marked set grows with nobody deciding what is in it",
+  );
+});
+
+test("A4: a TRUST-marked knob is actually READ somewhere, or its row declares why it is not", () => {
+  // The failure this exists to catch: a knob that weakens posture is removed
+  // from the code, but its documented, marked row survives — so a reader is still
+  // warned about a knob that cannot fire, and the warning has lost its meaning.
+  const marked = trustRows();
+  assert.ok(marked.length >= 8, `non-vacuity: only ${marked.length} TRUST-marked rows parsed`);
+  const unbacked = unbackedTrustRows(DOC_ROWS, ENV_READS);
+  assert.deepEqual(
+    unbacked,
+    [],
+    "these rows are marked TRUST — they weaken the daemon's trust posture — but the knob is read NOWHERE " +
+      "in src/ or scripts/ and the row does not declare why. Either the read was removed (then the knob " +
+      "is gone and the row is a warning about nothing: delete it or say it is dead) or the read moved " +
+      "behind a shape this scan cannot see (then fix the row's cite).",
+  );
+  // Disclosure, in A1.3's shape: the set may not be EMPTY BY ACCIDENT, and it may
+  // not quietly become the normal case either. Measured: 0 of 11 today.
+  const carried = marked.filter((r) => declaresUnbacked(r) && !ENV_READS.has(r.knob));
+  assert.ok(
+    carried.length <= 2,
+    `${carried.length} of ${marked.length} TRUST-marked rows now declare themselves unread ` +
+      `(${carried.map((r) => r.knob).join(", ")}) — a posture knob that no longer fires is a broad ` +
+      "posture change, not a row edit; re-audit the class rather than declaring them one at a time",
+  );
+});
+
+/** `rel:NN rest-of-site` -> the file and the 1-based line the read is on. */
+function siteLine(site: string): { rel: string; line: number; text: string } | null {
+  const m = /^(.*):(\d+) (.*)$/.exec(site);
+  return m ? { rel: m[1]!, line: Number(m[2]), text: m[3]! } : null;
+}
+
+/** Does this source line PRINT rather than act? A3's `isMessageLine` already
+ *  answers that for shell; this is the JS/TS twin, deliberately NARROW — it can
+ *  only ever fire on a line that literally contains a `console.*` call, so a
+ *  multi-line statement whose `console.log(` sits on an earlier line reads as
+ *  "acting" here. That direction is safe: it can under-report a print, never
+ *  invent one. */
+function isPrintLine(rel: string, text: string): boolean {
+  if (/\.sh$/.test(rel)) return isMessageLine(text);
+  return /\bconsole\s*\.\s*(log|error|warn|info|debug|trace)\s*\(/.test(text);
+}
+
+test("A4: every TRUST-marked knob has at least one read site that CONSUMES it, not one that only narrates it", () => {
+  // A3's rule ("a knob read only to print is inert") applied to the whole TRUST
+  // class rather than to three hand-listed provision locals. The failure this
+  // catches is the subtle half of the "marked but unbacked" rot: the read
+  // survives, the marker survives, and the reader still sees a posture warning
+  // on a knob whose only remaining effect is a sentence in a log.
+  //
+  // THE SHAPE IS "AT LEAST ONE CONSUMING SITE", NOT "NO PRINTING SITE" — measured,
+  // and the narrow shape is the correct one: a real marked knob legitimately
+  // narrates itself on the way past. `UI2API_ATTACH_PORT` has 15 read sites and
+  // one of them (`src/cli.ts:882`) only echoes the port into `/status`;
+  // `UI2API_INFRA_ADDRESSES` has 4, two of which only count the words into a
+  // `note`. Both also have real consuming sites (the attach-port resolver, and
+  // the `for a in ${UI2API_INFRA_ADDRESSES…}` loop at make-public-repo.sh:214).
+  // Forbidding every print would have made this gate misfire on the day it was
+  // written, which is how gates get skipped.
+  //
+  // MEASURED 2026-10-03, and the reason this needed a different answer than A3:
+  // two TRUST knobs are read EXACTLY ONCE and neither read is a print —
+  // `UI2API_TOKEN` is bound into the generated PHP config
+  // (`'token' => env('UI2API_TOKEN', …)`, src/generator/lang-php.ts:597) and
+  // `UI2API_TRUST` into the generated server's `servePlugin(…, {trust: …})`
+  // (src/generator/generate.ts:41). Both are CONSUMED, by the artifact the
+  // generator emits rather than by the generator process — which is why the
+  // assertion is about the nature of the read LINE and not about a second
+  // reference to the value later in the file: `trust` appears exactly once, at
+  // the call it configures, so an assertion demanding a second reference would
+  // misfire.
+  const marked = trustRows();
+  assert.ok(marked.length >= 8, `non-vacuity: only ${marked.length} TRUST-marked rows parsed`);
+  const unconsumed: string[] = [];
+  const stale: string[] = [];
+  let sitesExamined = 0;
+  let narrating = 0;
+  for (const row of marked) {
+    const sites = ENV_READS.get(row.knob) ?? [];
+    if (sites.length === 0) { unconsumed.push(`${row.knob} (AGENTS.md:${row.line}) — no read site at all`); continue; }
+    const prints: string[] = [];
+    for (const site of sites) {
+      sitesExamined++;
+      const at = siteLine(site);
+      if (!at) { stale.push(`${row.knob}: unparseable read site ${JSON.stringify(site)}`); continue; }
+      const lines = readFileSync(join(ROOT, at.rel), "utf8").split("\n");
+      const raw = lines[at.line - 1];
+      if (raw === undefined) { stale.push(`${row.knob}: ${site} — that line does not exist`); continue; }
+      // The line must still contain the IDENTIFIER the scan matched — not the
+      // whole normalised site text (the scan normalises `${UI2API_X}` to
+      // `$UI2API_X` and `env('UI2API_X', …)` to `env...('UI2API_X')`, so an exact
+      // substring test would flag live reads) and not the bare knob literal (a
+      // name-constant read carries the literal only at its declaration). This
+      // closes the loop on the whole derive chain: scan -> site string -> file
+      // -> line -> identifier, so a change to the site format cannot quietly
+      // stop matching anything.
+      const ident = (at.text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).pop();
+      if (!ident || !raw.includes(ident)) {
+        stale.push(`${row.knob}: ${site} — that line does not mention ${JSON.stringify(ident ?? at.text)}`);
+      }
+      if (isPrintLine(at.rel, raw)) prints.push(`${at.rel}:${at.line}`);
+    }
+    if (prints.length === sites.length) {
+      narrating += prints.length;
+      unconsumed.push(
+        `${row.knob} (AGENTS.md:${row.line}) — all ${sites.length} read site(s) only print: ${prints.join(", ")}`,
+      );
+    } else {
+      narrating += prints.length;
+    }
+  }
+  assert.ok(
+    sitesExamined >= marked.length,
+    `non-vacuity: only ${sitesExamined} read sites examined across ${marked.length} TRUST rows`,
+  );
+  assert.deepEqual(stale, [], "a TRUST row's recorded read site does not resolve to a line that reads it");
+  assert.deepEqual(
+    unconsumed,
+    [],
+    "these TRUST-marked knobs are read ONLY to print. A knob that weakens trust posture but merely " +
+      "narrates its value has no posture left to warn about — either wire it for real, or unmark it and " +
+      "say what it actually does.",
+  );
+  // Disclosure: a marked knob may echo itself on the way past (a /status line, a
+  // census count) as long as something ACTS on it. Bounded so the echo sites
+  // cannot quietly become the whole class.
+  assert.ok(
+    narrating <= marked.length * 3,
+    `${narrating} of ${sitesExamined} TRUST read sites only print — past 3 per marked row the class has ` +
+      "stopped being enforced and started being narrated",
+  );
+});
+
+test("A4: a marked knob that is ALSO declared message-only is reported — TRUST and INERT are disjoint", () => {
+  // A knob cannot both weaken the daemon's trust posture and be documented as
+  // only printing its value: the second says there is no behaviour to weaken.
+  // Measured 2026-10-03: 0 of 11 — the INERT class (`UI2API_DAEMON_PORT`,
+  // `UI2API_XVFB_DISPLAY`, `UI2API_PROMPTD_PORT`) is deliberately unmarked.
+  const both = DOC_ROWS.filter(
+    (r) => r.purpose.includes(TRUST_MARKER) && /message-only|INERT/i.test(r.purpose),
+  ).map((r) => `${r.knob} (AGENTS.md:${r.line})`);
+  assert.deepEqual(
+    both,
+    [],
+    "these rows are marked TRUST AND declared message-only/INERT. Decide which one it is: a knob that " +
+      "cannot fire has no trust posture, so its marker is a warning about nothing (drop the marker), and a " +
+      "knob that does fire must not be documented as printing (drop the INERT claim).",
+  );
+});
+
+test("A4: negative — DROPPING a TRUST marker IS reported (the marker pin can fail)", () => {
+  // The mutation this proves, end to end: delete `**TRUST**` from one AGENTS.md
+  // knob row and the gate must name that row. Driven through the SAME
+  // classification function the real assertion uses, on a copy of the real rows.
+  const victim = EXPECTED_TRUST[0]!;
+  const before = unmarkedExpectation(DOC_ROWS, EXPECTED_TRUST);
+  assert.deepEqual(before, [], "precondition: the real tree has no unmarked posture knob");
+  const mutated = DOC_ROWS.map((r) =>
+    r.knob === victim ? { ...r, purpose: r.purpose.replace(TRUST_MARKER, "") } : r,
+  );
+  const after = unmarkedExpectation(mutated, EXPECTED_TRUST);
+  assert.deepEqual(
+    after,
+    [`${victim} (AGENTS.md:${DOC_ROWS.find((r) => r.knob === victim)!.line})`],
+    `dropping ${TRUST_MARKER} from ${victim}'s row must be reported`,
+  );
+  assert.ok(mutated.some((r) => r.knob === victim && !r.purpose.includes(TRUST_MARKER)), "the mutation really removed the marker");
+});
+
+test("A4: negative — a TRUST knob whose read DISAPPEARS IS reported (the read-side pin can fail)", () => {
+  // The mutation this proves: delete the body that reads a posture knob (or move
+  // it behind a shape the scan cannot see) and the documented, marked TRUST row
+  // survives — the reader is still warned about a knob that cannot fire. Driven
+  // through the same pure classifier the real assertion uses.
+  const victim = EXPECTED_TRUST.find((k) => (ENV_READS.get(k) ?? []).length === 1) ?? EXPECTED_TRUST[0]!;
+  assert.ok(ENV_READS.has(victim), `precondition: ${victim} must be read in the real tree`);
+  assert.deepEqual(unbackedTrustRows(DOC_ROWS, ENV_READS), [], "precondition: no marked row is unbacked");
+  const readsWithout = new Map(ENV_READS);
+  readsWithout.delete(victim);
+  assert.deepEqual(
+    unbackedTrustRows(DOC_ROWS, readsWithout),
+    [`${victim} (AGENTS.md:${DOC_ROWS.find((r) => r.knob === victim)!.line})`],
+    `losing the only read of ${victim} must be reported as an unbacked TRUST marker`,
+  );
+  // …and a row that DECLARES why it is unread must NOT be reported, or the gate
+  // would force a knob to keep a marker it cannot back.
+  const declared = DOC_ROWS.map((r) =>
+    r.knob === victim ? { ...r, purpose: `${r.purpose} DEAD — the read was removed deliberately` } : r,
+  );
+  assert.deepEqual(
+    unbackedTrustRows(declared, readsWithout),
+    [],
+    "an explicitly declared-dead TRUST row is not an unbacked marker",
+  );
+});
+
+// ============================================= A5 — DORMANT stays DECLARED
+
+/** Rows documented in AGENTS.md's knob table that the scan finds NO environment
+ *  read for — a knob that is DORMANT (dead, a family prefix, a non-env const, or
+ *  a knob nothing reads). Pure classifiers, so the negatives below drive the same
+ *  code the real assertions do. */
+function dormantRows(rows: DocRow[], reads: Map<string, string[]>): DocRow[] {
+  return rows.filter((r) => !reads.has(r.knob));
+}
+
+/** The honesty clause of a dormant row: which of the declared phrases it uses,
+ *  or `null` when it uses none. */
+function honestyPhrase(row: DocRow): string | null {
+  return DECLARED_NOT_READ.find((p) => row.purpose.includes(p)) ?? null;
+}
+
+/** DORMANT rows that SAY NOTHING about being dormant. */
+function undeclaredDormantRows(rows: DocRow[], reads: Map<string, string[]>): string[] {
+  return dormantRows(rows, reads)
+    .filter((r) => !declaresNotRead(r))
+    .map((r) => `${r.knob} (AGENTS.md:${r.line})`);
+}
+
+test("A5: a documented knob that is read NOWHERE must DECLARE it — a code literal is not a read", () => {
+  // DELIBERATELY TIGHTER THAN A1.3, and the overlap is named rather than hidden:
+  // A1.3 lets a documented-but-unread row pass if the knob still appears as a
+  // LITERAL somewhere in src/ (the `!literalKnobs().has(r.knob)` clause). That
+  // escape hatch is right for A1 — "is this row grounded in the code at all?" is
+  // a different question — but it is WRONG here: a literal left behind by a
+  // removed read is exactly how a dead knob keeps looking configurable, and it is
+  // the loophole a stale `DEAD`/`nothing reads it` label would slip through.
+  //
+  // MEASURED 2026-10-03: 3 dormant rows, all declaring — `UI2API_AI_PROFILE`
+  // ("nothing reads it", and it IS still a literal in src/profile/profile.ts),
+  // `UI2API_VERSION` ("NOT AN ENV KNOB"), `UI2API_WIGOLO_` ("family prefix",
+  // and it is NOT a literal anywhere — that row is grounded purely by its
+  // declaration, which is why the escape hatch had to go).
+  const marked = DOC_ROWS.length;
+  assert.ok(marked >= 60, `non-vacuity: only ${marked} rows parsed out of AGENTS.md's knob table`);
+  const undeclared = undeclaredDormantRows(DOC_ROWS, ENV_READS);
+  assert.deepEqual(
+    undeclared,
+    [],
+    "these rows document a knob that is read NOWHERE from the environment, and say nothing about it: " +
+      "a knob with no read must be documented as dead / unread / a family prefix / not-an-env-knob. " +
+      "Otherwise a reader configures it and nothing happens.",
+  );
+});
+
+test("A5: the DORMANT set is disclosed and BOUNDED — it cannot rot into unchecked, nor grow silently", () => {
+  const dormant = dormantRows(DOC_ROWS, ENV_READS);
+  // Non-vacuity, both directions. A floor so the direction cannot die by the
+  // class becoming empty (every knob read again = nothing left to declare), and
+  // the A1.3-shaped ceiling so a new dormant knob must arrive with a decision.
+  assert.ok(
+    dormant.length >= 1,
+    "non-vacuity: no documented-but-unread rows at all — this whole category is being measured against an empty set",
+  );
+  assert.ok(
+    dormant.length <= 4,
+    `the documented-but-never-read set grew to ${dormant.length}: ` +
+      `${dormant.map((r) => `${r.knob} (AGENTS.md:${r.line}, "${honestyPhrase(r)}")`).join("; ")} — ` +
+      "every entry must declare why, so past this bound the class needs re-auditing rather than more rows",
+  );
+  // Disclosure: name the set AND the honesty phrase each entry uses, so the
+  // number is readable rather than an opaque count. The names are DECLARED, not
+  // derived, for the one thing a derived-only assertion provably cannot catch:
+  // A5.1 above still passes if a dormant row is DELETED from the table, because
+  // a row that is not there declares nothing. Pinning the members means the
+  // deletion is a decision somebody has to make out loud — the same reason A3
+  // declares its three INERT knobs, and the same reason EXPECTED_TRUST exists
+  // above. The phrases are pinned beside the names because a row can keep its
+  // name and lose the honesty clause, which is the rot this category is named for.
+  const disclosed = dormant.map((r) => `${r.knob}="${honestyPhrase(r)}"`).sort();
+  assert.deepEqual(
+    disclosed,
+    ["UI2API_AI_PROFILE=\"nothing reads it\"", "UI2API_VERSION=\"NOT AN ENV KNOB\"", "UI2API_WIGOLO_=\"family prefix\""],
+    "the DORMANT set is pinned by name so a knob cannot quietly become dormant (or be deleted from the " +
+      "table) without this gate saying so; if a knob is genuinely re-wired, update it here in the same commit",
+  );
+});
+
+/** Rows that declare themselves unread while the scan finds a LIVE read — the
+ *  inverse rot of A5.1, and the reason a DORMANT label needs the same treatment
+ *  A3 gives INERT: the day someone wires the knob for real, the stale "nothing
+ *  reads it" must be reclassified, not left next to a working read. */
+function staleDormantRows(rows: DocRow[], reads: Map<string, string[]>): string[] {
+  return rows
+    .filter((r) => declaresNotRead(r) && reads.has(r.knob))
+    .map((r) => `${r.knob} (AGENTS.md:${r.line})`);
+}
+
+test("A5: a row declared DORMANT must NOT be read — the label cannot outlive the truth", () => {
+  // Measured 2026-10-03: 0 of 68 rows. `UI2API_AI_PROFILE` is the live risk: its
+  // row says the working override is `UI2API_AI_SITE`, and the knob is still a
+  // literal in src/profile/profile.ts — so wiring it back up is a one-line change
+  // that would leave the row claiming nothing reads it.
+  const stale = staleDormantRows(DOC_ROWS, ENV_READS);
+  assert.deepEqual(
+    stale,
+    [],
+    "these rows declare that the knob is not read (dead / family prefix / not-an-env-knob / nothing " +
+      "reads it) yet the scan finds a live environment read. Reclassify the row to describe what the knob " +
+      "now does — a stale dormancy label is how a reader keeps avoiding a knob that works.",
+  );
+});
+
+test("A5: negative — DROPPING an honesty phrase IS reported (the DORMANT pin can fail)", () => {
+  // The mutation this proves: delete "nothing reads it" from `UI2API_AI_PROFILE`'s
+  // row. A1.3 does NOT catch it — that row's knob is still a literal in
+  // src/profile/profile.ts, which is precisely the escape hatch A5.1 removes.
+  const victim = "UI2API_AI_PROFILE";
+  const real = DOC_ROWS.find((r) => r.knob === victim);
+  assert.ok(real, `precondition: ${victim} must have a row in AGENTS.md's knob table`);
+  assert.equal(honestyPhrase(real!), "nothing reads it", "precondition: the row declares its dormancy");
+  assert.deepEqual(undeclaredDormantRows(DOC_ROWS, ENV_READS), [], "precondition: every dormant row declares why");
+  const mutated = DOC_ROWS.map((r) =>
+    r.knob === victim ? { ...r, purpose: r.purpose.replace("nothing reads it", "runtime knob").replace("**DEAD — nothing reads it.**", "") } : r,
+  );
+  assert.ok(mutated.find((r) => r.knob === victim)!.purpose.includes("runtime knob"), "the mutation landed");
+  assert.deepEqual(
+    undeclaredDormantRows(mutated, ENV_READS),
+    [`${victim} (AGENTS.md:${real!.line})`],
+    "an undocumented-as-dead knob that is read nowhere must be reported, literal or not",
+  );
+});
+
+test("A5: negative — a knob that becomes genuinely DEAD IS reported (it must be declared, not left configurable)", () => {
+  // The mutation this proves: remove a live read (here the single read of a real
+  // knob) and the row is left describing a knob an operator can still configure.
+  // Derived, not hand-listed: the victim is whichever real knob the scan finds
+  // with exactly one read site.
+  const victim = [...ENV_READS.entries()].find(
+    ([k, v]) => v.length === 1 && DOC_KNOBS.has(k) && !declaresNotRead(DOC_KNOBS.get(k)!),
+  );
+  assert.ok(victim, "non-vacuity: at least one documented knob must have exactly one read site");
+  const [knob, sites] = victim;
+  assert.deepEqual(undeclaredDormantRows(DOC_ROWS, ENV_READS), [], "precondition: every dormant row declares why");
+  const readsWithout = new Map(ENV_READS);
+  readsWithout.delete(knob);
+  assert.deepEqual(
+    undeclaredDormantRows(DOC_ROWS, readsWithout),
+    [`${knob} (AGENTS.md:${DOC_KNOBS.get(knob)!.line})`],
+    `${knob} lost its only read at ${sites[0]} and must be declared dead`,
+  );
 });

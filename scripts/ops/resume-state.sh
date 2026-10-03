@@ -28,7 +28,19 @@ if [ "$(git status --porcelain | wc -l)" -gt 0 ]; then
   git status --porcelain | head -10 | sed 's/^/    /'
   say "    ^ UNCOMMITTED. Another lane may be mid-write; do not git add -A."
 fi
-say "  unpushed    : $(git log --oneline gitlab/main..HEAD 2>/dev/null | wc -l) commit(s)"
+# MEASURED DEFECT, fixed here: the count came from
+# `git log --oneline <ref>..HEAD 2>/dev/null | wc -l`. A MISSING ref makes git
+# fail, stderr was swallowed, and `wc -l` printed 0 — so a ref that does not
+# resolve at all was reported as "0 commit(s) unpushed", which asserts the exact
+# opposite of the truth (measured: `git log --oneline gitlab/no-such-ref..HEAD
+# 2>/dev/null | wc -l` -> 0, exit 0). An unpushed-commit count of zero is a
+# green light on a remote that may not exist; it is now UNKNOWN with the reason.
+if git rev-parse --verify --quiet gitlab/main >/dev/null 2>&1; then
+  say "  unpushed    : $(git log --oneline gitlab/main..HEAD 2>/dev/null | wc -l) commit(s) vs gitlab/main"
+else
+  say "  unpushed    : UNKNOWN — gitlab/main does not resolve as a ref here, so the count CANNOT be computed"
+  say "                (this is not '0 unpushed': a missing ref used to print 0 and read as green. Fix the remote, then re-run.)"
+fi
 
 say ""
 say "CI (last 8 pipelines, newest first)"

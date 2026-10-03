@@ -36,13 +36,22 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # "shipped code reads this". The name is not repeated here for that reason.
 TARGET_DIR="/opt/ui2api"
 CHROME_USER="${UI2API_CHROME_USER:-ui2api}"
+# API_PORT is LIVE here, but only as the port THIS SCRIPT PROBES. It is not the
+# port the service listens on: scripts/ops/units/ui2api-api.service carries its
+# own `Environment=UI2API_PROMPTD_PORT=9797`, and install-services.sh copies that
+# unit verbatim. So exporting the knob moves the health/registry/models/vault
+# probes AWAY from the running service, which then fails the health gate and
+# rolls back a release that was perfectly healthy. That is loud, never silent —
+# but it reads like "the service is broken" when the service is fine, so the
+# health-gate line below names it. To genuinely move the port, edit the unit's
+# Environment= line and re-run install-services.sh, then re-run this deploy.
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
 DO_RESTART=1
 
 # The rollback point sits BESIDE the target, never inside it, so a restore can
 # never rsync a previous release into itself and never ships as part of a deploy.
-ROLLBACK_DIR="${DEPLOY_ROLLBACK_DIR:-${TARGET_DIR}.rollback}"
-ROLLBACK_TMP="${ROLLBACK_DIR}.tmp"
+# IT IS DERIVED, and it is derived AFTER the flags are parsed — see below; the
+# value itself is assigned there, not here.
 # Bounded everywhere. A rollback that can loop is an outage that never ends.
 HEALTH_ATTEMPTS=30
 HEALTH_INTERVAL=2
@@ -63,6 +72,28 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+# ROLLBACK_DIR / ROLLBACK_TMP are DERIVED from the target, and they are derived
+# HERE, after the flags — not at the top of the file next to TARGET_DIR.
+#
+# MEASURED DEFECT (this exact line used to sit at line 44, BEFORE this loop):
+# `--target` overrode TARGET_DIR while the derived pair kept the DEFAULT target's
+# path. `bash -x scripts/ops/deploy.sh --target /tmp/x --no-restart` printed
+#     + TARGET_DIR=/tmp/x
+#     + ROLLBACK_DIR=/opt/ui2api.rollback        <- never followed --target
+# So a deploy to any other target `rm -rf`'d the PRODUCTION rollback point at
+# line ~180 and preserved the OTHER tree into it — after which a rollback of the
+# production release would restore a tree that was never live. A flag that
+# overrides a value in a way that does not reach its destination.
+#
+# An explicit DEPLOY_ROLLBACK_DIR still wins — it is an operator naming the
+# rollback point on purpose, and --target must not silently move it.
+if [[ -z "${DEPLOY_ROLLBACK_DIR:-}" ]]; then
+  ROLLBACK_DIR="${TARGET_DIR}.rollback"
+else
+  ROLLBACK_DIR="$DEPLOY_ROLLBACK_DIR"
+fi
+ROLLBACK_TMP="${ROLLBACK_DIR}.tmp"
 
 say()  { printf '[deploy] %s\n' "$*"; }
 loud() { printf '[deploy] %s\n' "$*" >&2; }
@@ -519,6 +550,7 @@ fi
 # is part of the exit status, not a log line, and a failure ROLLS BACK.
 if [[ "$DO_RESTART" -eq 1 ]]; then
   say "health gate: /health must be 2xx AND parse as JSON with ok:true (connection refused, any non-2xx, an unparseable body and ok!==true all FAIL)"
+  say "probing 127.0.0.1:${API_PORT} — this script's probe port. The SERVICE's port comes from the unit's own Environment= line (9797 as shipped), so if that number is not what the unit says, this gate fails a healthy service and rolls it back."
   ok=0
   for _ in $(seq 1 "$HEALTH_ATTEMPTS"); do
     if health_probe_once; then ok=1; break; fi
