@@ -241,6 +241,310 @@ export function firstNonFlagArg(argv: string[]): string {
   return "";
 }
 
+// ── GOAL 215: THE INPUT-VALIDATION SEAM ─────────────────────────────────────
+//
+// ONE CLASS, FOUR COSTUMES. MEASURED before this seam existed:
+// `ui2api prompt "hi" --site duckduckgo --bogus` printed nothing about `--bogus`
+// and went on to a real 45-second browser call. A tool that hears a typed value
+// and says nothing is worse than one that refuses, because the operator's NEXT
+// act is built on the assumption it was heard. So four shapes refuse, and the
+// policy is one line: **only CONTRADICTION and MALFORMATION refuse; a flag that
+// is merely inert on the current command stays legal** (`--port` on `profile
+// list` is harmless, and refusing it would be hostile).
+//
+// ── WHY EVERY SET BELOW IS DERIVED, NEVER RESTATED ───────────────────────────
+// `KNOWN_FLAGS` and `NUMERIC_FLAGS` are read out of `parseFlags`' OWN source,
+// exactly as `VALUE_TAKING_FLAGS` already is above. A hand-typed list beside
+// the parser is the defect the GOAL 44 comment describes: the ordinary edit —
+// add a flag to `parseFlags` — then leaves a second consumer believing the old
+// world, and the new refusals would then fire on a flag that genuinely WORKS.
+// A refusal on a live flag is worse than the silent no-op it replaced, so the
+// flag set these refusals judge is read from the parser rather than copied.
+// Both helpers are exported and PURE so the test lane can mutation-prove the
+// derivation against a SYNTHETIC parser — a pin that only re-reads the real
+// source would pass just as happily against a literal (the GOAL 44 lesson).
+
+/**
+ * Strip JS comments so a derivation cannot read PROSE. Measured, not
+ * hypothetical: the GOAL 44 comment above literally quotes
+ * `argv[i] === "--x")` to explain the pattern, and the un-stripped derivation
+ * dutifully collected a flag named `--x` that `parseFlags` does not accept —
+ * 41 flags where the parser has 40. A phantom in this set is not cosmetic:
+ * `KNOWN_FLAGS` is what the refusals JUDGE, so a wrong member can wave a real
+ * token through. String literals are preserved (a `//` inside one is not a
+ * comment). `valueTakingFlagsFrom` needs none of this — its pattern requires
+ * the assignment to follow the test directly, so prose cannot satisfy it — and
+ * it is left exactly as measured.
+ */
+function stripJsComments(source: string): string {
+  let out = "";
+  let quote: string | undefined;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+    const n = source[i + 1];
+    if (quote) {
+      out += c;
+      if (c === "\\") {
+        out += n ?? "";
+        i++;
+        continue;
+      }
+      if (c === quote) quote = undefined;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      out += c;
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+export function knownFlagsFrom(parserSource: string): Set<string> {
+  return new Set(
+    [...stripJsComments(parserSource).matchAll(/argv\[i\]\s*===\s*"(--[\w-]+)"/g)].map((m) => m[1]!),
+  );
+}
+
+/** The subset whose value goes through `Number(...)` — the numeric flags. */
+export function numericFlagsFrom(parserSource: string): Set<string> {
+  return new Set(
+    [
+      ...stripJsComments(parserSource).matchAll(
+        /argv\[i\]\s*===\s*"(--[\w-]+)"\)\s*f\.\w+\s*=\s*Number\(/g,
+      ),
+    ].map((m) => m[1]!),
+  );
+}
+
+// `--help` is the ONE form the CLI acts on OUTSIDE parseFlags: `ui2api --help`
+// does not parse as a command, so it lands on the `default:` help branch and
+// has always printed help. It is added here rather than refused because
+// REFUSING IT WOULD BE A REGRESSION THIS SEAM INTRODUCES ITSELF — and because
+// `unknownFlagRefusal`'s own remedy line points the operator at exactly this
+// command (`Run \`ui2api --help\``), so a set without it would tell a user to
+// run a command that the very same refusal then rejects.
+//
+// The honest limit, recorded because it is NOT fixed here: `--help` is honoured
+// only in COMMAND position. `ui2api promptd --help` therefore stays inert and
+// still starts the daemon — the exact pathology capabilities/CAPTURE-RUNBOOK.md
+// records ("There is no per-command `--help`"). Making help per-command is a
+// behaviour ADDITION outside this seam's mandate (it would have to invent a
+// help path per command); fixing it here would mean refusing a form that works.
+const KNOWN_FLAGS = new Set([...knownFlagsFrom(parseFlags.toString()), "--help"]);
+const NUMERIC_FLAGS = numericFlagsFrom(parseFlags.toString());
+
+/** One `--x` token as the seam sees it. */
+export interface FlagToken {
+  /** the token itself, `--x` form */
+  flag: string;
+  /** the value token, when the flag is value-taking AND one follows */
+  value?: string;
+  /** true when a value-taking flag has NO token after it */
+  missingValue: boolean;
+}
+
+/**
+ * Every flag-shaped token in argv, in order — THE single definition of
+ * "flag-shaped" the three refusals share, and the one that must AGREE with
+ * `firstNonFlagArg` above (GOAL 215's crux: a value that happens to look like a
+ * flag is legal input, so `--site --weird-dir` is a site named `--weird-dir`,
+ * not a refusal).
+ *
+ * It agrees BY CONSTRUCTION, not by promise, because both walk the same two
+ * derived sets:
+ *   - only `--x` is flag-shaped — a single-dash token, a bare `-` and every
+ *     positional (the command, a subcommand, a host, a URL, the prompt text)
+ *     are never flags and are skipped here exactly as `firstNonFlagArg` skips
+ *     them;
+ *   - only a KNOWN value-taking flag consumes the next token, so a VALUE that
+ *     looks like a flag is consumed as a value and never scanned;
+ *   - an UNKNOWN flag consumes nothing (`VALUE_TAKING_FLAGS` does not contain
+ *     it), which is the same answer `firstNonFlagArg` gives for the token after
+ *     it — so this walker can never re-classify a token the positional reader
+ *     already accepted.
+ */
+export function flagTokens(argv: string[]): FlagToken[] {
+  const out: FlagToken[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i]!;
+    if (!tok.startsWith("--")) continue; // a positional is never a flag
+    if (VALUE_TAKING_FLAGS.has(tok)) {
+      const value = argv[i + 1];
+      out.push({ flag: tok, value, missingValue: value === undefined });
+      i++; // the value token is consumed — including one that looks like a flag
+      continue;
+    }
+    out.push({ flag: tok, missingValue: false });
+  }
+  return out;
+}
+
+/** `ui2api` has no diff/levenshtein, but a near-miss is the one thing that turns
+ *  a refusal into a next step instead of a dead end. Distance 1-3 only, so a
+ *  suggestion is never noise. Pure. */
+function nearestKnownFlag(flag: string): string | undefined {
+  const target = flag.replace(/^--/, "");
+  let best: { name: string; dist: number } | undefined;
+  for (const known of KNOWN_FLAGS) {
+    const name = known.replace(/^--/, "");
+    const a = name.split("");
+    const b = target.split("");
+    if (Math.abs(a.length - b.length) > 3) continue;
+    const row: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = row[0]!;
+      row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const tmp = row[j]!;
+        row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    const dist = row[b.length]!;
+    if (dist >= 1 && dist <= 3 && (!best || dist < best.dist)) best = { name: known, dist };
+  }
+  return best?.name;
+}
+
+/**
+ * Seam 1 — UNKNOWN FLAGS REFUSE, naming the flag and pointing at the help.
+ *
+ * Before this, an unknown token was inert: `parseFlags` never matched it,
+ * `firstNonFlagArg` skipped it because it starts with `--`, and the command
+ * ran and exited as though the operator had not typed it. That is the whole
+ * class GOAL 215 names. The compatibility risk of refusing is real and is
+ * accepted deliberately: a script that passed an extra token through was ALREADY
+ * broken — it was passing a flag the tool ignored — so refusing surfaces the bug
+ * at the call site instead of hiding it until production.
+ *
+ * Pure — no I/O, no exit — so the test lane can call it directly.
+ */
+export function unknownFlagRefusal(argv: string[]): string {
+  for (const t of flagTokens(argv)) {
+    if (KNOWN_FLAGS.has(t.flag)) continue;
+    const near = nearestKnownFlag(t.flag);
+    return (
+      `unknown flag ${t.flag} — nothing ran. This CLI knows exactly ${KNOWN_FLAGS.size} flags ` +
+      `and ${t.flag} is not one, so it would have been ignored ` +
+      `in silence and the command would have exited as if it had been heard.` +
+      (near ? ` Did you mean ${near}?` : "") +
+      ` Run \`ui2api --help\` for the full command and flag list. Nothing was written.`
+    );
+  }
+  return "";
+}
+
+/**
+ * Seam 2 — MALFORMED NUMERIC VALUES REFUSE, naming the flag, the value
+ * received, and the accepted form. `--pool-max abc` used to become
+ * `Number("abc") || undefined` = `undefined` = "auto": a silent coercion to a
+ * default, which is the same lie as an ignored flag wearing a value.
+ *
+ * ── WHAT THIS DOES *NOT* DECIDE, DELIBERATELY ────────────────────────────────
+ * GOAL 215 leaves `--pool-min 0` AMBIGUOUS on purpose: `Number(x) || undefined`
+ * means `0` currently means UNSET, and whether that is "zero" or "auto" is a
+ * real product question with two defensible answers that no gate settles. So
+ * this refusal fires ONLY on input that is not a number at all — absent, blank,
+ * or `Number(...) === NaN`. `0` keeps meaning exactly what it means today
+ * (`undefined`), and the next reader must NOT "fix" that here: resolving it is
+ * the operator's call, not this seam's.
+ *
+ * Negative and fractional values are likewise untouched: they parse, they were
+ * accepted before, and narrowing the rule to NaN is the whole of the mandate.
+ *
+ * Pure — no I/O, no exit.
+ */
+export function numericFlagRefusal(argv: string[]): string {
+  for (const t of flagTokens(argv)) {
+    if (!NUMERIC_FLAGS.has(t.flag)) continue;
+    const accepted = `a number, e.g. ${t.flag} 4`;
+    if (t.missingValue) {
+      return (
+        `malformed value for ${t.flag}: the flag was given NO value (accepted form: ${accepted}). ` +
+        `Without it the value was dropped in silence and the default was used instead. ` +
+        `Nothing was written; re-run with a number after ${t.flag}.`
+      );
+    }
+    const raw = t.value ?? "";
+    if (raw.trim() === "" || Number.isNaN(Number(raw))) {
+      return (
+        `malformed value for ${t.flag}: got ${JSON.stringify(raw)}, which is not a number ` +
+        `(accepted form: ${accepted}). It would have been coerced to the default in silence, ` +
+        `so the run you asked for is not the run you would have got. ` +
+        `Nothing was written; re-run with a number after ${t.flag}.`
+      );
+    }
+  }
+  return "";
+}
+
+/**
+ * Seam 3 — A FLAG THAT IS ONLY MEANINGFUL *WITH* ANOTHER REFUSES, naming the
+ * flag it needs. These are CONTRADICTIONS, not inertness: the flag was typed,
+ * it is read only inside a sibling flag's branch, and the command exits
+ * reporting work it did not do.
+ *
+ *   - `--xhost-all` without `--assist`: the GOAL 215 priority case. It widens
+ *     the xhost relax mode of the `--assist` display-share capture and is read
+ *     ONLY inside that branch, so without `--assist` the capture runs the
+ *     ordinary path, opens a browser and reports a capture while relax-mode was
+ *     never applied — the operator believes relax-mode ran.
+ *   - `--registry-repo` without `--mirror`: the repo URL is the MIRROR
+ *     destination and is read only inside the `--mirror` branch of publish, so
+ *     without it the publish succeeds and the mirror push never happens.
+ *   - `hub run --port` without `--acp`: `--port` is read only on the `--acp`
+ *     (HTTP) path; without `--acp`, `hub run` serves STDIO and the port was
+ *     ignored.
+ *
+ * Command-SCOPED on purpose, and this is seam 4: the same flag on a command
+ * that has no such pairing is merely inert, which stays LEGAL. Refusing
+ * `--xhost-all` on `prompt`, or `--port` on `profile list`, would be hostile.
+ *
+ * Pure — no I/O, no exit.
+ */
+export function needsCompanionRefusal(cmd: string | undefined, arg: string | undefined, flags: Flags): string {
+  if (cmd === "profile" && arg === "capture" && flags.xhostAll && !flags.assist) {
+    return (
+      `ui2api profile capture --xhost-all: --xhost-all only means anything together with ` +
+      `--assist (it widens the xhost relax mode of the --assist display-share capture, and ` +
+      `is read only inside that branch). Without --assist this run would take the ordinary ` +
+      `capture path and report a capture while relax-mode was never applied. ` +
+      `Re-run as: ui2api profile capture <url> --assist --xhost-all. Nothing was written.`
+    );
+  }
+  if (cmd === "hub" && arg === "publish" && flags.registryRepo && !flags.mirror) {
+    return (
+      `ui2api hub publish --registry-repo ${flags.registryRepo}: --registry-repo only means ` +
+      `anything together with --mirror (the repo URL is the MIRROR destination, and is read ` +
+      `only inside the --mirror branch). Without --mirror the package would publish and the ` +
+      `mirror push would never happen. ` +
+      `Re-run as: ui2api hub publish <host> --mirror --registry-repo <url>. Nothing was written.`
+    );
+  }
+  if (cmd === "hub" && arg === "run" && flags.port !== undefined && !flags.acp) {
+    return (
+      `ui2api hub run --port ${flags.port}: --port is read only on the --acp (HTTP) path — ` +
+      `without --acp, hub run serves STDIO and the port was ignored. ` +
+      `Re-run as: ui2api hub run <host> --acp --port ${flags.port}. Nothing was written.`
+    );
+  }
+  return "";
+}
+
 // GOAL 43: the requirements/doctor <site> positional, read flag-aware from the
 // WHOLE command argv. `requirements --json gemini` and
 // `requirements gemini --json` scope IDENTICALLY — a site token is honored no
@@ -1661,6 +1965,41 @@ async function main(): Promise<void> {
   // Parse flags from the whole command line so e.g. `ui2api hub --port N` works
   // even though `--port` would otherwise be swallowed into `arg`.
   const flags = parseFlags(process.argv.slice(2));
+  // ── GOAL 215 SEAM 1: UNKNOWN FLAGS REFUSE, AT THE DISPATCH SEAM ────────────
+  // Placed here — after parseFlags, BEFORE the switch — so it precedes EVERY
+  // command, not just the ones a handler remembered to guard. MEASURED before
+  // this line existed: `ui2api prompt "hi" --site duckduckgo --bogus` printed
+  // nothing about `--bogus` and went on to a REAL 45-second browser call; the
+  // operator's next act was built on the belief the flag had been heard.
+  //
+  // WHY IT THROWS AND DOES NOT LOG: `main().catch` turns a throw into
+  // `console.error("Error:", msg)` + `process.exit(1)` — the same shape
+  // cmdGenerate uses for generateTargetRefusal, so a refused flag is a NONZERO
+  // EXIT a script can test, never an exit 0 that reads as success.
+  const unknownFlag = unknownFlagRefusal(process.argv.slice(2));
+  if (unknownFlag) throw new Error(unknownFlag);
+  // ── GOAL 215 SEAM 2: A MALFORMED NUMERIC VALUE REFUSES ─────────────────────
+  // `--pool-max abc` reached `Number("abc") || undefined` = `undefined` =
+  // "auto": the operator asked for a pool and the daemon printed a confident
+  // "auto" and started, so the run they asked for was not the run they got.
+  // Same throw-not-log seam as above, same nonzero exit.
+  //
+  // `--pool-min 0` IS NOT THIS SEAM'S BUSINESS. GOAL 215 leaves it ambiguous on
+  // purpose (`0` means UNSET today, and whether that is "zero" or "auto" is a
+  // product question), so this fires ONLY on input that is not a number at all.
+  // `0` keeps meaning exactly what it means today.
+  const badNumeric = numericFlagRefusal(process.argv.slice(2));
+  if (badNumeric) throw new Error(badNumeric);
+  // ── GOAL 215 SEAM 3: A FLAG THAT ONLY MEANS SOMETHING *WITH* ANOTHER ───────
+  // These are CONTRADICTIONS, not inertness: the flag was typed, it is read only
+  // inside a sibling flag's branch, and the command exits reporting work it did
+  // not do. `profile capture --xhost-all` without `--assist` widened nothing,
+  // yet opened a browser and reported a capture.
+  //
+  // COMMAND-SCOPED, so the same flag on a command with no such pairing stays
+  // LEGAL — refusing `--xhost-all` on `prompt` would be hostile, not strict.
+  const needsCompanion = needsCompanionRefusal(cmd, arg, flags);
+  if (needsCompanion) throw new Error(needsCompanion);
   switch (cmd) {
     case "hub": {
       if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "", flags);
