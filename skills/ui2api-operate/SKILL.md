@@ -86,10 +86,11 @@ units — it writes no unit file itself, it delegates to the single installer
 `scripts/ops/install-services.sh`.
 
 **The display number is not a knob.** `scripts/ops/units/ui2api-xvfb.service`
-starts `Xvfb :99` in its `ExecStart`, and every shipped unit hardcodes
-`Environment=DISPLAY=:99`; the installer copies those files verbatim
-(`install -m 0644`, no template substitution anywhere). `UI2API_XVFB_DISPLAY` is
-read into a shell variable at `scripts/ops/provision-ui2api-user.sh` and consumed
+hardcodes `ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp`,
+and every shipped unit carries `Environment=DISPLAY=:99`; the installer copies
+those files verbatim (`install -m 0644`, no template substitution anywhere).
+`UI2API_XVFB_DISPLAY` is read into a shell variable at
+`scripts/ops/provision-ui2api-user.sh` and consumed
 **only inside a printed message** — it is never substituted into a unit, so
 setting it changes nothing that gets installed. To use a different display, edit
 the unit files and re-run `scripts/ops/install-services.sh`.

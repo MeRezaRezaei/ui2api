@@ -5,12 +5,26 @@
 // (`capabilities/<site>/` on disk — the layout `findPackageDir()` /
 // `resolvePackagedProfile()` / `buildRegistryPackages()` already read).
 //
-// GOAL 116 — HONEST DEFAULT: no public community registry is published yet, so
-// `DEFAULT_REGISTRY_URL` below is an INTENTIONAL placeholder that always 404s;
-// install REQUIRES `--registry <url>` / `UI2API_REGISTRY_URL` pointing at a
-// registry the operator runs or forks. The in-repo `capabilities/<site>/`
-// packages are served with no install step at all. See `fetchRegistryIndex()`
-// for the named error that says exactly this instead of guessing at reachability.
+// THE DEFAULT REGISTRY IS PUBLISHED AND SERVED. `DEFAULT_REGISTRY_URL` below is
+// a public repo (default branch `master`, served over
+// raw.githubusercontent.com), so a bare `ui2api install <site>` /
+// `install --catalog` needs NO `--registry`. MEASURED 2026-10-03 against the
+// default: `index.json` -> HTTP 200 (7198 bytes), 33 catalog entries,
+// `install --catalog` exit 0; the API reports `private: false`, default branch
+// `master`, last pushed 2026-09-24.
+// What that does NOT buy you is a stability contract: the registry is
+// maintained by this project, most entries are `trust: unreviewed`, and the
+// catalog changes as the project publishes — read it as "whatever the registry
+// publishes today", not as a pinned set of versions. `--registry <url>` /
+// `UI2API_REGISTRY_URL` still override it (a fork, or a registry the operator
+// runs). The in-repo `capabilities/<site>/` packages need no install step at
+// all. If a fetch DOES fail, `fetchRegistryIndex()` names the failure that
+// actually happened instead of asserting anything about the registry's
+// existence.
+// (Supersedes GOAL 116, which asserted the built-in default was an unpublished
+// placeholder that could not resolve. True when written, false now; kept
+// inline rather than silently rewritten so the reason the old branch existed —
+// a user was once sent hunting for a repo that did not exist — stays readable.)
 //
 // The registry's layout is a git repo whose default branch is `master` (NOT
 // `main`). Its root carries `index.json` — the installable-site catalog with `trust`
@@ -93,8 +107,10 @@ export function normalizeRegistryBase(input: string): string {
 /**
  * Fetch the registry's index.json catalog (the discovery surface): the list of
  * installable sites with name/url/version/trust. Throws when the base URL is
- * wrong — including the pinned 404 cause (a `main` branch URL that no longer
- * exists), with the corrective hint.
+ * wrong — including the wrong-branch case (a `main` URL, when the registry's
+ * default branch is `master`), with the corrective hint. A fetch failure
+ * against a CORRECT base is also thrown, with the actual error text appended;
+ * the hint describes the failure, not the registry's existence.
  */
 export async function fetchRegistryIndex(registryBaseUrl: string): Promise<RegistryIndex> {
   const base = normalizeRegistryBase(registryBaseUrl);
@@ -103,17 +119,19 @@ export async function fetchRegistryIndex(registryBaseUrl: string): Promise<Regis
     parsed = JSON.parse(await fetchText(`${base}/index.json`));
   } catch (e) {
     const wrongBranch = base.includes(`/main/`) || base.endsWith("/main");
-    // GOAL 116: the DEFAULT base is NOT a reachable registry — no public
-    // community registry is published, so a bare `ui2api install <site>` /
-    // `install --catalog` 404s on the code's own default. Saying "verify the
-    // registry repo is reachable" sent the reader hunting for a repo that does
-    // not exist. Name the REAL cause (nothing is published) and the REAL
-    // remedy (supply your own registry), instead.
+    // The default base IS a real, served registry (MEASURED 2026-10-03: HTTP
+    // 200, 33 entries — see the header comment), so reaching THIS branch means
+    // the FETCH failed, not that the registry is missing: offline/DNS/proxy
+    // trouble, a non-200 (GitHub 5xx, rate limit), or a body that is not a
+    // catalog. An earlier version of this branch told the user the default
+    // registry was unreachable by design — false, and it blamed the registry
+    // for what is usually a transient network failure. Name the failure that
+    // actually happened; keep it actionable.
     const isDefault = base === normalizeRegistryBase(DEFAULT_REGISTRY_URL);
     const hint = wrongBranch
       ? ` — the registry default branch is "${DEFAULT_REGISTRY_BRANCH}" (its /main is gone); use e.g. ${DEFAULT_REGISTRY_URL}`
       : isDefault
-        ? ` — no public community registry is published yet: the built-in default ${DEFAULT_REGISTRY_URL} has no repo behind it, so it 404s by design. Supply a registry: pass --registry <url> or set UI2API_REGISTRY_URL to a raw base ending in the branch (e.g. <your-fork>/${DEFAULT_REGISTRY_BRANCH}) — or skip install entirely and use the packages already vendored in this repo's capabilities/<site>/ directories`
+        ? ` — the fetch for the default registry failed, not the registry's existence: ${DEFAULT_REGISTRY_URL} is a real published registry on branch "${DEFAULT_REGISTRY_BRANCH}" (the usual causes are offline/DNS/proxy trouble, a GitHub 5xx or rate limit, or a non-JSON body). Retry; if it persists, check connectivity to that URL, or point elsewhere with --registry <url> / UI2API_REGISTRY_URL (e.g. <your-fork>/${DEFAULT_REGISTRY_BRANCH}) — or skip install entirely and use the packages already vendored in this repo's capabilities/<site>/ directories`
         : ` — no registry answered at that URL; --registry <url> / UI2API_REGISTRY_URL must point at a registry that publishes index.json on the ${DEFAULT_REGISTRY_BRANCH} branch`;
     throw new Error(`registry index.json not readable at ${base}/index.json${hint} (${e instanceof Error ? e.message : String(e)})`);
   }

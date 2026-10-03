@@ -319,6 +319,8 @@ blocker listed above — do not invent a green for it.
 - `UI2API_USER_DATA_DIR` / `UI2API_CHROME_PROFILE_PATH` — reuse your real
   Chrome profile (cannot share a profile already locked by running Chrome).
 - `UI2API_ATTACH_PORT=9222` — attach to an already-running Chrome
+  (`google-chrome --remote-debugging-port=9222`) instead of launching.
+- `UI2API_POOL_MIN` — warm browser pool size for promptd.
 
 > **The Chrome point of use is a DEDICATED LINUX USER, not your own browser.**
 > Chrome will not let another process attach to the browser you are personally
@@ -341,8 +343,6 @@ blocker listed above — do not invent a green for it.
 >
 > The owner is data, not a hardcode: `UI2API_CHROME_USER=some-svc-acct` for a
 > per-customer service account, `UI2API_CHROME_USER=ci` for CI.
-  (`google-chrome --remote-debugging-port=9222`) instead of launching.
-- `UI2API_POOL_MIN` — warm browser pool size for promptd.
 
 > **App-bound / login-gated capabilities** (gmail, google-ai-search, youtube
 > posting + transcript, tencent-aistudio, gemini search toggle, kimi Extra
@@ -482,11 +482,18 @@ The shipped example module is the same contract for chat:
 exposes `send_prompt`, `new_chat`, `read_last_response`, `ai_status` over MCP
 (see README "Wire it into an agent…").
 
-ACP: the generated stdio ACP server surface (`generate --acp` →
-`sites/server/acp.ts`, protocolVersion 2025-03-26) is covered by the unit suite
-(`test/acp.test.ts`, initialize + list_tools over JSON-RPC), but a *live* ACP
-tool call needs a real captured action map for a site — none is installed on
-this box out of the box — so MCP stdio is the live-proven consumer surface.
+ACP: `ui2api generate <host>` emits the **MCP** server only
+(`sites/<host>/server/index.ts`) — there is **no `--acp` flag**; passing one is
+silently ignored, so nothing lands in `sites/<host>/server/acp.ts`. The ACP
+surface the CLI actually reaches is `ui2api hub run <host> --acp [--port N]`
+(default `:8788`) — HTTP JSON-RPC, protocolVersion 2025-03-26, and it needs the
+host published into the hub registry first (`ui2api hub publish <host>`). The
+generated stdio `acp.ts` template (same protocol version) does exist and is
+covered by the unit suite (`test/acp.test.ts`, initialize + list_tools over
+JSON-RPC), but no CLI subcommand emits it — only the generator API does, with
+`generate(map, dir, "acp")`. Either way a *live* ACP tool call needs a real
+captured action map for a site — none is installed on this box out of the box —
+so MCP stdio is the live-proven consumer surface.
 
 ## 12. Community install — `ui2api install <site>` (GOAL 24, 2026-09-24)
 

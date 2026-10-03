@@ -31,6 +31,15 @@ set -euo pipefail
 # real point of use. UI2API_CHROME_USER is the production knob.
 CHROME_USER="${CHROME_USER:-${UI2API_CHROME_USER:-ui2api}}"
 CHROME_DIR=".config/ui2api-chrome"
+# DAEMON_PORT / XVFB_DISPLAY / API_PORT are MESSAGE-ONLY locals. MEASURED: the
+# install path is install-services.sh, which copies scripts/ops/units/*.service
+# verbatim (`install -m 0644`, no sed/envsubst/template anywhere), and the shipped
+# units hardcode CDP :9222, promptd :9797 and DISPLAY=:99. Exporting
+# UI2API_DAEMON_PORT / UI2API_PROMPTD_PORT / UI2API_XVFB_DISPLAY to this script
+# therefore changes NOTHING that gets installed — which is also why these must
+# never be interpolated into a sentence that describes what was installed. To
+# move a value, edit the unit in scripts/ops/units/ and re-run
+# scripts/ops/install-services.sh.
 DAEMON_PORT="${UI2API_DAEMON_PORT:-9222}"
 XVFB_DISPLAY="${UI2API_XVFB_DISPLAY:-99}"
 API_PORT="${UI2API_PROMPTD_PORT:-9797}"
@@ -140,7 +149,8 @@ if [[ "$DO_SYSTEMD" -eq 1 ]] && have systemctl; then
   # than discovering it from a unit running as somebody else.
   if [[ "$CHROME_USER" != "ui2api" ]]; then
     say "CHROME_USER=$CHROME_USER is a THROWAWAY test user."
-    say "the shipped units are NOT parameterized by it: they hardcode User=ui2api, CDP :$DAEMON_PORT, promptd :$API_PORT, DISPLAY=:$XVFB_DISPLAY."
+    say "the shipped units are NOT parameterized by it: they hardcode User=ui2api, CDP :9222, promptd :9797, DISPLAY=:99."
+    say "your requested values are NOT applied — UI2API_DAEMON_PORT=$DAEMON_PORT, UI2API_PROMPTD_PORT=$API_PORT, UI2API_XVFB_DISPLAY=$XVFB_DISPLAY are read here for reporting only. install-services.sh copies the units verbatim, so :9222/:9797/:99 are what land. To move one, edit scripts/ops/units/*.service and re-run scripts/ops/install-services.sh."
     say "delegating installs the PRODUCTION units for 'ui2api' — that is intended, and the test user is NOT what ends up serving."
   fi
 

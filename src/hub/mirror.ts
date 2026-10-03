@@ -98,11 +98,16 @@ export function pickLatestVersion(names: string[]): string | null {
  * This only ever WRITES a vetted, already-published package; it never pulls or
  * executes anything. Requires git push access to the mirror repo.
  *
- * GOAL 120: there is NO published community registry, so this used to default to
- * `https://github.com/MeRezaRezaei/ui2api-registry` — a repo that does not
- * exist, which made every mirror attempt a silent failure against nothing. The
- * mirror target is now EXPLICIT: supply `repoUrl` or `UI2API_REGISTRY_REPO`. We
- * never invent a default destination for a write.
+ * GOAL 120: this used to DEFAULT the mirror target to
+ * `https://github.com/MeRezaRezaei/ui2api-registry`, which made every mirror
+ * attempt a silent failure against a destination the seam had not verified. The
+ * community registry itself is real and reachable — `ui2api-registry` is
+ * published and public (measured 2026-09-24: `index.json` HTTP 200 with 33
+ * entries; repo API `private: false`, default branch `master`). So the standing
+ * invariant is NOT that the registry is missing: it is that there is NO default
+ * WRITE target, because publishing into a repo this seam did not choose is a
+ * write nobody asked for. The mirror target is EXPLICIT: supply `repoUrl` or
+ * `UI2API_REGISTRY_REPO`. We never invent a default destination for a write.
  */
 /* The public repository is `MeRezaRezaei/ui2api`, written only by the sanitizer.
  * The name is overridable by env so a fork can guard ITS OWN public repo without
@@ -139,7 +144,9 @@ export function pushToMirror(pkg: MirrorPackage, opts: { repoUrl?: string; workD
   if (!repoUrl) {
     throw new Error(
       "no mirror repository configured: pass repoUrl or set UI2API_REGISTRY_REPO to the git remote " +
-        "that should receive published packages. There is no default community mirror — none is published."
+        "that should receive published packages. There is no default community mirror — a rule about " +
+        "WHERE a publish goes, not about the registry existing. The registry itself is published " +
+        "(measured 2026-09-24); name the remote you intend to push to."
     );
   }
   /* THE PUBLIC SANITIZED DESTINATION IS NOT A PACKAGE MIRROR, and this seam had

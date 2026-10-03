@@ -77,6 +77,36 @@ import {
  * `test:unit` must never have its verdict decided by a third party's uptime, so
  * the network half stays OPT-IN (the same idiom as test/install.test.ts:141).
  * That is precisely why the hermetic half above has to carry the weight alone.
+ *
+ * ------------------------ THE SOURCE, TOO (inverted 2026-10-03) -------------
+ *
+ * 1-8 gate the DOCS. Two pins also gate the SOURCE, and on 2026-10-03 both of
+ * them had to be INVERTED because they asserted the opposite of the truth:
+ *
+ *   assert.match(INSTALL_SRC, /no public community registry is published/i)
+ *   assert.match(err.message,  /no public community registry is published/i)
+ *
+ * MEASURED that day against the default registry: `index.json` -> HTTP 200
+ * (7198 bytes, 33 entries, `install --catalog` exit 0; repo API `private:false`,
+ * branch `master`, pushed_at 2026-09-24). So those two pins did not merely fail
+ * to catch a lie — they REQUIRED the lie to stay in the code. The one surface a
+ * user actually reads when a fetch fails (the error hint) was being protected by
+ * this gate while telling them to go and look for a registry that is right
+ * there. A gate that pins a falsehood can only be made green by keeping the
+ * falsehood, so it protects the wrong claim by construction.
+ *
+ * Both are now the same pin in the honest direction, and phrased as the CLASS
+ * rather than the one sentence a diff happened to touch: this file's own
+ * registry-anchored classifier is run over the installer and over the hint, so
+ * ANY rephrasing the classifier reads as "unpublished" is refused — the old
+ * wording, "has no repo behind it", "404s by design", all of them. Silence is
+ * not enough (it would pass a header that only deleted the lie without adding
+ * the fact), so the truth must be STATED, and stated as a dated measurement.
+ *
+ * The original intent of the hint test was never wrong — "must not send readers
+ * hunting for a repo that does not exist" is exactly right, and it is kept. Only
+ * the regex was wrong, because the corrected message names the failure that
+ * actually happened instead of the registry's non-existence.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -523,7 +553,7 @@ const topicsOf = (texts: Record<string, string>): TopicDoc[] =>
 // ============================================================= HERMETIC ====
 
 d("GOAL 116 — registry doc/code truth", () => {
-  t("the code's default really is the documented placeholder (master, this repo name)", () => {
+  t("the code's default really is the one the docs document (master, this repo name)", () => {
     assert.equal(DEF_BRANCH, DEFAULT_REGISTRY_BRANCH, "parsed branch must equal DEFAULT_REGISTRY_BRANCH");
     assert.equal(
       DEFAULT_REGISTRY_URL,
@@ -684,8 +714,52 @@ d("GOAL 116 — registry doc/code truth", () => {
     assert.match(MIRROR, /no default community mirror/i, "and must say so by name");
   });
 
-  t("the shipped source keeps the honest-default comment (no drift back to 'PUBLIC')", () => {
-    assert.match(INSTALL_SRC, /no public community registry is published/i);
+  t("the shipped source STATES the default registry is published, and never calls it an unpublished placeholder", (tt) => {
+    // INVERTED 2026-10-03 — and the inversion IS the fix, so it is worth saying
+    // why. This used to read
+    //   `assert.match(INSTALL_SRC, /no public community registry is published/i)`
+    // i.e. it required `src/registry/install.ts` to KEEP asserting something
+    // false. The world had already moved (MEASURED 2026-10-03: default registry
+    // HTTP 200, 7198 bytes, 33 entries, `install --catalog` exit 0; repo API
+    // `private:false`, branch `master`), so the pin had exactly one way to stay
+    // green: keep the lie. That is what made this file blind — it was the gate
+    // for registry truth, and it was defending a falsehood.
+    //
+    // Phrased as the CLASS, not as the literal the sibling's diff deleted: the
+    // classifier below (`claimsIn`) is this file's own registry-anchored
+    // publishedness reader, so ANY rephrasing it reads as "unpublished" is
+    // refused — the old wording, "has no repo behind it", "404s by design" —
+    // rather than one string someone chose to delete.
+    const claims = claimsIn("src/registry/install.ts", INSTALL_SRC);
+    assert.deepEqual(
+      claims.filter((c) => c.direction === "unpublished").map((c) => c.evidence),
+      [],
+      "src/registry/install.ts must not claim the default registry is unpublished / has no repo behind it — " +
+        "it is published and served, and this file's whole subject is that class of claim",
+    );
+    // Non-vacuity, and the reason a bare `doesNotMatch` would be worthless here:
+    // "no false claim" is also satisfied by SAYING NOTHING, which leaves the next
+    // reader of the installer's header unable to tell published from unpublished.
+    assert.ok(
+      claims.some((c) => c.direction === "published"),
+      `precondition: the installer must STATE that the default registry is published, not merely stop denying it; ` +
+        `its claims were ${JSON.stringify(claims.map((c) => [c.direction, c.evidence]))}`,
+    );
+    // …and the stated fact must be AUDITABLE, on the same terms the docs' own
+    // printed counts are (`measured <YYYY-MM-DD>`, enforced by countDateViolations
+    // above). A source comment asserting a world-state with no measurement is a
+    // world-state that rots silently — which is what the deleted fiction was.
+    assert.match(
+      INSTALL_SRC,
+      /\bmeasured\s+\d{4}-\d{2}-\d{2}\b/i,
+      "the installer's publishedness claim must carry the `measured <YYYY-MM-DD>` it was measured on",
+    );
+    tt.diagnostic(
+      `installer's registry claim: ${claims.map((c) => `${c.direction} ("${c.evidence}")`).join("; ") || "NONE"}`,
+    );
+    // Unchanged from before the inversion, and still a real gate: the old header
+    // described a per-site fetch as coming "from the PUBLIC" registry, which the
+    // modern <name>/<version>.json mirror layout made wrong. Do not drift back.
     assert.doesNotMatch(INSTALL_SRC, /Fetches a per-site capability package from the PUBLIC/);
   });
 
@@ -693,10 +767,24 @@ d("GOAL 116 — registry doc/code truth", () => {
     // The code surface is derived too, so a NEW src file carrying the claim is
     // counted rather than invisible. Its direction is deliberately NOT folded
     // into the docs' world-agreement: `src/registry/install.ts` states the claim
-    // in its 404 error text and `src/hub/mirror.ts` in its refusal text, and both
-    // are contracts about what the code SAYS on failure — the code's runtime
+    // in its header + fetch-error text and `src/hub/mirror.ts` in its refusal
+    // text, and both are contracts about what the code SAYS — the code's runtime
     // behaviour is checked against the world by the live half below. What this
     // pin holds is that the enumeration is live and every hit classifies cleanly.
+    //
+    // KNOWN FINDING, deliberately NOT asserted here (it would be a red suite, and
+    // `src/hub/mirror.ts` is not this file's to change): the mirror's own comment
+    // still carries a WORLD claim the world has outgrown — "there is NO published
+    // community registry … a repo that does not exist" (mirror.ts:101) — which is
+    // why it classifies as `unpublished` beside the installer's `published`. Its
+    // CODE contract is still true and still gated by the mirror pin above (there
+    // is no default WRITE destination: `pushToMirror` reads `repoUrl ??
+    // UI2API_REGISTRY_REPO` with no fallback, and says so by name). Only the
+    // historical justification sentence is stale, and it should be re-worded to
+    // "no default WRITE target is configured" so it stops reading as a
+    // publishedness claim. `srcClaimFiles()` will then report the mirror as
+    // claiming nothing, and this test's `dirs.size === 1` rule stops applying to
+    // it — the installer keeps its own dedicated pin above either way.
     const files = srcClaimFiles();
     assert.ok(
       files.includes("src/registry/install.ts") && files.includes("src/hub/mirror.ts"),
@@ -710,7 +798,11 @@ d("GOAL 116 — registry doc/code truth", () => {
         `${f} makes a registry claim in BOTH directions; it must state one: [${[...dirs].join(", ")}]`,
       );
     }
-    tt.diagnostic(`src files making a registry publishedness claim: ${files.join(", ")}`);
+    tt.diagnostic(
+      `src files making a registry publishedness claim: ${files
+        .map((f) => `${f}=${[...new Set(claimsIn(f, read(f)).map((c) => c.direction))].join("/")}`)
+        .join(", ")}`,
+    );
   });
 
   t("MUTATION: a doc claiming the registry IS live is a claim, and carries no repo/branch literal the code contradicts", () => {
@@ -889,7 +981,7 @@ d("GOAL 116 — registry doc/code truth", () => {
 });
 
 d("GOAL 116 — the default-registry failure names the real cause and remedy", () => {
-  t("a default-URL 404 says the registry is NOT published and how to supply one", async () => {
+  t("a default-URL fetch failure names a REAL cause and the escape hatch, and never blames non-existence", async () => {
     const err = await withStubbedFetch(() =>
       fetchRegistryIndex(DEFAULT_REGISTRY_URL).then(
         () => assert.fail("expected the default registry to be unreachable"),
@@ -897,12 +989,49 @@ d("GOAL 116 — the default-registry failure names the real cause and remedy", (
       )
     );
     assert.match(err.message, /index\.json not readable/);
-    assert.match(err.message, /no public community registry is published/i);
+    // THE INTENT THIS TEST WAS WRITTEN FOR IS UNCHANGED, and it is the reason the
+    // test exists at all: a user must not be sent hunting for a repo that does not
+    // exist. What was wrong was the REGEX — it `assert.match`ed the exact false
+    // wording ("no public community registry is published"), so correcting the
+    // source's lie turned the gate RED. The protected behaviour is now asserted
+    // against the corrected message.
+    //
+    // First, as the CLASS: the classifier reads the hint itself for a
+    // publishedness claim, so any rephrasing a reader would take as "the registry
+    // is not there" fails — not only the literal that was deleted.
+    assert.deepEqual(
+      claimsIn("default-hint", err.message).filter((c) => c.direction === "unpublished").map((c) => c.evidence),
+      [],
+      "the default-URL hint must not claim the registry is unpublished — a failed FETCH is not evidence of non-existence",
+    );
+    // …then the named hunting trips, spelled out rather than left to the
+    // classifier's coverage: each of these is a sentence this gate once shipped.
+    for (const trip of [
+      /no public community registry is published/i,
+      /has no repo behind it/i,
+      /404s? by design/i,
+      /unreachable by design/i,
+      /intentional placeholder/i,
+      /\bdoes not exist\b/i,
+      /verify the registry repo is reachable/i,
+    ]) {
+      assert.doesNotMatch(err.message, trip, `the default-URL hint must not say ${trip} — that is the hunting trip`);
+    }
+    // A hint that names no cause and no remedy is not honest, it is merely
+    // shorter, so the OTHER half is asserted positively: the user must be told
+    // what actually happened and what they can do about it.
+    assert.match(err.message, /\bfetch\b/i, "must say the FETCH failed — that is the fact it can see");
+    assert.match(
+      err.message,
+      /(offline|dns|proxy|connectivity)/i,
+      "must name a connectivity cause (offline / DNS / proxy) — the most common real one",
+    );
+    assert.match(err.message, /(5xx|rate limit)/i, "must name an upstream 5xx or rate limit as a possible cause");
+    assert.match(err.message, /non-JSON/i, "must name a non-JSON body as a possible cause");
+    // The escape hatch, if it is offered at all, has to still be the real one.
     assert.match(err.message, /--registry/);
     assert.match(err.message, /UI2API_REGISTRY_URL/);
     assert.match(err.message, new RegExp(DEFAULT_REGISTRY_BRANCH), "must name the branch a real registry uses");
-    // The old message sent readers hunting for a repo that does not exist.
-    assert.doesNotMatch(err.message, /verify the registry repo is reachable/);
   });
 
   t("a non-default URL 404 is not blamed on 'not published' — it names the index/branch contract", async () => {
