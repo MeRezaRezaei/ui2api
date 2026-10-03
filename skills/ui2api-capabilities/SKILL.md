@@ -25,7 +25,7 @@ curl -s http://127.0.0.1:9797/accounts?site=gemini | jq
 
 ## 1. Discovery contract — `/registry` is the ONLY source
 
-`GET /registry` (`src/prompt/http.ts:1174`, builder `src/prompt/registry.ts:946`) returns
+`GET /registry` (`src/prompt/http.ts:1179`, builder `src/prompt/registry.ts:946`) returns
 `{contractVersion, endpoints, auth, scope, packages[], generatedAt}`.
 **No site knowledge may live in a consumer.**
 
@@ -59,13 +59,13 @@ curl -s http://127.0.0.1:9797/accounts?site=gemini | jq
 
 | route | returns |
 |---|---|
-| `GET /capabilities/<site>` (`http.ts:1225`) | `{site,name,url,capabilities[{id,name,description,method}],source:"manifest",accounts[]}` |
-| `GET /capabilities?site=<id>&account=<id>` | the stored `CapabilityReport` (`http.ts:1253`) |
-| `GET /accounts?site=<id>` (`http.ts:1193`) | `{site, host, accounts[]}` |
+| `GET /capabilities/<site>` (`src/prompt/http.ts:1266`) | `{site,name,url,capabilities[{id,name,description,method}],source:"manifest",accounts[]}` |
+| `GET /capabilities?site=<id>&account=<id>` | the stored `CapabilityReport` (`src/prompt/http.ts:1266`) |
+| `GET /accounts?site=<id>` (`src/prompt/http.ts:1206`) | `{site, host, accounts[]}` |
 
-`probed:false` (+ `hint`, or `error` when the stored file is malformed — `http.ts:1326`) means
+`probed:false` (+ `hint`, or `error` when the stored file is malformed — `src/prompt/http.ts:1338`) means
 **no fingerprint stored**. Probe it, don't infer it. Unresolvable account ⇒ `400
-{error:{code:"no_stored_account", message}}` (`http.ts:1298`).
+{error:{code:"no_stored_account", message}}` (`src/prompt/http.ts:1311`).
 
 Stored report (`src/runtime/capability-probe.ts`, `interface CapabilityReport`): `site`, `host`, `account`, `observedAt`,
 `tier`, `models`, `modelsMethod`, `restrictions[]`, `abilities?`, `abilitiesMethod?`, `ok`, `reason?`.
@@ -80,7 +80,7 @@ consumer wire shape: `{account, capturedAt, usable?}`. `accountsSummary`:
 
 ## 4. Call one capability
 
-`POST /capability/<site>` (`http.ts:1480`); site is the path suffix.
+`POST /capability/<site>` (`src/prompt/http.ts:1493`); site is the path suffix.
 
 ```bash
 curl -s -X POST http://127.0.0.1:9797/capability/youtube \
@@ -92,16 +92,16 @@ curl -s -X POST http://127.0.0.1:9797/capability/youtube \
 |---|---|---|
 | `capability` | yes | the bare `tool.id`, not `tool.name`. `400 "capability is required"`. |
 | `args` | no | defaults `{}` |
-| `account` | no | slug or email; empty = legacy shared session. Resolved against the vault **before any browser launches** (`http.ts:1510`), so a bad ref never spins up Chrome. |
+| `account` | no | slug or email; empty = legacy shared session. Resolved against the vault **before any browser launches** (`src/prompt/http.ts:1462`), so a bad ref never spins up Chrome. |
 
 The response **is the runner's own object, verbatim** — no wrapper; `200` when `ok`, else `502`
-(`http.ts:1521`). Check `ok` FIRST. Read `ok`, `data`, `error` (the named reason string —
+(`src/prompt/http.ts:1534`). Check `ok` FIRST. Read `ok`, `data`, `error` (the named reason string —
 **gated failures live here; there is no `reason` field on gated results**), `loginGated`
 (`src/capabilities/gated.ts:38`), `scaffold` (unverified DOM selectors,
 `src/capabilities/youtube.ts:113`), plus `method`/`latencyMs`/`wireNote?`/`antiBot?` provenance.
 
 Codes: unknown site ⇒ `404 {error:{code:"site_not_dispatched"}, reason_code, dispatchable[]}`
-(`http.ts:1486`) — read `dispatchable[]` rather than guessing a site id; unknown capability ⇒
+(`src/prompt/http.ts:1503`) — read `dispatchable[]` rather than guessing a site id; unknown capability ⇒
 `400 {error:{code:"unknown_capability"}}`; runner throw ⇒ `500 {ok:false, reason_code:"runner_error"}`.
 
 ## 5. Status & truth — what you may claim
@@ -154,7 +154,7 @@ youtube, tencent). Replaying the vault — or a profile copy — into a fresh co
 instead:** `UI2API_ATTACH_PORT` (`src/runtime/browser.ts:201`) points the daemon at an
 already-running browser's CDP endpoint (the dedicated chrome owner's live profile, or the
 operator's own, via `google-chrome --remote-debugging-port=9222`). Verify with
-`GET /status` → `posture` (`src/prompt/http.ts:1336`). See `src/capabilities/gmail.ts:72`
+`GET /status` → `posture` (`src/prompt/http.ts:1349`). See `src/capabilities/gmail.ts:72`
 for the named auth-wall note and its unblock steps.
 
 ## 8. Sibling skills

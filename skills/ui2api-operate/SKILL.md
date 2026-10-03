@@ -147,7 +147,9 @@ or wrong-version. Let `launchBrowser()`'s ladder resolve it; never hardcode a pa
 Posture-weakening knobs, read before setting any: `UI2API_ATTACH_PORT`,
 `UI2API_USER_DATA_DIR`, `UI2API_SINGLE_PROCESS`, `UI2API_CHROME_NO_SANDBOX`,
 `UI2API_WIGOLO_ALLOW_REMOTE`, `UI2API_WIGOLO_ALLOW_REMOTE_TOKEN`,
-`UI2API_HUB_BIND`. **Do not duplicate the knob table** — full surface with each
+`UI2API_HUB_BIND`, `UI2API_ACP_BIND` (`src/agent/acp.ts` — the ACP surface executes
+tools and has no auth, so it is loopback unless you deliberately opt in; see the ACP
+section above). **Do not duplicate the knob table** — full surface with each
 knob's purpose and read site is in repo `AGENTS.md`.
 
 Session writes are truth-gated (`src/runtime/session-store.ts`): zero cookies AND
@@ -164,9 +166,22 @@ npx tsx src/cli.ts install <host> --registry <url>   # write-gated, below
 npx tsx src/cli.ts generate <host> --out <dir>
 npx tsx src/cli.ts serve <host> --trust
 npx tsx src/cli.ts plugin serve <module.ts> --base-url <url> --account <slug>
-npx tsx src/cli.ts hub run <host>
+npx tsx src/cli.ts hub publish <host> --data-dir <scratch>
+npx tsx src/cli.ts hub run <host> [--acp]
 npx tsx src/cli.ts package <host>      # REFUSES LOUD by design — see AGENTS.md
 ```
+
+**`hub publish` — pass `--data-dir`, and know where the default lands.** The flag is
+honored, by the same `flags.dataDir ?? <cwd>/data` convention the sibling paths use
+(`src/cli.ts` `cmdHubPublish`). It used to be **inert**: `hub publish <host> --data-dir
+<other>` still wrote into `<cwd>/data/packages/<host>/` and never created `<other>`.
+That is a **containment** defect, not a cosmetic one — **run from the repo, `<cwd>/data`
+is the live session vault (`data/sessions/**`, real credentials)**, so a publish aimed
+at a scratch dir wrote beside them. Always name a scratch `--data-dir` outside the
+repo when publishing from a working tree. A **refused** publish (non-2xx from the hub,
+or an unreachable hub) now writes **nothing** — it builds into a private staging root,
+PUTs against the hub's gate, and only commits the pair after the gate accepted, so a
+failure leaves the tree byte-identical.
 
 `install` (`src/registry/install.ts`) validates the **whole** fetched package
 before any file lands: required files, parseable JSON, manifest capability entries,
@@ -193,7 +208,62 @@ Also emitted: per-host leaf skill `server/SKILL.md` + `skill-loader.mjs`
 (`src/generator/skill-template.ts`), the ACP server
 (`src/generator/acp-template.ts`, reads `UI2API_ACCOUNT` + `UI2API_DATA_DIR`), and
 the PHP client (`src/generator/lang-php.ts`, `Ui2apiClient`, `config/ui2api.php`).
-The CLI's `generate` emits the MCP server + action map; ACP comes via `hub run --acp`.
+
+### ACP — served from a REGISTERED package, and the path is real
+
+`generate` emits the MCP server + action map; **the standalone ACP JSON-RPC server
+comes from `hub run <host> --acp`**, after `hub publish <host>`
+(`src/hub/serve.ts`, `serveInstanceAcp`; `src/cli.ts` `cmdHubRun`).
+
+This line was written when that path was **provably dead** — the store is keyed
+`ui2api-site-<host>` while the run lookup asked for the bare host, and the browser
+origin was built from the store KEY, so every tool call was handed
+`https://ui2api-site-<host>/` and died `net::ERR_NAME_NOT_RESOLVED`. It is now
+fixed at `src/hub/runtime.ts` (`resolveKey` matches any operator-typed form against
+the store's real keys and the package's own declared identities; `resolveBaseUrl`
+takes the origin from the package's OWN `url`, never from a name) and the path is
+**verified working** — the fix commit records a real headed-Chrome round trip whose
+`tools/call` returned a live page's real DOM body, not a server that merely started.
+
+**Do not re-derive that path from a name.** Publish first, and pass the host in any
+form the package declares (bare host, the `ui2api-site-`-prefixed key, or the URL) —
+`resolveKey` normalizes it; an unmatched name is refused by name rather than
+silently serving the wrong origin. `hub run <host>` without `--acp` is the **stdio**
+MCP path and is fixed by the same change.
+
+**Posture — `UI2API_ACP_BIND` (`src/agent/acp.ts`).** This surface executes tools: a
+`tools/call` drives a real browser through the operator's own logged-in session, and
+there is **no auth on it at all**. So it binds **`127.0.0.1`** by default
+(`ACP_BIND_HOST`), and a wider bind is **REFUSED** before the socket exists unless
+`UI2API_ACP_BIND` is set to that **exact same host** — an equal-host opt-in, not a
+"bind anywhere" switch. Loopback (`127.0.0.1`/`localhost`/`::1`) always needs no
+opt-in. The refusal names the knob and recommends a tunnel; read that posture before
+widening any bind, and note it differs from `UI2API_HUB_BIND` on purpose — the hub's
+wider bind exposes a READ inventory, this one hands over a browser.
+
+## The CLI is STRICT about its own input — a refusal is not a crash
+
+Every command in this file runs behind a **refuse-before-doing** seam
+(`src/cli.ts`). An input the CLI does not understand is a **named error with a
+nonzero exit**, never a silent ignore — because an ignored flag is the worst kind
+of lie: the command runs, prints a confident result, and the operator's next act is
+built on the belief the flag was heard.
+
+- **Unknown flag** — `prompt "hi" --bogus` **exits 1** and names the flag, says
+  nothing ran and nothing was written, offers the nearest known flag when one is
+  close, and points at `ui2api --help`. An unknown token used to be inert: the
+  command ran and exited as if it had been heard.
+- **Malformed numeric value** — `--port abc` **exits 1** naming the flag, the value
+  received and the accepted form. It used to be coerced to the default in silence,
+  so the run you asked for was not the run you got.
+- **A flag that only means something WITH another** (e.g. `--xhost-all` without
+  `--assist`) refuses too, because the command would otherwise exit reporting work
+  it did not do.
+
+So: **a harness that passes an extra token gets an error it can explain, not a run
+that quietly did something else.** If you hit one, the flag is genuinely unknown for
+this CLI — check `ui2api --help` rather than retrying or stripping it blindly. A
+`0` on a pool knob is NOT this seam (it still means auto, floor one).
 
 ## Troubleshooting ladder — keyed on the honest symptom
 
@@ -205,6 +275,7 @@ The CLI's `generate` emits the MCP server + action map; ACP comes via `hub run -
 | `refusing to spawn a browser` | not the chrome owner — run as it, or attach |
 | `ProcessSingleton` / one-instance refusal | owner Chrome already up — read `chrome status`, adopt |
 | `unknown site "<id>"` | not on the allowlist; there is no arbitrary-URL path |
+| `unknown flag --x` — nothing ran | the CLI refused a token it does not know; see the strict-input section above |
 | package installed but absent from `/registry` | the write gate refused it, by name |
 
 **Never** retry the plain path in a loop and **never** raise a timeout to "fix" a

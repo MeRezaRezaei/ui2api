@@ -62,7 +62,14 @@ never hand-write it.
 - **Loopback + token.** The daemon binds `127.0.0.1` and answers only configured
   profiles; origin pinning and SSRF guards live in `src/runtime/ssrf.ts`.
   `UI2API_PROMPTD_TOKEN` optionally bearer-gates every route — unset means a
-  localhost-only posture (`src/prompt/http.ts`).
+  localhost-only posture (`src/prompt/http.ts`). **The ACP surface is a different
+  door with a stricter default:** it has **no auth at all** and executes tools, so it
+  binds loopback and refuses a wider bind unless `UI2API_ACP_BIND` names that exact
+  host (`src/agent/acp.ts`). Do not assume the hub's read-only wider bind carries over.
+- **The CLI refuses what it does not understand.** An unknown flag or a malformed
+  numeric value is a **named error with a nonzero exit**, never a silently ignored
+  token (`src/cli.ts`). An extra token from a harness surfaces as an error you can
+  read — not as a run that quietly did something else.
 - **Never commit `data/`.** Session snapshots are real credentials: gitignored, never
   committed, never pasted (`src/runtime/session-store.ts`).
 - **Never deploy.** The production deploy job is `when: manual` in `.gitlab-ci.yml` —

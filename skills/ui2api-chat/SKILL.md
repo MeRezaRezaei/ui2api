@@ -31,7 +31,7 @@ npx tsx src/cli.ts prompt "reply: PONG" --site gemini   # no daemon: one-shot
 npx tsx src/cli.ts promptd          # start it; CLI model list: prompt --sites
 ```
 
-Daemon default `127.0.0.1:9797`, loopback-only when no token is set (`src/cli.ts:774`, `src/prompt/http.ts:986`). With `UI2API_PROMPTD_TOKEN` set, EVERY call needs `Authorization: Bearer <token>` or you get `401 {"error":"unauthorized"}` (`src/prompt/http.ts:1081`).
+Daemon default `127.0.0.1:9797`, loopback-only when no token is set (`src/cli.ts:1206`, `src/prompt/http.ts:991`). With `UI2API_PROMPTD_TOKEN` set, EVERY call needs `Authorization: Bearer <token>` or you get `401 {"error":"unauthorized"}` (`src/prompt/http.ts:1087`).
 
 Derive live state; never trust a count in this file.
 
@@ -69,7 +69,7 @@ The pool REUSES warm pages, so before each ask the driver snapshots the answer r
 `account` (or `--account`) takes the exact handle from
 `GET /accounts?site=<id>`; omit it or pass `"default"` for the legacy shared
 session. Resolution is **exact** — no alias folding, no "first account" fallback
-(`src/prompt/http.ts:830`). Unknown account → **400**, before any browser launches,
+(`src/prompt/http.ts:835`). Unknown account → **400**, before any browser launches,
 `{"error":{"code":"no_stored_account","message":"account \"<acct>\" is not available for <host>; send the request without \"account\" to use the default account, or pass an id from GET /accounts?site=<host>"}}`
 — it deliberately does **not** list the other stored identities
 (`src/prompt/consumer-surface.ts:632`). Fix: take a handle from
