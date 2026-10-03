@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { writeFileSync, readFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+// Additive import for cmdHubPublish's staging/cleanup seam (copyFileSync,
+// mkdtempSync, rmSync) + node:os tmpdir. Deliberately its own statement rather
+// than an edit to the import above, so an unrelated change to that line cannot
+// collide with it.
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
@@ -1026,29 +1032,74 @@ async function cmdHubRun(host: string, flags: Flags): Promise<void> {
 }
 
 async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
-  if (!host) throw new Error("usage: ui2api hub publish <host> [--mirror] [--registry-repo URL]");
+  if (!host) throw new Error("usage: ui2api hub publish <host> [--mirror] [--registry-repo URL] [--data-dir DIR]");
   const sitesRoot = resolve(process.cwd(), "sites");
-  const pkgRoot = resolve(process.cwd(), "data");
+  // `--data-dir` is honored here by the SAME convention the sibling paths use
+  // (cmdHubRun, cmdPluginServe, cmdPrompt: `flags.dataDir ?? <cwd>/data`).
+  // It used to hardcode `resolve(process.cwd(), "data")`, which made the flag
+  // INERT on publish — `hub publish <host> --data-dir <other>` still wrote into
+  // `<cwd>/data/packages/<host>/` and never created `<other>`. That is a
+  // CONTAINMENT defect, not a cosmetic one: run from the repo, `<cwd>/data` is
+  // the live session vault (data/sessions/**), so a publish aimed at a scratch
+  // dir wrote beside real credentials.
+  const pkgRoot = flags.dataDir ?? resolve(process.cwd(), "data");
   const meta = {
     author: process.env.UI2API_HUB_AUTHOR || "cli",
     use: process.env.UI2API_HUB_USE || `own use of ${host}`,
   };
-  const dir = buildPackage(host, sitesRoot, pkgRoot, meta);
-  const metadata = JSON.parse(readFileSync(resolve(dir, "metadata.json"), "utf8"));
-  const map = JSON.parse(readFileSync(resolve(dir, "action-map.json"), "utf8"));
-  const manifest = { ...metadata, version: metadata.version || "1.0.0" };
-  const moduleText = JSON.stringify(map, null, 2);
-  const base = process.env.UI2API_HUB_URL ?? `http://localhost:${process.env.PORT ?? 8787}`;
-  const token = process.env.UI2API_HUB_TOKEN ?? "";
-  const r = await fetch(`${base}/api/packages`, {
-    method: "PUT",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ manifest, module: moduleText }),
-  });
-  if (!r.ok) { console.error("publish failed:", await r.text()); process.exit(1); }
-  console.log(`[ui2api] published ${manifest.name}@${manifest.version}`);
-  if (flags.mirror) {
-    pushToMirror({ name: manifest.name, version: manifest.version, manifest: manifest as Record<string, unknown>, module: moduleText }, { repoUrl: flags.registryRepo });
+  // WRITE-BEFORE-TRUTH-GATE (the class session-store.ts's write gate and
+  // registry/install.ts's install gate exist to kill — in the one publish path
+  // nobody had looked): this used to call buildPackage() with the REAL pkgRoot
+  // and only then PUT, so a REFUSED publish (4xx, or an unreachable hub) exited
+  // 1 with metadata.json + action-map.json already on disk. buildPackage is the
+  // ONLY writer of that pair (src/hub/publish-contract.ts derives the manifest
+  // field set FROM it), so it cannot simply stop writing: the fix is ORDER.
+  // Build into a private staging root, PUT against the hub's gate, and copy the
+  // pair into pkgRoot ONLY after the gate accepted it. Every refusal path —
+  // 4xx, unreachable hub, thrown fetch — unwinds through `finally` and removes
+  // the staging root, so a failed publish leaves the tree byte-identical.
+  const stagingRoot = mkdtempSync(resolve(tmpdir(), "ui2api-publish-"));
+  try {
+    const dir = buildPackage(host, sitesRoot, stagingRoot, meta);
+    const metadata = JSON.parse(readFileSync(resolve(dir, "metadata.json"), "utf8"));
+    const map = JSON.parse(readFileSync(resolve(dir, "action-map.json"), "utf8"));
+    const manifest = { ...metadata, version: metadata.version || "1.0.0" };
+    const moduleText = JSON.stringify(map, null, 2);
+    const base = process.env.UI2API_HUB_URL ?? `http://localhost:${process.env.PORT ?? 8787}`;
+    const token = process.env.UI2API_HUB_TOKEN ?? "";
+    let r: Response;
+    try {
+      r = await fetch(`${base}/api/packages`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ manifest, module: moduleText }),
+      });
+    } catch (e) {
+      // Unreachable hub / DNS / socket — the same gate, reached as a throw.
+      // NAMED and loud, and it writes NOTHING: the staging root is removed by
+      // the `finally` below and pkgRoot was never touched.
+      throw new Error(
+        `publish-refused: hub unreachable at ${base} (${e instanceof Error ? e.message : String(e)}) — ` +
+          `nothing was written to ${pkgRoot}`
+      );
+    }
+    if (!r.ok) {
+      // The gate said no. Refuse LOUD with its own verdict, and write NOTHING:
+      // no `process.exit` here — it would skip the `finally` that removes the
+      // staging root. A non-ok publish exits 1 via main()'s top-level handler.
+      throw new Error(`publish-refused: hub answered ${r.status} — ${(await r.text()).trim() || "(empty body)"} — nothing was written to ${pkgRoot}`);
+    }
+    // The gate ACCEPTED it: now, and only now, does the pair land under pkgRoot.
+    const committed = resolve(pkgRoot, "packages", host);
+    mkdirSync(committed, { recursive: true });
+    copyFileSync(resolve(dir, "metadata.json"), resolve(committed, "metadata.json"));
+    copyFileSync(resolve(dir, "action-map.json"), resolve(committed, "action-map.json"));
+    console.log(`[ui2api] published ${manifest.name}@${manifest.version}`);
+    if (flags.mirror) {
+      pushToMirror({ name: manifest.name, version: manifest.version, manifest: manifest as Record<string, unknown>, module: moduleText }, { repoUrl: flags.registryRepo });
+    }
+  } finally {
+    rmSync(stagingRoot, { recursive: true, force: true });
   }
 }
 
