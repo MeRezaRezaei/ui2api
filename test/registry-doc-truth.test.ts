@@ -772,19 +772,24 @@ d("GOAL 116 — registry doc/code truth", () => {
     // behaviour is checked against the world by the live half below. What this
     // pin holds is that the enumeration is live and every hit classifies cleanly.
     //
-    // KNOWN FINDING, deliberately NOT asserted here (it would be a red suite, and
-    // `src/hub/mirror.ts` is not this file's to change): the mirror's own comment
-    // still carries a WORLD claim the world has outgrown — "there is NO published
-    // community registry … a repo that does not exist" (mirror.ts:101) — which is
-    // why it classifies as `unpublished` beside the installer's `published`. Its
-    // CODE contract is still true and still gated by the mirror pin above (there
-    // is no default WRITE destination: `pushToMirror` reads `repoUrl ??
-    // UI2API_REGISTRY_REPO` with no fallback, and says so by name). Only the
-    // historical justification sentence is stale, and it should be re-worded to
-    // "no default WRITE target is configured" so it stops reading as a
-    // publishedness claim. `srcClaimFiles()` will then report the mirror as
-    // claiming nothing, and this test's `dirs.size === 1` rule stops applying to
-    // it — the installer keeps its own dedicated pin above either way.
+    // The mirror's stale world-claim was FIXED 2026-10-03, and this test is part of
+    // why it is load-bearing rather than cosmetic: `mirror.ts` used to justify
+    // itself with "there is NO published community registry", which read as
+    // `unpublished` and would have tripped this loop's `dirs.size === 1` rule
+    // beside the installer's `published`. It now states the real fact — the
+    // registry IS published and public (measured 2026-09-24: index.json HTTP 200,
+    // 33 entries, `private:false`, branch `master`) — and keeps the invariant that
+    // actually holds, "NO default WRITE target", which the mirror pin above gates.
+    //
+    // So the mirror still yields exactly ONE claim, direction `published`
+    // (MEASURED over this classifier, evidence "registry itself is published"), and
+    // is NOT dropped from `srcClaimFiles()` — the assertion below is satisfied as
+    // written. This note exists to stop the next well-meaning reword: phrasing the
+    // mirror so it states no publishedness claim at all would remove it from the
+    // derived set, silently switch off the `dirs.size === 1` rule for that file,
+    // and quietly invalidate the `files.includes("src/hub/mirror.ts")` line right
+    // below. If that wording ever does change, the derived set is the thing to
+    // re-measure — not this comment's prediction.
     const files = srcClaimFiles();
     assert.ok(
       files.includes("src/registry/install.ts") && files.includes("src/hub/mirror.ts"),

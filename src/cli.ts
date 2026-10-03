@@ -37,7 +37,7 @@ const DEFAULT_SITES = resolve(SRC_DIR, "..", "sites");
 export const HELP_LINES: readonly string[] = [
   "UI2API — turn any website into MCP tools for AI\n",
   "  ui2api analyse  <url>   [--root App] [--out DIR] [--llm] [--max-tasks N] [--login] [--cookies FILE]",
-  "  ui2api generate <host>  [--out DIR]",
+  "  ui2api generate <host>  [--out DIR]  (MCP server only — --acp/--skill are REFUSED here, never read; the ACP surface is `ui2api hub run <host> --acp`)",
   "  ui2api serve    <host>  [--out DIR] [--trust] [--engine native|wigolo]  (--trust = the explicit consent gate cmdServe demands before an untrusted action-map runs; wigolo = drive the browser side through a local wigolo daemon)",
   "  ui2api remap    <host>  [--out DIR]",
   "  ui2api package  <host>       (REFUSED — GOAL 66 write-truth: only knows the DEAD metadata+action-map pair nothing serves; package the modern way: ui2api analyse → capabilities/<id>/ with manifest.json + profile.json + session.lock.json + CAPABILITIES.md, then it is served by /registry + install)",
@@ -80,6 +80,12 @@ interface Flags {
   poolMin?: number;
   poolMax?: number;
   acp?: boolean;
+  /**
+   * The generator API's `opts.skill` (emits SKILL.md + skill-loader.mjs into the
+   * server dir). Declared HERE ONLY so `generate --skill` can be REFUSED by name
+   * instead of ignored as an unknown token — see generateTargetRefusal.
+   */
+  skill?: boolean;
   mirror?: boolean;
   registryRepo?: string;
   baseUrl?: string;
@@ -123,6 +129,11 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--force") f.force = true;
     if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
     if (argv[i] === "--acp") f.acp = true;
+    // `--skill` is parsed ONLY so the refusal can NAME it (generateTargetRefusal).
+    // It is NOT a capability of any command: generate()'s `opts.skill` has no
+    // CLI surface, and an unparsed token would be ignored as silently as --acp
+    // was — the same false success, one step further from the source.
+    if (argv[i] === "--skill") f.skill = true;
     if (argv[i] === "--mirror") f.mirror = true;
     if (argv[i] === "--registry-repo") f.registryRepo = argv[++i];
     if (argv[i] === "--base-url") f.baseUrl = argv[++i];
@@ -447,7 +458,61 @@ async function doInteractiveLogin(url: string, host: string, sessionDir: string)
   }
 }
 
+/**
+ * `generate` emits the **MCP** server only. `--acp` (and `--skill`) are the two
+ * flags that used to make that claim false.
+ *
+ * THE DEFECT, measured. `ui2api generate <host> --acp` ran, printed
+ * `Generated MCP server -> …/server/index.ts`, exited 0 — byte-identical to the
+ * same command without the flag, and no `acp.ts` in either case. `flags.acp` was
+ * parsed at the top of this file and read NOWHERE on this path: `cmdGenerate`
+ * called `generate(map, root)` and dropped both of `generate`'s remaining
+ * parameters. A REJECTED flag tells the user they were wrong; a silently accepted
+ * one tells them IT WORKED, and they go on to build against an `acp.ts` that was
+ * never written — with the failure surfacing somewhere else, much later.
+ *
+ * WHY A REFUSAL AND NOT A WIRING. `generate(map, dir, "acp")` does exist, is
+ * unit-covered (test/acp.test.ts drives a real JSON-RPC initialize + list_tools
+ * over the emitted file), and passing the flag through would have been a
+ * one-argument change. That is not why it is refused:
+ *
+ *   - The shipped docs already name the ACP surface the CLI actually reaches:
+ *     `ui2api hub run <host> --acp [--port N]` (docs/ONBOARDING.md §11,
+ *     skills/ui2api-operate). `hub run --acp` reads `--acp` TODAY, so the flag
+ *     stays LIVE there; it is only dead on `generate`.
+ *   - Emitting a second, stdio, from-the-legacy-action-map ACP surface would add
+ *     a second way to get an ACP server rather than remove a lie — a design
+ *     decision, not a bug fix, and this audit is scoped to removing false
+ *     success.
+ *
+ * So the honest fix is the cheap one: name the real path, exit nonzero, write
+ * nothing. Same shape as GOAL 85's `addAllModeArg` contradiction refusal.
+ * Pure — no I/O — so it is unit-testable without spawning the CLI.
+ */
+export function generateTargetRefusal(flags: Pick<Flags, "acp" | "skill">): string {
+  const named: string[] = [];
+  if (flags.acp) named.push("--acp");
+  if (flags.skill) named.push("--skill");
+  if (named.length === 0) return "";
+  return (
+    `ui2api generate ${named.join(" and ")}: this command emits the MCP server only ` +
+    `(sites/<host>/server/index.ts) — it never read ${named.join(" nor ")}, so the flag was ` +
+    `accepted and ignored (a silent no-op, exit 0).` +
+    (flags.acp
+      ? ` For ACP, serve the registered package instead: ui2api hub publish <host> then ` +
+        `ui2api hub run <host> --acp [--port N]  (HTTP JSON-RPC, protocolVersion 2025-03-26, default :8788).`
+      : "") +
+    (flags.skill
+      ? ` --skill has no CLI surface at all: only the generator API emits SKILL.md ` +
+        `(generate(map, dir, "mcp", { skill: true })).`
+      : "") +
+    ` Nothing was written.`
+  );
+}
+
 async function cmdGenerate(host: string, flags: Flags): Promise<void> {
+  const refusal = generateTargetRefusal(flags);
+  if (refusal) throw new Error(refusal);
   const root = sitesRoot(flags);
   if (!existsSync(mapPath(host, root))) throw new Error("No action-map for " + host + ". Run analyse first.");
   const map = validateActionMap(JSON.parse(readFileSync(mapPath(host, root), "utf8")));
@@ -1151,14 +1216,38 @@ async function cmdChrome(action: string, flags: Flags): Promise<void> {
 //
 // A `--root` flag exists so the SAME code path can be exercised against a
 // disposable tree, which is what the gate's non-vacuity proofs rely on.
+/**
+ * `vault tighten`'s MODE, decided from the two flags that declare one.
+ *
+ * `--dry-run` was parsed and read NOWHERE: the handler keyed off `flags.apply`
+ * alone (`{ dryRun: !apply }`), so the pair `--apply --dry-run` — an operator
+ * asking for BOTH, which is exactly the confused sentence a credential-permission
+ * tool gets — silently APPLIED. The mode that changes 0600/0700 on files holding
+ * real cookies and Bearer tokens was decided by a flag that was ignored, with no
+ * refusal and no warning. The dry-run DEFAULT is unchanged and stays the default;
+ * what changes is that the contradiction now REFUSES by name instead of being
+ * swallowed (same shape as GOAL 85's `addAllModeArg`).
+ *
+ * Pure — no I/O — so the mode is testable without a vault.
+ */
+export function vaultTightenModeArg(flags: Pick<Flags, "apply" | "dryRun">): "apply" | "dry-run" {
+  if (flags.apply && flags.dryRun) {
+    throw new Error(
+      "cannot combine --apply and --dry-run (tighten the vault vs report only) — re-run with exactly one",
+    );
+  }
+  return flags.apply ? "apply" : "dry-run";
+}
+
 async function cmdVault(sub: string | undefined, flags: Flags): Promise<void> {
   if (sub !== "tighten") {
     console.error(`[ui2api] vault: unknown subcommand ${JSON.stringify(sub ?? "")} — try: ui2api vault tighten [--dry-run|--apply] [--json] [--root DIR]`);
     process.exitCode = 2;
     return;
   }
+  const mode = vaultTightenModeArg(flags);
+  const apply = mode === "apply";
   const root = flags.root ?? resolveDataDir();
-  const apply = flags.apply === true;
   const res = tightenVaultModes(root, { dryRun: !apply });
 
   if (flags.json) {
