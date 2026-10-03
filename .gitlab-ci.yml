@@ -35,7 +35,23 @@ variables:
   # leaves .brain/ inconsistent must fail the pipeline, not a person.
   npm_config_cache: "$CI_PROJECT_DIR/.npm"
 
-concurrent: 2
+# ⛔ There is deliberately NO top-level `concurrent:` here, and its absence is a
+# fix rather than an omission. The ci/perf-optimization branch added
+# `concurrent: 2` at the top level, intending to stop one repo from occupying
+# every runner slot on this shared baremetal runner. But top-level `concurrent`
+# is NOT a valid GitLab key: the linter reads it as a JOB named `concurrent`
+# with no script/run/trigger, and rejects the ENTIRE config --
+#   "jobs concurrent config should implement the script:, run:, or trigger:
+#    keyword"
+# Pipeline 1327 failed with ZERO jobs created and yaml_errors: None, which is
+# exactly what that rejection looks like: not a red test, a pipeline that never
+# forms. Removing the key restores every job.
+#
+# THE LESSON, because the branch commit described this as a benefit: the branch
+# also arrived with three real fixes, so nothing about "this branch is good"
+# survived contact with the linter. A CI change is verified by the linter and by
+# a pipeline that CREATES JOBS -- not by a diffstat, and not by yaml_errors,
+# which is null for a config this broken.
 
 cache:
   key:
