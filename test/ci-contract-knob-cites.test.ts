@@ -189,7 +189,7 @@ const CAPS = capabilityDirCounts();
  */
 export const ALLOWED_UNDOCUMENTED_KNOBS: { knob: string; reason: string }[] = [
   // EMPTY, and that is the point. It held exactly one entry: UI2API_XVFB_DISPLAY, read by
-  // shipped code at scripts/ops/provision-ui2api-user.sh:27 and named in no doc at all. The
+  // shipped code at scripts/ops/provision-ui2api-user.sh:35 and named in no doc at all. The
   // row now EXISTS, so the entry is deleted rather than tolerated, and the budget below is 0
   // — meaning the next undocumented knob is a hard failure, not a fourth exception.
 ];

@@ -33,7 +33,14 @@ This file is ORIENTATION. Depth lives in the siblings.
 
 **Per-host leaf skill.** Need ONE host's tools in detail? `src/generator/skill-template.ts`
 emits a `ui2api-<host>` `SKILL.md` plus a `skill-loader.mjs` beside the generated MCP
-server — look for `skills/ui2api-<host>/SKILL.md`. Generate it with `ui2api generate`;
+server — the generator writes them to `sites/<host>/server/SKILL.md`, beside that
+server's `index.ts` and `action-map.json` (`src/generator/generate.ts`). That location is
+GENERATED build output: the per-host server directories under `sites/` are gitignored
+(`.gitignore`), so nothing in one is committed and an agent must not go looking for a
+tracked `skills/` file the generator never writes. `ui2api generate <host>` writes the
+server and the action map; the
+leaf skill is written only when the generator is called with `skill: true`
+(`src/generator/generate.ts`), so treat it as present only where a caller asked for it —
 never hand-write it.
 
 ## Rules that must never break

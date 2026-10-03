@@ -12,9 +12,14 @@
 //                 "unknown capability "<x>" for "<site>"; available: […]"}.
 //   GET  /capabilities/<site>  -> the installed package's manifest capability
 //                 surface {site, name, url, capabilities:[{id,name,description,
-//                 method}], source:"manifest", accounts:[{slug,identity,host,
-//                 source,capturedAt}]} for any installed package — `accounts` is
-//                 the same identity-keyed vault as /accounts?site= ([] when none).
+//                 method}], source:"manifest", accounts:[{account,capturedAt,
+//                 usable?}]} for any installed package — `accounts` is the same
+//                 consumer vault list /accounts?site= serves ([] when none).
+//                 The row shape is the allow-list CONSUMER_ACCOUNT_FIELDS
+//                 (src/runtime/session-store.ts): `account` + `capturedAt`
+//                 always, `usable` only when the row carries a verdict. The
+//                 internal StoredAccount index row is NEVER serialised — the
+//                 identity/host/source columns in this repo are not on the wire.
 //   OpenAI-compatible surface (for OpenAI SDKs, OmniRoute, etc.):
 //   GET  /v1/models             -> {object:"list", data:[{id:"deepseek",...},...]}
 //   POST /v1/chat/completions   {"model":"deepseek"|"ui2api/deepseek",
@@ -1179,9 +1184,17 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         });
       }
       // Identity-keyed accounts stored for a site (the multi-account vault):
-      //   GET /accounts?site=gemini  -> { site, accounts: [{slug, identity, capturedAt, source}] }
+      //   GET /accounts?site=gemini  -> { site, accounts: [{account, capturedAt, usable?}] }
       // A `/prompt` may then pass `account: <slug|identity>` to drive that
       // specific logged-in session.
+      //
+      // The SERVED row is not the internal StoredAccount index row: every row
+      // goes through `withAccountVerdict` -> `defineWireProjection`, which
+      // installs a non-enumerable `toJSON` projecting it down to the allow-list
+      // CONSUMER_ACCOUNT_FIELDS (src/runtime/session-store.ts) — `account` +
+      // `capturedAt` always, `usable` only when a verdict exists. slug /
+      // identity / host / source stay readable in-process and never reach a
+      // consumer; a consumer selects by the `account` field alone.
       //
       // Resolution (GOAL 31): the chat-profile set first (byte-identical legacy
       // contract), then the installed capability package — the SAME

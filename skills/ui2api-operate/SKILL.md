@@ -82,7 +82,17 @@ browser. Prove it — `curl -s 127.0.0.1:9797/status` must show
 request for headful was refused by the environment and the run is worthless for a
 sensitive site. For the persistent version, `scripts/ops/provision-ui2api-user.sh`
 is idempotent and registers the `ui2api-xvfb`, `ui2api-chrome` and `ui2api-api`
-units; `UI2API_XVFB_DISPLAY` sets the display number.
+units — it writes no unit file itself, it delegates to the single installer
+`scripts/ops/install-services.sh`.
+
+**The display number is not a knob.** `scripts/ops/units/ui2api-xvfb.service`
+starts `Xvfb :99` in its `ExecStart`, and every shipped unit hardcodes
+`Environment=DISPLAY=:99`; the installer copies those files verbatim
+(`install -m 0644`, no template substitution anywhere). `UI2API_XVFB_DISPLAY` is
+read into a shell variable at `scripts/ops/provision-ui2api-user.sh` and consumed
+**only inside a printed message** — it is never substituted into a unit, so
+setting it changes nothing that gets installed. To use a different display, edit
+the unit files and re-run `scripts/ops/install-services.sh`.
 
 ## The chrome point of use is a DEDICATED LINUX USER
 

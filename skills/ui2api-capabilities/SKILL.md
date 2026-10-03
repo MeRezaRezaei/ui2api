@@ -67,12 +67,14 @@ curl -s http://127.0.0.1:9797/accounts?site=gemini | jq
 **no fingerprint stored**. Probe it, don't infer it. Unresolvable account ⇒ `400
 {error:{code:"no_stored_account", message}}` (`http.ts:1298`).
 
-Stored report (`src/runtime/capability-probe.ts:66`): `site`, `host`, `account`, `observedAt`,
+Stored report (`src/runtime/capability-probe.ts`, `interface CapabilityReport`): `site`, `host`, `account`, `observedAt`,
 `tier`, `models`, `modelsMethod`, `restrictions[]`, `abilities?`, `abilitiesMethod?`, `ok`, `reason?`.
 `restrictions[]` entries are exactly `{kind, matched}` (`capability-probe.ts:23`).
 `ok:false` carries `reason: "nothing readable with the current probe selectors"`.
 
-Accounts (`CONSUMER_ACCOUNT_FIELDS`, `src/runtime/session-store.ts:852`) — an allow-list, the
+Accounts (`CONSUMER_ACCOUNT_FIELDS`, `src/runtime/session-store.ts` — the file-level pin is deliberate:
+the constant's line drifts with every edit to the doc block above it, and a wrong line teaches you to
+skip the file) — an allow-list, the
 consumer wire shape: `{account, capturedAt, usable?}`. `accountsSummary`:
 `{total, usable, unusable, reasons}`. An unusable row is still LISTED; `usable:false` is the signal.
 
