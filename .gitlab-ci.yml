@@ -222,6 +222,31 @@ deploy:
   needs: ["verify"]
   dependencies: []
   resource_group: ui2api-production
+  # ⛔ PRODUCTION IS THE OPERATOR'S DECISION, AND THIS IS THE LINE THAT MAKES IT ONE.
+  #
+  # MEASURED before this was added, because the operator asked whether it was
+  # already theirs and it was NOT. A push to main ran `rsync -a --delete` over
+  # /opt/ui2api and restarted ui2api-api.service — the live daemon every consumer
+  # on this box talks to — as a pure SIDE EFFECT of pushing. The only thing standing
+  # between a push and production was `needs: ["verify"]`.
+  #
+  # Specifically checked, not assumed:
+  #   deploy.environment          -> ABSENT
+  #   protected_environments API  -> []   (nothing protected, so no approval gate)
+  #   `when: manual` in the config -> 0 occurrences
+  #   deploy.when                 -> unset (so: runs automatically)
+  # So there was NO human gate anywhere on this path. The suite being green is a
+  # necessary condition for deploying, not a decision to deploy.
+  #
+  # `allow_failure: false` is EXPLICIT rather than left at its default on purpose:
+  # an unrun manual job with allow_failure:true lets the pipeline go green with the
+  # deploy silently skipped, which is the "looks green while publishing nothing"
+  # failure this pipeline already has a comment about. false makes the pipeline sit
+  # in `blocked` and WAIT, so the decision is visible instead of absent.
+  when: manual
+  allow_failure: false
+  environment:
+    name: production
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   script:
