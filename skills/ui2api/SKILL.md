@@ -65,11 +65,16 @@ never hand-write it.
   localhost-only posture (`src/prompt/http.ts`). **The ACP surface is a different
   door with a stricter default:** it has **no auth at all** and executes tools, so it
   binds loopback and refuses a wider bind unless `UI2API_ACP_BIND` names that exact
-  host (`src/agent/acp.ts`). Do not assume the hub's read-only wider bind carries over.
+  host (`src/agent/acp.ts`). Do not assume the hub's read-only wider bind carries over —
+  match the refusal on its literal, `refusing to bind the ACP server to <host>`.
 - **The CLI refuses what it does not understand.** An unknown flag or a malformed
   numeric value is a **named error with a nonzero exit**, never a silently ignored
   token (`src/cli.ts`). An extra token from a harness surfaces as an error you can
   read — not as a run that quietly did something else.
+- **`--site` + `--profile FILE` agree on the id, or nothing runs.** A tuning file whose
+  own `id` names a different site is refused rather than silently applied to the site you
+  asked for — match `profile file <path> id "..." does not match --site <id>`
+  (`src/profile/profile.ts`).
 - **Never commit `data/`.** Session snapshots are real credentials: gitignored, never
   committed, never pasted (`src/runtime/session-store.ts`).
 - **Never deploy.** The production deploy job is `when: manual` in `.gitlab-ci.yml` —

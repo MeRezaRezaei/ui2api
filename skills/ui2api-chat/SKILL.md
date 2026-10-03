@@ -120,7 +120,8 @@ default, read-site) is **`AGENTS.md`** → "Environment knobs — the full
 `UI2API_*` surface". Every knob named in this skill is a row there.
 `UI2API_AI_SITE` takes a builtin site id OR a `*.json` profile path; a
 `--profile FILE` whose `id` disagrees with `--site` refuses loudly rather than
-tuning the wrong site (`src/profile/profile.ts:518`).
+tuning the wrong site — match `profile file <path> id "..." does not match --site <id>`
+(`src/profile/profile.ts:518`).
 
 ## Sibling skills
 

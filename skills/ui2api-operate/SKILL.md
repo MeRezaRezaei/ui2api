@@ -181,13 +181,24 @@ at a scratch dir wrote beside them. Always name a scratch `--data-dir` outside t
 repo when publishing from a working tree. A **refused** publish (non-2xx from the hub,
 or an unreachable hub) now writes **nothing** — it builds into a private staging root,
 PUTs against the hub's gate, and only commits the pair after the gate accepted, so a
-failure leaves the tree byte-identical.
+failure leaves the tree byte-identical. Both refusal paths print the same literal
+prefix, so an agent can recognize either without parsing the rest:
+`publish-refused: hub unreachable at <base>` (socket/DNS) or
+`publish-refused: hub answered <status>` (the gate said no) — each ends
+`nothing was written to <pkgRoot>` (`src/cli.ts` `cmdHubPublish`).
 
 `install` (`src/registry/install.ts`) validates the **whole** fetched package
 before any file lands: required files, parseable JSON, manifest capability entries,
 recipe path traversal, profile shape, profile/package id agreement. A refusal
 names the file and writes nothing, so a broken package can never install
 "successfully" and be refused only later at serve time.
+
+**`serve <host>` refuses an untrusted action map.** The generated map carries a
+`trusted` flag; without `--trust` (or `UI2API_TRUST`) `serve` stops before
+importing the generated module and prints
+`action-map is untrusted — review it and re-run with --trust` (`src/cli.ts`,
+`cmdServe`). Match that literal: it means the map was never loaded, not that the
+server crashed.
 
 **MCP registration** — the generated server is stdio. Use the argv the generator
 itself spawns (`src/generator/skill-template.ts`):
@@ -237,9 +248,12 @@ there is **no auth on it at all**. So it binds **`127.0.0.1`** by default
 (`ACP_BIND_HOST`), and a wider bind is **REFUSED** before the socket exists unless
 `UI2API_ACP_BIND` is set to that **exact same host** — an equal-host opt-in, not a
 "bind anywhere" switch. Loopback (`127.0.0.1`/`localhost`/`::1`) always needs no
-opt-in. The refusal names the knob and recommends a tunnel; read that posture before
-widening any bind, and note it differs from `UI2API_HUB_BIND` on purpose — the hub's
-wider bind exposes a READ inventory, this one hands over a browser.
+opt-in. The refusal names the knob and recommends a tunnel; it throws **before the
+socket exists**, so nothing is listening when you see it. Match the literal
+`refusing to bind the ACP server to <host>` (`src/agent/acp.ts`,
+`resolveAcpBindHost`); read that posture before widening any bind, and note it
+differs from `UI2API_HUB_BIND` on purpose — the hub's wider bind exposes a READ
+inventory, this one hands over a browser.
 
 ## The CLI is STRICT about its own input — a refusal is not a crash
 
@@ -259,6 +273,19 @@ built on the belief the flag was heard.
 - **A flag that only means something WITH another** (e.g. `--xhost-all` without
   `--assist`) refuses too, because the command would otherwise exit reporting work
   it did not do.
+- **`--port` beside `hub run`** without `--acp` refuses rather than ignoring the
+  port: `--port` is read only on the HTTP path, so a bare `hub run --port N` would
+  serve stdio and report success. Match `ui2api hub run --port <n>` — the refusal
+  restates the exact re-run as `ui2api hub run <host> --acp --port <n>` and ends
+  `Nothing was written.` (`src/cli.ts` `needsCompanionRefusal`). The same seam
+  covers `--registry-repo` without `--mirror`, which prints
+  `ui2api hub publish --registry-repo <url>: --registry-repo only means anything
+  together with --mirror` and re-runs as `ui2api hub publish <host> --mirror
+  --registry-repo <url>` — the repo URL is the MIRROR destination, read only inside
+  the `--mirror` branch.
+- **`--site` + `--profile FILE` id disagreement** refuses instead of tuning the
+  wrong site: `profile file <path> id "..." does not match --site <id>`
+  (`src/profile/profile.ts`).
 
 So: **a harness that passes an extra token gets an error it can explain, not a run
 that quietly did something else.** If you hit one, the flag is genuinely unknown for
