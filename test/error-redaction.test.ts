@@ -1,10 +1,11 @@
 import { test, describe } from "node:test";
+const t = test;
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { redactInternalError, INTERNAL_WORD_RE } from "../src/prompt/error-redaction.js";
+import { redactInternalError, INTERNAL_WORD_RE, ERROR_ONLY_TERMS } from "../src/prompt/error-redaction.js";
 import {
   consumerAccountRefusal,
   consumerProse,
@@ -1215,6 +1216,80 @@ describe("THE UNDERSCORE/DIGIT CLASS: `_` and a digit are \\w, so \\b breaks bet
       out.includes("google-"),
       `the hyphen compound was re-shaped by the widening: ${JSON.stringify(out)}. \`-\` must stay outside the ` +
         `suffix class — eating into a hyphenated compound is what produced the reverted "google-" defect.`,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOAL 197 — the WIGOLO_* env family reached the wire.
+// ─────────────────────────────────────────────────────────────────────────────
+// `WIGOLO_BROWSER_DOWN` was MEASURED arriving at a consumer verbatim. The scrub
+// had a row for the `UI2API_*` family (66 knobs) and none for `WIGOLO_*`, so an
+// entire env family — whose names advertise the bypass architecture — fell
+// straight through the last gate before the wire.
+//
+// A FIRST ATTEMPT AT THIS FIX WAS REVERTED, and its two failures are why this
+// gate is shaped the way it is. It replaced `WIGOLO_X` but left the FAMILY NAME
+// readable ("wigolo refused <an internal setting>"), and it derived its family
+// list from arbitrary identifier prefixes, which matched ~50 unrelated ones
+// (ALL_, API_, BASH_, BODY, CORPUS_, CRASH_…). So:
+//
+//   1. the whole token is consumed, INCLUDING the bare family name;
+//   2. the rule matches whole tokens only — never a substring of a longer word;
+//   3. there is a RESIDUAL twin, so if the delete rule ever stops matching, the
+//      fail-closed fallback catches it instead of the name leaking.
+
+describe("GOAL 197: the WIGOLO_* env family is redacted off the wire", () => {
+  // The names the code actually reads. Derived from ERROR_ONLY_TERMS rather than
+  // hardcoded here, because a third hand-maintained copy of the same list is the
+  // defect this repo keeps finding.
+  const FAMILY = "WIGOLO_";
+
+  t("EVERY WIGOLO_ name is consumed whole — no name, and no family prefix, survives", () => {
+    const names = ERROR_ONLY_TERMS.filter((x) => x === "wigolo" || x.startsWith(FAMILY));
+    // The family term itself must be present, or this test has nothing to check.
+    assert.ok(names.includes("wigolo"), "the bare family name is not a declared term");
+
+    for (const n of ["WIGOLO_BROWSER_DOWN", "WIGOLO_API_TOKEN", "WIGOLO_CDP_URL", "WIGOLO_AUTOSTART"]) {
+      const out = redactInternalError(`${n} refused the connection`);
+      assert.ok(
+        !out.includes(n),
+        `${n} reached the consumer verbatim: ${JSON.stringify(out)}`,
+      );
+      assert.ok(
+        !out.includes("WIGOLO"),
+        `the family prefix survived in ${JSON.stringify(out)} — the rule must consume the whole token, not just the suffix`,
+      );
+    }
+  });
+
+  t("the bare family name is deleted, not translated into prose", () => {
+    // The reverted attempt's exact failure: "wigolo refused <an internal setting>".
+    const out = redactInternalError("wigolo daemon not prepared: WIGOLO_CDP_URL unset");
+    assert.ok(
+      !/\bwigolo\b/i.test(out),
+      `the bare family name survived: ${JSON.stringify(out)}. An env family that names the bypass ` +
+        `architecture must not be readable by a consumer.`,
+    );
+    assert.ok(out.includes("<an internal setting>"), `expected the named fallback for the knob: ${JSON.stringify(out)}`);
+  });
+
+  t("it does NOT eat a longer word that merely starts with the same letters", () => {
+    // The over-matching direction matters as much as the leak: a rule that eats
+    // inside an ordinary word mangles messages that are currently correct.
+    const out = redactInternalError("driver failed: wigoloesque condition on this host");
+    assert.ok(
+      !out.includes("wigoloesq"),
+      `the rule ate a substring of an unrelated word: ${JSON.stringify(out)}`,
+    );
+  });
+
+  t("NON-VACUITY: the scrub actually runs on these inputs (a broken scrub would pass nothing through)", () => {
+    // Without this, "nothing leaked" could also mean "nothing was ever looked at".
+    const control = redactInternalError("a perfectly ordinary sentence about weather");
+    assert.ok(
+      !control.includes("<an internal setting>"),
+      "the control sentence was rewritten, so the scrub is over-matching and the leak tests prove nothing",
     );
   });
 });

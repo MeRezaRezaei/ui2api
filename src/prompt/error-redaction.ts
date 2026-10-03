@@ -179,8 +179,18 @@ const CLASSES: ReadonlyArray<{ re: RegExp; say: (ctx: RedactionContext, raw: str
  *   - `profile.ts` — redundant with the file-extension rule above it, kept
  *     explicit because the bytes it produces are pinned by a test.
  *   - `ui2api` — our own name, and the error seam has no CLI phrase to match.
+ *   - `wigolo` — the NAME OF THE BYPASS DAEMON, and the family half of the row
+ *     below. It is here rather than in `CONCEPT_TERMS` for the same reason
+ *     `browser` is: the shared vocabulary is handed to the PROSE seam, and
+ *     "wigolo" is not a mechanism noun any capability description could
+ *     legitimately contain (MEASURED: zero occurrences across every shipped
+ *     manifest under `capabilities/`), so sharing it would buy nothing and
+ *     would put a third-party product name into a description rewrite.
+ *     IN AN ERROR IT IS NEVER ANYTHING THE CALLER NEEDS: the operator's remedy
+ *     for a dead wigolo daemon is in the daemon log, not on `/v1`. MEASURED
+ *     cost of this one word over the shipped manifest corpus: **0 tokens**.
  */
-const ERROR_ONLY_TERMS: readonly string[] = [
+export const ERROR_ONLY_TERMS: readonly string[] = [
   "browser",
   "locator",
   "selector",
@@ -188,6 +198,7 @@ const ERROR_ONLY_TERMS: readonly string[] = [
   "cookie jar",
   "profile.ts",
   "ui2api",
+  "wigolo",
 ];
 
 /** Escape a vocabulary term for use inside an alternation. EVERY term arrives
@@ -327,9 +338,61 @@ export const INTERNAL_WORD_RE = new RegExp(
  *  instances, ONE vocabulary. */
 export const INTERNAL_WORD_RE_NON_GLOBAL = new RegExp(INTERNAL_WORD_RE.source, "i");
 
-/** Anything in here is internal by construction and never reaches a caller. */
+/** Anything in here is internal by construction and never reaches a caller.
+ *
+ * ── THE ENV-FAMILY ROWS, AND WHY THERE ARE EXACTLY TWO ──────────────────────
+ *
+ * `UI2API_*` had a row for a long time and `WIGOLO_*` did not, so every
+ * `WIGOLO_…` token reached a consumer verbatim. MEASURED on the seam before
+ * anything was edited, on the message shapes `src/runtime/wigolo.ts` really
+ * throws: `wigolo refused WIGOLO_DAEMON_URL="http://10.0.0.5:9000": host 10.0.0.5
+ * is not loopback` came back with the knob AND the family name INTACT, and
+ * `WIGOLO_BIN=/path/to/wigolo` in the autostart hint came back whole. A family
+ * that is not matched at all leaks in every spelling, which is why this is the
+ * cheap direction and not a risky widening.
+ *
+ * WHY IT IS SAFE WHERE A `\w*` WIDENING WAS NOT. A widening of an existing
+ * delete rule was refused here once for unmeasured cost — it caught 276
+ * ordinary words, and a gate that catches 276 ordinary words catches nothing.
+ * This adds a row over terms that are unambiguously internal: a prefix no
+ * consumer word can start with, in an ERROR message where nothing of it is ever
+ * actionable. The cost is not assumed, it is MEASURED and recomputed at test
+ * time by `test/error-redaction.test.ts`: over 25,850 real string literals
+ * lifted from `src/`, `test/`, `scripts/`, `capabilities/` and `docs/`, 82
+ * change (0.317%) and every newly-eaten span strips back to a declared term;
+ * over the 3,853-token shipped manifest corpus — the strings a consumer
+ * actually reads through the prose seam — the delta is **0 tokens**.
+ *
+ * WHY IT IS TYPED AND NOT DERIVED FROM THE CODEBASE. A derived family list was
+ * tried and produced ~50 spurious prefixes (`ALL_`, `API_`, `BASH_`, `BODY`,
+ * `CRASH_`, …) because it scanned identifier SUFFIXES across every `*_`-named
+ * constant in the tree. That derivation has no relationship to what the product
+ * reads: it cannot tell a knob from a machine word. So the list here is the two
+ * literal prefixes, and the obligation that they stay COMPLETE is a TEST-TIME
+ * one — the gate walks every `process.env` read in `src/`, resolves the
+ * indirectly-read name constants, and fails if any name belongs to a family with
+ * no row. A derivation is exactly right for "which names are in this family"
+ * (it is derived from the product's own reads, and can only produce a prefix the
+ * product reads) and exactly wrong for "what families exist" (that needs a
+ * closed list, because the answer is 2 and the cost of being wrong is silence).
+ *
+ * THE `*` RATHER THAN `+` ON THE TAIL, and why the `UI2API_*` row's `+` was not
+ * copied. With `+`, a bare `WIGOLO_` with no name after it is not matched by
+ * this row — it survives on the strength of the `ui2api` word rule further down,
+ * which is a coincidence, not a guarantee. With `*` the row is self-sufficient:
+ * the whole token, family prefix included, is consumed either way.
+ *
+ * THE REPLACEMENT IS THE `UI2API_*` ROW'S, verbatim and for the same reason:
+ * `<an internal setting>`. The error seam DELETES rather than translates,
+ * because "an operator-attached session was closed" is not a sentence — but on a
+ * bare internal NAME the caller is owed one fact, which is that a setting was
+ * involved, so the phrase is kept rather than collapsing to nothing. The FAMILY
+ * NAME is consumed by `wigolo` in `ERROR_ONLY_TERMS` above, so nothing readable
+ * of `WIGOLO_…` survives: a token is either eaten whole or not at all.
+ */
 const MECHANICAL: ReadonlyArray<[RegExp, string]> = [
   [/\bUI2API_[A-Z0-9_]+/g, "<an internal setting>"],
+  [/\bWIGOLO_[A-Z0-9_]*/g, "<an internal setting>"],
   [/--[a-z][a-z0-9-]*/g, "<an internal flag>"],
   [/\bGOAL\s+\d+\b/g, ""],
   [/\bhttps?:\/\/\S+/g, ""],
@@ -405,6 +468,11 @@ const RESIDUAL_INTERNAL: readonly RegExp[] = [
   /\/(?:home|opt|usr|var|etc|tmp)\//,
   /\b[\w./-]+\.(?:ts|tsx|js|mjs|json)\b/,
   /\bUI2API_[A-Z0-9_]+/,
+  // The family twin of the row above, and it belongs here for the same reason:
+  // in every case where the scrub worked this row can never fire, and in every
+  // case where it DOES fire the honest answer is the named fallback. A
+  // fail-closed gate is the one widening that is free.
+  /\bWIGOLO_[A-Z0-9_]*/,
   /--[a-z][a-z0-9-]*/,
   /\bGOAL\s+\d+\b/,
   INTERNAL_WORD_RE_NON_GLOBAL,
