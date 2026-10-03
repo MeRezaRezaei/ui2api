@@ -270,8 +270,16 @@ github_release:
     auto_stop_in: 1 day
   cache:
     key:
+      prefix: "ui2api"
       files: [package-lock.json]
-    paths: [.npm/, node_modules/]
+    # node_modules/ is NOT cached here, for the same measured reason as the
+    # build/verify jobs: this job runs `npm ci`, which rebuilds it, and the
+    # runner caps are 1 GiB (docker) / 512 MiB (shell) -- caching it is what
+    # produced the 413 in pipeline 173. The ci/perf-optimization branch fixed
+    # three cache blocks but was cut four days before this job existed, so the
+    # merge left this one carrying the defect the branch was written to remove.
+    policy: pull
+    paths: [.npm/]
   script:
     - npm ci --cache .npm --prefer-offline
     - npm run build
