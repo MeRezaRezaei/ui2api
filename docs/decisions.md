@@ -389,3 +389,69 @@ No test file was added, so `package.json` (`scripts["test:unit"]`) and `README.m
 file-count figures are **deliberately untouched** — this lane owns both, and adding a gate for a
 class chosen *not* to gate would have been the vacuous outcome this ADR argues against.
 `test/phantom-gate-citation.test.ts` and `test/injection-verdict.test.ts` still pass.
+## 2026-10-03 — Agent skills become a TRACKED, INSTALLED family, and prose skills get a machine gate
+
+**DECIDED.** The way an AI agent learns to use ui2api is a **tracked skill family in
+`skills/`**, installed into any agent's skills directory by
+`scripts/install-skills.sh`, and held honest by a **machine gate**
+(`test/skills-truth.test.ts`) that fails when a skill names a route, knob, or
+site the code does not have.
+
+**The finding that forced the shape.** `.agents/` is **gitignored**
+(`.gitignore:6`). The one existing agent skill,
+`.agents/skills/ui2api/SKILL.md`, was therefore never in git — `git ls-files
+.agents/` returns nothing. An agent on any other machine has no ui2api skill
+and never did. Worse, the untracked copy was already **stale**: its state
+block is headed `State (2026-09-18)` and names three verified sites, against
+22 chat models today, and it still cites the pre-v1 npm version. Untracked
+prose about a moving codebase rots silently, because nothing ever notices it
+is missing from a commit.
+
+**Alternatives considered.**
+
+1. **Keep writing into `.agents/skills/`** (status quo). Rejected: not one line
+   of it ships, so it cannot be the answer to "make skills for AI to be able to
+   use this tool" — the consumer is precisely a machine that lacks the file.
+2. **Put the skills in `docs/`.** Rejected twice over. Brain privacy gate item
+   4 exists to keep brain-derived material out of tracked non-brain paths, and
+   `docs/` is a public-mirror destination (`scripts/ci/make-public-repo.sh`);
+   a skills directory under it invites exactly the confusion that gate forbids,
+   and the skills are not documentation — they are load-bearing executable
+   instructions for an agent.
+3. **One giant skill.** Rejected: the three surfaces have genuinely different
+   triggers. An agent debugging a capability runner should never load the
+   Xvfb/headed-posture material, and an agent choosing a model should not read
+   33 package manifests. Trigger discipline is what keeps a skill from being
+   ignored.
+4. **Generated skills only** (`src/generator/skill-template.ts` already emits a
+   per-host `SKILL.md` + `skill-loader.mjs`). Rejected as the *primary* path:
+   it is emitted per site and describes only that site's tools, so it cannot
+   teach discovery, the daemon, the account model, or the rules that must never
+   break. It stays as the per-host leaf, and `skills/ui2api-capabilities` points
+   at it.
+5. **Skills with no gate.** Rejected outright — that is the status quo with a
+   new filename, and the stale copy above is the receipt.
+
+**Why the gate is part of the decision and not a follow-up.** A prose skill is
+an assertion about code that nothing verifies. This repo already has the
+matching failure twice: a skill that cites routes and knobs by hand, and a
+docs gate (`test/doc-numbers-truth.test.ts`) added because hand-typed counts
+rotted. So the skills get the same treatment: every `UI2API_*` knob named must
+exist in `src/` or `scripts/`, every `/route` named must be registered in
+`src/prompt/http.ts`, every site id named must be a real package directory or
+builtin profile, and any "verified" claim must be backed by a manifest field
+rather than typed by a human.
+
+**What would make this wrong.** If the family grows a skill per site — the
+per-host generator already could — the gate's route/knob checks stay cheap but
+the "reads only when named" discipline fails and the loader pays for it. If the
+gate turns out to fire on honest prose faster than it catches rot, it is
+misdesigned: the fix is to narrow what it asserts, never to delete it, exactly
+as `test/ci-contract-knob-cites.test.ts` narrowed a file pin to a disclosed
+drift count rather than removing the pin.
+
+**Recorded, not asked.** The operator said *"now its time to make skills for ai
+to be able to use this tool"* and *"ask in chat"* for the prior decision. No
+question was raised about layout, count, or naming — a design the agent can
+decide must be decided and written down here, so the operator reviews a record
+instead of answering an interview.
