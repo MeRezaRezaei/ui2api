@@ -1370,11 +1370,11 @@ d("GOAL 209 — the docs vs the RECORDED registry fact (deterministic, no networ
     // Non-vacuity FIRST: the disabling stub must actually be armed, or "passes
     // with fetch disabled" would be satisfied by a stub that silently no-ops
     // and a gate that quietly still uses the network.
-    await assert.rejects(
-      () => withNetworkDisabled(() => fetch("https://example.invalid/")),
-      /network disabled/,
-      "precondition: the disabling stub really does make any fetch throw",
-    );
+      await assert.rejects(
+        () => withNetworkDisabled(() => fetch("http://127.0.0.1:1/")),
+        /network disabled/,
+        "precondition: the disabling stub really does make any fetch throw",
+      );
 
     const withoutNet = await withNetworkDisabled(async () => mainGateReport(w));
     assert.deepEqual(
