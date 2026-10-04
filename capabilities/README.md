@@ -86,10 +86,13 @@ stamps `chat.model` ONLY on surfaced ids — refused packages carry no chat clai
 | `xiaomimimo` | **dead-end — EXCLUDED from chat surface** | aistudio.xiaomimimo.com DNS-pinned to 127.0.0.1 (DNSPod A record, TTL 600) — host unreachable, no live round-trip possible; stays on /registry + /capability/xiaomimimo |
 | `chatglm` | **url-less — EXCLUDED from chat surface** | packaged ChatSiteProfile has no `url` (only `hosts` chatglm.cn / chat.z.ai) → the GOAL 32 driveability gate refuses (isDriveableChatProfile requires a url); no metadata.json (registry status unknown, unverified-candidate); stays on /registry + /capability/chatglm with no `chat.model` |
 
-The 11 builtin chat profiles (gemini, chatgpt, claude, copilot, perplexity,
-huggingchat, deepseek, kimi, tencent-aistudio, google-ai-search, hunyuan) are
+The 10 builtin chat profiles on the chat surface (gemini, chatgpt, claude,
+copilot, perplexity, huggingchat, deepseek, kimi, tencent-aistudio, hunyuan) are
 "builtin" — their verification lives in the profile's own note, not a machine
-field. Capability-only packages (gmail/youtube/araprat/…) never become chat
+field. `BUILTIN_PROFILES` holds 11 keys; the eleventh is `google-ai-search`,
+withheld from the chat surface (GOAL 147 — composer-less profile, no `*_chat`
+capability, `loginGatedResult(...)` runner) and fully served as a *capability*
+package. Capability-only packages (gmail/youtube/araprat/…) never become chat
 models.
 
 | Package | Status | Key discovery |

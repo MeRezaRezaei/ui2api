@@ -58,7 +58,10 @@ dropped `google-ai-search` from the chat surface (composer-less profile, no
 `POST /capability/google-ai-search`, and an explicit `--site google-ai-search`
 still resolves; only its chat-model claim is withdrawn. GOAL 34:
 `/registry` stamps `chat.model` ONLY on these surfaced ids, so a consumer
-never sees a chat provider that `/v1` would refuse.
+never sees a chat provider that `/v1` would refuse — and GOAL 159 narrows that
+further: a surfaced id gets the key only when its measured record class is
+`ANSWERS`, the rest carrying `chatWithheld: { class, reason }` instead. Of the
+22 surfaced ids, 2 are stamped today (`duckduckgo`, `gemini`).
 
 - One-shot: `ui2api prompt 'hello' --site gemini`
 - Daemon: `ui2api promptd` → `POST /prompt`, `POST /v1/chat/completions` (OpenAI-compatible, `stream:true` replays the finished DOM-read answer as SSE — honest: it is a page read, not synthesized traffic).

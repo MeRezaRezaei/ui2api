@@ -353,12 +353,15 @@ own real Chrome attached with mail.google.com signed in,
 kimi Extra Long, tencent-aistudio's no-UI caps) has its measured blocker and
 copy-paste unblock in **`docs/UNLOCK.md`**.
 A machine-checkable `verified` record (since/evidence/via) rides on every
-`/registry` package — absent or `false` = honestly not verified. Each package's
-`chat.model` is present **only** on the servable chat ids `GET /v1/models`
-lists (22 on a default daemon, measured 2026-09-27, GOAL 34 — derive the live
-set from `GET /v1/models` or `npx tsx src/cli.ts prompt --sites`; `google-ai-search`
+`/registry` package — absent or `false` = honestly not verified. A package's
+`chat.model` is present **only** on the servable chat ids `GET /v1/models` lists
+(22 on a default daemon, measured 2026-09-27, GOAL 34 — derive the live set from
+`GET /v1/models` or `npx tsx src/cli.ts prompt --sites`; `google-ai-search`
 is deliberately absent, it has no chat surface behind it yet is still served as a
-capability package) — absence = no chat surface, and
+capability package) **AND** only when its measured record class is `ANSWERS`:
+of those 22 ids, 2 carry the key today (`duckduckgo`, `gemini`) and the other 20
+carry `chatWithheld: { class, reason }` instead (GOAL 159, `src/prompt/registry.ts:132`),
+so absence = no chat surface and
 `POST /v1/chat/completions` 404s refused ids. Each verified
 chat site exposes a `/capability/<site>` surface plus the shared `POST /prompt`.
 Sending is always the site's **own JS**: paste event + Enter — no synthetic

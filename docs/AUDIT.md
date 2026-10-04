@@ -88,8 +88,23 @@ npx tsx -e '
 '
 # chat surface: 22 = builtin 10 + packaged 12
 # BUILTIN_PROFILES: 11 | not surfaced: google-ai-search
-# registry packages: 33 | carrying chat.model: 22
+# registry packages: 33 | carrying chat.model: 2
 ```
+
+**Why only 2 of the 22 carry `chat.model` — do not "fix" this back to 22.** The
+22 is the *servable chat set*; `chat.model` is a narrower, **measured** claim. The
+GOAL 159 record-class gate (`chatWithheld`, `src/prompt/registry.ts:132`) stamps
+the key only on a surfaced id whose measured record class is `ANSWERS`; the other
+20 surfaced ids carry `chatWithheld: { class, reason }` instead (today the
+classes are `SIGN-OUT`, `COMPOSER-DRIFT`, `WALL-CHALLENGE`,
+`UNATTRIBUTED-NO-ANSWER`, `NON-ANSWER-READ` — the split moves as sessions are
+re-captured, which is why no per-class count is printed here), so a consumer
+keying on `pkg.chat` never materialises a provider for a model the record says
+cannot answer. The remaining 11 of the 33 packages carry neither key:
+capability-only / url-less / dormant packages, never on the chat set to begin
+with (GOAL 34). Only the total `2` is pinned, by
+`test/audit-transcript-gate.test.ts`, against `buildRegistryPackages()` — derive
+it with the block above rather than typing it.
 
 Note the split is **10 + 12, not 11 + 11**: `BUILTIN_PROFILES` holds 11 keys but
 only 10 are surfaced as chat models — `google-ai-search` is catalogued and fully
