@@ -39,3 +39,4 @@
 | L2-C-style-audit | L2 | read-only style+freshness audit | L1-latency-launch | mutation house style + freshness-gate assessment | 2026-10-04T22:01:06+02:00 | running |
 | `l2-style-audit` | L2 | VERIFY (mutation-gate house style + freshness gate) | codeg parent (pool/driver attach-mode lane) | read-only report: mutation-gate house style, readback-freshness gate, awaitAnswer baseline, injection-verdict + owner-guard contracts | 2026-10-04T22:01:15+02:00 | running |
 | L2-C-style-audit | L2 | read-only audit | L1-latency-launch | DONE: mutation house style + FOUND defeatable freshness baseline | 2026-10-04T22:04:35+02:00 | completed |
+| `ui2api-poolA-bench` | L2 | execution/verify | codeg-parent-poolA-profile | /tmp/poolA/report.md (bench.mts, report.md) | 2026-10-04T20:07:28Z | done — awaiting parent MERGE/FIRE decision |
