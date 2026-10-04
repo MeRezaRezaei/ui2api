@@ -455,3 +455,61 @@ to be able to use this tool"* and *"ask in chat"* for the prior decision. No
 question was raised about layout, count, or naming — a design the agent can
 decide must be decided and written down here, so the operator reviews a record
 instead of answering an interview.
+
+## ADR-004 — the version carries a `-dev` suffix until the deploy is real, so the tree can never claim a release it has not earned
+
+- **Date:** 2026-10-04
+- **Goal:** the operator's "adjust version tag for justifications"
+- **Status:** accepted
+- **Class:** the source tree's declared version, when it has drifted from what is actually deployed.
+
+### Context
+
+`v1.0.0` points at `999632eb`, which is the commit **production runs**. `HEAD` is **34 commits
+ahead** of that, and those commits are not cosmetic — they contain real, user-visible behaviour
+changes:
+
+| change | what an operator would notice |
+| --- | --- |
+| `cli: refuse unknown flags, malformed numbers, and companion-less flags` | a previously-accepted typo now **refuses** instead of silently defaulting |
+| `cli: refuse two silent no-op flags — one of them silently APPLIED to the vault` | `vault tighten --apply --dry-run` no longer quietly rewrites credential-file modes |
+| `hub: publish containment + write-gate` | a failed publish leaves **nothing** on disk |
+| `security: the ACP surface gets a credential gate` | a wider ACP bind now requires **two** keys, not one |
+| `hub+acp+skills: close the three planned gaps` | the hub **refuses** rather than inventing a browser origin; ACP answers an unknown method with `-32601` |
+
+So a **minor** bump is earned on the semantics alone: these are added refusals and a closed
+write-path, not patch-level fixes.
+
+### The decision
+
+`package.json` moves `1.0.0` → **`1.1.0-dev.1`**, and the annotated tag is **`v1.1.0-dev.1`**.
+
+**The `-dev.1` suffix is the whole point.** None of these 34 commits is deployed: production is
+still `999632eb`, the deploy gate is manual, and `npm` `latest` is still `0.2.0` because publishing
+was never authorised. A plain `v1.1.0` would assert a release that does not exist — and **a tag is
+a claim that outlives the commit that made it.** This repo's own rule is that an unearned claim is
+a failure, so the string must not claim what is not true. **The suffix is removed by the deploy, not
+by a decision.**
+
+### Alternatives considered
+
+- **Tag plain `v1.1.0`.** Rejected: it would read as "released", and the release process this
+  project actually uses (`docs/RECONSTRUCTION-RUNBOOK.md` + the commit-map) treats a tag as a
+  reconstruction anchor. A tag on un-deployed source poisons that.
+- **Move `v1.0.0` to `HEAD`.** Rejected outright: `v1.0.0` names the commit production runs, and
+  moving it would make the tag a **lie about the running system** — the exact rot this project has
+  spent five rounds removing from prose.
+- **Leave the version at `1.0.0`.** Rejected: anyone installing from `HEAD` would get a tree
+  claiming to be `1.0.0` that is not `1.0.0`, which is the same defect class as a doc claiming a
+  count that has drifted.
+- **Bump to `1.1.0` and rely on the commit log to say "unreleased".** Rejected: the log is not read
+  by the consumer; the version string is.
+
+### What would make this wrong
+
+If the project's convention is that `package.json` tracks the **last deployed** version rather than
+the **current source**, then `1.0.0` was correct and this bump is a regression. Measured against
+that: the single consumer is `UI2API_VERSION` (`src/registry/package.ts:18`), which stamps
+**generated package metadata at packager time** — i.e. it describes the tree being packaged, not the
+deployed install. On that reading `-dev.1` is right. **No test pins the string**, so if the operator
+intends the other convention, reverting is a one-line change with no gate to unpick.
