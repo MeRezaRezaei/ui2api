@@ -275,7 +275,15 @@ test("GOAL8(c): every real /capability/<site> runner validates the account BEFOR
   // The ordering itself, in the one handler that now serves all of them.
   const handlerStart = HTTP_SOURCE.indexOf('req.url?.startsWith("/capability/")');
   assert.ok(handlerStart >= 0, "the table-driven /capability handler is missing from http.ts");
-  const handler = HTTP_SOURCE.slice(handlerStart, handlerStart + 3000);
+  // The window is a probe bound, not the assertion: the three checks below
+    // care about ORDER inside this handler. It was 3000 chars, which was enough
+    // until GOAL 231 wrapped the shared-browser call in an admission slot plus
+    // the comment explaining why — the constructor moved past the bound and the
+    // probe reported a missing forwarding that was still there in the source.
+    // Widened rather than loosened: the assertions are unchanged, and the bound
+    // must still cover this handler's whole body. Verified by mutation — moving
+    // the account guard AFTER `pool.sharedBrowser()` still fails this test.
+    const handler = HTTP_SOURCE.slice(handlerStart, handlerStart + 8000);
   const guardIdx = handler.indexOf("resolveCapabilityAccount(account, profile, dataDir)");
   const browserIdx = handler.indexOf("pool.sharedBrowser()");
   assert.ok(guardIdx >= 0, "the handler must validate the account before browser work");

@@ -291,8 +291,16 @@ function startAcpHttpServer(dir: string, root: string): {
   post(body: unknown): Promise<{ status: number; body: any }>;
   close(): void;
 } {
-  const driverPath = resolve(dir, "acp-http-driver.ts");
-  writeFileSync(driverPath, HTTP_DRIVER(root));
+const driverPath = resolve(dir, "acp-http-driver.ts");
+    // The driver is written into a temp dir, so it has no repo package.json above
+    // it and tsx resolves its format as "cjs" — which then REFUSES the driver's own
+    // top-level await ("not supported with the cjs output"), and the refusal
+    // arrives as a child-process exit that kills the whole runner mid-suite
+    // instead of failing one test. Declaring the module type the driver is
+    // actually authored in keeps ESM semantics; cwd alone does not, because the
+    // format follows the FILE, not the working directory.
+    writeFileSync(resolve(dir, "package.json"), JSON.stringify({ type: "module" }));
+    writeFileSync(driverPath, HTTP_DRIVER(root));
 
   const child = spawn(process.execPath, ["--import", "tsx", driverPath], {
     cwd: root,
