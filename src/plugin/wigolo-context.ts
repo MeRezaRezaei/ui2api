@@ -64,6 +64,63 @@ function pageMarkdown(out: WigoloFetchOutput): string {
   return cap(out?.markdown ?? "");
 }
 
+// A fetch answer that reports a FAILURE is not a successful blank page. The
+// daemon can answer HTTP 200 whose payload carries the failure (a challenge
+// shell renders to near-empty markdown), and `wigoloRequest` only throws on
+// !res.ok or an `{ok:...}` envelope (src/runtime/wigolo.ts) — so an unread
+// field here reads as "the page was empty" and a challenged page passes for a
+// successful read. The project's rule (AGENTS.md, "WHEN A SITE CHALLENGES YOU
+// — reach for WIGOLO") is that a blocked page stays a refusal with the NAMED
+// reason, so refuse by name instead of returning "".
+//
+// WHICH signals count is decided by the daemon's own shapes, not guessed:
+//   - `error` / `error_reason` — the StageError shape (wigolo src/types.ts).
+//   - `challenge_class` with NO clearing `solve_method` — the honest-block shape
+//     (router.ts always pairs a block with `solve_method: null`), i.e. no rung
+//     cleared the wall. A challenge_class that DOES carry a solve_method is a
+//     challenge the ladder CLEARED (browser-pool.ts sets both together on the
+//     success return), so that page is real content and must not be refused.
+//   - `solve_method` and `http_status` alone are NOT triggers: solve_method
+//     names the rung that cleared a challenge (not a failure), and wigolo
+//     deliberately serves HTML 4xx landing pages (a 404 docs page is useful
+//     content, src/tools/fetch.ts). Both only appear in the NAMED reason, after
+//     another signal has already failed.
+//
+// Only these declared fields are read, and only their values — no other payload
+// key (no header, cookie or token field) is echoed, so no credential can ride
+// along in the message.
+function refuseIfFailedFetch(out: WigoloFetchOutput | null | undefined, label: string): void {
+  const text = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const s = v.trim();
+    return s === "" ? null : s;
+  };
+  const challengeClass = text(out?.challenge_class);
+  const solveMethod = text(out?.solve_method);
+  // A challenge class with no solve method = no rung cleared the wall.
+  const blockedChallenge = challengeClass !== null && solveMethod === null;
+  const error = text(out?.error);
+  const errorReason = text(out?.error_reason);
+  const httpStatus = typeof out?.http_status === "number" && out.http_status >= 400 ? `http ${out.http_status}` : null;
+  if (error === null && errorReason === null && !blockedChallenge) return;
+
+  // Named by the upstream field, most specific first. solve_method is spelled
+  // out when it is the honest null: "no rung cleared it" IS the reason.
+  const parts = [
+    error ?? errorReason ?? (blockedChallenge ? "blocked_by_challenge" : null),
+    error !== null && errorReason !== null ? errorReason : null,
+    challengeClass !== null ? `challenge_class=${challengeClass}` : null,
+    blockedChallenge && solveMethod === null ? "solve_method=null (no rung cleared it)" : null,
+    httpStatus,
+  ].filter((p): p is string => p !== null);
+
+  // The "wigolo refused " prefix is this repo's marker for a refusal that must
+  // NOT be degraded into a native-browser retry (withBrowserFallback re-throws
+  // it by name): a challenge is a policy refusal, not a flaky browser tier, and
+  // the native page would answer "" — the silent blank this guard exists to kill.
+  throw new Error(`wigolo refused ${label}: ${parts.join("; ")}`);
+}
+
 // Defence in depth behind the runtime's loopback-only daemon gate
 // (`src/runtime/wigolo.ts`): a daemon answer must describe the site we asked
 // about. A cross-origin `url`/`source_url` means the answer was NOT read off
@@ -156,6 +213,11 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
       return await viaWigolo();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // A refusal is a verdict, not a flaky browser tier: degrading it would
+      // re-answer the question on the native page and hand back "" (or the
+      // interstitial's own body text) — the silent blank the refusal exists to
+      // prevent. Re-thrown by name, exactly as the daemon-unavailable path above.
+      if (WIGOLO_REFUSAL.test(msg)) throw err;
       if (WIGOLO_BROWSER_DOWN.test(msg)) {
         logger.warn && logger.warn(`[wigolo-engine] wigolo browser tier down (${msg.slice(0, 120)}); ${op} -> native browser`);
         return viaNative(await getNativePage());
@@ -176,6 +238,7 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
       ...extra,
     });
     assertAnswerOrigin(out?.url, baseUrl, "fetch answer");
+    refuseIfFailedFetch(out, "fetch answer");
     return out;
   }
 

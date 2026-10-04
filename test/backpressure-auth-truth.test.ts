@@ -49,6 +49,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
+
+import { startPromptd, CAPABILITY_MAX_INFLIGHT, admitCapability } from "../src/prompt/http.js";
+import { consumerPoolRefusal } from "../src/prompt/consumer-surface.js";
+import { ChatPool } from "../src/prompt/pool.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POOL = readFileSync(join(ROOT, "src/prompt/pool.ts"), "utf8");
@@ -209,4 +216,177 @@ test("the auth gate fails CLOSED when a token is set and is applied before every
   assert.match(HTTP, /process\.env\[TOKEN_ENV\] \?\? ""/, "the token default changed; re-audit the no-token posture");
   // A 401 is the refusal, and it is emitted before any browser or vault work.
   assert.match(HTTP, /return send\(res, 401, \{ error: "unauthorized" \}\)/, "an unauthenticated request no longer 401s");
+});
+
+// ===========================================================================
+// GOAL 231 — THE CAPABILITY ROUTE'S ADMISSION CONTROL.
+//
+// `/prompt` was bounded (`pool.acquire` -> park, or `pool_saturated`); the
+// capability route was not. `pool.sharedBrowser()` is a bare `ensureBrowser()`
+// with no queue and no cap, and the 20 `shared: false` dispatch rows construct
+// their runner with `browser: undefined`, so the runner launches its OWN Chrome
+// — N concurrent requests meant N browsers, and the aggregate 504 cannot cancel
+// browser work (it only SENDS the 504). What makes that more than a generic DoS
+// is AGENTS.md's own record that an abuse challenge against a REAL logged-in
+// account is unrecoverable, so exhausting the box burns the operator's account.
+//
+// The gate below is over the WIRE (a real daemon, a real socket), because the
+// claim being made is about a leaked counter, and no source-shape assertion can
+// demonstrate that a slot comes back. Two facts are pinned: the honest 503 at
+// the ceiling, and — the one that matters — that the route is NOT permanently
+// wedged afterwards.
+//
+// NO BROWSER IS LAUNCHED anywhere here. The daemon is handed a pre-built pool
+// through the GOAL-87 `pool` seam (never acquired, so never opened), and the
+// site driven is `google-ai-search`, whose runner is a `loginGatedResult`
+// short-circuit that answers WITHOUT a browser. Slots are held by stalling a
+// request's own body upload — a real way a local caller occupies the route, and
+// the reason admission is taken before the body is read.
+
+type Wire = { status: number; body: Record<string, unknown> | null; dead?: string };
+
+/** One complete request, answered off the wire. A hang is a NAMED failure. */
+function call(port: number, path: string, body: unknown): Promise<Wire> {
+  return new Promise((resolve) => {
+    const raw = Buffer.from(JSON.stringify(body));
+    const req = httpRequest(
+      { host: "127.0.0.1", port, method: "POST", path, headers: { "content-type": "application/json", "content-length": String(raw.length) } },
+      (r) => {
+        let d = "";
+        r.on("data", (c) => (d += c));
+        r.on("end", () => {
+          let parsed: unknown = null;
+          try { parsed = d ? JSON.parse(d) : null; } catch { /* keep null */ }
+          resolve({ status: r.statusCode ?? 0, body: parsed as Record<string, unknown> | null });
+        });
+      },
+    );
+    req.setTimeout(30_000, () => { req.destroy(); resolve({ status: 0, body: null, dead: "probe-timeout" }); });
+    req.on("error", (e: Error & { code?: string }) => resolve({ status: 0, body: null, dead: e.code ?? e.message }));
+    req.end(raw);
+  });
+}
+
+/** A request whose body STALLS: headers + a partial body flushed, content-length
+ *  promising more. The server holds it inside `readJson`, and — since admission
+ *  is taken first — it holds a capability slot for as long as the test keeps it. */
+function stall(port: number, path: string, full: unknown) {
+  const raw = Buffer.from(JSON.stringify(full));
+  let resolveStatus: (w: Wire) => void = () => {};
+  const done = new Promise<Wire>((resolve) => { resolveStatus = resolve; });
+  const req = httpRequest(
+    { host: "127.0.0.1", port, method: "POST", path, headers: { "content-type": "application/json", "content-length": String(raw.length) } },
+    (r) => {
+      let d = "";
+      r.on("data", (c) => (d += c));
+      r.on("end", () => {
+        let parsed: unknown = null;
+        try { parsed = d ? JSON.parse(d) : null; } catch { /* keep null */ }
+        resolveStatus({ status: r.statusCode ?? 0, body: parsed as Record<string, unknown> | null });
+      });
+    },
+  );
+  req.setTimeout(30_000, () => { req.destroy(); resolveStatus({ status: 0, body: null, dead: "stalled-probe-timeout" }); });
+  req.on("error", (e: Error & { code?: string }) => resolveStatus({ status: 0, body: null, dead: e.code ?? e.message }));
+  // The first byte flushes the headers; the server then waits for `raw.length`
+  // bytes that never arrive until `finish()` below.
+  req.write(raw.subarray(0, Math.max(1, Math.floor(raw.length / 2))));
+  return { finish: () => { req.end(raw.subarray(Math.max(1, Math.floor(raw.length / 2)))); }, done };
+}
+
+const CAP_PATH = "/capability/google-ai-search";
+const CAP_BODY = { capability: "google_ai_mode_search" };
+
+test("the capability route refuses at its ceiling with the honest pool_saturated 503, then gives every slot back", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "u2a-admission-"));
+  // A pre-built pool that is NEVER acquired: no warm at boot, no browser, ever.
+  const pool = new ChatPool({ profiles: [], min: 1, max: 1, defaultProfile: "deepseek", dataDir });
+  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir, pool });
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const held = Array.from({ length: CAPABILITY_MAX_INFLIGHT }, () => stall(svc.port, CAP_PATH, CAP_BODY));
+
+    // PROBE until the route reports saturation. Polled rather than slept-on, so
+    // the assertion cannot race the daemon's own admission: the gate is "a
+    // probe is eventually refused", not "a probe after N ms is refused".
+    let over: Wire | null = null;
+    for (let i = 0; i < 60 && !over; i++) {
+      const probe = await call(svc.port, CAP_PATH, CAP_BODY);
+      if (probe.status === 503) over = probe;
+      else await sleep(25);
+    }
+    assert.ok(over, `the capability route never refused: ${CAPABILITY_MAX_INFLIGHT} concurrent requests were all admitted`);
+    assert.equal(over!.status, 503, `saturation must be a 503, got ${over!.status}`);
+    // The EXISTING shape: the same `{error:{code,message}}` a pool refusal
+    // produces through poolRefusal + consumerPoolRefusal. Compared against the
+    // owner, not a literal, so a reword cannot make this gate pass or fail on
+    // wording alone.
+    assert.deepEqual(over!.body, { error: { code: "pool_saturated", message: consumerPoolRefusal("pool_saturated") } });
+    // Every held request is still genuinely in flight, not silently refused.
+    assert.ok(held.every((h) => h.done instanceof Promise), "the stalled requests lost their answers");
+
+    // THE IMPORTANT HALF: settle the in-flight requests and prove the counter
+    // came back. A leaked slot is worse than no cap — it wedges the route for
+    // every later caller — so this is asserted over the wire, not by reading the
+    // counter.
+    for (const h of held) h.finish();
+    const settled = await Promise.all(held.map((h) => h.done));
+    settled.forEach((w, i) => {
+      assert.ok(!w.dead, `held request ${i} died instead of settling: ${w.dead}`);
+      assert.notEqual(w.status, 503, `held request ${i} was refused instead of served: ${w.status}`);
+    });
+
+    const after = await call(svc.port, CAP_PATH, CAP_BODY);
+    assert.notEqual(after.status, 503, "the route stayed wedged after its in-flight requests settled — the counter leaked");
+    assert.ok(!after.dead, `the post-settle probe died: ${after.dead}`);
+    // The answer is the runner's honest login-gated refusal (502 ok:false), which
+    // is what this browser-free site really does — NOT a fabricated ok:true.
+    assert.equal(after.status, 502);
+    assert.equal(after.body?.ok, false);
+    assert.equal(after.body?.loginGated, true);
+  } finally {
+    await svc.close();
+    await pool.close().catch(() => {});
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("`/prompt` is untouched by the capability admission control", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "u2a-admission-prompt-"));
+  const pool = new ChatPool({ profiles: [], min: 1, max: 1, defaultProfile: "deepseek", dataDir });
+  const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir, pool });
+  try {
+    // The /prompt branch answers BEFORE any pool work for both of these, so
+    // they need no browser and they are the route's own refusals, unchanged.
+    const empty = await call(svc.port, "/prompt", { site: "deepseek" });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.body?.error, "prompt is required");
+
+    const unknown = await call(svc.port, "/prompt", { site: "no-such-site", prompt: "hi" });
+    assert.equal(unknown.status, 400, "/prompt must still answer its own site guard, not the capability cap");
+
+    // And the pool seam that already bounded it is still in place — the cap was
+    // added to the OTHER route rather than by weakening this one.
+    assert.match(HTTP, /const worker = await pool\.acquire\(profile\.id, account\);/, "/prompt no longer takes its page from the bounded pool");
+  } finally {
+    await svc.close();
+    await pool.close().catch(() => {});
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("the admission helper cannot leak a slot, and a double release cannot un-bound the cap", () => {
+  const state = { inFlight: 0 };
+  const taken = Array.from({ length: CAPABILITY_MAX_INFLIGHT }, () => admitCapability(state));
+  assert.ok(taken.every((t) => typeof t === "function"), "the ceiling refused below its own value");
+  assert.equal(admitCapability(state), null, "the ceiling did not refuse AT its own value");
+  assert.ok(CAPABILITY_MAX_INFLIGHT >= 8, "the ceiling must sit above the pool's own page ceiling (max <= 4) so /prompt concurrency is never refused here");
+
+  // Release twice: the counter must land on 0, never below it. A negative
+  // counter admits without bound — the failure this cap exists to prevent,
+  // reached through its own release path.
+  for (const release of taken) release!();
+  for (const release of taken) release!();
+  assert.equal(state.inFlight, 0, `a double release drove the counter off zero: ${state.inFlight}`);
+  assert.ok(admitCapability(state) !== null, "the counter never came back after every slot was released");
 });

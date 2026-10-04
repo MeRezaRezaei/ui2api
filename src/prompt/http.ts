@@ -799,6 +799,79 @@ export function poolRefusal(message: string): { code: PoolRefusalCode } | null {
   return null;
 }
 
+/* ── GOAL 231: THE CAPABILITY ROUTE'S ADMISSION CONTROL ────────────────────
+ *
+ * THE DEFECT, MEASURED (not suspected). `POST /prompt` was already bounded: it
+ * takes a page from the warm pool, and `pool.acquire` either parks it in a
+ * queue bounded by `maxWaiters` or throws `POOL_REFUSAL_CODES.pool_saturated`,
+ * so a burst of prompts costs at most `pool.max` pages.
+ *
+ * `POST /capability/<site>` was NOT. `pool.sharedBrowser()` hands out the
+ * pool's one browser with no queue and no cap (`pool.ts` `sharedBrowser()` is a
+ * bare `ensureBrowser()`), and for the 20 `shared: false` rows in
+ * `capability-dispatch.ts` the runner launches its OWN Chrome per request (the
+ * `browser: undefined` the handler passes falls through to the runner's own
+ * `launchBrowser()`). So N concurrent capability requests meant N Chrome
+ * processes — and N contexts inside one Chrome for the 13 `shared: true` rows.
+ * The aggregate 504 deadline does not help: it only SENDS the 504, it cannot
+ * cancel browser work, so the work it gave up on keeps running.
+ *
+ * WHY THIS IS NOT A GENERIC DoS NOTE. AGENTS.md records that an abuse
+ * challenge against a REAL logged-in account is unrecoverable. Exhausting this
+ * box with browsers is therefore a way to burn the operator's account, not just
+ * CPU — which is exactly why this route needed a bound and `pool_saturated`'s
+ * existing honest 503 is the right answer to it.
+ *
+ * WHY A CONSTANT AND NOT A `UI2API_*` KNOB. It is not an operator dial: the
+ * value below is derived from the pool's own ceilings, and a knob would both
+ * need a documented row in the AGENTS.md `UI2API_*` table and turn a capacity
+ * bound into a capacity DISCLOSURE on a loopback socket.
+ *
+ * WHY 8. The pool's page ceiling is at most 4 (`resourceMax()` caps at 4), so
+ * 8 is twice what a fully saturated `/prompt` already admits — ordinary client
+ * concurrency is therefore never refused here — while still bounding one local
+ * process's burst at 8 browsers instead of N. It is also half the pool's own
+ * default waiters (16), so the capability route refuses before a burst reaches
+ * the queue depth the pool itself considers its working set.
+ */
+export const CAPABILITY_MAX_INFLIGHT = 8;
+
+/** The per-daemon in-flight capability counter (never module state, so one
+ *  daemon's load can never be seen — or leaked into a test's — by another). */
+export interface CapabilityAdmissionState {
+  inFlight: number;
+}
+
+/**
+ * Take ONE capability slot, or return `null` when the route is at its ceiling.
+ * The returned release function is IDEMPOTENT and must be called from a
+ * `finally`: a leaked slot is worse than no cap at all, because it permanently
+ * wedges the route for every later caller.
+ */
+export function admitCapability(state: CapabilityAdmissionState): (() => void) | null {
+  if (state.inFlight >= CAPABILITY_MAX_INFLIGHT) return null;
+  state.inFlight++;
+  let released = false;
+  return () => {
+    // Idempotent on purpose: a double release would drive the counter NEGATIVE,
+    // and a negative counter admits without bound — the exact failure the cap
+    // exists to prevent, reached through its own release path.
+    if (released) return;
+    released = true;
+    state.inFlight--;
+  };
+}
+
+/** The refusal, in the ONE shape this project already answers saturation in:
+ *  the same `{error:{code,message}}` 503 the pool's own `pool_saturated` throws
+ *  produces through `poolRefusal` + `consumerPoolRefusal` below. Reused rather
+ *  than re-declared, so a consumer that branches on `code === "pool_saturated"`
+ *  (the published contract — see `consumer-surface.ts`) cannot tell the two
+ *  saturations apart, and a reword cannot drift between them. */
+function capabilitySaturated(res: ServerResponse) {
+  return send(res, 503, { error: { code: "pool_saturated", message: consumerPoolRefusal("pool_saturated") } });
+}
+
 // Resolve a site id from the request. Accept only built-in ids or the ids of
 // profiles handed to the server at startup — NEVER an arbitrary URL, so the
 // service cannot be used to drive unintended origins.
@@ -1056,6 +1129,11 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
   // daemon's log can never leak into another's — and never into a test's.
   const requestLog = new RequestLog();
 
+  // GOAL 231: the capability route's admission counter. Per-daemon, for the
+  // same reason the request ring above is: two daemons in one process must not
+  // share a bound (and a test must never see another daemon's load).
+  const capabilityAdmission: CapabilityAdmissionState = { inFlight: 0 };
+
   const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // GOAL 87: open a ring record and capture the answer. Every response path
     // ends the response (send(), the /v1 SSE stream, the deadline's 504), so
@@ -1115,20 +1193,33 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
                 `this daemon was started with an explicit site list, so it serves only those sites`,
             });
           }
-          const pkg = registryPackageFor(site);
-          if (pkg) {
-            const body = await readJson(req);
-            const capability = String(body.capability ?? "");
-            if (!capability) return send(res, 400, { error: "capability is required" });
-            const available = pkg.tools.map((t) => t.id);
-            if (!available.includes(capability)) {
-              return send(res, 400, {
-                error: {
-                  code: "unknown_capability",
-                  message: `unknown capability "${capability}" for "${site}"; available: [${available.join(", ")}]`,
-                },
-              });
+          // GOAL 231: admission is taken HERE, before the body is read below and
+          // long before the routed handler opens anything. This guard awaits
+          // `readJson`, so a request that stalls mid-upload holds a slot for as
+          // long as it stalls — bounded now instead of free. The slot is
+          // released in the `finally`, so every return above and every throw
+          // below gives it back; the routed handler takes its own slot for the
+          // browser work itself.
+          const releaseGuard = admitCapability(capabilityAdmission);
+          if (!releaseGuard) return capabilitySaturated(res);
+          try {
+            const pkg = registryPackageFor(site);
+            if (pkg) {
+              const body = await readJson(req);
+              const capability = String(body.capability ?? "");
+              if (!capability) return send(res, 400, { error: "capability is required" });
+              const available = pkg.tools.map((t) => t.id);
+              if (!available.includes(capability)) {
+                return send(res, 400, {
+                  error: {
+                    code: "unknown_capability",
+                    message: `unknown capability "${capability}" for "${site}"; available: [${available.join(", ")}]`,
+                  },
+                });
+              }
             }
+          } finally {
+            releaseGuard();
           }
         }
       }
@@ -1526,16 +1617,30 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // Reuse the pool's logged-in browser: a fresh per-request browser lands
         // on the signed-out landing shell and DOM/RPC reads fail. Sharing the
         // pool browser keeps the proven session AND avoids a second Chrome.
-        const shared = entry.shared ? await pool.sharedBrowser() : undefined;
-        const Runner = CAPABILITY_RUNNERS[site];
-        const caps = new Runner(profile, { browser: shared, dataDir, account });
+        //
+        // GOAL 231: this is the work the cap exists for. `sharedBrowser()` is a
+        // bare `ensureBrowser()` with no queue and no ceiling, and for a
+        // `shared: false` row the runner below launches its OWN Chrome — so this
+        // line and the three after it are where N concurrent requests became N
+        // browsers. The slot is taken BEFORE them and given back by the
+        // `finally`, which closes the runner first and then releases — so a
+        // runner that throws cannot leak a slot either.
+        const releaseRunner = admitCapability(capabilityAdmission);
+        if (!releaseRunner) return capabilitySaturated(res);
         try {
-          const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
-          return send(res, result.ok ? 200 : 502, result);
-        } catch (e) {
-          return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+          const shared = entry.shared ? await pool.sharedBrowser() : undefined;
+          const Runner = CAPABILITY_RUNNERS[site];
+          const caps = new Runner(profile, { browser: shared, dataDir, account });
+          try {
+            const result = await caps.run(capability, (body.args ?? {}) as Record<string, unknown>);
+            return send(res, result.ok ? 200 : 502, result);
+          } catch (e) {
+            return send(res, 500, { capability, ok: false, error: capabilityFailure(capability, e), reason_code: "runner_error" });
+          } finally {
+            await caps.close().catch(() => {});
+          }
         } finally {
-          await caps.close().catch(() => {});
+          releaseRunner();
         }
       }
 
