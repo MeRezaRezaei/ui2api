@@ -335,6 +335,33 @@ d("GOAL 161: mutation proof — both gates bite", () => {
     assert.equal(gateCeilingNotGrown((await adaptiveWait({ wallAtMs: null }, WAIT_MS)).waitedMs), true);
   });
 
+  t("MUTATION 2b: the ceiling the DRIVER hands the poll is pinned to the shipped profile", () => {
+    // MUTATION 2 above proves the algorithm honours whatever ceiling it is given.
+    // This proves the ceiling the driver ACTUALLY passes has not been raised —
+    // the defect "the ceiling must not grow" lives in the driver and the profile,
+    // not in the helper, so a helper-only gate would sit green through a real
+    // regression. Both halves are pinned: the `?? ` fallback literal in the
+    // driver, and the profile value it defaults from.
+    const driverCeiling = Number(
+      DRIVER_CODE.match(/awaitConsentWall\(\s*wall\.waitMs \?\? (\d+)/)?.[1] ?? Number.NaN,
+    );
+    assert.equal(
+      driverCeiling,
+      WAIT_MS,
+      `the driver's consent-wall ceiling fallback is ${driverCeiling}ms but the shipped profile says ` +
+        `${WAIT_MS}ms. A raised ceiling is a latency regression, not a tuning choice.`,
+    );
+
+    // And the mutation is real: raise the literal and the same predicate fails.
+    const raised = DRIVER_CODE.replace(
+      /awaitConsentWall\(\s*wall\.waitMs \?\? \d+/,
+      "awaitConsentWall(wall.waitMs ?? 3600",
+    );
+    const mutatedCeiling = Number(raised.match(/awaitConsentWall\(wall\.waitMs \?\? (\d+)/)?.[1] ?? Number.NaN);
+    assert.notEqual(mutatedCeiling, WAIT_MS, "precondition: the mutation actually raised the ceiling");
+    assert.equal(driverCeiling === WAIT_MS, true, "and the shipped driver is the one that passes");
+  });
+
   t("MUTATION 3: deleting the `if (wallVisible)` gate is caught by the source gates", async () => {
     const mutated = DRIVER_CODE.replace("if (wallVisible) {", "if (true) {");
     assert.ok(
