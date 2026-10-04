@@ -42,7 +42,21 @@ export function createHubRouter(store: RegistryStore, opts: { token: string; reg
       let body: any;
       try {
         body = (await readJson(req)) as any;
-      } catch {
+      } catch (e) {
+        // GOAL 237: an oversized body is a TYPED fault and keeps its own status,
+        // code and message — the same shape promptd sends
+        // (src/prompt/http.ts:1683), so one refusal reads the same everywhere.
+        // `connection: close` + destroy-on-finish because the upload is still in
+        // flight and was deliberately stopped mid-stream: the socket must not be
+        // reused. Answer FIRST, destroy after the flush — the reverse order is
+        // what made this class unsendable in promptd. NOTE this whole branch runs
+        // BEFORE store.save, so capping the body moves NO validation after a
+        // write: a refused publish still writes nothing.
+        if (e instanceof HubClientError) {
+          json(res, e.status, { error: { code: e.code, message: e.message } }, { connection: "close" });
+          if (e.code === "payload_too_large") res.once("finish", () => req.destroy());
+          return;
+        }
         return json(res, 400, { error: "invalid json body" });
       }
       const { manifest, module } = body;
@@ -105,12 +119,87 @@ async function uplink(store: RegistryStore, registryUrl: string, name?: string, 
   } catch { return null; }
 }
 
+/**
+ * GOAL 237: the hub's body reader had NO byte cap and NO pause — `buf += c` grew
+ * until the process ran out of memory, reachable by any process that can open a
+ * socket to the hub port. The precedent this ports is promptd's own reader
+ * (`MAX_BODY_BYTES` + the 413 `payload_too_large`, src/prompt/http.ts:679 and
+ * :715-733); the hub is simply the surface that was missed.
+ *
+ * WHY 1 MB, and not promptd's number copied on faith: a hub publish body is
+ * `{ manifest, module }` (src/cli.ts:1087) — JSON METADATA plus one action-map
+ * text, never a binary blob. Measured over every `capabilities/<id>/` in this
+ * repo, the LARGEST body this hub is ever asked to accept is 15,327 bytes
+ * (tencent-aistudio: a 15 KB manifest + a metadata-derived module). 1 MB is
+ * ~65x that, so no real package can be refused, while a caller that streams
+ * past it is stopped at 1 MB instead of at whatever the box's free memory
+ * happens to be. Going tighter would risk refusing a legitimately large
+ * action-map; going wider buys nothing, because the ceiling is a DoS bound and
+ * not a feature.
+ *
+ * A named exported constant rather than a `UI2API_*` knob on purpose: this repo
+ * GATES knobs (test/ci-contract-knob-cites.test.ts + the AGENTS.md knob table
+ * both fail on a knob with no documented row), and the publish surface is a
+ * localhost, single-operator path where a tunable limit is not worth a contract.
+ */
+export const HUB_MAX_BODY_BYTES = 1e6;
+
+/**
+ * A TYPED client fault, ported from promptd's `HttpClientError`
+ * (src/prompt/http.ts:668). It exists so the oversized-body refusal is
+ * DISTINGUISHABLE from a malformed body: both reject out of `readJson`, and
+ * without a type the caller's `catch` answers every failure with a flat 400 —
+ * which is exactly how a 1 GB upload becomes "invalid json body", a refusal
+ * class that names neither the size nor the real cause.
+ */
+export class HubClientError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HubClientError";
+  }
+}
+
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let buf = "";
-    req.on("data", (c) => (buf += c));
+    // GOAL 237: count BYTES, not string units — chunks arrive as Buffers (no
+    // encoding is set), so `c.length` IS the byte count, and the refusal names
+    // bytes. Same correction as src/prompt/http.ts:708-713.
+    let size = 0;
+    let refused = false;
+    req.on("data", (c) => {
+      if (refused) return;
+      size += typeof c === "string" ? Buffer.byteLength(c) : c.length;
+      if (size > HUB_MAX_BODY_BYTES) {
+        // Stop reading IMMEDIATELY, and drop what we have. Two separate
+        // obligations, both load-bearing:
+        //  - `pause()` + dropping the `data` listener stop the client's stream
+        //    at the cap instead of feeding a server that already refused it.
+        //  - `buf = ""` + `refused` make a PARTIAL PARSE IMPOSSIBLE: the buffer
+        //    is the first HUB_MAX_BODY_BYTES of a body we never saw the end of,
+        //    so it must never reach `JSON.parse`. `refused` additionally stops
+        //    the `end` handler below from doing anything at all, so a promise
+        //    that already rejected cannot be walked into a parse by a late
+        //    `end`. (The socket is NOT destroyed HERE — see the caller's
+        //    `payload_too_large` branch, which answers first and destroys after
+        //    the flush, because destroying here is what made this code
+        //    unsendable in promptd: the client got ECONNRESET and no answer.)
+        refused = true;
+        buf = "";
+        req.pause();
+        req.removeAllListeners("data");
+        reject(new HubClientError(413, "payload_too_large", `request body exceeds ${HUB_MAX_BODY_BYTES} bytes`));
+        return;
+      }
+      buf += c;
+    });
     req.on("error", reject);
     req.on("end", () => {
+      if (refused) return;
       if (!buf) return resolve({});
       try {
         resolve(JSON.parse(buf));
@@ -120,5 +209,8 @@ function readJson(req: IncomingMessage): Promise<unknown> {
     });
   });
 }
-function json(res: ServerResponse, code: number, obj: unknown) { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); }
+function json(res: ServerResponse, code: number, obj: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(code, { "content-type": "application/json", ...headers });
+  res.end(JSON.stringify(obj));
+}
 function html(res: ServerResponse, code: number, s: string) { res.writeHead(code, { "content-type": "text/html; charset=utf-8" }); res.end(s); }
