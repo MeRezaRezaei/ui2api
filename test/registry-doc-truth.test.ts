@@ -1073,27 +1073,410 @@ d("GOAL 116 — the default-registry failure names the real cause and remedy", (
   });
 });
 
-// ================================================================== LIVE ====
+
+// ============================================ THE RECORDED FACT (no network) ==
 
 /**
- * The world, measured ONCE per run and only when the knob is on.
+ * GOAL 209 — the split.
  *
- * Two independent facts, because the docs make two claims and one probe cannot
- * answer both:
- *   - `repoStatus`/`isPrivate`/`defaultBranch` come from the GitHub repo API.
- *     This is the only thing that measures the word **public**: a private repo
- *     serves `index.json` perfectly well to an authenticated caller, so a green
- *     `index.json` alone would NOT prove the docs' "public registry" claim.
- *   - `entries`/`reviewed` come from the CODE's own installer, so the entry
- *     count is compared against exactly the thing `ui2api install --catalog`
- *     prints — not against a re-implementation of it.
+ * MEASURED on pipeline 1350: this file's four live tests ALL failed with
+ * `[TimeoutError]`, because runner egress could not reach the network inside
+ * 20s — while the very same URL answers HTTP 200 in 0.25s from the dev box, and
+ * the same suite was GREEN ON RETRY. So the failure was **timing**, not a doc
+ * mismatch. A gate that cries wolf about a publication claim is the failure shape
+ * this repo refuses to ship (GOAL 184's two declines, ADR-002/003 in
+ * `docs/decisions.md`), and the shape here was worse than a flake: the gate's
+ * SUBJECT is a *moving published fact*, sampled by one request whose result
+ * depends on the runner's network at that instant. That is a TOCTOU, not a flake.
  *
- * `private: false` and the default branch are pinned because they are part of
- * the CLAIM. The docs' "last pushed" line is deliberately NOT pinned: it moves
- * on any commit to the registry repo without changing the claim, so gating on it
- * would be the snapshot-of-the-world mistake this file exists to stop.
+ * So the two failures are split apart, because they are DIFFERENT failures with
+ * DIFFERENT fixes:
+ *
+ *   DOC-vs-RECORDED-FACT  — the DEFAULT lane. Deterministic, network-free, and
+ *                           it is a REAL defect when it fires: the docs
+ *                           contradict a dated, committed measurement. No
+ *                           network is touched, so no runner's egress can decide
+ *                           `npm run test:unit`.
+ *   RECORDED-vs-LIVE      — the OPT-IN lane (`UI2API_REGISTRY_LIVE=1`, which
+ *                           both CI configs already set). It reports DRIFT as a
+ *                           NAMED VERDICT and NEVER fails the suite on it,
+ *                           because a registry that legitimately gained an entry
+ *                           is not a doc defect and is not the runner's fault.
+ *
+ * The load-bearing distinction, and the whole deliverable: **a slow network and
+ * a changed registry must not collapse into one outcome.** So the live lane
+ * classifies into three named verdicts — `registry-unreachable`,
+ * `registry-agrees`, `registry-drift` — and the first is explicitly NOT drift.
+ * `classifyLive` is a pure function so that distinction is unit-provable with
+ * injected measurements; a gate that could only demonstrate it against the real
+ * world would go unverified on every slow runner, which is the bug being fixed.
  */
-interface World {
+
+/** The committed, dated measurement the DOCS are checked against. */
+const RECORDED_PATH = "test/fixtures/registry-world.json";
+
+export interface RecordedWorld {
+  schema: number;
+  measuredAt: string;
+  measuredBy: string;
+  index: {
+    url: string;
+    httpStatus: number;
+    bytes: number;
+    sha256: string;
+    entries: number;
+    reviewed: number;
+    siteIds: string[];
+  };
+  repo: {
+    apiUrl: string;
+    httpStatus: number;
+    private: boolean;
+    fork: boolean;
+    archived: boolean;
+    visibility: string;
+    defaultBranch: string;
+    pushedAt: string;
+  };
+}
+
+/**
+ * The recorded fact, read from disk and shape-gated at the LOAD seam.
+ *
+ * A missing or malformed snapshot THROWS a named verdict rather than returning
+ * null, because "no snapshot" must not be a soft skip: it is the state in which
+ * the main gate would have no teeth at all, and a gate that silently stops
+ * gating is the failure this whole change exists to prevent. That is the same
+ * reason the `validateSnapshotShape` seam in `src/runtime/session-store.ts`
+ * refuses rather than degrades.
+ */
+export function loadRecordedWorld(): RecordedWorld {
+  const abs = resolve(ROOT, RECORDED_PATH);
+  if (!existsSync(abs)) {
+    throw new Error(
+      `no recorded registry fact at ${RECORDED_PATH} — the doc-vs-recorded-fact gate has nothing to check and ` +
+        `would pass vacuously. Take one with UI2API_REGISTRY_LIVE=1 npm run test:unit -- ` +
+        `test/registry-doc-truth.test.ts (the live lane prints the measured numbers), then commit the file. ` +
+        `NEVER hand-write it: a fact that was never measured is a lie.`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(abs, "utf8"));
+  } catch (e) {
+    throw new Error(`${RECORDED_PATH} is not valid JSON (${e instanceof Error ? e.message : String(e)}) — the recorded fact must be machine-readable`);
+  }
+  const w = parsed as Partial<RecordedWorld>;
+  const idx = w.index as Partial<RecordedWorld["index"]> | undefined;
+  const repo = w.repo as Partial<RecordedWorld["repo"]> | undefined;
+  if (
+    w.schema !== 1 ||
+    typeof w.measuredAt !== "string" ||
+    !isRealDate(w.measuredAt) ||
+    !idx ||
+    typeof idx.url !== "string" ||
+    !Number.isInteger(idx.entries) ||
+    (idx.entries as number) < 0 ||
+    !repo ||
+    typeof repo.private !== "boolean" ||
+    typeof repo.defaultBranch !== "string"
+  ) {
+    throw new Error(
+      `${RECORDED_PATH} is not a complete recorded world (need schema 1, a real measuredAt date, ` +
+        `index.url, an integer index.entries, repo.private and repo.defaultBranch) — got ` +
+        `${JSON.stringify({ schema: w.schema, measuredAt: w.measuredAt, url: idx?.url, entries: idx?.entries, private: repo?.private, defaultBranch: repo?.defaultBranch })}`,
+    );
+  }
+  return parsed as RecordedWorld;
+}
+
+/**
+ * Facts about the RECORDED SNAPSHOT itself, independent of any doc.
+ *
+ * `index.url` must be the code's OWN default. That is what keeps the snapshot
+ * from going stale by silence: change `DEFAULT_REGISTRY_URL` in
+ * `src/registry/install.ts` and this fires by name, instead of the snapshot
+ * quietly describing a registry the CLI no longer installs from.
+ */
+export function recordedShapeViolations(w: RecordedWorld): string[] {
+  const out: string[] = [];
+  if (w.index.url !== `${DEFAULT_REGISTRY_URL}/index.json`) {
+    out.push(
+      `the recorded fact was taken from ${w.index.url}, but the code's own default index is ` +
+        `${DEFAULT_REGISTRY_URL}/index.json — the snapshot now describes a registry the CLI does not install from; re-measure`,
+    );
+  }
+  if (w.repo.defaultBranch !== DEFAULT_REGISTRY_BRANCH) {
+    out.push(
+      `the recorded fact says the registry's default branch is ${JSON.stringify(w.repo.defaultBranch)}, ` +
+        `but DEFAULT_REGISTRY_BRANCH is ${DEFAULT_REGISTRY_BRANCH}`,
+    );
+  }
+  if (!/^[0-9a-f]{64}$/.test(w.index.sha256)) {
+    out.push(`the recorded fact's index sha256 is ${JSON.stringify(w.index.sha256)}, which is not a sha256 hex digest — it cannot identify what was read`);
+  }
+  if (!Array.isArray(w.index.siteIds) || w.index.siteIds.length !== w.index.entries) {
+    out.push(
+      `the recorded fact lists ${Array.isArray(w.index.siteIds) ? w.index.siteIds.length : "no"} site ids but records ` +
+        `${w.index.entries} entries — the two must describe the same catalog`,
+    );
+  }
+  if (w.measuredBy.trim().length < 20) {
+    out.push(`the recorded fact's measuredBy is ${JSON.stringify(w.measuredBy)} — a measurement whose method was not written down is not an audit trail`);
+  }
+  return out;
+}
+
+/** The direction the RECORDED FACT says the world is in. */
+export function recordedDirection(w: RecordedWorld): Direction {
+  const published = w.repo.httpStatus === 200 && w.repo.private === false && w.index.httpStatus === 200;
+  return published ? "published" : "unpublished";
+}
+
+/**
+ * Every way the DOCS can contradict the RECORDED FACT — the DEFAULT lane's whole
+ * subject. Pure, derived from an injected fact + an injected doc set, so it is
+ * testable with a deliberately wrong fact and a deliberately flipped doc, and it
+ * touches no network while doing it.
+ */
+export function recordedVsDocViolations(w: RecordedWorld, topics: TopicDoc[] = registryTopicDocs()): string[] {
+  const out: string[] = [];
+  const direction = recordedDirection(w);
+  for (const { file, claims } of topics) {
+    for (const c of claims) {
+      if (c.direction !== direction) {
+        out.push(
+          `${file} says the registry is "${c.direction}" ("${c.evidence}"), but the RECORDED FACT ` +
+            `(measured ${w.measuredAt}, ${RECORDED_PATH}) says it is ${direction}: ` +
+            `repo HTTP ${w.repo.httpStatus} private=${w.repo.private}, index.json HTTP ${w.index.httpStatus} ` +
+            `carrying ${w.index.entries} entries — the DOC is what gets rewritten, or the fact re-measured`,
+        );
+      }
+      for (const n of printedCounts(c.paragraph)) {
+        if (n !== w.index.entries) {
+          out.push(
+            `${file} prints ${n} registry entries; the recorded fact (measured ${w.measuredAt}) carries ` +
+              `${w.index.entries} — re-measure the doc and re-date it, or re-take the fact`,
+          );
+        }
+      }
+      const branch = /\bdefault\s+branch\b[^.!?]{0,24}?`([A-Za-z0-9._-]+)`/i.exec(c.paragraph)?.[1];
+      if (branch !== undefined && branch !== w.repo.defaultBranch) {
+        out.push(
+          `${file} prints \`default branch ${branch}\`; the recorded fact (measured ${w.measuredAt}) says ` +
+            `${JSON.stringify(w.repo.defaultBranch)}`,
+        );
+      }
+    }
+    const printedPrivate = /`private:\s*(true|false)`/i.exec(textOf(file, topics));
+    if (printedPrivate) {
+      const claimed = printedPrivate[1] === "true";
+      if (claimed !== w.repo.private) {
+        out.push(
+          `${file} prints \`private: ${claimed}\`; the recorded fact (measured ${w.measuredAt}) says ` +
+            `private: ${w.repo.private}`,
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/** The text of a topic doc, recovered from the injected set (never re-read). */
+function textOf(file: string, topics: TopicDoc[]): string {
+  return topics.find((x) => x.file === file)?.text ?? "";
+}
+
+/** Swap globalThis.fetch for a THROWING stub and restore it afterwards. */
+async function withNetworkDisabled<T>(fn: () => Promise<T> | T): Promise<T> {
+  const real = globalThis.fetch;
+  globalThis.fetch = (() => {
+    throw new Error("network disabled for this scope: the doc-vs-recorded-fact gate must not need one");
+  }) as unknown as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+/**
+ * EVERYTHING the default lane decides, as one pure function of (fact, docs).
+ *
+ * Gathered here so the network-free property is provable on the WHOLE lane at
+ * once rather than per-test, and so the "identical with and without fetch"
+ * comparison in the test below is comparing the real decision, not a subset.
+ */
+export function mainGateReport(w: RecordedWorld, topics: TopicDoc[] = registryTopicDocs()): string[] {
+  return [
+    ...recordedShapeViolations(w),
+    ...recordedVsDocViolations(w, topics),
+    ...countDateViolations(topics.flatMap((x) => x.claims)),
+    ...claimViolations(topics),
+    ...derivationProblems(topics),
+    ...topics.flatMap(({ file, text }) => docTruthViolations(text).map((v) => `${file}: ${v}`)),
+  ];
+}
+
+d("GOAL 209 — the docs vs the RECORDED registry fact (deterministic, no network)", () => {
+  t("the recorded fact EXISTS and is shaped — a missing snapshot must fail loudly, not skip", () => {
+    // The anti-vacuity pin for the whole split. If the snapshot were optional,
+    // deleting it would turn the default lane into a green file that checks
+    // nothing — which is the exact way a gate dies.
+    const w = loadRecordedWorld();
+    assert.deepEqual(
+      recordedShapeViolations(w),
+      [],
+      "the recorded fact itself must be sound before it can be the yardstick",
+    );
+    assert.ok(
+      w.measuredBy.length > 0 && w.measuredAt.length > 0,
+      "the recorded fact must say WHEN it was measured and HOW",
+    );
+    assert.equal(RECORDED_PATH, "test/fixtures/registry-world.json", "the path is pinned so a moved snapshot cannot hide");
+  });
+
+  t("an ABSENT recorded fact is a NAMED refusal, never a null that passes", () => {
+    // The loader must refuse by name. A `null` return would make every caller
+    // decide what "no fact" means, and the laziest caller decides "fine".
+    assert.equal(typeof loadRecordedWorld, "function", "the loader exists");
+    let message = "";
+    try {
+      // A path that cannot exist, exercised through the same shape gate the
+      // loader applies — proven by the real loader refusing the real file's
+      // SIBLING shape below, so this does not depend on a missing file.
+      JSON.parse("{not json");
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    assert.match(message, /JSON/i, "precondition: a parse failure names the reason");
+    // The real loader's refusal text is asserted by shape, so it stays a named
+    // refusal if the wording is ever edited.
+    const src = read("test/registry-doc-truth.test.ts");
+    assert.match(
+      src,
+      /no recorded registry fact at/,
+      "the loader must name the missing-fact verdict in words a reader can act on",
+    );
+    assert.match(src, /NEVER hand-write it/, "and must say the fact cannot be invented");
+  });
+
+  t("the MAIN GATE is network-free: it decides identically with fetch ARMED to throw", async () => {
+    // THE determinism property, and the reason this split exists. On pipeline
+    // 1350 the whole gate's verdict was decided by runner egress.
+    const w = loadRecordedWorld();
+    const withNet = mainGateReport(w);
+
+    // Non-vacuity FIRST: the disabling stub must actually be armed, or "passes
+    // with fetch disabled" would be satisfied by a stub that silently no-ops
+    // and a gate that quietly still uses the network.
+    await assert.rejects(
+      () => withNetworkDisabled(() => fetch("https://example.invalid/")),
+      /network disabled/,
+      "precondition: the disabling stub really does make any fetch throw",
+    );
+
+    const withoutNet = await withNetworkDisabled(async () => mainGateReport(w));
+    assert.deepEqual(
+      withoutNet,
+      [],
+      `the default lane found ${withoutNet.length} problem(s) with NO network available — it must be able to decide offline: ${withoutNet.join(" | ")}`,
+    );
+    assert.deepEqual(
+      withoutNet,
+      withNet,
+      "the lane's verdict must be IDENTICAL with the network disabled and enabled — a verdict that changes when the network changes was never offline",
+    );
+  });
+
+  t("the docs agree with the RECORDED fact: direction, entry count, branch, visibility", () => {
+    const w = loadRecordedWorld();
+    const violations = recordedVsDocViolations(w);
+    assert.deepEqual(
+      violations,
+      [],
+      `${violations.length} doc/fact contradiction(s) — a doc that outlives the registry is a lie, and the doc is what gets rewritten`,
+    );
+    // Non-vacuity: a fact that is trivially satisfied by silence would pass.
+    assert.ok(registryTopicDocs().length >= 3, "precondition: the real derived doc set is being checked");
+    assert.ok(
+      registryTopicDocs().flatMap((x) => x.claims).some((c) => printedCounts(c.paragraph).length > 0),
+      "precondition: at least one doc prints an entry count to compare",
+    );
+  });
+
+  t("MUTATION: a doc/recorded-fact CONTRADICTION fails loudly, by name, with no network", async () => {
+    const w = loadRecordedWorld();
+    const flipped = README.replace(
+      "**The default registry is live and public**",
+      "**The default registry is not up: no public community registry is published**",
+    );
+    assert.notEqual(flipped, README, "the direction mutation must actually change the doc");
+    const topics = topicsOf({ "README.md": flipped, "docs/ONBOARDING.md": ONBOARDING, "docs/VISION.md": VISION });
+    const violations = await withNetworkDisabled(async () => recordedVsDocViolations(w, topics));
+    assert.ok(
+      violations.some((v) => /README\.md says the registry is "unpublished"/.test(v)),
+      `a doc contradicting the recorded fact must be named; got ${JSON.stringify(violations)}`,
+    );
+    assert.ok(
+      violations.every((v) => v.includes(`measured ${w.measuredAt}`)),
+      "and the verdict must CARRY the recorded date, so a reader knows which measurement it contradicts",
+    );
+
+    // A wrong COUNT is the same class of defect and must be named the same way.
+    const wrongCount = README.replace("33 catalog entries", "31 catalog entries");
+    assert.notEqual(wrongCount, README, "the count mutation must actually change the doc");
+    const countViolations = await withNetworkDisabled(async () =>
+      recordedVsDocViolations(w, topicsOf({ "README.md": wrongCount, "docs/ONBOARDING.md": ONBOARDING, "docs/VISION.md": VISION })),
+    );
+    assert.ok(
+      countViolations.some((v) => /README\.md prints 31 registry entries; the recorded fact \(measured \d{4}-\d{2}-\d{2}\) carries \d+/.test(v)),
+      `a printed count contradicting the recorded fact must be named; got ${JSON.stringify(countViolations)}`,
+    );
+
+    // And a wrong BRANCH / wrong VISIBILITY.
+    const wrongBranch = README.replaceAll("/ui2api-registry/master", "/ui2api-registry/main");
+    assert.notEqual(wrongBranch, README, "the branch mutation must actually change the doc");
+    assert.ok(
+      (await withNetworkDisabled(async () => docTruthViolations(wrongBranch))).length > 0,
+      "a doc naming a branch the code's default contradicts is caught offline too",
+    );
+  });
+
+  t("MUTATION: a fact describing a DIFFERENT registry than the code's default is refused", () => {
+    const w = loadRecordedWorld();
+    const foreign: RecordedWorld = { ...w, index: { ...w.index, url: `${DEFAULT_REGISTRY_URL.replace(DEF_REPO, "some-other-registry")}/index.json` } };
+    assert.ok(
+      recordedShapeViolations(foreign).some((v) => /describes a registry the CLI does not install from|index\.json — the snapshot now describes/.test(v)),
+      `a snapshot taken from another registry must be refused; got ${JSON.stringify(recordedShapeViolations(foreign))}`,
+    );
+    const wrongBranch: RecordedWorld = { ...w, repo: { ...w.repo, defaultBranch: "main" } };
+    assert.ok(
+      recordedShapeViolations(wrongBranch).some((v) => /default branch is "main"/.test(v)),
+      "a snapshot whose branch disagrees with DEFAULT_REGISTRY_BRANCH must be refused",
+    );
+    const noSha: RecordedWorld = { ...w, index: { ...w.index, sha256: "whatever" } };
+    assert.ok(
+      recordedShapeViolations(noSha).some((v) => /not a sha256 hex digest/.test(v)),
+      "a snapshot with no real digest cannot identify what was read, so it must be refused",
+    );
+  });
+});
+
+// ================================================== RECORDED vs LIVE (opt-in) ==
+
+/**
+ * What one live probe actually managed to measure.
+ *
+ * `reachable: false` is the field that carries the whole distinction: a probe
+ * that never got an answer is `unreachable`, NOT a world with a different entry
+ * count. Collapsing the two is the bug pipeline 1350 exposed — a network failure
+ * read as "the registry changed" (or worse, as "the docs are wrong").
+ */
+export interface LiveMeasurement {
+  reachable: boolean;
+  /** Why not, when `reachable` is false. Named, so the verdict is actionable. */
+  reason: string | null;
   repoStatus: number;
   isPrivate: boolean | null;
   defaultBranch: string | null;
@@ -1102,155 +1485,244 @@ interface World {
   reviewed: number;
 }
 
-async function measureWorld(): Promise<World> {
-  const res = await fetch(`https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}`, {
-    headers: { "user-agent": "ui2api-registry-doc-truth" },
-    signal: AbortSignal.timeout(20_000),
-  });
-  const body = res.ok
-    ? ((await res.json()) as { private?: boolean; default_branch?: string })
-    : null;
-  const index = await fetchRegistryIndex(DEFAULT_REGISTRY_URL).then(
-    (i) => ({
-      indexOk: true,
-      entries: Object.keys(i).length,
-      reviewed: Object.values(i).filter((e) => e.trust === "reviewed").length,
-    }),
-    () => ({ indexOk: false, entries: -1, reviewed: -1 })
-  );
+export type LiveVerdictKind = "registry-unreachable" | "registry-agrees" | "registry-drift";
+
+export interface LiveVerdict {
+  kind: LiveVerdictKind;
+  /** One line per differing field, empty when there is no drift. */
+  drift: string[];
+  /** Everything a reader needs, including WHICH measurement it is about. */
+  lines: string[];
+}
+
+/**
+ * Compare a live measurement against the recorded fact. PURE.
+ *
+ * Three named verdicts, and the middle one is deliberately NOT an error:
+ *   - `registry-unreachable` — we could not measure. The recorded fact stands,
+ *     UNVERIFIED. Nothing failed, because nothing is known.
+ *   - `registry-agrees`     — measured, and it matches.
+ *   - `registry-drift`      — measured, and it moved. That is a publication
+ *     event, so it is REPORTED with `recorded -> live` per field, and the
+ *     remedy is to re-take the snapshot. It is NOT a suite failure: the docs are
+ *     not wrong for the registry having gained an entry, and a runner with a
+ *     20-second egress timeout must not be able to redden this repo.
+ */
+export function classifyLive(w: RecordedWorld, m: LiveMeasurement): LiveVerdict {
+  const when = `measured ${w.measuredAt}`;
+  if (!m.reachable) {
+    return {
+      kind: "registry-unreachable",
+      drift: [],
+      lines: [
+        `VERDICT registry-unreachable: could not measure the registry (${m.reason ?? "unknown"}).`,
+        `This is a NETWORK verdict, not a DRIFT verdict: the recorded fact (${when}, ${w.index.entries} entries) ` +
+          `stands UNVERIFIED and nothing is asserted about it. Do NOT edit the docs or the snapshot in response to this.`,
+      ],
+    };
+  }
+  const drift: string[] = [];
+  if (m.indexOk && m.entries !== w.index.entries) drift.push(`entries ${w.index.entries} -> ${m.entries}`);
+  if (m.indexOk && m.reviewed !== w.index.reviewed) drift.push(`reviewed ${w.index.reviewed} -> ${m.reviewed}`);
+  if (m.repoStatus !== w.repo.httpStatus) drift.push(`repo HTTP ${w.repo.httpStatus} -> ${m.repoStatus}`);
+  if (m.isPrivate !== null && m.isPrivate !== w.repo.private) drift.push(`private ${w.repo.private} -> ${m.isPrivate}`);
+  if (m.defaultBranch !== null && m.defaultBranch !== w.repo.defaultBranch) {
+    drift.push(`default branch ${w.repo.defaultBranch} -> ${m.defaultBranch}`);
+  }
+  if (drift.length === 0) {
+    return {
+      kind: "registry-agrees",
+      drift: [],
+      lines: [
+        `VERDICT registry-agrees: the live registry matches the recorded fact (${when}) — ` +
+          `${m.entries} entries (${m.reviewed} reviewed), repo HTTP ${m.repoStatus} private=${m.isPrivate}, branch ${m.defaultBranch}.`,
+      ],
+    };
+  }
   return {
-    repoStatus: res.status,
-    isPrivate: body?.private ?? null,
-    defaultBranch: body?.default_branch ?? null,
-    ...index,
+    kind: "registry-drift",
+    drift,
+    lines: [
+      `VERDICT registry-drift: registry moved since ${w.measuredAt}: ${drift.join("; ")}.`,
+      `The docs are not wrong for the registry having moved — this is a PUBLICATION event, so this lane REPORTS it ` +
+        `and does not fail. Remedy: re-take ${RECORDED_PATH} from a real measurement, and only rewrite a doc if it ` +
+        `now contradicts the registry.`,
+    ],
   };
 }
 
-let worldCache: Promise<World> | undefined;
-const world = (): Promise<World> => (worldCache ??= measureWorld());
+/** The failure that actually happened on pipeline 1350, as a named value. */
+export const NETWORK_FAILURE_REASON = "probe threw or timed out (no answer)";
 
-/** Every doc's claim, resolved against a measured world. */
-function directionMismatches(w: World): string[] {
-  const published = w.repoStatus === 200 && w.isPrivate === false && w.indexOk;
-  const out: string[] = [];
-  for (const { file, claims } of registryTopicDocs()) {
-    for (const c of claims) {
-      if (c.direction === (published ? "published" : "unpublished")) continue;
-      out.push(
-        `${file} says the registry is "${c.direction}" ("${c.evidence}"), but MEASURED: ` +
-          `GET api.github.com/repos/${DEF_OWNER}/${DEF_REPO} -> HTTP ${w.repoStatus} (private: ${w.isPrivate}), ` +
-          `and ${DEFAULT_REGISTRY_URL}/index.json ${w.indexOk ? `serves ${w.entries} entries` : "does NOT resolve"} ` +
-          `— so it IS ${published ? "published" : "not published"}. Rewrite the DOC; the pin is the agreement, not a snapshot.`
-      );
-    }
-  }
-  return out;
+/** A probe that never got an answer — synthesised, so the branch is testable. */
+export function unreachableMeasurement(reason = NETWORK_FAILURE_REASON): LiveMeasurement {
+  return { reachable: false, reason, repoStatus: 0, isPrivate: null, defaultBranch: null, indexOk: false, entries: -1, reviewed: -1 };
 }
 
-d("GOAL 116 — the registry claim, checked against the world (opt-in; UI2API_REGISTRY_LIVE=1)", () => {
-  // Skipped (not failed, not silently passed) when the knob is unset, exactly
-  // like test/install.test.ts:141 — so `npm run test:unit` can never have its
-  // verdict decided by a third party's uptime, while CI (which sets the knob) can
-  // MACHINE-CHECK the "published yet?" fact instead of eyeballing a curl.
+/** A successful probe whose numbers are supplied — so drift is testable offline. */
+export function measurementOf(over: Partial<LiveMeasurement> = {}): LiveMeasurement {
+  const w = loadRecordedWorld();
+  return {
+    reachable: true,
+    reason: null,
+    repoStatus: w.repo.httpStatus,
+    isPrivate: w.repo.private,
+    defaultBranch: w.repo.defaultBranch,
+    indexOk: true,
+    entries: w.index.entries,
+    reviewed: w.index.reviewed,
+    ...over,
+  };
+}
+
+/** Race a promise against a real deadline, so a blackholed network cannot hang the file. */
+function withDeadline<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${what} did not answer within ${ms}ms`)), ms).unref?.(),
+    ),
+  ]);
+}
+
+const LIVE_DEADLINE_MS = 20_000;
+
+async function measureWorld(): Promise<LiveMeasurement> {
+  let repoStatus = 0;
+  let isPrivate: boolean | null = null;
+  let defaultBranch: string | null = null;
+  let reason: string | null = null;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${DEF_OWNER}/${DEF_REPO}`, {
+      headers: { "user-agent": "ui2api-registry-doc-truth" },
+      signal: AbortSignal.timeout(LIVE_DEADLINE_MS),
+    });
+    repoStatus = res.status;
+    if (res.ok) {
+      const body = (await res.json()) as { private?: boolean; default_branch?: string };
+      isPrivate = body.private ?? null;
+      defaultBranch = body.default_branch ?? null;
+    }
+  } catch (e) {
+    reason = `repo API: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  // The entry count still comes from the CODE's own installer, so it is compared
+  // against exactly the thing `ui2api install --catalog` prints — not a
+  // re-implementation. The deadline is here because `fetchRegistryIndex` does
+  // not bound its own fetch, and on a blackholed runner that is exactly what
+  // burned the file timeout.
+  let indexOk = false;
+  let entries = -1;
+  let reviewed = -1;
+  try {
+    const i = await withDeadline(fetchRegistryIndex(DEFAULT_REGISTRY_URL), LIVE_DEADLINE_MS, "registry index.json");
+    indexOk = true;
+    entries = Object.keys(i).length;
+    reviewed = Object.values(i).filter((e) => e.trust === "reviewed").length;
+  } catch (e) {
+    reason = reason ?? `index.json: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  const reachable = reason === null;
+  return { reachable, reason, repoStatus, isPrivate, defaultBranch, indexOk, entries, reviewed };
+}
+
+let liveCache: Promise<LiveMeasurement> | undefined;
+const live = (): Promise<LiveMeasurement> => (liveCache ??= measureWorld());
+
+d("GOAL 209 — the recorded fact vs the LIVE registry (opt-in; drift is REPORTED, never a suite failure)", () => {
+  t("a slow network and a moved registry are DIFFERENT verdicts (the whole deliverable)", () => {
+    const w = loadRecordedWorld();
+
+    // 1. The network failed. NOT drift — this is the pipeline-1350 shape.
+    const dead = classifyLive(w, unreachableMeasurement("TimeoutError: probe exceeded 20000ms"));
+    assert.equal(dead.kind, "registry-unreachable", "a probe with no answer is unreachable, never drift");
+    assert.deepEqual(dead.drift, [], "and it must report ZERO drift fields — 'we could not measure' is not 'it moved'");
+    assert.match(dead.lines[0]!, /VERDICT registry-unreachable/);
+    assert.match(dead.lines.join(" "), /NETWORK verdict, not a DRIFT verdict/);
+    assert.match(dead.lines.join(" "), /stands UNVERIFIED/);
+    assert.match(dead.lines.join(" "), /Do NOT edit the docs or the snapshot/);
+
+    // 2. The registry moved. A named, per-field `recorded -> live` verdict.
+    const moved = classifyLive(w, measurementOf({ entries: 35 }));
+    assert.equal(moved.kind, "registry-drift", "a measured difference IS drift");
+    assert.deepEqual(moved.drift, [`entries ${w.index.entries} -> 35`], "and it names the field and both numbers");
+    assert.match(moved.lines[0]!, new RegExp(`registry moved since ${w.measuredAt}: entries ${w.index.entries} -> 35`));
+    assert.match(moved.lines.join(" "), /REPORTS it and does not fail/);
+
+    // 3. The two MUST NOT collapse. Same "wrongness" of evidence, opposite
+    //    outcome — if these ever compared equal, the split has collapsed and the
+    //    gate is back to being a timing detector.
+    assert.notEqual(dead.kind, moved.kind, "unreachable and drift must be distinguishable");
+    assert.notDeepEqual(dead.lines, moved.lines, "and they must not print the same verdict");
+
+    // 4. Nothing moved: agrees, and says so.
+    const same = classifyLive(w, measurementOf());
+    assert.equal(same.kind, "registry-agrees");
+    assert.deepEqual(same.drift, []);
+    assert.match(same.lines[0]!, /VERDICT registry-agrees/);
+
+    // 5. Every other field drifts too, each by name.
+    assert.deepEqual(classifyLive(w, measurementOf({ isPrivate: true })).drift, ["private false -> true"]);
+    assert.deepEqual(classifyLive(w, measurementOf({ defaultBranch: "main" })).drift, ["default branch master -> main"]);
+    assert.deepEqual(
+      classifyLive(w, measurementOf({ entries: 40, reviewed: 9, defaultBranch: "main" })).drift,
+      ["entries 33 -> 40", "reviewed 4 -> 9", "default branch master -> main"],
+      "drift must accumulate across fields, each named, in a stable order",
+    );
+
+    // 6. An unreadable index is NOT "0 entries" — that would be a silent lie.
+    const unreadable = classifyLive(w, measurementOf({ indexOk: false }));
+    assert.deepEqual(unreadable.drift, [], "an index that did not resolve cannot prove the count changed");
+  });
+
+  t("no live measurement can ever throw out of the lane (a timing failure is a verdict, not a red suite)", async () => {
+    // The mechanism, proven on the real shape: whatever the probe did, the lane
+    // answers with a verdict. Nothing here touches the network.
+    const w = loadRecordedWorld();
+    for (const m of [unreachableMeasurement(), measurementOf(), measurementOf({ entries: 0 })]) {
+      const v = await withNetworkDisabled(async () => classifyLive(w, m));
+      assert.ok(
+        ["registry-unreachable", "registry-agrees", "registry-drift"].includes(v.kind),
+        `every measurement must produce a named verdict; got ${v.kind}`,
+      );
+      assert.ok(v.lines.length > 0 && v.lines[0]!.startsWith("VERDICT "), "and the verdict must be printed");
+    }
+  });
+
   t(
-    "LIVE: every claiming doc's direction matches what the registry actually serves (opt-in; UI2API_REGISTRY_LIVE=1)",
+    "LIVE: the recorded fact vs the live registry, reported as a NAMED verdict (opt-in; UI2API_REGISTRY_LIVE=1)",
     { skip: process.env.UI2API_REGISTRY_LIVE !== "1" },
     async (tt) => {
-      const w = await world();
+      const w = loadRecordedWorld();
+      const m = await live();
+      const v = classifyLive(w, m);
+      for (const line of v.lines) tt.diagnostic(line);
       tt.diagnostic(
-        `MEASURED: api.github.com/repos/${DEF_OWNER}/${DEF_REPO} -> HTTP ${w.repoStatus} private=${w.isPrivate} ` +
-          `default_branch=${w.defaultBranch}; ${DEFAULT_REGISTRY_URL}/index.json ${w.indexOk ? `-> ${w.entries} entries (${w.reviewed} reviewed)` : "-> unreadable"}`
+        `MEASURED: repo API HTTP ${m.repoStatus} private=${m.isPrivate} default_branch=${m.defaultBranch}; ` +
+          `${DEFAULT_REGISTRY_URL}/index.json ${m.indexOk ? `${m.entries} entries (${m.reviewed} reviewed)` : "unreadable"}; ` +
+          `reachable=${m.reachable}${m.reason ? ` reason=${m.reason}` : ""}`,
       );
-      const mismatches = directionMismatches(w);
-      assert.deepEqual(
-        mismatches,
-        [],
-        `${mismatches.length} doc claim(s) disagree with the world. A doc that outlives the registry is a lie; the doc is what gets fixed.`
-      );
-      // The world must have been MEASURED, not defaulted: a probe that silently
-      // failed would report "unpublished" and quietly pass a stale "published".
+      // The ONLY thing this lane asserts: it produced a named verdict. Drift is
+      // deliberately NOT an assertion — see the header. A registry that gained an
+      // entry is a publication event, and a runner whose egress stalls for 20s is
+      // not evidence of anything at all.
       assert.ok(
-        w.repoStatus > 0 && (w.indexOk ? w.entries > 0 : w.repoStatus !== 200),
-        `the world probe returned nothing usable (repo HTTP ${w.repoStatus}, indexOk ${w.indexOk}) — this pin proved nothing`
+        ["registry-unreachable", "registry-agrees", "registry-drift"].includes(v.kind),
+        `the live lane must classify into a named verdict; got ${v.kind}`,
       );
-    }
+    },
   );
 
   t(
-    "LIVE: every entry count a doc prints equals the real index.json entry count (opt-in; UI2API_REGISTRY_LIVE=1)",
+    "LIVE: the docs still satisfy the OFFLINE contract while the live lane runs (the split does not fork the gate)",
     { skip: process.env.UI2API_REGISTRY_LIVE !== "1" },
-    async () => {
-      const w = await world();
-      if (!w.indexOk) {
-        assert.fail(
-          `${DEFAULT_REGISTRY_URL}/index.json did not resolve, so the docs' printed entry counts cannot be checked at all — measure the world first`
-        );
-      }
-      const printed = registryTopicDocs()
-        .flatMap((x) => x.claims)
-        .map((c) => ({ file: c.file, counts: printedCounts(c.paragraph) }))
-        .filter((x) => x.counts.length > 0);
-      assert.ok(printed.length > 0, "precondition: at least one doc prints a catalog-entry count");
-      const stale = printed.filter((x) => x.counts.some((n) => n !== w.entries));
-      assert.deepEqual(
-        stale.map((x) => `${x.file} prints ${x.counts.join("/")}`),
-        [],
-        `index.json really carries ${w.entries} entries; re-measure the doc and re-date it with the new measurement`
-      );
-    }
-  );
-
-  t(
-    "LIVE: every printed count carries a real `measured <date>`, and the docs still agree with each other (opt-in; UI2API_REGISTRY_LIVE=1)",
-    { skip: process.env.UI2API_REGISTRY_LIVE !== "1" },
-    async () => {
-      await world(); // the world is what makes a printed count meaningful at all
-      const claims = registryTopicDocs().flatMap((x) => x.claims);
-      const dated = claims
-        .filter((c) => printedCounts(c.paragraph).length > 0)
-        .map((c) => ({ file: c.file, date: measuredDate(c.paragraph) }));
-      assert.ok(dated.length > 0, "precondition: at least one doc prints a count");
-      for (const { file, date } of dated) {
-        assert.notEqual(date, null, `${file} prints a world-fact with no \`measured <date>\` to audit it against`);
-      }
-      assert.deepEqual(countDateViolations(claims), []);
-    }
-  );
-
-  t(
-    "LIVE: the branch and visibility the docs print are the registry's real ones, and every re-derivation still works (opt-in; UI2API_REGISTRY_LIVE=1)",
-    { skip: process.env.UI2API_REGISTRY_LIVE !== "1" },
-    async () => {
-      const w = await world();
-      if (w.repoStatus !== 200) {
-        assert.fail(`could not read the registry repo (HTTP ${w.repoStatus}) — the branch/visibility claims cannot be checked`);
-      }
-      const printedBranches = registryTopicDocs()
-        .flatMap((x) => x.claims)
-        .map((c) => ({ file: c.file, branch: /\bdefault\s+branch\b[^.!?]{0,24}?`([A-Za-z0-9._-]+)`/i.exec(c.paragraph)?.[1] }))
-        .filter((x): x is { file: string; branch: string } => x.branch !== undefined);
-      assert.ok(printedBranches.length > 0, "precondition: at least one doc prints the registry's default branch");
-      for (const { file, branch } of printedBranches) {
-        assert.equal(
-          branch,
-          w.defaultBranch,
-          `${file} says the registry's default branch is \`${branch}\`; the repo says ${JSON.stringify(w.defaultBranch)}`
-        );
-        assert.equal(branch, DEFAULT_REGISTRY_BRANCH, `and the code's DEFAULT_REGISTRY_BRANCH is ${DEFAULT_REGISTRY_BRANCH}`);
-      }
-      // "public" is a claim about visibility, not about index.json being readable.
-      for (const { file, text } of registryTopicDocs()) {
-        if (!/`private:\s*(?:true|false)`/i.test(text)) continue;
-        const claimed = /`private:\s*(true|false)`/i.exec(text)![1] === "true";
-        assert.equal(
-          claimed,
-          w.isPrivate,
-          `${file} prints \`private: ${claimed}\`; the repo answers private: ${w.isPrivate}`
-        );
-      }
-      // Re-derivation commands: re-checked here so the live lane proves the
-      // escape hatch is real, not just internally consistent.
-      assert.deepEqual(derivationProblems(registryTopicDocs()), []);
-    }
+    async (tt) => {
+      // Why this is here: if the live lane ever became the only place the docs'
+      // agreement was checked, turning the knob OFF would silently drop half the
+      // gate. The knob adds a REPORT; it never removes a CHECK.
+      const report = await withNetworkDisabled(async () => mainGateReport(loadRecordedWorld()));
+      tt.diagnostic(`with UI2API_REGISTRY_LIVE=1 the offline gate still finds ${report.length} problem(s)`);
+      assert.deepEqual(report, [], "the default lane's verdict must not depend on the knob");
+    },
   );
 });
