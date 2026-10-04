@@ -19,6 +19,7 @@ import {
 } from "../src/prompt/verification-class.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { NO_ANSWER_REFUSAL_RE, renderNoAnswerRefusal, RETRY } from "../src/prompt/error-redaction.js";
 
 // The classifier is pure, so every pin below is hermetic: no browser, no
 // network, no clock. The inputs are the values the DEPLOYED service actually
@@ -409,8 +410,16 @@ const rowFor = (model: string): ShippedRow => {
   return r as ShippedRow;
 };
 
-const SHIPPED_REFUSAL =
-  "v0 did not return an answer within 90000ms — the site may be busy, rate-limiting, or showing a sign-in or consent wall. Retry; if it repeats, pick another model id from GET /v1/models.";
+/** The refusal the DEPLOYED service emitted, COMPOSED FROM ITS OWNER rather than
+ *  re-typed. `src/prompt/error-redaction.ts` owns the clause, the template, the
+ *  render and the retry tail; `src/prompt/verification-class.ts` owns only the
+ *  matcher. This file used to carry the whole sentence as a literal — which made
+ *  it a third owner of a sentence the service emits, and the copy that would have
+ *  survived a reword of the emitter while the row it feeds kept claiming the
+ *  class. Deriving it here means a reword of the emitter moves THIS fixture too,
+ *  and `test/error-redaction.test.ts`'s exclusivity gate is then the only place
+ *  that can decide whether the new words are still the shipped contract. */
+const SHIPPED_REFUSAL = `${renderNoAnswerRefusal("v0", "90000")} ${RETRY}`;
 
 test("UNATTRIBUTED-NO-ANSWER: the service's own named refusal, at an idle pool, with no page", () => {
   const c = classifyOutcome({ httpStatus: 502, message: SHIPPED_REFUSAL, poolAtRequest: IDLE });
@@ -454,7 +463,23 @@ test("the class cannot be read as a diagnosis: it is NOT any one of the causes t
   // cannot be widened into prose-shaped free text.
   assert.equal(noAnswerRefusalIn("the request timed out after a while"), null);
   assert.equal(noAnswerRefusalIn("the site returned no content"), null);
-  assert.equal(noAnswerRefusalIn(SHIPPED_REFUSAL), "did not return an answer(?: within \\d+\\s*ms)?");
+  // The matched pattern is the OWNER'S, compared by source — this file used to
+  // assert against a hand-typed `"did not return an answer(?: within \d+\s*ms)?"`,
+  // which is the exact copy this change removed: it would have kept passing
+  // against a matcher that no longer matched anything, because the expectation
+  // was the same words twice rather than the shipped pattern. Asserting against
+  // `NO_ANSWER_REFUSAL_RE.source` asks the question that matters — is the
+  // classifier running the derived matcher, or one of its own?
+  assert.equal(
+    noAnswerRefusalIn(SHIPPED_REFUSAL),
+    NO_ANSWER_REFUSAL_RE.source,
+    "the classifier must run the owner's derived matcher, not a pattern of its own",
+  );
+  assert.ok(
+    new RegExp(NO_ANSWER_REFUSAL_RE.source, "i").test(SHIPPED_REFUSAL),
+    "the derived matcher must actually match the sentence the emitter renders — a source-equality " +
+      "assertion on its own would pass for a matcher that matches nothing",
+  );
 });
 
 test("MUTUAL EXCLUSION: the new class cannot swallow a class that was already derivable", () => {

@@ -5,7 +5,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { redactInternalError, INTERNAL_WORD_RE, ERROR_ONLY_TERMS } from "../src/prompt/error-redaction.js";
+import {
+  redactInternalError,
+  INTERNAL_WORD_RE,
+  ERROR_ONLY_TERMS,
+  NO_ANSWER_REFUSAL_CLAUSE,
+  NO_ANSWER_REFUSAL_RE,
+  renderNoAnswerRefusal,
+  RETRY,
+} from "../src/prompt/error-redaction.js";
 import {
   consumerAccountRefusal,
   consumerProse,
@@ -139,7 +147,11 @@ const REAL_DRIVER_ERRORS: ReadonlyArray<[string, string]> = [
   ],
   [
     "no answer appeared on copilot within 30000ms. The page may be behind a consent wall — tune the profile's 'dismiss' selectors.",
-    "did not return an answer",
+    // Derived from the owner, not re-typed: this row asserts the diagnosis that
+    // SURVIVES redaction, and that sentence is emitted from `NO_ANSWER_REFUSAL_CLAUSE`
+    // below. Typing the words here would make the test a second owner of the very
+    // clause the one-owner gate below pins to a single file in `src/`.
+    NO_ANSWER_REFUSAL_CLAUSE,
   ],
 ];
 
@@ -324,6 +336,116 @@ describe("ONE OWNER: the malformed-body refusal is authored in exactly one place
       // The emitter must USE the constant, not merely import it beside a copy.
       assert.match(src, /INVALID_JSON_MESSAGE\)/, `${site} must answer with the owner's value`);
     }
+  });
+});
+
+/**
+ * ── ONE OWNER FOR THE NO-ANSWER REFUSAL ────────────────────────────────────
+ *
+ * THE DEFECT, and it is the more dangerous half of the family above. The
+ * account-refusal defect was TWO SENTENCES for one condition: both still
+ * classified, so a consumer was handed two wordings and nothing went red. This
+ * one is ONE sentence and a second file holding the regex that decides whether
+ * that sentence counts as the service's own named refusal —
+ * `NO_ANSWER_REFUSAL_PATTERNS` in `src/prompt/verification-class.ts`, which is
+ * what files the 502 the service reports. Its comment claimed the pattern was
+ * "taken from the single template that produces it". NOTHING took it from
+ * anything: the clause was TYPED a second time, as a regex literal, with the
+ * surrounding words escaped by hand.
+ *
+ * So a reword of the emitter left the matcher matching NOTHING, the classifier
+ * filed UNATTRIBUTED-NO-ANSWER as UNCLASSIFIED, and BOTH stayed green — and that
+ * is WORSE than a drifted sentence, because the drifted sentence still classified
+ * and this one does not. A reword here deletes a class.
+ *
+ * `src/prompt/error-redaction.ts` now owns the clause (`NO_ANSWER_REFUSAL_CLAUSE`),
+ * the template (`NO_ANSWER_REFUSAL_TEMPLATE`), the render (`renderNoAnswerRefusal`),
+ * the retry tail (`RETRY`) and the matcher (`NO_ANSWER_REFUSAL_RE`), and
+ * `verification-class.ts` imports the last of those. Three properties below, and
+ * each one closes a DIFFERENT way back in:
+ *
+ *   1. EXCLUSIVITY — the clause may be TYPED in exactly one file under `src/`.
+ *      Kills a re-typed copy anywhere, including a second occurrence inside the
+ *      owning file, because `codeOwnersOf` counts OCCURRENCES and not files.
+ *   2. DERIVATION — the shipped matcher really does match what the emitter emits,
+ *      in both the timed and the untimed shape. This is what a reword of the
+ *      clause alone would break, and exclusivity alone would NOT: the clause
+ *      stays typed once while the matcher silently stops matching.
+ *   3. SHIPPED BYTES — the shipped verification record (`capabilities/model-verification.json`,
+ *      the `v0` row) quotes the sentence this file renders today, so a reword of
+ *      the TEMPLATE TAIL — the part no `src/` file re-types, and therefore the
+ *      part property 1 cannot see — leaves a record claiming the service said
+ *      something it no longer says.
+ *
+ * Property 3 is why this is not a comment. Exclusivity plus derivation would
+ * both stay GREEN through a tail reword, and that is precisely the mutation the
+ * gate exists to fail.
+ */
+describe("ONE OWNER: the no-answer refusal is authored in exactly one place", () => {
+  /** The `v0` row's own refusal, as the record quotes it. The row embeds the
+   *  sentence in a paragraph and renders the dash as a plain hyphen, so the
+   *  comparison is made on the dash-normalised text — that normalisation is the
+   *  whole reason the shipped record is not simply `includes(rendered)`. */
+  const shippedEvidence = (): string =>
+    (JSON.parse(srcOf("capabilities/model-verification.json")) as {
+      records: { model: string; evidence?: string }[];
+    }).records.find((r) => r.model === "v0")?.evidence ?? "";
+
+  test("the clause is typed exactly once under src/ — the classifier may not re-type it", () => {
+    assert.deepEqual(
+      codeOwnersOf(NO_ANSWER_REFUSAL_CLAUSE),
+      ["src/prompt/error-redaction.ts"],
+      "the no-answer clause must be typed EXACTLY ONCE in src/ — a second copy is a matcher that will " +
+        "stop matching the day the emitter is reworded, deleting the UNATTRIBUTED-NO-ANSWER class silently",
+    );
+  });
+
+  test("the classifier IMPORTS the derived matcher instead of holding a pattern", () => {
+    const src = srcOf("src/prompt/verification-class.ts");
+    assert.match(
+      src,
+      /import\s*\{[^}]*\bNO_ANSWER_REFUSAL_RE\b[^}]*\}\s*from\s*"\.\/error-redaction\.js"/,
+      "verification-class.ts must import the owner's matcher — a hand-typed pattern there is the defect this closes",
+    );
+    assert.match(
+      src,
+      /NO_ANSWER_REFUSAL_PATTERNS\s*:\s*readonly RegExp\[\]\s*=\s*\[\s*NO_ANSWER_REFUSAL_RE\s*\]/,
+      "the classifier's pattern array must BE the owner's matcher, not a list it fills beside a copy",
+    );
+  });
+
+  test("the derived matcher matches what the emitter actually emits, timed and untimed", () => {
+    // Property 2. Timed: the shape the shipped `v0` refusal carries. Untimed: the
+    // shape emitted when the raw message had no timer in it. The untimed case is
+    // the one a `within \d+ms`-only pattern would miss, so it is asserted, not
+    // assumed.
+    assert.ok(
+      NO_ANSWER_REFUSAL_RE.test(renderNoAnswerRefusal("kimi", "30000")),
+      "the derived matcher must match the sentence the emitter renders with a timer",
+    );
+    assert.ok(
+      NO_ANSWER_REFUSAL_RE.test(renderNoAnswerRefusal("kimi")),
+      "the derived matcher must match the shorter untimed sentence the emitter renders",
+    );
+    assert.ok(
+      NO_ANSWER_REFUSAL_RE.test(NO_ANSWER_REFUSAL_CLAUSE),
+      "the clause alone must match — that is what survives being quoted inside evidence prose",
+    );
+    // AND THE NARROWING IS THE POINT: generic prose about a timeout is not a
+    // match, so the class cannot be widened into free text.
+    assert.equal(NO_ANSWER_REFUSAL_RE.test("the request timed out after a while"), false);
+  });
+
+  test("the shipped v0 record quotes the bytes this file renders today", () => {
+    // Property 3 — the one that fails on a TAIL reword, which exclusivity cannot
+    // see because the tail is owned here and typed nowhere else.
+    const quoted = `${renderNoAnswerRefusal("v0", "90000")} ${RETRY}`.replace(/—/g, "-");
+    assert.ok(
+      shippedEvidence().includes(quoted),
+      "the shipped v0 record no longer quotes the sentence the redaction seam emits — the record and " +
+        "the service disagree about what the service said, and every re-derivation of that row is " +
+        "now measured against a sentence no producer emits",
+    );
   });
 });
 

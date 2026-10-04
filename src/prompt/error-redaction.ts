@@ -52,8 +52,86 @@ export interface RedactionContext {
   account?: string;
 }
 
-/** How the caller may recover. Named, not inlined, so the wording cannot drift. */
-const RETRY = "Retry; if it repeats, pick another model id from GET /v1/models.";
+/** How the caller may recover. Named, not inlined, so the wording cannot drift.
+ *
+ *  EXPORTED, and that is not a convenience: the refusal the no-answer class
+ *  emits is `${renderNoAnswerRefusal(site, ms)} ${RETRY}`, so the closing half of
+ *  the SHIPPED sentence is this file's alone. A test that wants to assert the
+ *  bytes a consumer actually reads (rather than just the clause the classifier
+ *  keys on) used to have two choices — import this, or re-type the tail, and the
+ *  second one is a second owner of a sentence this file emits. That is the same
+ *  duplication this file exists to prevent, one clause over. */
+export const RETRY = "Retry; if it repeats, pick another model id from GET /v1/models.";
+
+/* ── THE NO-ANSWER REFUSAL, AND THE MATCHER THAT FINDS IT ──────────────────────
+ *
+ * THIS IS THE SAME DEFECT CLASS AS `consumerAccountRefusal` ABOVE, IN ITS OTHER
+ * FORM. That one had TWO SENTENCES for one condition. This one has ONE sentence
+ * and a second file holding a regex that decides whether the sentence counts as
+ * the service's own named refusal — the matcher in `./verification-class.ts`,
+ * which classifies the 502 the service reports. Its doc comment claimed the
+ * pattern was "taken from the single template that produces it". NOTHING took it
+ * from anything: the clause was TYPED a second time. So a reword of the emitter
+ * left the matcher matching nothing, the classifier filing UNATTRIBUTED-NO-ANSWER
+ * as UNCLASSIFIED, and BOTH staying green — a reword that silently deletes a
+ * class is worse than a drifted sentence, because the drifted sentence still
+ * classifies and this one does not.
+ *
+ * SO THE SENTENCE LIVES HERE AND IS COMPUTED FROM. `NO_ANSWER_REFUSAL_CLAUSE` is
+ * the clause; `NO_ANSWER_REFUSAL_TEMPLATE` is the whole sentence with the clause
+ * referred to by hole (so the clause is TYPED once, which is what the one-owner
+ * gate counts); `renderNoAnswerRefusal()` is what the emitter below calls, so the
+ * emitter types no sentence either; and `NO_ANSWER_REFUSAL_RE` is the matcher's
+ * source, derived from the clause plus the emitter's OWN timer-extraction pattern.
+ *
+ * WHY THE MATCHER COVERS THE CLAUSE AND NOT THE WHOLE TEMPLATE — and this is a
+ * decision the shipped record forced, not a convenience. The classifier is fed
+ * the service's message, and the real message is the sentence EMBEDDED in
+ * evidence prose: the shipped `v0` row quotes it inside a paragraph and renders
+ * the dash as a plain hyphen. A matcher derived from the full template would
+ * therefore fail the one record that has to re-derive, which is the opposite of
+ * the point. The clause is the part that is stable across that embedding, so the
+ * clause is what the matcher derives from — and the tail after it is owned by
+ * this file alone, which is why nothing downstream may quote it.
+ *
+ * NOTE ONE NARROWING THE DERIVATION MAKES ON PURPOSE. The hand-typed matcher
+ * accepted `within 30000 ms` (with a space). The emitter has never emitted that
+ * — it fills the hole with `within ${n}ms` — so that tolerance matched a spelling
+ * no producer exists for, and the derived form accepts only the shape this file
+ * actually writes.
+ */
+export const NO_ANSWER_REFUSAL_CLAUSE = "did not return an answer";
+
+/** The sentence, with `{site}`, `{clause}` and the optional `{ms}` timer hole. */
+export const NO_ANSWER_REFUSAL_TEMPLATE =
+  "{site} {clause}{ms} — the site may be busy, rate-limiting, or showing a sign-in or consent wall.";
+
+/** Reads the measured wait out of the raw message. Named because the MATCHER is
+ *  derived from its own source: the number the emitter reads is the shape the
+ *  matcher accepts, so the two cannot describe different timers. */
+const WAIT_IN_RAW = /within (\d+)ms/i;
+
+/** Render the sentence. `ms` omitted when the raw message carried no timer —
+ *  the emitter has always emitted the shorter sentence in that case. */
+export function renderNoAnswerRefusal(site: string, ms?: string): string {
+  return NO_ANSWER_REFUSAL_TEMPLATE.replace("{site}", site)
+    .replace("{clause}", NO_ANSWER_REFUSAL_CLAUSE)
+    .replace("{ms}", ms === undefined ? "" : ` within ${ms}ms`);
+}
+
+/** `WAIT_IN_RAW`'s own source, with its capture group made non-capturing: the
+ *  classifier wants the SHAPE and never reads the number, and a capturing group
+ *  quoted into a `reason` string reads like a bug rather than a pattern. */
+const TIMER_HOLE_PATTERN = WAIT_IN_RAW.source.replace(/\((?!\?)/, "(?:");
+
+/** The matcher's SOURCE, derived. Imported by `./verification-class.ts`, which
+ *  therefore holds no copy of the sentence — and `test/error-redaction.test.ts`
+ *  pins both halves of that: the clause is typed in exactly one file under `src/`,
+ *  and the derived pattern still matches what the emitter actually emits. */
+export const NO_ANSWER_REFUSAL_RE = new RegExp(
+  `${termPattern(NO_ANSWER_REFUSAL_CLAUSE)}(?: ${TIMER_HOLE_PATTERN})?`,
+  "i",
+);
 
 /**
  * Known internal failure classes, MOST SPECIFIC FIRST. Each entry is
@@ -87,11 +165,14 @@ const CLASSES: ReadonlyArray<{ re: RegExp; say: (ctx: RedactionContext, raw: str
     // happened, which site, what the caller can do. The timer value is KEPT
     // (it is our own number, tells the caller whether to raise their timeout)
     // and the remediation is restated in caller terms, not in profile terms.
+    // THE SENTENCE IS NOT TYPED HERE EITHER — this entry renders
+    // `renderNoAnswerRefusal()` from the owner block above, for the same reason
+    // the account class delegates: a reword that left the classifier's matcher
+    // behind would silently delete a class instead of rewording a sentence.
     re: /no answer appeared on .* within \d+ms/i,
     say: (c, raw) => {
-      const m = /within (\d+)ms/i.exec(raw);
-      const ms = m ? ` within ${m[1]}ms` : "";
-      return `${c.site ?? "this model"} did not return an answer${ms} — the site may be busy, rate-limiting, or showing a sign-in or consent wall. ${RETRY}`;
+      const m = WAIT_IN_RAW.exec(raw);
+      return `${renderNoAnswerRefusal(c.site ?? "this model", m?.[1])} ${RETRY}`;
     },
   },
   {
@@ -201,9 +282,11 @@ export const ERROR_ONLY_TERMS: readonly string[] = [
   "wigolo",
 ];
 
-/** Escape a vocabulary term for use inside an alternation. EVERY term arrives
+/** Escape a literal for use inside a pattern. EVERY term arrives
  *  RAW — a term is a word, not a pattern — so this is the single place a
- *  metacharacter is escaped, and it runs exactly once.
+ *  metacharacter is escaped, and it runs exactly once. `NO_ANSWER_REFUSAL_CLAUSE`
+ *  is escaped through it too: a sentence is a literal in a pattern as much as a
+ *  vocabulary word is, and a second escape function is a second place to forget.
    *
    * THE DOUBLE-ESCAPE THIS FUNCTION EXISTS TO PREVENT, because it shipped in
    * the first draft of this change and was caught by measurement rather than by

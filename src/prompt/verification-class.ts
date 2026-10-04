@@ -35,6 +35,14 @@
 // the row hide.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// THE MATCHER BELOW IS NOT AUTHORED HERE. It is computed by the module that
+// EMITS the sentence, so a reword of the emitter moves the matcher with it
+// instead of leaving this file describing a shape nothing produces any more.
+// `./error-redaction.ts` owns the clause and builds the pattern; importing it
+// here is a dependency on the owner, never a second copy of the words. The same
+// shape as `CONCEPT_TERMS` / `consumerAccountRefusal` in `./consumer-surface.ts`.
+import { NO_ANSWER_REFUSAL_RE } from "./error-redaction.js";
+
 export const VERIFICATION_CLASSES = [
   "ANSWERS",
   "SIGN-OUT",
@@ -155,17 +163,39 @@ export const NO_COMPOSER_PATTERN = /no composer found/i;
 /** The server's own phrase for "this site needs a signed-in session". */
 export const SIGN_IN_MESSAGE_PATTERN = /requires sign-in|sign in once|requires login|not logged in|unauthenticated/i;
 
-/** The server's OWN wording for the no-answer timeout it reports, taken from
- *  the single template that produces it (src/prompt/error-redaction.ts). This is
- *  the service naming a condition and listing its candidate causes — busy,
- *  rate-limiting, sign-in or consent wall — without asserting which one is real.
- *  Matched only in that exact shape, so text that merely resembles a timeout is
- *  not a match, and so widening it to catch generic prose about timeouts cannot
- *  pull a different failure in behind it. v0 2026-09-30: four identical 502s at
- *  an IDLE pool carrying this sentence. */
-export const NO_ANSWER_REFUSAL_PATTERNS: readonly RegExp[] = [
-  /did not return an answer(?: within \d+\s*ms)?/i,
-];
+/** The service's OWN wording for the no-answer timeout it reports.
+ *
+ * WHAT IS ACTUALLY TRUE, STATED HERE BECAUSE THE PREVIOUS COMMENT WAS NOT: this
+ * array holds NO hand-typed pattern. Its single member is `NO_ANSWER_REFUSAL_RE`,
+ * whose source is COMPUTED in `./error-redaction.ts` from
+ * `NO_ANSWER_REFUSAL_CLAUSE` — the clause the emitter itself renders — plus the
+ * emitter's own timer-extraction pattern. The old comment here claimed the
+ * pattern was "taken from the single template that produces it"; nothing took it
+ * from anything, and the sentence was TYPED in this file as well, so a reword of
+ * the emitter left this matcher matching NOTHING and the whole class
+ * UNATTRIBUTED-NO-ANSWER unreachable while every gate stayed green.
+ *
+ * WHY IT COVERS THE CLAUSE AND NOT THE WHOLE SENTENCE, which is now derived
+ * rather than asserted: the classifier is fed the service's own message, and the
+ * real message is the sentence EMBEDDED in evidence prose — the shipped `v0` row
+ * quotes it mid-paragraph and renders the dash as a plain hyphen. A whole-sentence
+ * matcher would fail the one record that must re-derive. The clause is what
+ * survives that embedding.
+ *
+ * It is therefore still the service naming a condition and listing its candidate
+ * causes — busy, rate-limiting, sign-in or consent wall — without asserting which
+ * one is real, and it still REQUIRES that clause, so text that merely resembles a
+ * timeout is not a match and widening it to catch generic prose about timeouts
+ * cannot pull a different failure in behind it. What "that shape" is, stated
+ * exactly because the sentence above is derived and the shape is no longer a
+ * hand-written one: the CLAUSE, optionally followed by the emitter's own
+ * `within <digits>ms` — the clause alone matches, because the clause alone is what
+ * survives being quoted inside evidence prose. This is the same breadth the
+ * hand-typed pattern had (it made the timer group optional too), and
+ * `test/error-redaction.test.ts` measures the derived matcher against what the
+ * emitter actually emits, timed and untimed. v0 2026-09-30: four identical 502s
+ * at an IDLE pool carrying this sentence. */
+export const NO_ANSWER_REFUSAL_PATTERNS: readonly RegExp[] = [NO_ANSWER_REFUSAL_RE];
 
 const idle = (p: PoolState | undefined): boolean => p?.busy === 0 && p?.queued === 0;
 const has = (haystack: string, needles: readonly string[]): string | null => {
