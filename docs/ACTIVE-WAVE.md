@@ -215,9 +215,11 @@ Gates in `test/error-redaction.test.ts`: the clause is typed exactly once under
 is authored in exactly one place". Both **strip prose first**, by the same rule as
 the sibling gates — **a comment quoting the clause is not a second owner.**
 
-Mutations: rewording the **owner** clause made `verification-class` 41/1 **and**
-`error-redaction` 62/1, so a reword can no longer pass silently; injecting a
-hand-typed second owner into the classifier failed **both** one-owner gates.
+Mutations: rewording the **owner** clause turned both of those files red, so a
+reword can no longer pass silently; injecting a hand-typed second owner into the
+classifier failed **both** one-owner gates. Per-file counts are a runtime-only
+fact — read them from a run (`npx tsx --test test/error-redaction.test.ts`,
+`test/verification-class.test.ts`) rather than trusting the numbers written here.
 Commit `4feeb2f`.
 
 ### 3. `araprat.ts` was a second owner of the login-gated refusal — **CLOSED**
@@ -247,9 +249,10 @@ sha-existence, no set-membership — §2.1 records that the count prose was **fa
 before 2026-10-01, so pinning counts would re-encode the defect, and those need the
 repositories rather than the file (P7 owns them).
 
-Measured: good map **0**; flipped header **1** (`header-orientation (column 0 of
-line 1 is "new", expected "old")`); row missing its second field **1**
-(`row-shape …`); no args **2**. Test: `test/verify-commit-map.test.ts` 4/4.
+Measured exit codes: good map **0**; flipped header **1**
+(`header-orientation (column 0 of line 1 is "new", expected "old")`); row missing
+its second field **1** (`row-shape …`); no args **2**. Its test is
+`test/verify-commit-map.test.ts` — run it for the live per-file count.
 
 **Two facts it corrected in my own brief:** the **`private-full` map has NO header**
 — it is a bare column of shas, not a correspondence — so the orientation check
