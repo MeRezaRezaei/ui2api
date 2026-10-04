@@ -125,16 +125,24 @@ test("seam 1: EVERY flag the parser derives is ACCEPTED — the refusal cannot f
 });
 
 test("seam 1: the flag COUNT in the message is truthful and DERIVED from parseFlags.toString()", () => {
-  // A hand-typed count rots the moment a flag is added. The number must equal
-  // what the parser actually derives, plus `--help`.
-  const derived = knownFlagsFrom(parseFlagsSource()).size + 1; // +1 = the explicit --help
+  // A hand-typed count rots the moment a flag is added, and a count that quotes
+  // the WRONG set is the same class of defect the refusal exists to kill. The
+  // number quoted must equal what `parseFlags` itself derives.
+  //
+  // It is deliberately the PARSER's count and NOT the judging set's size: the
+  // judging set (`KNOWN_FLAGS`) also carries the `--help` carve-out, which is
+  // not a parsed flag, so counting it would make the message claim 41 where the
+  // parser has 40. The regex is worded to match the sentence rather than one
+  // adjective of it ("parses exactly N flags" / "knows exactly N flags"), so a
+  // reworded message cannot silently unpin the number.
+  const derived = knownFlagsFrom(parseFlagsSource()).size;
   const msg = unknownFlagRefusal(BOGUS_ARGV);
-  const claimed = /knows exactly (\d+) flags/.exec(msg)?.[1];
+  const claimed = /exactly (\d+) flags/.exec(msg)?.[1];
   assert.ok(claimed !== undefined, `the message must state a count; got: ${msg}`);
   assert.equal(
     Number(claimed),
     derived,
-    `the message claims ${claimed} flags but parseFlags derives ${derived} (${knownFlagsFrom(parseFlagsSource()).size} + --help)`,
+    `the message claims ${claimed} flags but parseFlags derives ${derived}`,
   );
 });
 
@@ -367,7 +375,7 @@ const unknownRefusalBare: UnknownRefusal = (argv) =>
 
 /** (a'') Refuses with a HAND-TYPED count that has nothing to do with the parser. */
 const unknownRefusalHardcodedCount: UnknownRefusal = () =>
-  "unknown flag --bogus — nothing ran. This CLI knows exactly 7 flags and --bogus is not one.";
+  "unknown flag --bogus — nothing ran. This CLI parses exactly 7 flags and --bogus is not one.";
 
 /** (b) The pre-fix shape: `Number("abc") || undefined` never notices. */
 const numericRefusalPreFix: NumericRefusal = () => "";
@@ -413,8 +421,8 @@ test("MUTATION (a'): if the unknown-flag refusal stopped naming the flag and the
 });
 
 test("MUTATION (a''): if the flag COUNT were hand-typed instead of derived, the pin fails", () => {
-  const derived = knownFlagsFrom(parseFlagsSource()).size + 1;
-  const claimedOf = (msg: string): number => Number(/knows exactly (\d+) flags/.exec(msg)?.[1] ?? -1);
+  const derived = knownFlagsFrom(parseFlagsSource()).size;
+  const claimedOf = (msg: string): number => Number(/exactly (\d+) flags/.exec(msg)?.[1] ?? -1);
   assert.equal(claimedOf(unknownFlagRefusal(BOGUS_ARGV)), derived, "precondition: the real count is derived");
   assert.notEqual(
     claimedOf(unknownRefusalHardcodedCount(BOGUS_ARGV)),
