@@ -377,6 +377,24 @@ async function handle(msg: any, plugin: LoadedPlugin): Promise<unknown> {
       return { content: [{ type: "text", text }] };
     }
     default:
-      return { is_error: true, content: [{ type: "text", text: "unknown method: " + msg.method }] };
+      // An unknown method is NOT a tool outcome — it is the one place this
+      // surface used to answer a success-shaped result, so a client could not
+      // tell "I did not understand you" from "I understood and the tool
+      // reported a problem", at HTTP 200 either way. The transport already
+      // refuses an unknown PATH (404) and an unknown HTTP verb (405); the router
+      // is the third refusal and the only one that answered in the wrong shape.
+      //
+      // Throwing `RpcError` is how it reaches the SAME `sendRpc` envelope those
+      // transport refusals and every other JSON-RPC failure already use — the
+      // caller's id is echoed and the status stays 200 (the JSON-RPC-over-HTTP
+      // convention: the STATUS reports the transport, the BODY the failure).
+      // `handle` takes no `res`, so this is the route to that envelope rather
+      // than a second one written here; it is also how `initialize` refuses an
+      // unspeakable protocolVersion, so a refusal is uniform by construction.
+      throw new RpcError(
+        `unknown method: ${msg.method}. This server speaks initialize, tools/list and tools/call. ` +
+          `Nothing was read and no tool ran.`,
+        RPC_METHOD_NOT_FOUND
+      );
   }
 }

@@ -40,6 +40,8 @@ import assert from "node:assert/strict";
 
 import { fileURLToPath } from "node:url";
 
+import { knownFlagsFrom, numericFlagsFrom } from "../src/cli.js";
+
 const REPO = resolve(fileURLToPath(import.meta.url), "../..");
 const SRC = join(REPO, "src");
 const SKILLS = join(REPO, "skills");
@@ -133,6 +135,14 @@ interface Seam {
   remedyFlags: string[];
   /** resolved `UI2API_*` env names. */
   envs: string[];
+  /**
+   * The module-level Set whose membership supplied `derivedFlags` (e.g.
+   * `NUMERIC_FLAGS`), or `""` when this seam has no derived-set guard. Present
+   * so the gate can prove the DERIVED-guard class is gated rather than dropped.
+   */
+  derivedFrom: string;
+  /** the `--flag`s `derivedFrom` holds — derived from the parser, never typed. */
+  derivedFlags: string[];
 }
 
 /** `cmdHubPublish` → `hub publish`; non-`cmd` names contribute no command path. */
@@ -295,7 +305,19 @@ function literalsIn(body: string): Lit[] {
       if (body[j] === c) break;
       j++;
     }
-    const end = endOfStatement(body, j);
+    // Start the scan AFTER the literal's closing quote, not AT it. `j` indexes
+    // the closing quote, so passing it directly made `endOfStatement` treat that
+    // quote as an OPENER: it then skipped from just past the close to the NEXT
+    // literal's opener, and every character between was scanned as code. That
+    // desynchronised the scan badly enough to find a `;` INSIDE the next refusal
+    // literal and end the statement there — which is what orphaned
+    // `Nothing was written; re-run with a number after ${t.flag}.` away from the
+    // `malformed value for` anchor it belongs to. The anchor's own statement then
+    // looked marker-free and the seam was DROPPED for a second, undocumented
+    // reason, even once its trigger was derivable. Starting one past the close
+    // keeps the quote state balanced from a known-synced position, so every
+    // literal ahead is skipped whole and the statement ends at real code.
+    const end = endOfStatement(body, j + 1);
     spans.push({ text: body.slice(i + 1, j), at: i, stmt: body.slice(stmtStart, end) });
     i = j;
   }
@@ -336,6 +358,122 @@ function guardFlagNames(guard: string): { required: string[]; companion: string[
 }
 
 /**
+ * A guard that filters an ITERATION by a Set instead of by a literal flag:
+ * `if (!NUMERIC_FLAGS.has(t.flag)) continue;` — the shape that made
+ * `numericFlagRefusal` UNGATEABLE, because `guardFlagNames` above only reads
+ * `flags.<camel>` and this guard reads no flag at all. The set is the whole
+ * trigger, and the set is DERIVED, so it can be derived here too.
+ *
+ * Two requirements, and the second is what makes this safe:
+ *
+ *   1. the `continue;` — proof the test is an ITERATION FILTER rather than a
+ *      condition, and proof a loop encloses it (`continue` outside one is a
+ *      syntax error), so the set really does gate the iteration the seam's
+ *      message belongs to;
+ *   2. the SAME iteration variable the seam's message interpolates. This is what
+ *      a positional window could not do: in `numericFlagRefusal` the set test is
+ *      one guard FURTHER BACK than the `if (t.missingValue) {` that `guardBefore`
+ *      returns, so reading "the last guard before the literal" never saw it — and
+ *      that is precisely why the seam was dropped in the first place. Matching
+ *      `${t.flag}` in the message against `has(t.flag)` in the guard associates
+ *      the seam with the decision that actually governs its own variable.
+ *
+ * The `!` is REQUIRED. `unknownFlagRefusal` guards
+ * `if (KNOWN_FLAGS.has(t.flag)) continue;` — the same shape without the negation
+ * — and admitting it would attach ~41 derived flags to that seam, so every skill
+ * naming ANY flag would owe `unknown flag`. The negation is what says "this
+ * refusal is scoped TO the set's members", which is the class that needs gating.
+ */
+function derivedSetGuardIn(
+  body: string,
+  at: number,
+  stmtFlagVar: string,
+): { ident: string } | null {
+  if (!stmtFlagVar) return null;
+  const head = body.slice(0, at);
+  const re = new RegExp(
+    `!\\s*([A-Z][A-Z0-9_]*)\\.has\\(\\s*${stmtFlagVar}\\.flag\\s*\\)\\s*\\)\\s*continue\\s*;`,
+    "g",
+  );
+  let last: RegExpExecArray | null = null;
+  let m = re.exec(head);
+  while (m !== null) {
+    last = m;
+    m = re.exec(head);
+  }
+  return last ? { ident: last[1]! } : null;
+}
+
+/**
+ * The iteration variable whose `.flag` a statement interpolates — `${t.flag}` in
+ * `` `malformed value for ${t.flag}: …` ``. That interpolation is what the set
+ * guard filters, so it is the join between the message and its trigger.
+ */
+const INTERPOLATED_FLAG_VAR = /\$\{\s*([A-Za-z_]\w*)\.flag\s*\}/;
+
+/**
+ * `<IDENT> = <helper>(parseFlags.toString())` — a module-level Set whose
+ * membership is read out of the PARSER rather than typed beside it. Matching the
+ * declaration shape (rather than the identifier) is what keeps this honest: a
+ * hand-typed `const BAD = new Set(["--x"])` does not match, so it is not treated
+ * as a derived set — which is correct, because a hand-typed list is exactly the
+ * defect `src/cli.ts`'s own GOAL 215 comment warns about.
+ */
+const PARSER_DERIVED_DECL =
+  /(?:const|let)\s+([A-Z][A-Z0-9_]*)\s*=\s*(?:new Set\(\s*\.\.\.\s*)?([A-Za-z]\w*)\(\s*parseFlags\.toString\(\)\s*\)/g;
+
+/**
+ * The published parser-derivation helpers, keyed by their own names, read off
+ * the declaration above — so the FLAG LIST is never restated here. It is taken
+ * from the same exported derivation `src/cli.ts` itself uses and that
+ * `test/cli-input-validation.test.ts` mutation-proves against a synthetic
+ * parser, so this gate and the source cannot disagree about which flags are
+ * numeric.
+ *
+ * A new parser helper that is not wired in here does not fall back to anything:
+ * when a GUARD names such a Set it lands in {@link UNRESOLVED_DERIVED_SETS} and
+ * fails a named test. That is the honest failure mode — a NEW gate failing
+ * loudly, never a stale list passing quietly. A declared Set that no guard names
+ * is simply unused (`VALUE_TAKING_FLAGS` today) and is NOT reported, because
+ * reporting it would be a false alarm about a seam that does not exist.
+ */
+const PARSER_DERIVED_HELPERS: Record<string, (parserSource: string) => Set<string>> = {
+  knownFlagsFrom,
+  numericFlagsFrom,
+};
+
+/** Guard-named Sets that could not be resolved. Reported by a named test, not dropped. */
+const UNRESOLVED_DERIVED_SETS = new Set<string>();
+
+/**
+ * `parseFlags`' own source, read back out of `src/`. `functionBody` returns the
+ * body plus the index of its opening brace, so the declaration is reconstructable
+ * exactly — the same reconstruction `test/cli-input-validation.test.ts` performs
+ * with its own `parseFlagsSource()`.
+ */
+function parserSourceOf(src: string): string {
+  const declStart = src.indexOf("function parseFlags");
+  const { body, offset } = functionBody(src, "parseFlags");
+  if (declStart < 0 || !body || offset <= 0) return "";
+  return src.slice(declStart, offset + 1 + body.length + 1);
+}
+
+/**
+ * Every parser-derived flag Set a module declares, mapped IDENT → its members,
+ * sorted. Empty for a file with no `parseFlags`.
+ */
+function derivedFlagSetsIn(src: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const parserSource = parserSourceOf(src);
+  if (!parserSource) return out;
+  for (const m of src.matchAll(PARSER_DERIVED_DECL)) {
+    const helper = PARSER_DERIVED_HELPERS[m[2]!];
+    if (helper) out.set(m[1]!, [...helper(parserSource)].sort());
+  }
+  return out;
+}
+
+/**
  * The guard clause in front of a literal: the last `if (` / `for (` / `while (`
  * / `case ` / `catch ` before it. That window is where `cmd === "hub" &&
  * arg === "publish"` and the flags a refusal is scoped to actually live, so it
@@ -363,6 +501,9 @@ function guardBefore(body: string, at: number): string {
  */
 export function deriveSeams(): Seam[] {
   const seams: Seam[] = [];
+  // Re-derive from scratch, so a second `deriveSeams()` cannot report a stale
+  // unresolved set from a previous pass.
+  UNRESOLVED_DERIVED_SETS.clear();
   for (const file of tsFilesUnder(SRC)) {
     const raw = readFileSync(file, "utf8");
     const src = stripJsComments(raw);
@@ -376,6 +517,10 @@ export function deriveSeams(): Seam[] {
     for (const m of src.matchAll(/const\s+([A-Z][A-Z0-9_]*_ENV)\s*=\s*"([A-Z0-9_]+)"/g)) {
       if (fileEnvs.has(m[2]!)) envConsts.set(m[1]!, m[2]!);
     }
+    // Flag Sets this module derives FROM THE PARSER. Empty for every file that
+    // has no `parseFlags`, so nothing outside the parser-owning module is
+    // affected by this at all.
+    const derivedSets = derivedFlagSetsIn(src);
     for (const fn of new Set([...src.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)].map((m) => m[1]!))) {
       const { body, offset } = functionBody(src, fn);
       if (!body) continue;
@@ -450,7 +595,31 @@ export function deriveSeams(): Seam[] {
           if (v) envs.add(v);
         }
         for (const m of lit.stmt.matchAll(/"(UI2API_[A-Z0-9_]+)"/g)) envs.add(m[1]!);
-        const flags = new Set([...guardFlags, ...remedyFlags]);
+
+        // A guard filtering an iteration by a PARSER-DERIVED flag Set is a valid
+        // trigger set, on the same terms a literal flag list is one. It is joined
+        // to this seam through the `${t.flag}` the MESSAGE interpolates, not
+        // through position, because in `numericFlagRefusal` the set test sits one
+        // guard behind the `if (t.missingValue)` that `guard` ends at. Before this
+        // the seam had no trigger at all and was DROPPED — which is why a skill
+        // could name `--port` and owe nothing about the refusal it prints for
+        // `--port abc`. The membership comes from the parser through the source's
+        // own exported derivation, so it is the same set the refusal actually
+        // judges and cannot drift from it.
+        //
+        // These go into `flags` (NOT `guardFlags`): the seam is not command-scoped
+        // and has no `flags.<camel>` scoping read, so folding them into
+        // `requiredFlags` would make the companion-pairing logic in
+        // `triggersNamed` demand a companion that does not exist.
+        const stmtFlagVar = INTERPOLATED_FLAG_VAR.exec(lit.stmt)?.[1] ?? "";
+        const derivedGuard = derivedSetGuardIn(body, lit.at, stmtFlagVar);
+        const derivedIdent = derivedGuard?.ident ?? "";
+        // A guard naming a Set this gate cannot resolve is REPORTED, never
+        // dropped in silence — that is the defect this class was added to fix.
+        if (derivedIdent && !derivedSets.has(derivedIdent)) UNRESOLVED_DERIVED_SETS.add(derivedIdent);
+        const derivedFlags = new Set<string>(derivedIdent ? derivedSets.get(derivedIdent) ?? [] : []);
+
+        const flags = new Set([...guardFlags, ...remedyFlags, ...derivedFlags]);
         if (commands.size === 0 && flags.size === 0 && envs.size === 0) continue;
 
         // stripJsComments preserves length, so this offset is a real index in
@@ -469,6 +638,8 @@ export function deriveSeams(): Seam[] {
           requiredFlags: [...requiredFlags].sort(),
           remedyFlags: [...remedyFlags].sort(),
           envs: [...envs].sort(),
+          derivedFrom: derivedIdent,
+          derivedFlags: [...derivedFlags].sort(),
         });
       }
     }
@@ -544,12 +715,68 @@ function triggersNamed(seam: Seam, text: string): string[] {
 
 const SEAMS = deriveSeams();
 
+/**
+ * Guard-named Sets the association step could NOT resolve to a trigger list. An
+ * empty set is the healthy state; a name here means a seam was dropped for a
+ * reason nobody reads, which is the defect this file was fixed for.
+ */
+function unresolvedDerivedSets(): Set<string> {
+  return UNRESOLVED_DERIVED_SETS;
+}
+
 test("the derivation is not vacuous: it finds the refusal seams that exist in src/", () => {
   assert.ok(SEAMS.length >= 6, `only ${SEAMS.length} refusal seams derived — derivation is broken`);
   const anchors = SEAMS.map((s) => s.anchor);
   for (const must of ["unknown flag", "publish-refused:", "refusing to bind the ACP server to"]) {
     assert.ok(anchors.includes(must), `expected anchor ${JSON.stringify(must)} among ${JSON.stringify(anchors)}`);
   }
+});
+
+/**
+ * The seams whose guard names a PARSER-DERIVED flag SET instead of a literal
+ * flag list — `if (!NUMERIC_FLAGS.has(t.flag)) continue;` — are the class this
+ * gate used to DROP. Its reason was recorded as structural ("no trigger is
+ * derivable, so the seam is dropped rather than gated on nothing"), and the
+ * anchor was derivable all along: the literal run before the first `${`, which
+ * is `malformed value for`. So a skill could name `--port` and owe nothing about
+ * the refusal it prints on `--port abc`.
+ *
+ * `derivedFrom` is the identifier whose membership supplied the trigger set (or
+ * `""` when the seam has no such guard), so this reads the SAME `SEAMS` the gap
+ * test reads rather than a parallel derivation that could drift from it.
+ */
+test("a seam whose guard names a PARSER-DERIVED flag set is gated, not dropped", () => {
+  const derived = SEAMS.filter((s) => s.derivedFrom !== "");
+  assert.ok(
+    derived.length > 0,
+    "no seam guarded by a parser-derived flag set was derived — the association step DROPS them, " +
+      "which is how `malformed value for` became ungated",
+  );
+  for (const s of derived) {
+    assert.ok(
+      s.derivedFlags.length > 0,
+      `seam ${s.fn} (${s.at}) claims trigger set ${s.derivedFrom} but resolved no flag out of it`,
+    );
+    assert.ok(
+      s.anchor.length >= ANCHOR_MIN && !s.anchor.includes("${"),
+      `parser-derived seam ${s.fn} produced a non-token anchor ${JSON.stringify(s.anchor)}`,
+    );
+  }
+});
+
+/**
+ * A derived-set guard whose set cannot be resolved must NOT be dropped in
+ * silence — that is the very defect this file was fixed for, one layer down. A
+ * new parser helper that is not wired in here lands here, loudly, instead of
+ * becoming a seam nobody gates.
+ */
+test("every parser-derived flag set a guard names is RESOLVED, not silently skipped", () => {
+  assert.deepEqual(
+    [...unresolvedDerivedSets()],
+    [],
+    `a guard names a derived set this gate cannot resolve, so its seam is dropped for a reason ` +
+      `nobody reads: ${[...unresolvedDerivedSets()].join(", ")}`,
+  );
 });
 
 test("every derived seam carries at least one command/flag/env trigger", () => {

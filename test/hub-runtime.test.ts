@@ -12,7 +12,7 @@ describe("HubRuntime", () => {
     try {
       const store = new RegistryStore(dir);
       const module = `export default { name: "demo.test", setup(c){ c.registerTool({ name:"ping", description:"p", inputSchema:{}, handler: async()=>({content:[{type:"text",text:"pong"}]}) }); } };`;
-      store.save("demo.test", "1.0.0", { name: "demo.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0" }, module);
+      store.save("demo.test", "1.0.0", { name: "demo.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0", url: "https://demo.test" }, module);
       const rt = new HubRuntime({ store, dataDir: dir });
       const inst = await rt.getInstance("demo.test");
       assert.equal(inst.host, "demo.test");
@@ -29,7 +29,7 @@ describe("HubRuntime", () => {
     try {
       const store = new RegistryStore(dir);
       const module = `export default { name:"c.test", setup(c){ /* receives only the allow-listed context */ } };`;
-      store.save("c.test", "1.0.0", { name: "c.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0" }, module);
+      store.save("c.test", "1.0.0", { name: "c.test", version: "1.0.0", author: "a", authorizedUse: "own", license: "MIT", ui2api: "0.1.0", url: "https://c.test" }, module);
       const rt = new HubRuntime({ store, dataDir: dir });
       const inst = await rt.getInstance("c.test");
       const keys = Object.keys(inst.plugin.context ?? {});

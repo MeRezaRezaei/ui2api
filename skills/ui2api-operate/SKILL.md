@@ -268,8 +268,13 @@ built on the belief the flag was heard.
   close, and points at `ui2api --help`. An unknown token used to be inert: the
   command ran and exited as if it had been heard.
 - **Malformed numeric value** — `--port abc` **exits 1** naming the flag, the value
-  received and the accepted form. It used to be coerced to the default in silence,
-  so the run you asked for was not the run you got.
+  received and the accepted form, and says all of it in one refusal:
+  `malformed value for --port: got "abc", which is not a number
+  (accepted form: a number, e.g. --port 4). It would have been coerced to the
+  default in silence, so the run you asked for is not the run you would have got.
+  Nothing was written; re-run with a number after --port.`
+  (`src/cli.ts` `numericFlagRefusal`). It used to be coerced to the default in
+  silence, so the run you asked for was not the run you got.
 - **A flag that only means something WITH another** (e.g. `--xhost-all` without
   `--assist`) refuses too, because the command would otherwise exit reporting work
   it did not do.

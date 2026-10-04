@@ -98,10 +98,12 @@ export class HubRuntime {
    * package published as `ui2api-site-example.test` handed its tools
    * `https://ui2api-site-example.test/` and every call died with
    * `page.goto: net::ERR_NAME_NOT_RESOLVED` — a tool driving a domain that
-   * cannot exist. The origin is now the URL the package declares: the action
-   * map's own `url` (what `analyse` captured and `publish` shipped), else the
-   * manifest's, else a hostname the manifest declares as `host`. Only that last
-   * fallback is name-derived, and only because it is then a real hostname.
+   * cannot exist. The origin is now ONLY the url the package declares: the
+   * action map's own `url` (what `analyse` captured and `publish` shipped), else
+   * the manifest's. There is NO third fallback: a package that declares neither
+   * is REFUSED by name, because the remaining candidates are a name and a bare
+   * host — fragments of a url, not a url — and inventing one defers the failure
+   * to a browser network error that looks like the site being down.
    */
   private resolveBaseUrl(manifest: Record<string, unknown>, moduleText: string, fallbackHost: string): string {
     const candidates: unknown[] = [];
@@ -115,7 +117,20 @@ export class HubRuntime {
       try { return new URL(c.trim()).origin; } catch { /* malformed — next candidate */ }
     }
     const declaredHost = typeof manifest.host === "string" ? manifest.host.trim() : "";
-    return `https://${declaredHost || fallbackHost}`;
+    // A NAME IS NOT A URL, and neither is a bare host. This line used to be
+    // `return `https://${declaredHost || fallbackHost}`` — MEASURED wrong: the
+    // store keys a published package `ui2api-site-<host>`, so a package that
+    // declared no url anywhere was handed `https://ui2api-site-example.test/`,
+    // an origin that resolves nowhere. It failed LATER, deep inside a browser,
+    // as `page.goto: net::ERR_NAME_NOT_RESOLVED` — indistinguishable from the
+    // site being down, and long after the operator could have acted. Refuse
+    // here instead, where the refusal names the package that must be fixed.
+    throw new Error(
+      `package "${fallbackHost}" declares no url, so there is no origin to drive: ` +
+        `its manifest and action-map carry neither a \`url\` nor a usable one. ` +
+        `A package must be published from a captured action map (ui2api analyse <url>), ` +
+        `which records the site url. Refusing beats inventing https://${declaredHost || fallbackHost}.`,
+    );
   }
 
   async getInstance(host: string): Promise<ManagedInstance> {

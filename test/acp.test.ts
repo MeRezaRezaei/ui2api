@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -241,4 +241,111 @@ test("generated ACP call_tool on an EXISTING selector returns a normal success w
   assert.notStrictEqual(res.is_error, true, "a real extraction must not be an error: " + JSON.stringify(res));
   const text = String(res.content?.[0]?.text ?? "");
   assert.ok(text.includes("quarterly revenue up 12%"), "expected the real page text, got: " + text);
+});
+
+// The three tests above drive the GENERATED stdio ACP server (emitted from
+// src/generator/acp-template.ts). The JSON-RPC OVER HTTP surface is a different
+// program — src/agent/acp.ts, `runServer`, reachable only via `hub run --acp`
+// (src/hub/serve.ts) — and it is the one that decides a JSON-RPC *wire shape*.
+// So the harness below boots that real HTTP server rather than a generated stdio
+// one; driving the generated server here would pin the wrong file's behaviour.
+//
+// A CHILD PROCESS, deliberately, for two reasons. (1) `runServer` never returns a
+// handle on its `http.Server`, so an in-process boot would leave a listener this
+// test could not close; the child's `close()` is a bounded SIGKILL, the same
+// teardown the stdio helper above already uses. (2) `runServer` installs
+// `process.once("SIGINT"/"SIGTERM")` handlers — running it inside the test runner
+// would attach handlers to the runner's own process.
+
+const HTTP_DRIVER = (root: string) => `
+import { createServer } from "node:http";
+import { runServer } from "${root}/src/agent/acp.js";
+import type { LoadedPlugin } from "${root}/src/plugin/types.js";
+
+// No tools and no context work: an unknown method must read NOTHING and run
+// NOTHING, so every field here is a stub that would be visibly wrong if used.
+const context = {
+  config: { dataDir: "/tmp/codeg-acp/acp-http-driver-data" },
+  logger: { info() {}, warn() {}, error() {} },
+  registerTool() {},
+  close: async () => {},
+} as unknown as LoadedPlugin["context"];
+const plugin: LoadedPlugin = { context, tools: new Map(), hooks: undefined };
+
+// Let the OS pick a free port, then release it for runServer to bind.
+const probe = createServer();
+await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+const port = (probe.address() as { port: number }).port;
+await new Promise<void>((r) => probe.close(() => r()));
+await runServer({ plugin, port });
+`;
+
+/**
+ * Boot the real `src/agent/acp.ts` HTTP server and return a `post` that speaks
+ * JSON-RPC over HTTP, resolving with the transport status AND the parsed body —
+ * this defect is a difference between those two layers, so a helper that kept
+ * only one of them could not see it.
+ */
+function startAcpHttpServer(dir: string, root: string): {
+  child: ChildProcess;
+  post(body: unknown): Promise<{ status: number; body: any }>;
+  close(): void;
+} {
+  const driverPath = resolve(dir, "acp-http-driver.ts");
+  writeFileSync(driverPath, HTTP_DRIVER(root));
+
+  const child = spawn(process.execPath, ["--import", "tsx", driverPath], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const killer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 60_000);
+  killer.unref?.();
+  child.on("close", () => clearTimeout(killer));
+
+  // Readiness is read off the server's OWN startup line (it prints
+  // `[ui2api] acp server … on http://<host>:<port>`), so the port is the one
+  // actually bound rather than a guess. Bounded, and a failure surfaces stderr.
+  let stderr = "";
+  child.stderr!.setEncoding("utf8");
+  const ready = new Promise<string>((res, rej) => {
+    const timer = setTimeout(() => rej(new Error("acp http server never reported a port; stderr:\n" + stderr)), 30_000);
+    child.stderr!.on("data", (chunk: string) => {
+      stderr += chunk;
+      const m = stderr.match(/127\.0\.0\.1:(\d+)/);
+      if (m) { clearTimeout(timer); res(m[1]); }
+    });
+    child.on("error", (e) => { clearTimeout(timer); rej(e); });
+    child.on("exit", (code) => { clearTimeout(timer); rej(new Error("acp http server exited " + code + "; stderr:\n" + stderr)); });
+  });
+
+  const post = async (body: unknown) => {
+    const port = await ready;
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() as any };
+  };
+
+  return { child, post, close: () => { child.kill("SIGKILL"); } };
+}
+
+test("the ACP HTTP router answers an unknown JSON-RPC method with -32601, not a success-shaped result", async (t) => {
+  const tmp = mkdtempSync(resolve(tmpdir(), "ui2api-acp-http-"));
+  const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const server = startAcpHttpServer(tmp, ROOT);
+  t.after(() => { server.close(); rmSync(tmp, { recursive: true, force: true }); });
+
+  const res = await server.post({ jsonrpc: "2.0", id: 9, method: "no/such/method" });
+
+  assert.strictEqual(res.status, 200, "JSON-RPC errors stay HTTP 200 by convention");
+  assert.strictEqual(
+    res.body.result,
+    undefined,
+    "an unknown method must NOT answer in a result envelope (that is the whole defect): " + JSON.stringify(res.body),
+  );
+  assert.strictEqual(res.body.error?.code, -32601, "JSON-RPC defines -32601 for Method not found");
+  assert.match(res.body.error.message, /no\/such\/method/, "the refusal must name the offending method");
+  assert.strictEqual(res.body.id, 9, "a client must be able to match the failure to the call that caused it");
 });
