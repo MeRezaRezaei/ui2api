@@ -162,7 +162,8 @@ So a skill may name `--pool-max` and owe nothing about the refusal it will print
 guard and gives up when it finds a derived set.
 
 **This task fixes the GATE, not the source.** The source message is fine and its behaviour is
-already pinned by `test/cli-input-validation.test.ts` (31 tests).
+already pinned by `test/cli-input-validation.test.ts` — read it for the current coverage rather than
+trusting a number here: an undated per-file count in a shipped doc is a claim, and claims rot.
 
 **Files:**
 - Modify: `test/skills-refusal-truth.test.ts` (the seam-association step)

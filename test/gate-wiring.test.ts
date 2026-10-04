@@ -933,3 +933,267 @@ test("R9b the unit browser guard FAILS on a missing browser — it must never SK
     "the old `maybe()` wrong-seam idiom is back — it guarded daemon LIVENESS, not browser launchability",
   );
 });
+
+/* ========================================================================
+ * R10 — the unit lane's own COMMAND must be runnable.
+ *
+ * MEASURED DEFECT (this file's own subject, one level down). `de4bad7`
+ * ("test: a knob EFFECT gate") rewrote `scripts["test:unit"]` and dropped the
+ * runner prefix, leaving a bare list of 177 `test/*.ts` paths. Measured:
+ *
+ *     $ npm run test:unit
+ *     sh: 1: test/account-exact-resolution-cli.test.ts: Permission denied
+ *     EXIT=126
+ *
+ * So the project's FULL unit suite could not run at all — and both CI configs
+ * invoke it (`.github/workflows/*.yml` step `npm run test:unit`;
+ * `.gitlab-ci.yml` declares `npm test -> npm run test:unit` for the full unit
+ * suite). Every lane consequently reported per-file results, because the
+ * aggregate number nobody could produce was missing for exactly this reason.
+ *
+ * IT IS A REPEAT, NOT A NEW BUG. `1afb09e` is titled "I broke test:unit with
+ * a regex, and the vault was being used as scratch space" — the same class of
+ * accident, already paid for once. **The reason it happened twice is that
+ * NOTHING PINNED THE COMMAND, only the LIST.**
+ *
+ * WHY R4/R5 COULD NOT SEE IT. Both rules read this exact string — and both read
+ * it through `testFilesNamedByUnitScript()`, which regexes
+ * `/test\/[a-z0-9-]+\.test\.ts/g` and throws the REST of the string away. The
+ * list was byte-perfect while the command was unrunnable: 177 == 177, both
+ * directions green, `EXIT=126`. A gate that watches the LIST must also watch
+ * the RUNNER, because the runner is what makes the list a command.
+ *
+ * COORDINATION, NOT DUPLICATION. `test/test-timeout-discipline.test.ts` already
+ * owns the `--test-timeout` RANGE (`>= 30_000`, `<= 180_000`) and
+ * `test/production-readiness-gate.test.ts` re-asserts its mere presence; both
+ * are left exactly as they are, and neither is restated here. What R10 adds is
+ * the part nobody owned:
+ *   * the script must START with a runner — the de4bad7 defect itself;
+ *   * `--test` must be present as its own token (it is what turns a list of
+ *     paths into a test RUN, and `node file.ts` without it just executes one);
+ *   * `--test-concurrency` must be present. `--test-concurrency=4` is pinned
+ *     NOWHERE in the repo, and it is what keeps the lane off the
+ *     `ERR_WORKER_INIT_FAILED` burst documented in AGENTS.md;
+ *   * every listed `test/...` token must exist ON DISK. R4/R5 compare against
+ *     the GIT INDEX, so a file listed but absent from disk is invisible to
+ *     both — R10 closes that from the other side.
+ * and it closes with a real SPAWN, because a string predicate can be satisfied
+ * by a runner that does not exist on this machine.
+ * ====================================================================== */
+
+/** Program words that can actually EXECUTE the following tokens. */
+const RUNNER_HEADS = ["node", "npx", "tsx"] as const;
+
+/**
+ * The command's PROGRAM word, or `[]` when there is none.
+ *
+ * In a shell command the program is always the FIRST token — so a first token
+ * that is not a runner is not "no runner found, keep scanning", it is THE
+ * DEFECT (a bare path `sh` will try to execute). Reporting "empty" for that
+ * shape would misname the fault, and a gate whose message misdescribes the
+ * defect is one people learn to skip.
+ */
+function runnerTokens(script: string): string[] {
+  const tokens = script.trim().split(/\s+/).filter(Boolean);
+  const first = tokens[0];
+  if (first === undefined) return [];
+  return (RUNNER_HEADS as readonly string[]).includes(first) ? [first] : [];
+}
+
+/** Flags of the form `--name=value` the command carries, by name. */
+function flagsOf(script: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of script.matchAll(/(^|\s)--([a-z0-9-]+)(?:=([^\s]+))?/g)) out.set(m[2]!, m[3] ?? "");
+  return out;
+}
+
+/**
+ * Everything wrong with a `test:unit`-shaped command, as named problems.
+ *
+ * A STRING-LEVEL predicate, deliberately: it must be able to run against a
+ * mutation without anyone editing `package.json`, which is what makes the
+ * MUTATION R10 test below a real proof rather than a promise. `rootExists` is
+ * injected for the same reason — the on-disk check must be testable against a
+ * synthetic tree, not only against this one.
+ */
+export function unitRunnerProblems(script: string, rootExists: (p: string) => boolean = (p) => fileExists(p, ROOT)): string[] {
+  const problems: string[] = [];
+  const trimmed = script.trim();
+
+  // (1) THE RUNNER. This is the measured defect, so it is checked as "the
+  // command's first program word can execute the rest" — a bare path fails it.
+  // An empty script and a runner-less script are DIFFERENT faults and get
+  // different messages: collapsing them would misname the defect, and a gate
+  // whose message misdescribes the fault is one people learn to skip.
+  const head = runnerTokens(trimmed);
+  const first = head[0];
+  const firstToken = trimmed.split(/\s+/).filter(Boolean)[0];
+  if (trimmed === "") {
+    problems.push(`scripts["test:unit"] is EMPTY: it names no command at all`);
+  } else if (first === undefined) {
+    problems.push(
+      `scripts["test:unit"] does not start with a runner: it begins with ${JSON.stringify(firstToken)}, which is not one of ` +
+        `${RUNNER_HEADS.join("/")} — \`sh\` will try to EXECUTE that token as a program. This is the measured de4bad7 ` +
+        `defect (\`sh: 1: test/account-exact-resolution-cli.test.ts: Permission denied\`, EXIT=126): a bare list of test ` +
+        `paths is not a command, so the project's full unit suite cannot run at all.`,
+    );
+  }
+
+  const flags = flagsOf(trimmed);
+
+  // (2) `--test`. Without it, `node <file>` EXECUTES one file instead of
+  // running the suite, which is the same class of silence as no runner at all.
+  if (!flags.has("test")) {
+    problems.push(
+      `scripts["test:unit"] carries no --test flag: the runner would import and EXECUTE the first test file instead of ` +
+        `running the suite (a run that reports one file and no tests is not a suite).`,
+    );
+  }
+
+  // (3) CONCURRENCY + TIMEOUT as flags, not as prose. The RANGE of the timeout
+  // is owned by test/test-timeout-discipline.test.ts and is NOT restated here;
+  // this only refuses a command that lost the bound entirely — which is what
+  // de4bad7 did to both flags at once.
+  for (const [flag, why] of [
+    ["test-concurrency", "the unbounded-parallelism burst documented in AGENTS.md (ERR_WORKER_INIT_FAILED / EAGAIN)"],
+    ["test-timeout", "a hang must be a NAMED failure (exit 124), not a silent stall — GOAL 102"],
+  ] as const) {
+    const v = flags.get(flag);
+    if (v === undefined) {
+      problems.push(`scripts["test:unit"] lost its --${flag} flag, so ${why} is unprotected`);
+    } else if (!/^\d+$/.test(v)) {
+      problems.push(`scripts["test:unit"] carries --${flag}=${JSON.stringify(v)}, which is not a plain integer`);
+    }
+  }
+
+  // (4) EVERY LISTED TOKEN EXISTS ON DISK, from the command's own side. R4/R5
+  // compare the list against the git INDEX, so a path that is listed but absent
+  // from disk passes both; this is the other direction, and it is the one a
+  // renamed-then-deleted file takes.
+  const listed = [...trimmed.matchAll(/(?:^|\s)(test\/[A-Za-z0-9._-]+\.ts)(?=\s|$)/g)].map((m) => m[1]!);
+  const ghosts = [...new Set(listed)].filter((p) => !rootExists(p)).sort();
+  if (ghosts.length > 0) {
+    problems.push(`scripts["test:unit"] names test files that do not exist on disk: ${JSON.stringify(ghosts)} — node --test exits 126 on the first missing path, which is how a stale list presents`);
+  }
+  return problems;
+}
+
+test("R10 scripts[\"test:unit\"] is a RUNNABLE COMMAND, not a list of paths", () => {
+  const script = PKG.scripts["test:unit"] ?? "";
+  const problems = unitRunnerProblems(script);
+  assert.deepEqual(problems, [], problems.join("\n  * "));
+
+  // Non-vacuity, stated as the measurement the task's own report needs: the
+  // command names a real, non-trivial number of files (not one, not none), and
+  // the runner really is a program word rather than a bare path.
+  assert.ok(runnerTokens(script)[0] !== undefined, "no runner token — R10 proved nothing");
+  const listed = script.match(/(?:^|\s)test\/[A-Za-z0-9._-]+\.ts(?=\s|$)/g) ?? [];
+  assert.ok(listed.length >= 50, `scripts["test:unit"] names only ${listed.length} test files — R10 is checking almost nothing`);
+});
+
+test("R10 non-vacuity: the runner is a PROGRAM on this machine, not just a word in a string", () => {
+  // A string predicate can be satisfied by a runner that does not exist. So the
+  // command's OWN prefix — every token up to and including `--test`, copied
+  // verbatim rather than reassembled, because a reassembly is a second opinion
+  // about what the repo ships — is SPAWNED against ONE real (tiny, hermetic)
+  // test file, and the exit code must be 0.
+  //
+  // This file is the right victim for two reasons: it is hermetic (no browser,
+  // no network — R7 exists because the browser half is a separate lane), and
+  // this file already IMPORTS it, so its hermeticity is an assumption R10 does
+  // not have to make fresh.
+  const script = PKG.scripts["test:unit"] ?? "";
+  const tokens = script.trim().split(/\s+/).filter(Boolean);
+  const cut = tokens.indexOf("--test");
+  assert.ok(cut > 0, `precondition: scripts["test:unit"] carries --test after a runner; got ${JSON.stringify(tokens.slice(0, 4))}`);
+  const argv = [...tokens.slice(0, cut + 1), "test/doc-numbers-truth.test.ts"];
+  assert.ok(fileExists(argv[argv.length - 1]!, ROOT), "precondition: the victim file exists on disk");
+
+  let code: number;
+  let out = "";
+  try {
+    out = execFileSync(tokens[0]!, argv.slice(1), { cwd: ROOT, encoding: "utf8", timeout: 90_000, stdio: ["ignore", "pipe", "pipe"] });
+    code = 0;
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string; signal?: string };
+    out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    code = e.status ?? (e.signal ? -1 : 1);
+  }
+  assert.equal(
+    code,
+    0,
+    `the runner this repo ships (\`${tokens[0]} ${argv.slice(1).join(" ")}\`) does not actually run on this machine — exit ${code}.\n` +
+      `A test:unit that cannot run is the de4bad7 defect wearing a different hat: the string looks right and the suite still does not run.\n${out.slice(-2000)}`,
+  );
+});
+
+test("MUTATION R10: the MEASURED de4bad7 form is named, and so is each flag it dropped", () => {
+  const live = PKG.scripts["test:unit"] ?? "";
+  assert.deepEqual(unitRunnerProblems(live), [], "precondition: the live command is clean");
+
+  // (a) THE MEASURED DEFECT, reproduced exactly: the same 177 paths with the
+  // runner prefix cut off — byte-for-byte the value `de4bad7` shipped. This is
+  // the form that made both CI configs run a command that exits 126.
+  const broken = live.replace(/^\S+(?:\s+\S+)*?\s+--test\s+/, "");
+  assert.ok(broken.startsWith("test/"), `precondition: the mutation strips the runner; got ${JSON.stringify(broken.slice(0, 40))}`);
+  assert.notEqual(broken, live, "the mutation must actually change the command");
+  const reported = unitRunnerProblems(broken, () => true);
+  assert.ok(
+    reported.some((p) => /does not start with a runner/.test(p)),
+    `the missing runner must be named; got ${JSON.stringify(reported)}`,
+  );
+  assert.ok(
+    reported.some((p) => /no --test flag/.test(p)),
+    `the missing --test flag must be named; got ${JSON.stringify(reported)}`,
+  );
+  for (const flag of ["test-concurrency", "test-timeout"]) {
+    assert.ok(
+      reported.some((p) => p.includes(`--${flag}`)),
+      `the dropped --${flag} must be named; got ${JSON.stringify(reported)}`,
+    );
+  }
+
+  // (b) ONE flag at a time, so the rule cannot pass while any single bound is
+  // silently gone — the shape of a partial, plausible-looking edit.
+  for (const [flag, re] of [
+    ["test-concurrency", /--test-concurrency=\d+\s+/],
+    ["test-timeout", /--test-timeout=\d+\s+/],
+    ["test", /--test\s+/],
+  ] as const) {
+    const oneDropped = live.replace(re, "");
+    assert.notEqual(oneDropped, live, `precondition: dropping --${flag} must change the command`);
+    assert.ok(
+      unitRunnerProblems(oneDropped, () => true).some((p) => p.includes(`--${flag}`)),
+      `dropping only --${flag} must be reported`,
+    );
+  }
+
+  // (c) THE LIST STILL PARSES PERFECTLY in the broken form — this is the whole
+  // reason the defect survived twice. A list/tree pin cannot see it, so R10
+  // must, and this assertion is what stops anyone "simplifying" R10 away on the
+  // grounds that R4 already covers it.
+  const listedCount = (broken.match(/(?:^|\s)test\/[A-Za-z0-9._-]+\.ts(?=\s|$)/g) ?? []).length;
+  assert.equal(listedCount, testFilesNamedByUnitScript().size, "the broken form still names every file — R4 stays green, which is why R10 exists");
+  assert.deepEqual(unitRunnerProblems(broken, () => true).length >= 4, true, "the broken form must raise at least the four structural problems");
+});
+
+test("MUTATION R10: a listed path that is not on disk is named, from the command's own side", () => {
+  // The gap R4/R5 cannot see: they compare the list against the GIT INDEX, so a
+  // path that is listed but gone from disk is invisible to both — and
+  // `node --test` exits 126 on the first missing file, presenting exactly like
+  // the runner defect.
+  const ghost = "test/ghost-not-on-disk.test.ts";
+  const live = PKG.scripts["test:unit"] ?? "";
+  const planted = `${live} ${ghost}`;
+  const problems = unitRunnerProblems(planted, (p) => p !== ghost);
+  assert.ok(
+    problems.some((p) => p.includes(ghost)),
+    `the ghost path must be named; got ${JSON.stringify(problems)}`,
+  );
+  assert.equal(problems.length, 1, `only the ghost may be reported; got ${JSON.stringify(problems)}`);
+  // The same command is clean when the path exists — the check is existence,
+  // not a permanent red.
+  assert.deepEqual(unitRunnerProblems(planted, () => true), []);
+  // And the LIVE command has no ghosts: asserted against the real filesystem.
+  assert.deepEqual(unitRunnerProblems(live), []);
+});
