@@ -514,7 +514,7 @@ this sentence cannot drift again.
 | `UI2API_REGISTRY_URL` | runtime knob; 4 read sites, this is the smoke path's resolver | — | `src/prompt/smoke.ts:144` |
 | `UI2API_REQUEST_LOG` | enable the bounded in-memory request log (a ring, hard-capped) | — | `src/prompt/http.ts:246` |
 | `UI2API_REQUEST_TIMEOUT_MS` | aggregate daemon deadline for one request | — | `src/prompt/http.ts:648` |
-| `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:1730` |
+| `UI2API_SHUTDOWN_GRACE_MS` | grace period for in-flight work on shutdown | — | `src/prompt/http.ts:1835` |
 | `UI2API_SINGLE_PROCESS` | **TRUST** run single-process (no pool isolation) | — | `src/runtime/browser.ts:102` |
 | `UI2API_TIMEOUT` | runtime knob (one round trip, in the generated PHP client) | — | `src/generator/lang-php.ts:600` |
 | `UI2API_TOKEN` | **TRUST** bearer token gating the daemon (unset = localhost-only) | unset = localhost-only | `src/generator/lang-php.ts:597` |
@@ -525,7 +525,7 @@ this sentence cannot drift again.
 | `UI2API_VERSION` | **NOT AN ENV KNOB — a local `const` in the packager that reads `package.json`.** Listed because the name reads like a knob; there is no `UI2API_VERSION` environment variable | — | `src/registry/package.ts:18` |
 | `UI2API_WIGOLO_` | family prefix; every member has its own row below | — | `src/runtime/wigolo.ts:109` |
 | `UI2API_WIGOLO_AUTOSTART` | runtime knob (`=0` refuses to autostart the wigolo daemon) | — | `src/runtime/wigolo.ts:320` |
-| `UI2API_WIGOLO_USE_AUTH` | runtime knob (`=0` drops the wigolo auth requirement) | — | `src/plugin/wigolo-context.ts:125` |
+| `UI2API_WIGOLO_USE_AUTH` | runtime knob (`=0` drops the wigolo auth requirement) | — | `src/plugin/wigolo-context.ts:182` |
 | `UI2API_XVFB_DISPLAY` | **INERT — it parameterizes nothing that gets installed.** The read below only fills a shell local whose sole other use is a PRINTED sentence (line 143), and the script's own header says it "does not write a unit file, ever": the units are delegated to `scripts/ops/install-services.sh`, which copies `scripts/ops/units/*.service` **verbatim** (`install -m 0644` — no `sed`, `envsubst` or template anywhere). The display is **hardcoded `:99`** in the shipped units — `ui2api-xvfb.service` `ExecStart=/usr/bin/Xvfb :99`, plus `Environment=DISPLAY=:99` in the xvfb, chrome and api units — so an operator who sets this knob sees nothing change, and the number the provision message echoes is that script's own default, not what was installed. **A display is still what makes `UI2API_HEADED=1` true** — see "HEADLESS IS WHAT GETS US BLOCKED" above; it is just not chosen here. To actually move it, edit the `DISPLAY` lines in `scripts/ops/units/*.service` and re-run `sudo ./scripts/ops/install-services.sh`, the only thing that installs units | `:99` — what the units hardcode, NOT a knob default | `scripts/ops/provision-ui2api-user.sh:44` |
 
 ## Site status (2026-09-19)
