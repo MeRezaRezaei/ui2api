@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   youtubePlaylistAddCommitted,
   YOUTUBE_PLAYLIST_ADD_UNVERIFIED,
@@ -84,9 +86,9 @@ function methodRegion(src: string, method: string): string {
 /**
  * The body of a `case "<capability>":` arm in a runner's dispatch switch.
  * Falls through a GROUP of labels that share one return (araprat dispatches all
- * six posting caps off one `return this.loginGated(capability)`), so the arm
- * ends at the next label that actually carries a `return` — not at the next
- * label.
+ * six posting caps off one `return loginGatedResult(this.profile.id, capability)`),
+ * so the arm ends at the next label that actually carries a `return` — not at
+ * the next label.
  */
 function caseRegion(src: string, capability: string): string {
   const m = new RegExp(`case\\s+"${capability}"\\s*:`).exec(src);
@@ -466,5 +468,177 @@ describe("GOAL 115: kimi/gemini upload + toggle verdicts are read-backs, not lit
     assert.ok(!ungatedOkTrue(stripComments(methodRegion(geminiSrc, "fileUpload"))), "the real gemini.ts gates its ok");
     assert.ok(!echoesRequestedState(stripComments(methodRegion(geminiSrc, "searchToggle"))), "the real gemini.ts does not echo the request");
     assert.ok(toggleRereadsAfterClick(stripComments(methodRegion(geminiSrc, "searchToggle"))), "the real gemini.ts re-reads after the click");
+  });
+});
+
+/**
+ * GOAL — ONE OWNER FOR THE LOGIN-GATED REFUSAL SENTENCE.
+ *
+ * WAS: `src/capabilities/araprat.ts` kept a PRIVATE near-verbatim copy of the
+ * login-gated refusal that `loginGatedResult()` (src/capabilities/gated.ts)
+ * owns, with the display word `Aparat` and a literal `https://www.aparat.com`
+ * hard-coded where the helper takes `${siteId}` and a `<url>` placeholder.
+ * Twenty other runners had already been folded onto the helper; araprat was the
+ * last holdout, and it was the SECOND OWNER of one sentence — so a reword of
+ * the owner would have left a second, silently-stale copy serving araprat's six
+ * posting caps, and a consumer would be handed two different sentences for one
+ * condition.
+ *
+ * THE WORDING DIFFERENCE WAS CHECKED, NOT ASSUMED. It is NOT load-bearing:
+ * nothing classifies on the sentence (the machine-readable marker is
+ * `loginGated: true`, and `login-required:` has no prefix classifier in src/),
+ * and no test asserts the concrete url or the display word. The fold is
+ * therefore presentational — the site word becomes the package id, and the
+ * literal url becomes the `<url>` placeholder the twenty folded runners already
+ * emit. Callers that need the concrete url read it off `GET /registry` /
+ * `GET /capabilities/<site>`.
+ *
+ * THE PIN IS A WHOLE-TREE SCAN, not a comment about one file, and it counts
+ * OCCURRENCES rather than files — the same shape (and for the same reason) as
+ * the account-refusal pin in test/error-redaction.test.ts: counting files
+ * cannot see two copies inside the file that already owns the sentence.
+ */
+const REPO_ROOT = join(fileURLToPath(new URL("..", import.meta.url)));
+
+/** Every TypeScript file under `src/`, so "typed in exactly one place" is a real gate. */
+function srcTsFiles(dir = join(REPO_ROOT, "src")): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...srcTsFiles(abs));
+    else if (entry.name.endsWith(".ts")) out.push(abs);
+  }
+  return out;
+}
+
+/**
+ * Drops PROSE so a "typed in exactly one place" pin cannot be tripped by a
+ * comment that QUOTES the sentence — the call site documents the decision in
+ * prose, and a comment is not a second owner. HONEST LIMIT: a trailing `//`
+ * comment at the end of a code line is NOT stripped, so a copy pasted into one
+ * still trips the gate. That over-reports, which is the safe direction.
+ */
+function stripProse(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .join("\n");
+}
+
+/** Every src file whose CODE (comments removed) contains `needle` — once per OCCURRENCE. */
+function codeOwnersOf(needle: string): string[] {
+  const owners: string[] = [];
+  for (const f of srcTsFiles()) {
+    const code = stripProse(readFileSync(f, "utf8"));
+    let at = code.indexOf(needle);
+    while (at !== -1) {
+      owners.push(relative(REPO_ROOT, f));
+      at = code.indexOf(needle, at + needle.length);
+    }
+  }
+  return owners.sort();
+}
+
+/** The one file allowed to type the login-gated refusal sentence. */
+const REFUSAL_OWNER = "src/capabilities/gated.ts";
+
+describe("ONE OWNER: the login-gated refusal sentence is authored in exactly one place", () => {
+  test(`the middle clause is typed in exactly one file under src/ (${REFUSAL_OWNER})`, () => {
+    for (const clause of ["needs an authorized captured", "recipe shipped, not yet executable"]) {
+      assert.deepEqual(
+        codeOwnersOf(clause),
+        [REFUSAL_OWNER],
+        `${JSON.stringify(clause)} must be typed EXACTLY ONCE in src/ — a second copy is a sentence that will drift`,
+      );
+    }
+  });
+
+  test("araprat's private copy is typed nowhere — the specific halves cannot come back", () => {
+    // THE DIRECT REGRESSION PIN. These are the two literals the old araprat
+    // copy added over the owner's text. Re-typing EITHER anywhere in `src/`
+    // turns this red, which is the property the defect lacked: two
+    // half-matching sentences satisfy every gate that only inspects one.
+    for (const drifted of ["needs an authorized captured Aparat session", "profile capture https://www.aparat.com"]) {
+      assert.deepEqual(
+        codeOwnersOf(drifted),
+        [],
+        `${JSON.stringify(drifted)} is typed again; the owner builds the sentence from siteId + a <url> placeholder`,
+      );
+    }
+  });
+
+  test("no runner keeps a private login-gated builder; every login-gated runner CALLS the owner", () => {
+    // The structural half of the pin. A private method whose name says
+    // login-gated is how the second owner was born, so it is refused by NAME
+    // in every runner — and any row of TABLE that CLAIMS `loginGatedResult` as
+    // its proof must really contain the call, which is the hole this defect
+    // walked through: TABLE named araprat's proof `loginGatedResult` while the
+    // code kept a private copy, and prose in a table asserts nothing.
+    const privateBuilders = srcTsFiles()
+      .filter((f) => relative(REPO_ROOT, f) !== REFUSAL_OWNER)
+      .filter((f) => /private\s+(?:async\s+)?loginGated\s*\(/.test(stripComments(readFileSync(f, "utf8"))))
+      .map((f) => relative(REPO_ROOT, f));
+    assert.deepEqual(privateBuilders, [], "a runner re-declares its own login-gated refusal instead of calling the owner");
+
+    const liars: string[] = [];
+    for (const c of TABLE) {
+      if (!c.proof.includes("loginGatedResult")) continue;
+      if (!/loginGatedResult\s*\(/.test(stripComments(regionFor(c)))) liars.push(`${c.id} (${c.file})`);
+    }
+    assert.deepEqual(liars, [], `TABLE claims the shared helper as the proof but the deciding code does not call it:\n${liars.join("\n")}`);
+  });
+
+  test("MUTATION: a re-typed second copy FAILS this gate (it cannot pass vacuously)", () => {
+    const CLAUSE = "needs an authorized captured";
+
+    // 1. a second copy pasted into the OWNER is caught — the case a file-COUNT
+    //    scan cannot see (both copies sit in one file, so "which files" still
+    //    answers with one name), and the reason this scan counts OCCURRENCES.
+    const ownerSrc = readIfPresent(join(REPO_ROOT, REFUSAL_OWNER));
+    const doubled = ownerSrc.replace(CLAUSE, `${CLAUSE} ${CLAUSE}`);
+    assert.notEqual(doubled, ownerSrc, "the mutation must actually apply");
+    assert.equal(
+      (stripProse(doubled).match(new RegExp(CLAUSE, "g")) ?? []).length,
+      2,
+      "MUTATION: pasting the clause twice into the owner yields TWO occurrences — a file-count scan would miss this",
+    );
+
+    // 2. the old araprat copy, pasted back into the runner, is caught too. The
+    //    clean tree's owner list is read off DISK, so the mutated file's own
+    //    occurrences are unioned in explicitly — that union is exactly what
+    //    the pin above forbids, so this asserts the refusal shape rather than
+    //    pretending a mutated string is on disk.
+    const arapratSrc = readIfPresent(`${RUNNER_DIR}/araprat.ts`);
+    const pasted = arapratSrc.replace(
+      "return loginGatedResult(this.profile.id, capability);",
+      'return { capability, ok: false, data: undefined, error: `login-required: ${capability} needs an authorized captured Aparat session (ui2api profile capture https://www.aparat.com --login first); recipe shipped, not yet executable`, loginGated: true };',
+    );
+    assert.notEqual(pasted, arapratSrc, "the mutation must actually apply to araprat.ts");
+    const union = [
+      ...codeOwnersOf(CLAUSE),
+      ...new Array((stripProse(pasted).match(new RegExp(CLAUSE, "g")) ?? []).length).fill(
+        "src/capabilities/araprat.ts",
+      ),
+    ].sort();
+    assert.notDeepEqual(
+      union,
+      [REFUSAL_OWNER],
+      "MUTATION: re-typing the clause in araprat.ts must break the one-owner pin",
+    );
+    assert.deepEqual(
+      union,
+      ["src/capabilities/araprat.ts", REFUSAL_OWNER],
+      "the mutated union is exactly the two owners this gate forbids",
+    );
+
+    // 3. and the honest, folded shape passes every pin.
+    const clean = stripProse(readIfPresent(`${RUNNER_DIR}/araprat.ts`));
+    assert.ok(
+      /return\s+loginGatedResult\(\s*this\.profile\.id\s*,\s*capability\s*\)/.test(clean),
+      "araprat's six posting caps must dispatch through the owner with the package id",
+    );
+    assert.deepEqual(codeOwnersOf(CLAUSE), [REFUSAL_OWNER], "the unmutated tree has exactly one owner");
+    assert.equal((clean.match(/private\s+loginGated\s*\(/g) ?? []).length, 0, "araprat declares no private login-gated builder");
   });
 });

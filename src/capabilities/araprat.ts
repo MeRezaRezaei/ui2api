@@ -48,6 +48,7 @@
 // search/feed/video endpoints before attempting any read.
 import { resolvedHeadless, launchBrowser, usingUserChrome } from "../runtime/browser.js";
 import { injectSnapshot, loadAccountSnapshot, loadSnapshot, snapshotPath } from "../runtime/session-store.js";
+import { loginGatedResult } from "./gated.js";
 import type { ChatSiteProfile } from "../profile/profile.js";
 import type { Browser, Page } from "playwright";
 
@@ -235,25 +236,31 @@ export class ArapratCapabilities {
       case "araprat_subscribe":
       case "araprat_upload":
       case "araprat_playlist":
-        return this.loginGated(capability);
+        // ONE OWNER for the login-gated refusal: `loginGatedResult()` in
+        // src/capabilities/gated.ts. This runner used to keep a private
+        // near-verbatim copy of that sentence with the display word `Aparat`
+        // and a literal `https://www.aparat.com` hard-coded where the helper
+        // takes `${siteId}` and a `<url>` placeholder — twenty other runners
+        // were folded onto the helper and this one was the last holdout, so a
+        // reword of the owner would have left a second, silently-stale copy
+        // serving araprat's posting surface.
+        //
+        // THE WORDING DIFFERENCE WAS CHECKED AND WAS NOT LOAD-BEARING. Nothing
+        // classifies on the sentence: the machine-readable marker a consumer
+        // branches on is `loginGated: true` (unchanged), `login-required:` is a
+        // human hint with no prefix classifier in src/, and no test asserts the
+        // concrete url or the display word. The two edits the fold makes are
+        // therefore presentational: the site word becomes the package id
+        // `araprat` (what every other folded runner prints — the convention is
+        // `loginGatedResult(this.profile.id, capability)`), and the literal url
+        // becomes the `<url>` placeholder, which is what the twenty folded
+        // runners already emit. A caller that needs the concrete url reads it
+        // off `GET /registry` / `GET /capabilities/<site>`, which carry the
+        // package url — so nothing that could act on it loses it.
+        return loginGatedResult(this.profile.id, capability);
       default:
         return { capability, ok: false, data: undefined, error: `unknown araprat capability: ${capability}` };
     }
-  }
-
-  // Honest login-gated short-circuit: no captured Aparat session exists, so a
-  // posting action can only ever return ok:false login-required — NEVER a
-  // fabricated success or a dead dispatch. No browser is launched.
-  private loginGated(capability: string): ArapratCapabilityResult {
-    return {
-      capability,
-      ok: false,
-      data: undefined,
-      error:
-        `login-required: ${capability} needs an authorized captured Aparat session ` +
-        `(ui2api profile capture https://www.aparat.com --login first); recipe shipped, not yet executable`,
-      loginGated: true,
-    };
   }
 
   // --- araprat_search: navigate /search/<q>, read the JS-rendered grid ---
