@@ -1,12 +1,38 @@
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChatDriver } from "../src/prompt/driver.js";
 import { startPromptd } from "../src/prompt/http.js";
+import { launchBrowser } from "../src/runtime/browser.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
+import { guardBrowser } from "./helpers/browser-launchability.js";
+
+// THE LAUNCHABILITY GUARD for the four tests below that drive a real browser.
+// Unguarded, a browser that cannot launch surfaced as whatever `ChatDriver`/
+// `startPromptd` happened to throw — an anonymous red naming a chrome-owner
+// refusal or an absent artifact, with nothing saying a guard had (or had not)
+// run. These pass today only because the ladder finds a system Chrome; on a box
+// without one the failure was indistinguishable from a code regression.
+//
+// Same seam as the code under test: `ChatDriver` launches through
+// `launchBrowser()` (`src/prompt/driver.ts:294`), and the daemon's prompt path
+// reaches the same seam, so the probe asks that ladder — by LAUNCHING, not by
+// fs-checking a path (`test/helpers/browser-launchability.ts` says why a path
+// that exists is not a browser that launches).
+//
+// IT CANNOT SKIP. `guardBrowser` has no skip branch: an unlaunchable probe
+// throws, so the lane goes RED with the classification (`browser-provisioning`
+// vs `launch-regression`) plus the browser's own words. The four tests that
+// need no browser (the two bearer/posture gates, and the /health + /sites half
+// of the daemon test) are deliberately NOT guarded — the guard would be
+// asserting something untrue about work that never launches anything.
+const probeUi2apiLadder = () => launchBrowser();
+
+const guarded = <T>(t: TestContext, run: () => Promise<T>): Promise<T | undefined> =>
+  guardBrowser(t, "ui2api-ladder", probeUi2apiLadder, run);
 
 // The MVP's end-to-end proof, fully hermetic (no internet): a local page that
 // behaves like an AI chat site (composer + streamed answer event bus), driven by
@@ -156,120 +182,138 @@ function seedUsableVault(dataDir: string, host = "fixture.test"): void {
   );
 }
 
-test("ChatDriver sends a prompt to an AI chat site (fixture) and returns the streamed answer", async () => {
-  const site = await startMockChat();
-  const dir = mkdtempSync(join(tmpdir(), "u2a-prompt-"));
-  try {
-    const driver = new ChatDriver(site.profile, { dataDir: dir });
+test("ChatDriver sends a prompt to an AI chat site (fixture) and returns the streamed answer", async (t) => {
+  await guarded(t, async () => {
+    const site = await startMockChat();
+    const dir = mkdtempSync(join(tmpdir(), "u2a-prompt-"));
     try {
-      const r = await driver.ask("hello world");
-      assert.ok(r.answer.includes("hello world"), `answer echoes the prompt: ${r.answer}`);
-      assert.ok(r.answer.trim().endsWith("done"), `answer streamed to completion: ${r.answer}`);
-      assert.equal(r.doneReason, "stable");
-      assert.ok(r.chunkCount >= 2, `answer observed in chunks, got ${r.chunkCount}`);
-      assert.match(r.url, /127\.0\.0\.1/);
+      const driver = new ChatDriver(site.profile, { dataDir: dir });
+      try {
+        const r = await driver.ask("hello world");
+        assert.ok(r.answer.includes("hello world"), `answer echoes the prompt: ${r.answer}`);
+        assert.ok(r.answer.trim().endsWith("done"), `answer streamed to completion: ${r.answer}`);
+        assert.equal(r.doneReason, "stable");
+        assert.ok(r.chunkCount >= 2, `answer observed in chunks, got ${r.chunkCount}`);
+        assert.match(r.url, /127\.0\.0\.1/);
+      } finally {
+        await driver.close();
+      }
     } finally {
-      await driver.close();
+      rmSync(dir, { recursive: true, force: true });
+      site.close();
     }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    site.close();
-  }
+  });
 });
 
-test("the proof: two random numbers sum — streamed back and verified", async () => {
+test("the proof: two random numbers sum — streamed back and verified", async (t) => {
   // The ONLY test that proves the engine — exactly as specified: generate two
   // random numbers, ask the site to add them, and the answer must equal the sum.
   // Here the "site" is a hermetic fixture whose model computes the sum; the real
   // target (copilot/gemini/...) is exercised by `npm run proof`. Same pipeline.
-  const site = await startMockChat();
-  const dir = mkdtempSync(join(tmpdir(), "u2a-proof-"));
-  try {
-    const driver = new ChatDriver(site.profile, { dataDir: dir });
-    const a = Math.floor(Math.random() * 10000) + 2;
-    const b = Math.floor(Math.random() * 10000) + 2;
-    const expected = a + b;
+  await guarded(t, async () => {
+    const site = await startMockChat();
+    const dir = mkdtempSync(join(tmpdir(), "u2a-proof-"));
     try {
-      const r = await driver.ask(`add ${a} ${b} — reply with only the number`);
-      const match = String(r.answer).match(/\d+/g);
-      const got = match && match.length ? Number(match[match.length - 1]) : NaN;
-      assert.equal(got, expected, `answer "${r.answer}" must equal ${a}+${b}=${expected}`);
+      const driver = new ChatDriver(site.profile, { dataDir: dir });
+      const a = Math.floor(Math.random() * 10000) + 2;
+      const b = Math.floor(Math.random() * 10000) + 2;
+      const expected = a + b;
+      try {
+        const r = await driver.ask(`add ${a} ${b} — reply with only the number`);
+        const match = String(r.answer).match(/\d+/g);
+        const got = match && match.length ? Number(match[match.length - 1]) : NaN;
+        assert.equal(got, expected, `answer "${r.answer}" must equal ${a}+${b}=${expected}`);
+      } finally {
+        await driver.close();
+      }
     } finally {
-      await driver.close();
+      rmSync(dir, { recursive: true, force: true });
+      site.close();
     }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    site.close();
-  }
+  });
 });
 
-test("the proof: two random numbers multiplication — streamed back and verified", async () => {
+test("the proof: two random numbers multiplication — streamed back and verified", async (t) => {
   // The goal's exact ask: two random numbers, multiplied. The hermetic
   // multiplication fixture model computes the product; real targets are
   // exercised by `npm run proof` on a healthy host. Same pipeline as real AI.
-  const site = await startMockMulChat();
-  const dir = mkdtempSync(join(tmpdir(), "u2a-mul-"));
-  try {
-    const driver = new ChatDriver(site.profile, { dataDir: dir });
-    const a = Math.floor(Math.random() * 10000) + 2;
-    const b = Math.floor(Math.random() * 10000) + 2;
-    const expected = a * b;
+  await guarded(t, async () => {
+    const site = await startMockMulChat();
+    const dir = mkdtempSync(join(tmpdir(), "u2a-mul-"));
     try {
-      const r = await driver.ask(`mul ${a} ${b} — reply with only the number`);
-      const match = String(r.answer).match(/\d+/g);
-      const got = match && match.length ? Number(match[match.length - 1]) : NaN;
-      assert.equal(got, expected, `answer "${r.answer}" must equal ${a}×${b}=${expected}`);
+      const driver = new ChatDriver(site.profile, { dataDir: dir });
+      const a = Math.floor(Math.random() * 10000) + 2;
+      const b = Math.floor(Math.random() * 10000) + 2;
+      const expected = a * b;
+      try {
+        const r = await driver.ask(`mul ${a} ${b} — reply with only the number`);
+        const match = String(r.answer).match(/\d+/g);
+        const got = match && match.length ? Number(match[match.length - 1]) : NaN;
+        assert.equal(got, expected, `answer "${r.answer}" must equal ${a}×${b}=${expected}`);
+      } finally {
+        await driver.close();
+      }
     } finally {
-      await driver.close();
+      rmSync(dir, { recursive: true, force: true });
+      site.close();
     }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    site.close();
-  }
+  });
 });
 
-test("promptd exposes the engine as localhost JSON so /var/www apps can use it unchanged", async () => {
-  const site = await startMockChat();
-  const dir = mkdtempSync(join(tmpdir(), "u2a-promptd-"));
-  try {
-    seedUsableVault(dir);
-    const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile] });
-    const base = `http://127.0.0.1:${svc.port}`;
+test("promptd exposes the engine as localhost JSON so /var/www apps can use it unchanged", async (t) => {
+  await guarded(t, async () => {
+    const site = await startMockChat();
+    const dir = mkdtempSync(join(tmpdir(), "u2a-promptd-"));
     try {
-      // Provider listing + health, usable without a browser.
-      const health = await (await fetch(`${base}/health`)).json();
-      assert.equal(health.ok, true);
-      const sites = await (await fetch(`${base}/sites`)).json();
-      assert.ok(sites.sites.some((s: { id: string }) => s.id === "fixture"));
+      seedUsableVault(dir);
+      const svc = await startPromptd({ port: 0, host: "127.0.0.1", dataDir: dir, profiles: [site.profile] });
+      const base = `http://127.0.0.1:${svc.port}`;
+      try {
+        // Provider listing + health, usable without a browser.
+        const health = await (await fetch(`${base}/health`)).json();
+        assert.equal(health.ok, true);
+        const sites = await (await fetch(`${base}/sites`)).json();
+        assert.ok(sites.sites.some((s: { id: string }) => s.id === "fixture"));
 
-      // The real flow: an app POSTs a prompt, gets the streamed answer back.
-      const r = await fetch(`${base}/prompt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ site: "fixture", prompt: "hello from an app" }),
-      });
-      const out = (await r.json()) as { ok: boolean; answer: string; doneReason: string };
-      assert.equal(r.status, 200);
-      assert.equal(out.ok, true);
-      assert.ok(out.answer.includes("hello from an app"), out.answer);
-      assert.ok(out.answer.trim().endsWith("done"), out.answer);
-      assert.equal(out.doneReason, "stable");
+        // The real flow: an app POSTs a prompt, gets the streamed answer back.
+        // This POST is what makes the test browser-bound, which is why it is
+        // inside the guard even though /health and /sites alone would not need one.
+        const r = await fetch(`${base}/prompt`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ site: "fixture", prompt: "hello from an app" }),
+        });
+        const out = (await r.json()) as { ok: boolean; answer: string; doneReason: string };
+        assert.equal(r.status, 200);
+        assert.equal(out.ok, true);
+        assert.ok(out.answer.includes("hello from an app"), out.answer);
+        assert.ok(out.answer.trim().endsWith("done"), out.answer);
+        assert.equal(out.doneReason, "stable");
 
-      // The service refuses to drive origins that were not configured.
-      const bad = await fetch(`${base}/prompt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ site: "gemini", prompt: "hi" }),
-      });
-      assert.equal(bad.status, 400);
+        // The service refuses to drive origins that were not configured.
+        const bad = await fetch(`${base}/prompt`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ site: "gemini", prompt: "hi" }),
+        });
+        assert.equal(bad.status, 400);
+      } finally {
+        await svc.close();
+      }
     } finally {
-      await svc.close();
+      rmSync(dir, { recursive: true, force: true });
+      site.close();
     }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    site.close();
-  }
+  });
 });
+
+// NOT guarded, deliberately: these two exercise the daemon's AUTH posture over
+// plain fetch. Neither ever reaches a browser, so guarding them would assert
+// something untrue about the code under test and go red on a
+// browser-hostile-but-healthy box for no reason. The same reasoning is recorded
+// in `test/wigolo-engine.test.ts` for its unguarded `replay` case, and it is the
+// distinction that matters: this guard excuses an ABSENT SUBJECT, never a
+// FAILING one.
 
 test("promptd bearer gate: token set => 401 without/with wrong token, 200 with it", async () => {
   const site = await startMockChat();
