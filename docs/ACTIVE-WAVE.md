@@ -170,7 +170,99 @@ must exercise the seam the code under test consumes, and must be provable to bit
 before you believe it.** Pointing that seam at `profile: null` -> 1 FAIL is what
 makes the control a real assertion rather than a comment.
 
-## OPEN — ONE LIST, the next wave starts at #1
+## THE ONE LIST — every item CLOSED 2026-10-04
+
+**STATUS 2026-10-04: EVERY ITEM BELOW IS NOW CLOSED.** This section is kept as the
+record of what was open and what closed it, because **an item deleted without a
+trace is an item that gets re-opened** — the same rule this file already states
+about its own two duplicated lists. The live residue is at the END of this file.
+
+Every closing below was **verified by the orchestrator, not by the lane that wrote
+it**, because nine lanes died (`child_rejected`, external) during the wave that
+closed them and a dead lane leaves work with no report and no tests anyone ran.
+Each closure is mutation-proven in both directions where a gate was involved.
+
+### 1. Unguarded browser launches in `session-store`/`prompt` — **CLOSED**
+
+Both files now import `guardBrowser` from `test/helpers/browser-launchability.ts` —
+the seam `wigolo-engine` already used — wrapped in a local `guarded` helper. The
+property that mattered is that **the guard CANNOT SKIP**, and that is an assertion
+rather than a claim: the gate collects every `t.skip` the guard makes and asserts
+the list is empty.
+
+Proven as a **negative control** by forcing an unlaunchable browser
+(`UI2API_CHROME_PATH=/nonexistent/chrome UI2API_ATTACH_PORT=1`): the run reported
+**`skipped 0`** and a **named** verdict — *"browser not launchable via the
+ui2api-ladder seam — classified launch-regression … this is the launchability
+guard, not the test body"* — including a self-test named *"the launchability guard
+NAMES an unlaunchable browser instead of skipping it"*. That is the whole
+difference the item was about: **a mystery became a verdict.** Normal behaviour
+unchanged (session-store 9/9, prompt 6/6). Commit `ba0af59`.
+
+### 2. The no-answer matcher hand-typed a mirror of its emitter — **CLOSED**
+
+`src/prompt/error-redaction.ts` now owns the wording as `NO_ANSWER_REFUSAL_CLAUSE`
+(`:103`); the emitter renders it through a `{clause}` hole (`:118`); and
+`NO_ANSWER_REFUSAL_RE` is **computed** from that clause plus the timer pattern
+(`:131-132`). `verification-class.ts:44` **imports** the derived matcher instead of
+holding a pattern, so its array member *is* the owner. The comment that made the
+false derivation claim now states what is true — **half of this item was the
+comment**, since a comment lying about its own derivation is the defect, not the
+regex. The sentence went from **four** homes to one.
+
+Gates in `test/error-redaction.test.ts`: the clause is typed exactly once under
+`src/` (the classifier may not re-type it), and "ONE OWNER: the no-answer refusal
+is authored in exactly one place". Both **strip prose first**, by the same rule as
+the sibling gates — **a comment quoting the clause is not a second owner.**
+
+Mutations: rewording the **owner** clause made `verification-class` 41/1 **and**
+`error-redaction` 62/1, so a reword can no longer pass silently; injecting a
+hand-typed second owner into the classifier failed **both** one-owner gates.
+Commit `4feeb2f`.
+
+### 3. `araprat.ts` was a second owner of the login-gated refusal — **CLOSED**
+
+The private `loginGated()` builder is gone; the posting caps return
+`loginGatedResult(this.profile.id, capability)`, the single owner at `gated.ts:38`.
+The gate in `test/mutating-capability-postcondition.test.ts` scans **every
+TypeScript file under `src/`**, so "typed in exactly one place" is a real property
+rather than a claim about one file, and it **strips prose first** for the same
+reason. Mutation: re-introducing the private builder fired it — *"no runner keeps a
+private login-gated builder; every login-gated runner CALLS the owner"* (14 pass /
+4 fail). Commit `14bb4ad`.
+
+### 5. No reconstruction runbook consumer was automated — **CLOSED**
+
+`scripts/ci/verify-commit-map.sh` now **executes** the documented procedure instead
+of trusting prose, and it is **wired** (`scripts.check:commit-map`) — because a
+consumer nothing invokes is still inert. It is **not** a session-resume script; the
+runbook is about a REPOSITORY.
+
+Checks **derived from the runbook**, not invented: the header is `old` then `new`
+compared **whitespace-split** (because filter-repo's `%-40s` pads it — a raw-line
+comparison would itself be the orientation bug this item exists to catch); rows are
+exactly two 40-hex fields; and the **forty-zero pruned row is accepted**, since §2.1
+calls it *"the single most misread fact"*. A deliberate **non-check**: no count, no
+sha-existence, no set-membership — §2.1 records that the count prose was **false**
+before 2026-10-01, so pinning counts would re-encode the defect, and those need the
+repositories rather than the file (P7 owns them).
+
+Measured: good map **0**; flipped header **1** (`header-orientation (column 0 of
+line 1 is "new", expected "old")`); row missing its second field **1**
+(`row-shape …`); no args **2**. Test: `test/verify-commit-map.test.ts` 4/4.
+
+**Two facts it corrected in my own brief:** the **`private-full` map has NO header**
+— it is a bare column of shas, not a correspondence — so the orientation check
+applies only to the `public-sanitized` map, which is the only artifact this
+consumer accepts. Commit `92f129f`.
+
+### GOAL 238 — `hub publish` reached three `resolve()` seams unvalidated — **CLOSED**
+
+Not on this list; it came from the friction hunt and the lane **disproved its own
+brief** while closing it. See the CLOUD-shaped entry in `.brain/verbatim-goals.md`
+round N+192. Commit `f25c5d0`.
+
+
 
 **This replaces the two duplicated "STILL OPEN" lists this file used to end
 with.** Those were 7 + 7 entries over the same 7 unique items, written across
@@ -181,73 +273,8 @@ evidence that it is. Nothing here is closed on the strength of a `grep` hit or
 the ledger's age; where the code and the old wording disagreed, the code won and
 the disagreement is named.
 
-1. **`session-store.test.ts` and `prompt.test.ts` launch a browser with no
-   guard**, so they go red with no named reason. VERIFIED OPEN 2026-10-03: grep
-   for `browserLaunchable` / `maybe(` / `skip` over both files returns NOTHING —
-   unlike `wigolo-engine.test.ts`, which now has `guardBrowser` (`:157`). They
-   pass today only because the system-Chrome fallback exists. **The reason this
-   one is genuinely still open and not an oversight:** a wrong guard on
-   `prompt.test.ts`'s live server is worse than none. The seam to use is
-   `test/helpers/browser-verdict.ts` (the defect class `wigolo-engine.test.ts:150-152`
-   was rebuilt to end) — a guard must exercise the seam the code under test
-   consumes AND be provable to bite before it is believed.
-2. **The no-answer MATCHER is a hand-typed mirror of the EMITTER, and the comment
-   says otherwise.** VERIFIED OPEN 2026-10-03. The emitter template is
-   `src/prompt/error-redaction.ts:94`
-   (`` `${c.site} did not return an answer${ms} — …` ``); the matcher is a literal
-   regex, `src/prompt/verification-class.ts:167`
-   (`/did not return an answer(?: within \d+\s*ms)?/i`). The doc comment at
-   `verification-class.ts:157-166` claims the pattern is "taken from the single
-   template that produces it" — **nothing derives it**, and a reword of the
-   emitter leaves the matcher matching nothing while both stay green. Worse, the
-   emitter sentence is restated a THIRD time as a string literal in
-   `test/verification-class.test.ts:413` and `test/error-redaction.test.ts:141`,
-   so three files hold one sentence. This is the same class as the closed
-   `consumerAccountRefusal` item: the fix is a derivation from the owner, plus a
-   gate that fails when the three disagree.
-3. **`src/capabilities/araprat.ts:247` is a second owner of the login-gated
-   refusal.** VERIFIED OPEN 2026-10-03. It is a near-verbatim private copy of
-   `gated.ts:38 loginGatedResult()` — same sentence, with `Aparat` and a literal
-   `https://www.aparat.com` where the helper takes `${siteId}` and `<url>`. Twenty
-   other runners were folded onto the helper; this one was not. Remains: return
-   araprat's posting caps through the shared helper (or prove the wording
-   difference is load-bearing, in which case say why at the call site).
-4. ~~**A digit suffix (`chrome2`, `selenium3`) still escapes the redaction rules.**~~
-   **RESOLVED 2026-10-03 — and the item above was half wrong, which is why it
-   survived a fold.** It named the right MECHANISM (`\b` falls between a declared
-   term and what follows it) and the wrong CLASS twice over.
-   - The four forms the earlier lane handed over — `chromeless`, `headlessly`,
-     `xorgs`, `zodish` — were already closed by `[a-z]*` and were never the
-     residual. Measured: 0 survivors across the whole term × suffix enumeration.
-   - The digit class (`chrome2`, `selenium3`) is **cosmetic**: 3 occurrences
-     repo-wide, every one of them THIS FILE quoting the defect at itself. Zero in
-     `src/`, zero in shipped manifests.
-   - The `_` class was the **real leak, and nobody had named it.** `_` is a `\w`
-     character, so `\b` falls between `xorg` and `_lock` and neither half
-     matched. `chromium_headless_shell` — Playwright's ACTUAL binary directory
-     name (`~/.cache/ms-playwright/chromium_headless_shell-1228/`, named verbatim
-     in shipped test fixtures) — reached a consumer **intact**, together with the
-     build number. Also `browser_download_url`, `ui2api_driver_error`,
-     `cdp_pipe`, `zod_v4`, `xorg_lock`. Note the absolute-path spelling did NOT
-     leak (the path rule eats it and the message falls to the fallback), so the
-     hole only opened on the pathless form a classifier's `reason` takes — which
-     is exactly why it was invisible.
-   - **CLOSED** by widening the suffix class `[a-z]*` → `[a-z0-9_]*`, the narrowest
-     rule that closes it (`-` and `.` still excluded, so the reverted `google-`
-     defect cannot recur). Cost MEASURED over 25,614 real string literals from
-     every shipped `.ts`/`.js`/`.mjs`/`.sh` under `src/`, `test/`, `scripts/`,
-     `capabilities/`, `docs/`: 98 messages change (0.385%), **90 distinct spans,
-     every one internal, 0 ordinary words** — so it is not the 276-token defect
-     in a new costume. Gate + mutation proof in `test/error-redaction.test.ts`
-     (reverting to `[a-z]*` reopens 7 forms; dropping only `_` reopens 6).
-   - The earlier lane's refusal was not idle: "do not widen it blind" was correct
-     and the measurement is what made it safe. What was wrong was the target.
-5. **No reconstruction runbook consumer is automated.** VERIFIED OPEN 2026-10-03.
-   `scripts/ci/make-public-repo.sh` only PRODUCES the map (`:189-190` private-full,
-   `:354-359` public-sanitized) and nothing in the tree CONSUMES it.
-   `docs/RECONSTRUCTION-RUNBOOK.md` is prose plus a format pin (its §8.1 records
-   that the script's own orientation comment was wrong before 2026-10-01 — which
-   is the argument for a consumer that executes the procedure rather than a human
-   reading it). Note `scripts/ops/resume-state.sh` is NOT this consumer: it
-   resumes a *session*, not a *repository*, and conflating the two is the kind of
-   gate that looks present and fires on nothing.
+## OPEN — NONE
+
+**Every item this file tracked is closed, each with its closing evidence above.**
+The next wave starts by hunting NEW friction rather than by re-reading this list —
+which is the failure mode this file exists to prevent.
