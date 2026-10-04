@@ -16,6 +16,7 @@ import { validateActionMap } from "./schema.js";
 import { sessionPath, saveCookies, buildLaunchOptions, userChromeProfile } from "./runtime/browser.js";
 import { capturePageStorage, saveSnapshot, snapshotPath, saveAccountSnapshot, listAccounts, loadAccountSnapshot, slugifyIdentity, slugCollision, snapshotHasAuth, tightenVaultModes } from "./runtime/session-store.js";
 import { buildPackage, packageCommandRefusal } from "./registry/package.js";
+import { assertSafePackageSegment } from "./registry/safe-segment.js";
 import { installPackage, defaultPackagesRoot, fetchRegistryIndex, DEFAULT_REGISTRY_URL } from "./registry/install.js";
 import { startHub } from "./hub/server.js";
 import { pushToMirror } from "./hub/mirror.js";
@@ -1045,6 +1046,60 @@ async function cmdHubRun(host: string, flags: Flags): Promise<void> {
 
 async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
   if (!host) throw new Error("usage: ui2api hub publish <host> [--mirror] [--registry-repo URL] [--data-dir DIR]");
+  // GOAL 238: `host` is the ONE identifier this command turns into filesystem
+  // paths, and it reached three `resolve()` seams UNVALIDATED:
+  //   - `buildPackage(host, sitesRoot, stagingRoot, …)` writes its metadata.json +
+  //     action-map.json pair to `resolve(pkgRoot, "packages", host)` — PROVEN over
+  //     this repo: `hub publish ../../evil` wrote both files OUTSIDE the staging
+  //     root entirely (`dir.startsWith(pkgRoot + "/")` was false);
+  //   - the commit step below, `resolve(pkgRoot, "packages", host)` (:1143).
+  //     pkgRoot DEFAULTS to `<cwd>/data` — MEASURED: with no `--data-dir`, a
+  //     publish lands in `<cwd>/data/packages/<host>/`, and in the repo
+  //     `<cwd>/data` is the LIVE session vault (`data/sessions/**`, real
+  //     credentials). HONEST SCOPE, do not overread this one: the commit step
+  //     runs only AFTER the hub accepted, so with the CURRENT store gate a
+  //     traversal host is refused at the PUT (`ui2api-site-../../evil` →
+  //     `invalid package name`) and this step never executes. The commit-step
+  //     escape is therefore REAL but CONDITIONAL on a hub that answers 2xx —
+  //     measured here against a 200 stub — and the caller cannot rely on the
+  //     hub being the current, gated build, since `UI2API_HUB_URL` is whatever
+  //     the environment names. The two UNCONDITIONAL escapes are the other two.
+  //   - `buildPackage`'s own READ, `resolve(sitesRoot, host, "action-map.json")`
+  //     (src/registry/package.ts:78), which let a publish read an action-map
+  //     from anywhere on the box. UNCONDITIONAL, and measured both ways.
+  //
+  // WHY THE CALLER AND NOT THE GATE. GOAL 121 gated the hub STORE and GOAL 113
+  // gated the registry INSTALL; both wrote the rule into
+  // `src/registry/safe-segment.ts` precisely so the seams could not drift — and
+  // both of those gates are deliberately UNCHANGED here. Loosening
+  // `assertSafePackageSegment` to accept `../..` would trade a proven
+  // path-traversal defence for a cosmetic fix, and it would have to be loosened
+  // in the one module whose own header names three ways the previous
+  // segment-shape drift produced real escapes. `host` here is not user prose
+  // and not a display label: it names a directory under `sites/`, so the correct
+  // spelling is exactly one safe segment. This is the third seam taking the SAME
+  // shared definition, which is what that module exists to make possible.
+  //
+  // IT IS ALSO THE WHOLE FIX FOR "publish sends a name the store refuses".
+  // `buildPackage` (src/registry/package.ts:85) stamps `name: \`ui2api-site-${host}\``
+  // — MEASURED through the real `buildPackage` → `PUT /api/packages` path: that
+//   body answers `200 {"ok":true}` and lands on disk as
+  //   `ui2api-site-<host>`; the real `RegistryStore.save` ACCEPTS that name and
+  //   REFUSES both a traversal host and a display name ("Tencent AI Studio
+  //   (aistudio.tencent.ai)" → `invalid package name: may only contain letters,
+  //   digits, …`) — all three measured against the real store, not a stub. But
+  //   `cmdHubPublish` NEVER sends a display name: the `metadata.json` it reads
+  //   at :1114 is the one `buildPackage` just WROTE into the staging root, not
+  //   any `capabilities/<id>/metadata.json`. With `host` gated to one safe
+  //   segment, `ui2api-site-${safeHost}` is safe by construction.
+  //
+  // `safeHost` is used at EVERY seam below, deliberately rather than as a
+  // throw-only statement: a `const` whose value is never read is a guard a
+  // reader has to take on faith and a refactor is free to delete, whereas
+  // routing the paths through the gated value makes the gate load-bearing in
+  // the data flow — there is then no un-gated spelling of `host` left to reach
+  // a `resolve()` at all.
+  const safeHost = assertSafePackageSegment("host", host);
   const sitesRoot = resolve(process.cwd(), "sites");
   // `--data-dir` is honored here by the SAME convention the sibling paths use
   // (cmdHubRun, cmdPluginServe, cmdPrompt: `flags.dataDir ?? <cwd>/data`).
@@ -1057,7 +1112,7 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
   const pkgRoot = flags.dataDir ?? resolve(process.cwd(), "data");
   const meta = {
     author: process.env.UI2API_HUB_AUTHOR || "cli",
-    use: process.env.UI2API_HUB_USE || `own use of ${host}`,
+    use: process.env.UI2API_HUB_USE || `own use of ${safeHost}`,
   };
   // WRITE-BEFORE-TRUTH-GATE (the class session-store.ts's write gate and
   // registry/install.ts's install gate exist to kill — in the one publish path
@@ -1072,7 +1127,7 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
   // the staging root, so a failed publish leaves the tree byte-identical.
   const stagingRoot = mkdtempSync(resolve(tmpdir(), "ui2api-publish-"));
   try {
-    const dir = buildPackage(host, sitesRoot, stagingRoot, meta);
+    const dir = buildPackage(safeHost, sitesRoot, stagingRoot, meta);
     const metadata = JSON.parse(readFileSync(resolve(dir, "metadata.json"), "utf8"));
     const map = JSON.parse(readFileSync(resolve(dir, "action-map.json"), "utf8"));
     const manifest = { ...metadata, version: metadata.version || "1.0.0" };
@@ -1102,7 +1157,7 @@ async function cmdHubPublish(host: string, flags: Flags = {}): Promise<void> {
       throw new Error(`publish-refused: hub answered ${r.status} — ${(await r.text()).trim() || "(empty body)"} — nothing was written to ${pkgRoot}`);
     }
     // The gate ACCEPTED it: now, and only now, does the pair land under pkgRoot.
-    const committed = resolve(pkgRoot, "packages", host);
+    const committed = resolve(pkgRoot, "packages", safeHost);
     mkdirSync(committed, { recursive: true });
     copyFileSync(resolve(dir, "metadata.json"), resolve(committed, "metadata.json"));
     copyFileSync(resolve(dir, "action-map.json"), resolve(committed, "action-map.json"));

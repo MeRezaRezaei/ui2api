@@ -1,9 +1,11 @@
 /**
- * THE PACKAGE-TARGET SEGMENT GATE — one definition, both write seams.
+ * THE PACKAGE-TARGET SEGMENT GATE — one definition, every seam that turns an
+ * identifier into a path.
  *
- * A package `name` / `version` / install `site` is not user input. It is an
- * IDENTIFIER: one safe path segment. Two seams turn one into a filesystem
- * path, and they were protected by rules that had drifted apart:
+ * A package `name` / `version` / install `site` / publish `host` is not user
+ * input. It is an IDENTIFIER: one safe path segment. Three seams turn one into
+ * a filesystem path, and two of them were protected by rules that had drifted
+ * apart:
  *
  *   1. `src/hub/store.ts` `RegistryStore.save` — GOAL 121, over the wire: a
  *      PUT body whose `name` was `../../ESCAPED-DATA-DIR` landed OUTSIDE
@@ -19,12 +21,19 @@
  *      `installPackage` return ok and write `metadata.json` + `manifest.json`
  *      to `<packagesRoot>/../PWNED` — outside the install root, one level up,
  *      which is the REPO ROOT in the default (no `--out`) case.
+ *   3. `src/cli.ts` `cmdHubPublish` — GOAL 238, the publish TARGET: `host`
+ *      reached `resolve(pkgRoot, "packages", host)` and
+ *      `resolve(sitesRoot, host, "action-map.json")` unvalidated, so
+ *      `hub publish ../../evil` wrote its metadata.json + action-map.json pair
+ *      outside the staging root and read an action-map from outside `sites/`.
+ *      Gated by this same `assertSafePackageSegment`, and the gated value
+ *      (`safeHost`) is what the paths are built from — not a throw-only check.
  *
  * The rule is POLICY, not a derivation: nothing in this repo computes the legal
  * spelling of a package identifier, and inventing one would be the fabrication
  * the repo forbids. It is a FILESYSTEM-SAFETY ALLOWLIST. What IS derivable —
- * and what this module exists to make true — is that both `resolve()`-into-a-
- * path seams share ONE definition of it, so a third state of the charset can
+ * and what this module exists to make true — is that every `resolve()`-into-a-
+ * path seam shares ONE definition of it, so a third state of the charset can
  * never exist on one seam and not the other.
  *
  * WHAT WOULD INVALIDATE IT: a package name or version that legitimately needs
@@ -41,10 +50,11 @@
  * This module is a stricter leaf: its only import is `node:path` (a builtin,
  * not a repo edge), so its relative-import closure is {safe-segment} alone.
  * Verified by walking the relative-import graph from each importer — adding
- * this edge to `src/registry/install.ts` or `src/hub/store.ts` grows that
- * importer's closure by exactly this one file and cannot close a loop, because
- * the new node has no outgoing repo edges to begin with. Neither seam imports
- * the other, so the shared rule costs no new direction between the two.
+ * this edge to `src/registry/install.ts`, `src/hub/store.ts` or `src/cli.ts`
+ * grows that importer's closure by exactly this one file and cannot close a
+ * loop, because the new node has no outgoing repo edges to begin with. No two
+ * of the three importers import each other through it, so the shared rule costs
+ * no new direction between them.
  */
 import { sep } from "node:path";
 
