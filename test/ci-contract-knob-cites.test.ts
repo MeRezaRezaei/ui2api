@@ -202,6 +202,11 @@ export const ALLOWED_WRONG_FILE_CITES: { knob: string; cite: string; reason: str
 ];
 const UNDOC_BUDGET = 0;   // was 1 (UI2API_XVFB_DISPLAY, now documented)
 const CITE_BUDGET = 0;    // was 1 (UI2API_HEADED, now citing its real read site)
+const DRIFT_BUDGET = 0;   // was UNENFORCED (GOAL 232): 30 of 70 rows sat stale and the
+                          // gate exited 0 — the drift count was measured, printed, and
+                          // pinned to nothing. All 30 re-derived and corrected; a drifted
+                          // `file:line` cell is now a hard failure, and a new one is fixed by
+                          // re-pointing the cell, never by raising this number.
 
 // ================================================================ rules ======
 
@@ -284,13 +289,42 @@ t("every knob-table row's cited LINE is a real line in the cited file", (ctx: Te
   }
 });
 
+t("knob-table line-exact drift stays inside its budget", (ctx: TestContext) => {
+  // The BUDGET half of the drift test below. Measured-and-printed is not pinned:
+  // GOAL 232 proved it by mutation — moving one exactly-correct cite from
+  // file-attach.ts:54 to :1 took drift 30 -> 31 and the suite still printed
+  // "pass 11 / fail 0" and exited 0, because nothing compared the count to
+  // anything. This is the comparison, in its OWN real top-level `test(...)` and
+  // not inside the disclosure test's body: a pin asserted in someone else's body
+  // is a pin the totals never count, which is how this repo once shipped 8
+  // phantom tests (GOAL: the counted-test warts).
+  //
+  // The budget is a COUNT and not a `line ===` loop on its own because the
+  // repair is mechanical (re-point a cell) while re-derivation is not (read the
+  // file, decide whether the literal is on a READ line or a NAME-constant line).
+  // Reporting every offending row at once is what a per-row loop cannot do.
+  const drift = ROWS.filter((r) => r.line !== null && !lineHas(r, r.knob));
+  assert.ok(
+    drift.length <= DRIFT_BUDGET,
+    `knob-table line-exact drift grew past its budget: ${drift.length} > ${DRIFT_BUDGET}. ` +
+      `Offending rows (re-point each cell at the line that really holds the knob — a knob ` +
+      `read through an exported name constant such as TOKEN_ENV cites the NAME line, never a ` +
+      `read line): ` +
+      drift.map((r) => `${r.knob} -> ${r.cite} (AGENTS.md:${r.docLine})`).join("; "),
+  );
+  ctx.diagnostic(
+    `knob-table line-exact drift: ${drift.length}/${DRIFT_BUDGET} in use; ` +
+      (drift.length === DRIFT_BUDGET ? "at budget" : "headroom"),
+  );
+});
+
 t("knob-table line-exact drift is MEASURED and disclosed, never silently tolerated", (ctx: TestContext) => {
-  // Why this is not a strict pin, stated so nobody re-adds one: 60 source files
-  // are re-flowed by unrelated edits, and the measured drift below is what a
-  // strict `line ===` gate would fail on TODAY — an always-red gate is not a gate,
-  // it is noise that teaches the next maintainer to skip the file. The FILE-level
-  // claim (the row points at a real file containing the knob) is the part that
-  // stays pinned hard, one test above; that is the part a reader can act on.
+  // DISCLOSURE half; the budget half is the test above, in its own top-level test.
+  // Why this is not a bare `line ===` pin, stated so nobody re-adds one: 60 source
+  // files are re-flowed by unrelated edits, so a line number is a fragile thing to
+  // hang a red build on. What is pinned is that the drift NEVER EXCEEDS A NAMED
+  // BUDGET — which is 0 today, because every cell was re-derived (GOAL 232), and
+  // is enforced in the test above rather than duplicated here.
   //
   // The two assertions here are real, not decoration:
   //   1. every drifted cite is a LINE offset only — its file exists and contains
