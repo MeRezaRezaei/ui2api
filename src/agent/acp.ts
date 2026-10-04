@@ -94,6 +94,49 @@ const RPC_METHOD_NOT_FOUND = -32601;
 const RPC_UNAUTHORIZED = -32001;
 
 /**
+ * GOAL 236: an oversized body. Same server-error band as `RPC_UNAUTHORIZED` and
+ * for the same reason — the server understood the request and refuses it on
+ * policy (here: on SIZE), it is not a malformed call. The code must be an INTEGER
+ * because this envelope is JSON-RPC 2.0, whose `error.code` is an integer by
+ * specification; the repo's published code NAME (`payload_too_large`, the string
+ * promptd's `HttpClientError` carries at `src/prompt/http.ts:731` and the hub's
+ * `HubClientError` at `src/hub/api.ts:195`) therefore rides in the message as its
+ * leading token, so one code name names this refusal across every surface in the
+ * repo instead of a per-surface spelling.
+ */
+const RPC_PAYLOAD_TOO_LARGE = -32002;
+
+/**
+ * GOAL 236: this surface read its request body with NO byte cap and NO pause —
+ * `req.on("data", (chunk) => (body += chunk))` — so any caller that could reach
+ * the port streamed an arbitrarily large POST and the string grew until the
+ * process ran out of memory. This is the highest-value target on the box
+ * precisely because it is the surface that EXECUTES tools (`tools/call` forwards
+ * into `plugin.tools` and drives a real Chrome through the operator's own
+ * logged-in session). Two sibling readers already cap and answer 413
+ * `payload_too_large` — promptd (`MAX_BODY_BYTES`, `src/prompt/http.ts:679`) and
+ * the hub (`src/hub/api.ts:118`) — so this surface was the one that was missed,
+ * and this constant ports the shape of what they already do rather than
+ * inventing a fourth refusal vocabulary.
+ *
+ * WHY 1 MB, and it is the SAME number promptd uses deliberately, not on faith:
+ * both readers are handed the same SHAPE of payload — a prompt plus tool
+ * arguments, as JSON — so a caller whose ACP `tools/call` body this refuses could
+ * not have been served by `POST /prompt` either. One DoS ceiling across the two
+ * tool-execution surfaces means there is never a question ("which is right?") with
+ * no derivable answer, and 1 MB is orders of magnitude above any real prompt +
+ * args while still stopping a stream at 1 MB instead of at whatever the box's
+ * free memory happens to be. The ceiling is a DoS bound, not a feature: going
+ * wider buys nothing, going tighter risks refusing a legitimate large call.
+ *
+ * A named exported constant rather than a `UI2API_*` knob, on purpose: this repo
+ * GATES knobs (test/ci-contract-knob-cites.test.ts and the AGENTS.md knob table
+ * both fail on a knob with no documented row), and a DoS ceiling on a loopback
+ * tool surface is not an operator knob.
+ */
+export const ACP_MAX_BODY_BYTES = 1e6;
+
+/**
  * One JSON-RPC wire shape for every reply: `{ jsonrpc, id, result }` on
  * success, `{ jsonrpc, id, error: { code, message } }` on failure. `id` is
  * ALWAYS the caller's id when the request parsed — a client must be able to
@@ -103,9 +146,14 @@ function sendRpc(
   res: ServerResponse,
   status: number,
   id: unknown,
-  payload: { result?: unknown } | { code?: number; message: string }
+  payload: { result?: unknown } | { code?: number; message: string },
+  // GOAL 236: the oversized-body refusal is the one reply that must not leave the
+  // connection reusable — the upload was deliberately stopped mid-stream, so the
+  // socket is closed after the answer flushes (mirrors promptd's `connection:
+  // close` on the same class). Every other caller leaves this empty.
+  headers: Record<string, string> = {},
 ): void {
-  res.writeHead(status, { "content-type": "application/json" });
+  res.writeHead(status, { "content-type": "application/json", ...headers });
   // An error payload is `{ code?, message }`; a success payload is `{ result }`.
   // The two never share a key, so the discriminator is exact.
   if ("message" in payload) {
@@ -233,8 +281,54 @@ export async function runServer(opts: AcpOptions): Promise<void> {
       });
     }
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
+    // GOAL 236: count BYTES, not string units. The refusal names bytes and the
+    // cap is documented as 1 MB, but `body.length` counts UTF-16 code units, so a
+    // 600k-CODE-UNIT Persian body measured 600k "units" and passed a limit already
+    // blown in bytes. Chunks arrive as Buffers (no encoding is set), so
+    // `chunk.length` IS the byte count. Same correction as
+    // src/prompt/http.ts:708-713.
+    let size = 0;
+    let refused = false;
+    req.on("data", (chunk) => {
+      if (refused) return;
+      size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+      if (size > ACP_MAX_BODY_BYTES) {
+        // Four separate obligations, all load-bearing:
+        //  - `refused = true` stops this handler and any late `end` from doing
+        //    anything else at all;
+        //  - `body = ""` makes a PARTIAL PARSE IMPOSSIBLE: what is in `body`
+        //    would be the first ACP_MAX_BODY_BYTES of a body whose end we never
+        //    saw, so it must never reach `JSON.parse` below;
+        //  - `req.pause()` + dropping the `data` listener STOP the client's
+        //    stream at the cap instead of feeding a server that already refused
+        //    it — this is the whole point of the gate;
+        //  - the socket is NOT destroyed HERE but after the answer flushes (the
+        //    `finish` hook below), because destroying inside this callback is
+        //    what made `payload_too_large` unsendable in promptd: the client got
+        //    ECONNRESET and no refusal at all.
+        refused = true;
+        body = "";
+        req.pause();
+        req.removeAllListeners("data");
+        res.once("finish", () => req.destroy());
+        return sendRpc(res, 413, null, {
+          code: RPC_PAYLOAD_TOO_LARGE,
+          message:
+            `payload_too_large: request body exceeds ${ACP_MAX_BODY_BYTES} bytes. Nothing was read, ` +
+            `parsed or executed — no tool ran and no page opened. Split the request; the server has ` +
+            `stopped reading. This surface executes tools through your own logged-in session, so an ` +
+            `unbounded body is a denial of service against every caller on the box, not just against ` +
+            `this call.`,
+        }, { connection: "close" });
+      }
+      body += chunk;
+    });
     req.on("end", async () => {
+      // GOAL 236: a refused request never reaches the parser. The `end` handler is
+      // the ONLY thing that calls `JSON.parse`, so this one guard is what makes
+      // "an oversized body can never be parsed, let alone executed" a property of
+      // the code rather than a claim about it.
+      if (refused) return;
       let msg: any = {};
       try {
         // A body is REQUIRED here (pre-fix, an empty body became `{}` and was
