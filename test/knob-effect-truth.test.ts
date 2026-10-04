@@ -622,6 +622,7 @@ const EXPECTED_TRUST: readonly string[] = [
     // has no auth. Registered here BY HAND on purpose: A4.2 exists so a posture
     // knob cannot join the TRUST set silently, and this record is that step.
     "UI2API_ACP_BIND",
+    "UI2API_ACP_TOKEN",
     "UI2API_ATTACH_MAX_BYTES",
     "UI2API_ATTACH_PORT",
   "UI2API_ATTACH_ROOTS",
