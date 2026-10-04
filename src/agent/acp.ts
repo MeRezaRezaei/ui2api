@@ -10,7 +10,22 @@ export interface AcpOptions {
    * `resolveAcpBindHost`.
    */
   bindHost?: string;
+  /**
+   * Bearer token gating this surface. Unset = the daemon's own unset posture
+   * (`localhost-only`: no token required, and the loopback bind is the only
+   * thing keeping it local). See `resolveAcpToken`.
+   */
+  token?: string;
 }
+
+/**
+ * THE definition site for the ACP surface's bearer-token knob, mirroring the
+ * daemon's `TOKEN_ENV` (`src/prompt/posture.ts`) rather than inventing a second
+ * auth scheme: this repo has already solved "an HTTP surface that must not be
+ * reachable without a credential" twice, and a third shape would be a third set
+ * of semantics to keep in step.
+ */
+export const ACP_TOKEN_ENV = "UI2API_ACP_TOKEN";
 
 /**
  * GOAL 123: the ACP surface called `server.listen(port)` with NO host, so it
@@ -29,6 +44,54 @@ export const ACP_BIND_ENV = "UI2API_ACP_BIND";
 function isLoopback(host: string): boolean {
   return host === ACP_BIND_HOST || host === "localhost" || host === "::1";
 }
+
+/**
+ * GOAL 123 follow-on: THE AUTH GATE. This surface EXECUTES tools — `tools/call`
+ * drives a real Chrome through the operator's own logged-in session, so a caller
+ * that reaches this port holds a logged-in browser on every site a package names.
+ * The bind gate limits reach to THIS machine, but "this machine" includes every
+ * local process, every reverse proxy and every tunnel, and on a shared box every
+ * other user — so loopback is a perimeter, not a credential.
+ *
+ * MIRRORED FROM THE DAEMON, deliberately. `src/prompt/http.ts` reads its token
+ * the same way (`opts.token ?? process.env[TOKEN_ENV] ?? ""`) and gates with the
+ * same single test (`if (token && authorization !== \`Bearer ${token}\`)`), and
+ * its unset posture is `auth: "token" | "localhost-only"` — i.e. **unset means no
+ * token is demanded**, and the loopback bind is what confines the surface. That
+ * is deliberately NOT tightened here: an operator who exports the knob and gets
+ * 401s on every existing consumer has configured a broken daemon, not a safer
+ * one, and a gate that cannot be switched on is a gate that gets switched off.
+ *
+ * The hub's shape (`src/hub/api.ts`, `if (!okToken) return 401`) is NOT mirrored
+ * here, and the difference is deliberate: the hub demands a token even when
+ * unset, because its unset token makes EVERY publish fail. Matching that here
+ * would mean an unset knob that bricks `tools/call` outright.
+ *
+ * The token VALUE is never logged, echoed, or placed in an error message: the
+ * refusal names the env var and nothing else, so a refusal body is safe to put
+ * in a client log or a bug report.
+ */
+export function resolveAcpToken(opts?: string): string {
+  return opts ?? process.env[ACP_TOKEN_ENV] ?? "";
+}
+
+/**
+ * JSON-RPC error codes this server emits, so a refusal is a real refusal.
+ * Declared ABOVE the request handler because the credential gate is the first
+ * thing in it: a code constant used before its own declaration is a temporal
+ * dead zone waiting for the one reader who imports this module in a way that
+ * reorders evaluation.
+ *
+ * `RPC_UNAUTHORIZED` is the JSON-RPC server-error band (-32000..-32099), which is
+ * where "this server understood you and refuses on policy" belongs. The
+ * pre-defined codes below are all *request* faults, and answering a missing
+ * credential with one of those would tell the client it had sent a malformed
+ * call — the opposite of what happened.
+ */
+const RPC_INVALID_REQUEST = -32600;
+const RPC_INVALID_PARAMS = -32602;
+const RPC_METHOD_NOT_FOUND = -32601;
+const RPC_UNAUTHORIZED = -32001;
 
 /**
  * One JSON-RPC wire shape for every reply: `{ jsonrpc, id, result }` on
@@ -52,18 +115,65 @@ function sendRpc(
   res.end(JSON.stringify({ jsonrpc: "2.0", id: id ?? null, result: payload.result }));
 }
 
-export function resolveAcpBindHost(requested?: string): string {
+/**
+ * The one place a bind is decided, for EVERY caller. MEASURED 2026-10-04, and
+ * this is a correction of a reported defect rather than a fix of one: the claim
+ * was that `serveInstanceAcp` passing no `bindHost` left `UI2API_ACP_BIND` inert
+ * on the `hub run <host> --acp` path. It does not. The env fallback lives INSIDE
+ * this resolver (`requested ?? process.env[ACP_BIND_ENV]`), so a caller that
+ * passes nothing still resolves the knob — measured, with `bindHost` undefined:
+ * `UI2API_ACP_BIND=0.0.0.0` -> `0.0.0.0`, `UI2API_ACP_BIND=10.0.0.5` ->
+ * `10.0.0.5`, unset -> `127.0.0.1`. `runServer` also has exactly ONE caller in
+ * the tree (`src/hub/serve.ts` `serveInstanceAcp`, from `cmdHubRun --acp`); the
+ * generated ACP servers speak stdio and never reach this function. So there was
+ * no second path whose resolution could disagree, and no `serve.ts` change was
+ * required to make them agree — inventing one would have been a cosmetic edit
+ * dressed as a fix.
+ *
+ * WHAT WAS REAL, AND IS NOW CLOSED. The measurement did surface a genuine
+ * silent-no-op next door, in the combination the original refusal text itself
+ * named: `UI2API_ACP_BIND=0.0.0.0` with no token was ACCEPTED, which is exactly
+ * "a wider bind … with no credential to stop them". The two knobs were
+ * orthogonal when they must not be: each was individually opt-in, and together
+ * they opened a network-reachable tool-execution port with nothing to stop
+ * anyone. So a widened bind now REQUIRES a credential. This is a tightening, and
+ * deliberately so: the bind knob's whole purpose is to reach this port from
+ * somewhere other than this machine, and a machine-local process is the one
+ * caller a loopback bind already admits.
+ *
+ * ONE THROW, TWO REASONS, ON PURPOSE. The refusal literal's opening clause is the
+ * anchor `test/skills-refusal-truth.test.ts` derives and requires every skill
+ * that names `UI2API_ACP_BIND` to quote verbatim, so it is byte-identical to
+ * before. The condition-specific half is a CONTINUATION of that one statement
+ * rather than a second `throw`, which is the shape that derivation explicitly
+ * exempts from being a seam of its own — a second throw statement here would
+ * have demanded a second literal from skill files this change may not edit.
+ */
+export function resolveAcpBindHost(requested?: string, token?: string): string {
   const want = requested ?? process.env[ACP_BIND_ENV];
   if (!want) return ACP_BIND_HOST;
   if (isLoopback(want)) return want;
-  if (process.env[ACP_BIND_ENV] === want) return want; // explicit opt-in
-  throw new Error(
-    `refusing to bind the ACP server to ${want}: it defaults to ${ACP_BIND_HOST} because this port ` +
-      `executes tools — a wider bind hands anyone who can reach it a real browser driven with your ` +
-      `own logged-in session (and, with no auth on this surface, no credential to stop them). ` +
-      `Set ${ACP_BIND_ENV}=${want} to opt in deliberately, or keep ${ACP_BIND_HOST} and reach it ` +
-      `through a tunnel.`
-  );
+  const optedIn = process.env[ACP_BIND_ENV] === want;
+  const credentialed = Boolean(resolveAcpToken(token));
+  if (!optedIn || !credentialed) {
+    throw new Error(
+      `refusing to bind the ACP server to ${want}: ` +
+        (optedIn
+          ? `${ACP_BIND_ENV} names it, so the bind itself is what you asked for — but no credential is ` +
+            `set, and this port executes tools: a wider bind with nothing to stop a caller hands anyone ` +
+            `who can reach it a real browser driven with your own logged-in session. Set ${ACP_TOKEN_ENV} ` +
+            `to the token clients will send in \`authorization: Bearer …\`; leaving it unset is safe only ` +
+            `while the bind stays on ${ACP_BIND_HOST}, which every process on this machine can reach but ` +
+            `nothing else can. The alternative to both is to keep ${ACP_BIND_HOST} and reach it through ` +
+            `a tunnel.`
+          : `it defaults to ${ACP_BIND_HOST} because this port executes tools — a wider bind hands anyone ` +
+            `who can reach it a real browser driven with your own logged-in session (and, with no ` +
+            `credential set, nothing to stop them). Set ${ACP_BIND_ENV}=${want} to opt in deliberately ` +
+            `(and ${ACP_TOKEN_ENV}, which a widened bind now requires), or keep ${ACP_BIND_HOST} and ` +
+            `reach it through a tunnel.`)
+    );
+  }
+  return want;
 }
 
 // Minimal Agent Client Protocol (ACP) JSON-RPC server over HTTP. It exposes a
@@ -72,8 +182,32 @@ export function resolveAcpBindHost(requested?: string): string {
 // context — this server just forwards tool calls into `plugin.tools`.
 export async function runServer(opts: AcpOptions): Promise<void> {
   const { plugin, port } = opts;
-  const host = resolveAcpBindHost(opts.bindHost); // throws BEFORE the socket exists
+  const token = resolveAcpToken(opts.token);
+  // The SAME resolved token, not a re-read of the env: one resolver decides both
+  // the bind and the credential, so the widened-bind gate cannot disagree with
+  // the request gate about whether a credential exists.
+  const host = resolveAcpBindHost(opts.bindHost, token); // throws BEFORE the socket exists
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    // THE CREDENTIAL GATE, and it is FIRST — ahead of the route check, the
+    // method check, the body read and the tool router, so a refused request has
+    // executed nothing at all (no page opened, no tool dispatched, no recipe
+    // replayed). The daemon gates at the same point in its own handler
+    // (`src/prompt/http.ts`, ahead of capability dispatch) for the same reason.
+    // An auth gate placed after routing would still answer a scanner with a
+    // route-shaped 404, which is a map of this surface handed out for free.
+    if (token && req.headers.authorization !== `Bearer ${token}`) {
+      return sendRpc(res, 401, null, {
+        code: RPC_UNAUTHORIZED,
+        message:
+          `unauthorized: this surface executes tools through your own logged-in session, so a caller ` +
+          `with no credential must not reach it. Send an \`authorization: Bearer <your token>\` header on ` +
+          `the POST. No tool ran and nothing was read. Set ${ACP_TOKEN_ENV} to the token you send. ` +
+          `Leaving it unset is a posture, not a default to fix: this server then demands no token and ` +
+          `relies on being bound to ${ACP_BIND_HOST}, reachable only from processes on this machine — so if ` +
+          `you widened the bind, the credential is what you are missing. The alternative to a wider bind ` +
+          `is to keep it on ${ACP_BIND_HOST} and reach it through a tunnel.`,
+      });
+    }
     // GOAL 123: route discipline. This used to dispatch ANY method on ANY path
     // with ANY body into the tool router, so the tool-execution port answered a
     // `GET /` from any scanner on the LAN with a JSON-RPC body. Only the two
@@ -176,11 +310,6 @@ export async function runServer(opts: AcpOptions): Promise<void> {
  */
 export const ACP_PROTOCOL_VERSIONS = ["2025-03-26"] as const;
 export const ACP_PROTOCOL_VERSION = ACP_PROTOCOL_VERSIONS[ACP_PROTOCOL_VERSIONS.length - 1];
-
-/** JSON-RPC error codes this server emits, so a refusal is a real refusal. */
-const RPC_INVALID_REQUEST = -32600;
-const RPC_INVALID_PARAMS = -32602;
-const RPC_METHOD_NOT_FOUND = -32601;
 
 /** An error carrying a JSON-RPC `code`, so the wire body is a real error. */
 class RpcError extends Error {
