@@ -121,6 +121,30 @@ function refuseIfFailedFetch(out: WigoloFetchOutput | null | undefined, label: s
   throw new Error(`wigolo refused ${label}: ${parts.join("; ")}`);
 }
 
+// A SUCCESSFUL fetch is not proof that the ACTION ran. The daemon answers
+// HTTP 200 for a page it read fine while an individual action was skipped (the
+// selector matched nothing), dropped by a version skew, or never attempted — so
+// `action_results` can come back with no entry for the action we asked for.
+// Reading that absence as `{ ok: true }` is a FABRICATED SUCCESS: the caller
+// goes on believing the text was pasted or the keys were pressed when nothing
+// happened, which is the one thing this project forbids outright (AGENTS.md,
+// "no fabricated traffic"). The native tier beside it is honest — it reports
+// `{insertedChars}` / `{pressed}` — and two tiers disagreeing about whether the
+// input landed is exactly the drift this guard removes.
+//
+// So the absence is a REFUSAL naming the action, shaped like every other refusal
+// in this file (`wigolo refused <label>: <reason>`) so `withBrowserFallback`
+// re-throws it by name instead of degrading it into a native retry that would
+// answer a different shape for the same call. An entry whose `output` is empty
+// is the same absence: no output is not evidence the input landed.
+function requireActionOutput<T = unknown>(out: WigoloFetchOutput, type: string, label: string): T {
+  const entry = out?.action_results?.find((r) => r.type === type);
+  if (entry && entry.output !== undefined && entry.output !== null) return entry.output as T;
+  throw new Error(
+    `wigolo refused ${label}: no usable "${type}" action_result in the daemon answer (the entry is missing or its output is empty) — the selector may have matched nothing, the action may have been skipped, or the daemon may be version-skewed; a missing action result is NOT evidence the action ran, so this is refused rather than answered with an invented success`
+  );
+}
+
 // Defence in depth behind the runtime's loopback-only daemon gate
 // (`src/runtime/wigolo.ts`): a daemon answer must describe the site we asked
 // about. A cross-origin `url`/`source_url` means the answer was NOT read off
@@ -391,7 +415,7 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
         return withBrowserFallback<unknown>(
           async () => {
             const out = await domFetch([{ type: "paste", selector: sel, text: String(text) }]);
-            return out.action_results?.find((r) => r.type === "paste")?.output ?? { ok: true };
+            return requireActionOutput(out, "paste", "paste into " + sel);
           },
           async (p) => {
             await p.locator(sel).first().focus();
@@ -413,7 +437,7 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
         return withBrowserFallback<unknown>(
           async () => {
             const out = await domFetch([{ type: "keys", selector: sel ?? undefined, keys }]);
-            return out.action_results?.find((r) => r.type === "keys")?.output ?? { ok: true };
+            return requireActionOutput(out, "keys", "press keys " + keys);
           },
           async (p) => {
             if (sel) await p.locator(sel).first().focus();
