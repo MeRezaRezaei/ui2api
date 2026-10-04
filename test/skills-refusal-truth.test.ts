@@ -93,6 +93,87 @@ function stripJsComments(src: string): string {
 }
 
 /**
+ * The `[start, end)` index ranges of every TEMPLATE LITERAL, on the
+ * length-preserved stripped source so an index is also an index into the raw
+ * file.
+ *
+ * `stripJsComments` deliberately leaves `//` and `/*` INSIDE a string alone —
+ * that is correct JavaScript: text in a template literal is text, not a comment.
+ * The consequence the derivation then has to respect is that a template literal
+ * may contain a whole FOREIGN-SOURCE PROGRAM. `src/generator/lang-php.ts`
+ * carries the entire PHP client inside backticks, so `function capability(` there
+ * is PHP, and the `//` on the line below it is a PHP comment — code a generator
+ * EMITS, not a message the runtime ever prints. Scanning that as if it were
+ * JavaScript is how a mangled comment fragment became a "refusal".
+ *
+ * Deliberately BACKTICK-ONLY, and top-level string-aware, so it introduces no
+ * fragility class `stripJsComments` does not already have: a `'` in a regex or a
+ * `"` in a comment cannot fabricate a span.
+ */
+export function templateSpans(src: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < src.length) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === c) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if (c !== "`") continue;
+    const start = i;
+    i++;
+    while (i < src.length) {
+      if (src[i] === "\\") { i += 2; continue; }
+      if (src[i] === "`") { i++; break; }
+      if (src[i] === "$" && src[i + 1] === "{") {
+        let d = 1;
+        i += 2;
+        while (i < src.length && d > 0) {
+          const e = src[i]!;
+          if (e === "{") { d++; i++; continue; }
+          if (e === "}") { d--; i++; continue; }
+          if (e === '"' || e === "'" || e === "`") {
+            const q = e;
+            i++;
+            while (i < src.length) {
+              if (src[i] === "\\") { i += 2; continue; }
+              if (src[i] === q) { i++; break; }
+              i++;
+            }
+            continue;
+          }
+          i++;
+        }
+        continue;
+      }
+      i++;
+    }
+    spans.push({ start, end: i });
+  }
+  return spans;
+}
+
+/** Is `index` inside one of `spans`? */
+function insideSpans(spans: Array<{ start: number; end: number }>, index: number): boolean {
+  return spans.some((s) => index >= s.start && index < s.end);
+}
+
+/** Byte offset of a 1-based `line` in `raw`; `-1` when the line does not exist. */
+function offsetOfLine(raw: string, line: number): number {
+  let off = 0;
+  for (let n = 1; n < line; n++) {
+    const i = raw.indexOf("\n", off);
+    if (i < 0) return -1;
+    off = i + 1;
+  }
+  return off < raw.length ? off : -1;
+}
+
+/**
  * Refusal markers — MORPHOLOGICAL, not a list of this repo's seams. Any literal
  * carrying one of these English shapes is an emitted refusal, wherever it lives.
  * This is the one judgement in the file, and it is stated rather than hidden.
@@ -521,7 +602,21 @@ export function deriveSeams(): Seam[] {
     // has no `parseFlags`, so nothing outside the parser-owning module is
     // affected by this at all.
     const derivedSets = derivedFlagSetsIn(src);
-    for (const fn of new Set([...src.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)].map((m) => m[1]!))) {
+    // A `function <name>(` inside a TEMPLATE LITERAL is FOREIGN SOURCE — the PHP
+    // client `src/generator/lang-php.ts` emits, whose `//` lines are PHP comments
+    // — and none of it is a message the runtime prints. Left in, the PHP body was
+    // brace-matched and then scanned as JavaScript, the apostrophe in
+    // `the runner's own honest refusal` opened a JS string, and the seam
+    // `anchor "s own honest\n            // refusal"` was born with `--tag` (read
+    // out of the same PHP body) as its trigger. The exclusion is at the
+    // DECLARATION, not at the literal: every such body is foreign source, so
+    // filtering per-literal would only remove today's symptom while the next
+    // foreign body kept producing the next mangled anchor.
+    const templates = templateSpans(src);
+    const fnDecls = [...src.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)].filter(
+      (m) => !insideSpans(templates, m.index),
+    );
+    for (const fn of new Set(fnDecls.map((m) => m[1]!))) {
       const { body, offset } = functionBody(src, fn);
       if (!body) continue;
       const cmdPath = commandPathFromHandler(fn);
@@ -787,6 +882,80 @@ test("every derived seam carries at least one command/flag/env trigger", () => {
 test("every derived anchor is distinctive enough to be a token (>= 8 chars, no interpolation)", () => {
   const weak = SEAMS.filter((s) => s.anchor.length < ANCHOR_MIN || s.anchor.includes("${"));
   assert.deepEqual(weak.map((s) => s.anchor), []);
+});
+
+/**
+ * A seam is only a REFUSAL if a human-facing message the runtime actually prints
+ * carries it. `src/generator/lang-php.ts` holds the entire PHP client inside one
+ * template literal, so `function capability(` there is PHP SOURCE and the `//`
+ * under it is a PHP comment. `deriveSeams` matched the declaration, brace-matched
+ * the PHP body, and then scanned it as JavaScript: the apostrophe in
+ * `the runner's own honest refusal` opened a JS "string" whose contents ran on
+ * into `$data['error']`, and that mangled fragment became the seam
+ *
+ *     anchor `s own honest\n            // refusal`   flags [`--tag`]
+ *
+ * `--tag` came out of the same PHP body. Nothing about that seam is a refusal any
+ * caller can be asked to carry — and a gate satisfiable by pasting a comment
+ * fragment into a skill is not a gate.
+ *
+ * The test is deliberately not "the anchor is not this exact string": it
+ * recomputes the template spans per file and fails for ANY seam whose literal
+ * lands inside one, and separately asserts the exclusion is LOAD-BEARING — there
+ * really is at least one function declaration inside a template literal in
+ * `src/`, so the check cannot pass by having nothing to exclude.
+ */
+test("no refusal seam is derived from FOREIGN SOURCE inside a template literal", () => {
+  const offenders: string[] = [];
+  const embedded: string[] = [];
+  for (const file of tsFilesUnder(SRC)) {
+    const raw = readFileSync(file, "utf8");
+    const spans = templateSpans(stripJsComments(raw));
+    if (spans.length === 0) continue;
+    const rel = file.slice(REPO.length + 1);
+    const stripped = stripJsComments(raw);
+    for (const m of stripped.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)) {
+      if (insideSpans(spans, m.index)) embedded.push(`${rel}: ${m[1]}()`);
+    }
+    for (const s of SEAMS) {
+      if (!s.at.startsWith(`${rel}:`)) continue;
+      const off = offsetOfLine(raw, Number(s.at.slice(rel.length + 1)));
+      if (off < 0 || !insideSpans(spans, off)) continue;
+      offenders.push(
+        `  ${s.at} fn ${s.fn} anchor ${JSON.stringify(s.anchor)} flags ${JSON.stringify(s.flags)}`,
+      );
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `refusal seams derived from code a generator EMITS rather than from a message the runtime prints:\n${offenders.join("\n")}`,
+  );
+  assert.ok(
+    embedded.length > 0,
+    "no function declaration inside a template literal was found in src/ — the template-literal " +
+      "exclusion in deriveSeams() is vacuous, so this test would pass for the wrong reason",
+  );
+  assert.ok(
+    embedded.includes("src/generator/lang-php.ts: capability()"),
+    `expected the embedded PHP client's own capability() to be among ${embedded.length} template-declared ` +
+      `functions; got: ${embedded.join(", ") || "(none)"}`,
+  );
+});
+
+/**
+ * The signature of the defect itself, independent of where it came from: an
+ * anchor carrying a line-comment marker, or spanning lines, is not a sentence a
+ * daemon prints — it is source text. This is the property that makes the gate
+ * non-satisfiable-by-comment-paste, and it holds whatever the extraction does.
+ */
+test("no derived anchor is a comment fragment or a multi-line blob", () => {
+  const bad = SEAMS.filter((s) => /(^|\s)\/\/|\/\*/.test(s.anchor) || /[\r\n]/.test(s.anchor));
+  assert.deepEqual(
+    bad.map((s) => `${s.at} fn ${s.fn} anchor ${JSON.stringify(s.anchor)}`),
+    [],
+    "a comment fragment is pasteable into any skill, so an anchor shaped like one cannot gate anything",
+  );
 });
 
 test("a skill that NAMES a refusal-emitting command/flag/env CARRIES that refusal's literal", () => {
