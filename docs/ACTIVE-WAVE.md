@@ -514,41 +514,81 @@ cannot match `ui2api_driver_error`, the very code `/prompt` was just changed to 
 error-contract gate was blind to it **on both routes**. I verified this in one command before
 dispatching. Being worked.
 
+### ROUND N+194j — the deploy trap was worse than reported, and the error scanner now sees (2026-10-05)
+
+Three lanes closed. **Two of them disproved something I asserted**, which is the second time in
+two rounds and remains the most valuable thing this round produces.
+
+**`e455e2c` — the deploy trap. I said the incident was caught by `set -e` ordering. That was wrong.**
+The lane reproduced the destroying rsync in a scratch tree: with `--exclude 'node_modules/'` it
+**exits 0**. So `set -e` would **not** have stopped the script — the caught run aborted for an
+unrelated reason, and **there was no ordering property to rely on**. It also found **16 vulnerable
+patterns**, not one: `node_modules/ dist/ .git/ .brain/ sites/ .agents/ .opencode/ graphify-out/`
+in both the preserve (`:199`) and stage (`:482`) rsyncs, each independently enough to destroy
+something. `data/` was safe **by accident** — `--exclude '/data'` has no trailing slash.
+Two independent defences shipped: a `preflight()` that runs **before the first rsync of either
+tree** and refuses a symlink/non-directory at any deploy-owned name (the destroy primitive is never
+invoked, so step order cannot matter), and every exclude made type-agnostic. `--delete` **stays**
+— stale sources are the half-written-file class — and is safe because rsync does not delete
+*excluded* destination files; `--delete-excluded` inverts that and is now **banned by a gate**
+(measured: it re-opens the hole). `--delete-delay` deliberately not used: it cannot help a wrong
+exclude. Registered as `6800409`.
+
+**`9a46d95` — the error-code scanner's blindness, now measured not argued.** The old pattern
+`([a-z_]+)` missed **six** served codes, and the lane classified each rather than listing them:
+`ui2api_driver_error` (`http.ts:1789`, `openai.ts:1378` — the real blindness, a digit),
+hyphenated diagnostics `vault-root-unresolvable` `:464`/`:545`, `vault-unreadable` `:560`,
+`host-unreadable` `:591`, `vault-probe-threw` `:1553`. One shared `CODE_CLASS = "A-Za-z0-9_-"`.
+**Not `[^\"]*`, which accepts prose.** Vocabulary **16 → 17**, newly visible `502
+ui2api_driver_error`. Reverting the class to `[a-z_]` turns **3 of its own pins RED**, naming the
+class — so the gate is armed, not merely wider. Live agreement confirmed: `/prompt` and `/v1` both
+answer `ui2api_driver_error` 502 for the same condition.
+
+**`ccdd547` — a runner failure now names its cause without `DEBUG`.** Measured **before**, on a
+real daemon with `UI2API_DEBUG` unset, the stderr capture for a genuine `youtube_search` failure was
+**empty**. After:
+```
+[ui2api] capability youtube_search failed: cause=ssrf-guard-refusal — SSRF guard: refusing to
+navigate https://www.youtube.com — origin pinning serves only youtube.com, never arbitrary URLs
+```
+**Option 2 chosen over Option 1, and the reasoning is the interesting part:** a scrub that deletes
+the diagnosis *is* the defect wearing a safety hat. So `redactFaultCause` drops node_modules
+references, absolute paths, stack frames, `Call log:`, DOM selectors and URL query — and **keeps**
+the guard name, both hosts and the deadline. `/status` gains `capabilityFailures: {count, last:
+{capability, cause, at}}`, a **code** with no redaction pass needed. The response body is unchanged
+and still says only *"see the daemon log, which names the cause"* — a log may name the cause, a
+response may not. Registered as `dd0a587`.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
 order, all re-confirmed still real:
 
-1. **The error-contract scanner's blind code** — `([a-z_]+)` cannot see `ui2api_driver_error`; being
-   worked.
-2. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
+1. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
    (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
    half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
    reporting it, not fixing it, and not committing it.
-3. **A capability fault is undiagnosable in production**: `capabilityFailure` logs its cause only
-   under `UI2API_DEBUG=1`, which the shipped systemd unit never sets — so a runner fault leaves no
-   trace on the box that has it. Found by `338393b`.
-4. `deepseek` measures an honest 502 `COMPOSER-DRIFT`, but the classifier has **no member for that
-   sentence**, so it derives `UNCLASSIFIED` and the seam refuses to write it. A real outcome the
-   vocabulary cannot express — the ninth instance of the class, in the classifier rather than a regex.
-5. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten, and
-   `RETURNS-DATA` has no row in that table. Unpinned doc.
-6. `src/prompt/pool.ts` — a **wedged** busy dropped worker is unreachable by `reclaimWedgedWorkers`
-   (`:1183` filters `this.workers`) so it never self-cleans; and `/status` still reports worker count
-   only, so even a bounded orphan is undetectable there.
-7. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
-   (2026-09-29/30) that **disagree with their verified receipts**. Importing them would demote
-   three more sites — a real honesty question nobody has answered yet.
-8. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
-   names are **UNTRACKED**. Registering an untracked file is the *opposite* direction of the rule
-   and the gate correctly refuses it, so this red clears when that workstream commits, not before.
-   **Not mine to force.**
-
-**One operational defect this round produced and must not recur:** `deploy.sh`'s
-`--exclude 'node_modules/'` does not match a **symlink**, so an rsync `--delete` gutted
-`/opt/ui2api/node_modules`. The deploy aborted under `set -e` before any restart and the re-run's
-`npm ci` restored it — no outage, but it is a real trap in a deploy script. The fix is
-`--exclude 'node_modules'`.
+2. **The four sites still unmeasured** — `deepseek` (honest 502 `COMPOSER-DRIFT`), `kimi` and
+   `tencent-aistudio` (honest 502 `ui2api_driver_error`, a sign-in/consent wall), `youtube` (now
+   navigable, but its round-trip row predates the SSRF fix). **The gate is honestly RED and that is
+   its job working** — these four are published `verified` and no measurement yet says so.
+3. `COMPOSER-DRIFT` has **no classifier member**, so it derives `UNCLASSIFIED` and the seam refuses
+   to write it — a real outcome the vocabulary cannot express. Tenth instance of the class.
+4. **Indirection blindness, same class:** `SHAPE_MESSAGES` codes (`unknown_site`, `not_chat`,
+   `bad_request` at `http.ts:1806-1815`) reach the wire **via a variable**, so the now-correct
+   source scanner cannot see them either; and `test/pool-refusal-truth.test.ts:81` holds a
+   **second hand-copied `parseDocTable`** still carrying the old `[a-z_]+` class.
+5. `src/capabilities/gmail.ts` still carries youtube's **bare-host-vs-www** shape and is not covered
+   by the www-sibling table — the same latent defect class `7e3e3a6` just fixed for youtube.
+6. `scripts/ops/deploy.sh`'s sibling concerns: `host-independence` RED is pre-existing on another
+   lane's `test/pool-atomic-max.test.ts:192` (verified with the deploy edits stashed).
+7. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten.
+8. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
+   (2026-09-29/30) that **disagree with their verified receipts** — a real honesty question
+   nobody has answered.
+9. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
+   names are **UNTRACKED**. The gate correctly refuses to register a file the repo does not ship, so
+   this red clears when that workstream commits, and not before. **Not mine to force.**
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
