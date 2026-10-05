@@ -145,6 +145,46 @@ function requireActionOutput<T = unknown>(out: WigoloFetchOutput, type: string, 
   );
 }
 
+// Read the stored cookie jar for `host`, or refuse BY NAME. `useAuth` is the
+  // posture this context was created with (authRequired, or UI2API_WIGOLO_USE_AUTH=0
+  // to opt out); it decides only the meaning of an ABSENT file, never the
+  // meaning of a BROKEN one. Returns [] for a legitimately absent session on an
+  // anonymous context — the only path where "no cookies" is the honest answer.
+  //
+  // Exported for its own test: the refusal is unreachable without a real browser
+  // (getNativePage launches one first), and a gate nobody can run is a gate
+  // nobody reads.
+export function readStoredSessionCookies(path: string, host: string, useAuth: boolean): any[] {
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf8");
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      const why = (e as Error)?.message ?? String(e);
+      if (code === "ENOENT") {
+        if (!useAuth) return []; // anonymous is the declared posture for this context
+        throw new Error(
+          `session refused for ${host}: no stored session at ${path} — this context was created to reuse a logged-in session, so running logged-out would be a different run than the one asked for; capture it first (ui2api profile capture <url> --login) or create the context without authRequired`
+        );
+      }
+      throw new Error(`session refused for ${host}: stored session at ${path} is unreadable (${why}) — refusing rather than driving the site logged-out`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(
+        `session refused for ${host}: stored session at ${path} is not valid JSON (${(e as Error)?.message ?? String(e)}) — refusing rather than driving the site logged-out`
+      );
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(
+        `session refused for ${host}: stored session at ${path} parsed to ${parsed === null ? "null" : typeof parsed}, not a cookie array — refusing rather than driving the site logged-out`
+      );
+    }
+    return parsed;
+  }
+
 // Defence in depth behind the runtime's loopback-only daemon gate
 // (`src/runtime/wigolo.ts`): a daemon answer must describe the site we asked
 // about. A cross-origin `url`/`source_url` means the answer was NOT read off
@@ -207,14 +247,28 @@ export function createWigoloContext(config: HubConfig, deps: ContextDeps): Ui2Ap
 
   // --- lazy native-browser page: only for live `call()` and browser-tier fallback ---
   let page: any = null;
+  // The stored session is the POINT of this tier: cookies are injected so the
+  // native page runs as the logged-in user. A bare `catch {}` around the read
+  // swallowed every way it can fail — a permissions error, a truncated file, a
+  // JSON shape that is not a cookie array — and the page then drove the site
+  // LOGGED-OUT while the caller still believed it had driven the stored
+  // session. A logged-out run is not a degraded success, it is a different run,
+  // so it is refused by name like every real runner does
+  // (gmail.ts:173, claude.ts:130, gemini.ts:208 all refuse a missing snapshot).
+  //
+  // One honest exception: NO session file at all is not corruption. When this
+  // context was NOT asked to authenticate (`useAuth` false), anonymous IS the
+  // declared posture — some sites are served anonymously — so absence proceeds
+  // with no cookies rather than inventing a failure. The moment auth IS
+  // expected, a missing session is a refusal: we cannot honour the posture we
+  // were given. Anything else (unreadable, unparseable, not an array) refuses
+  // in BOTH modes, because a broken session is a rot signal either way.
   async function getNativePage(): Promise<any> {
     if (page) return page;
     const browser = await launchBrowser();
     const ctx = await browser.newContext();
-    try {
-      const c = JSON.parse(readFileSync(sessionPath(dataDir, host), "utf8"));
-      if (Array.isArray(c)) await ctx.addCookies(c);
-    } catch {}
+    const cookies = readStoredSessionCookies(sessionPath(dataDir, host), host, useAuth);
+    if (cookies.length) await ctx.addCookies(cookies);
     page = await ctx.newPage();
     await page.goto(baseUrl, { waitUntil: "load", timeout: 30000 });
     return page;
