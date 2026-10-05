@@ -1067,3 +1067,729 @@ d("RELEASE EXCLUSIONS: one owner, three deriving readers", () => {
     assert.ok(!re.test("./Xgit/config"), "`.git` must be escaped — it must not match Xgit/");
   });
 });
+
+/* ========================================================================
+ * GOAL 183 — A BEHAVIOUR CHANGE MUST SHIP WITH ITS TEST.
+ *
+ * WHY THIS FILE, AND WHY THIS SECTION.
+ *   This file's whole subject is a SHIPPED ARTIFACT THAT PASSES EVERY CHECK
+ *   WHILE CARRYING THE DEFECT: a credential red line resting on one line of
+ *   .gitignore that zero tests read; a release tarball that printed
+ *   `exclusions re-checked: clean` over bytes carrying `.brain/`; a
+ *   tip-clean destination whose history was dirty. GOAL 183 is the same shape
+ *   one level up — a residue that compiled cleanly, passed every test that
+ *   exists, and shipped a renamed copy of the very bug it existed to kill.
+ *   The common root is not "a bad edit"; it is that NOTHING MEASURED THE
+ *   COMBINATION. Every check this repo had was asking "is the code correct?"
+ *   and none was asking "did the proof travel with the code?".
+ *
+ * THE MEASURED FAILURE (GOAL 183's own text).
+ *   Four delegated lanes returned truncated results and three died at a
+ *   HANDOFF. The worst wrote a credential-path behaviour change into
+ *   src/runtime/session-store.ts and returned the literal string "Now the
+ *   gate test file:". Its residue compiled cleanly and passed every test that
+ *   existed. A reviewer read it by hand, found `tsc` clean and the covering
+ *   tests green, and called it "coherent and correct". It was not.
+ *
+ * WHY A COMMIT-RANGE CHECK, AND NOT A WORKING-TREE CHECK.
+ *   "Shipped together" is a fact about what LANDED, and the unit that landed is
+ *   the commit. This is also the only scope that is sound in a repo where four
+ *   agents share one worktree: a working-tree rule would fire on every
+ *   in-flight edit, and test/gate-wiring.test.ts already records that exact
+ *   false positive as the class that teaches people to ignore a gate. So the
+ *   honest limit of this gate is stated up front: it judges SHIPPED changes.
+ *   An uncommitted residue — the literal GOAL-183 shape — is invisible to any
+ *   commit-range rule, and is covered by the independent-verifier rung instead.
+ *
+ * THE SCOPE BOUNDARY, DECIDED, WITH THE FALSE-POSITIVE ARGUMENT.
+ *   A repo legitimately changes comments, docs, generated files and formatting
+ *   with no test, so "any file under src/ changed" is NOT the rule. This repo
+ *   has already shipped two gates that were vacuous for exactly that reason, so
+ *   the boundary is defined by WHAT THE CHANGE ACTUALLY IS rather than by a
+ *   directory or a heuristic:
+ *
+ *     A BEHAVIOUR CHANGE is a path in the shipped compile set — derived from
+ *     tsconfig.json's own `include`, never a hand-typed `src/` — whose CONTENT
+ *     changes once every COMMENT and every WHITESPACE character is removed.
+ *     String and template-literal contents are preserved, because a changed
+ *     string literal IS a behaviour change (`"dry run"` -> `"CHANGED"` was one
+ *     of the four real findings below).
+ *
+ *     THE COMMENT/FORMAT INSENSITIVITY IS NOT NICETY, IT IS THE FALSE-POSITIVE
+ *     CONTROL, and it is measured on this repo's real history rather than
+ *     argued: over the last 120 commits the naive rule ("a src/*.ts path was
+ *     touched and no test/ path was touched") flags 6 commits, and this rule
+ *     flags 4. The 2 extra are commits whose entire src change was comments and
+ *     whitespace; 28 individual changed src files in that window were
+ *     comment/format-only and are correctly silent. A gate that cried wolf on
+ *     those would have been switched off, which is the outcome the goal names
+ *     as the one this repo has already produced twice.
+ *
+ *     MEASURED THROUGH THIS GATE'S OWN FUNCTIONS over those same 120 commits:
+ *     27 accompanied, 4 unaccompanied, 89 with no behaviour change. All 4 reds
+ *     are true positives — `src/plugin/wigolo-context.ts` (the wigolo tier may
+ *     not invent a success), `src/agent/acp.ts` twice (the ACP credential gate,
+ *     and the hub publish hardening), and `src/cli.ts` (refusing unknown
+ *     flags) — each a real behaviour change whose own commit moved no test.
+ *
+ *     AND THE COMMENT CASE IS NOT HYPOTHETICAL: commit 61d65a1, the very commit
+ *     that corrected a phantom gate claim on the credential path, changes
+ *     `src/runtime/session-store.ts` ENTIRELY in comments. A naive rule flags
+ *     it; this rule reports zero behaviour files, which is the correct answer.
+ *
+ *   THE ASYMMETRY. A commit that changes shipped behaviour AND moves the
+ *   verification surface is fine. One that changes shipped behaviour with NO
+ *   verification change is the defect. `sites/`, `data/`, `dist/`, `capabilities/`
+ *   and `docs/` are excluded — BY DERIVATION, not by a hand-typed list: they are
+ *   not in tsconfig.json's `include`, so they cannot be behaviour changes. A
+ *   list of forbidden directories would be a second place to forget an entry,
+ *   which is the rot this file's own `isForbiddenTracked` rewrite already had to
+ *   remove once.
+ *
+ *   THE VERIFICATION SURFACE is derived the same way, from three shipped files
+ *   rather than from `test/` typed out: tsconfig.test.json's `include` minus
+ *   tsconfig.json's `include`, restricted to the directory the unit suite
+ *   actually runs its files from (the common root of the paths named by
+ *   scripts["test:unit"]). It is not restricted to `.ts`, because a commit whose
+ *   only test-side change is a JSON fixture is still a commit that moved the
+ *   verification surface — and it is NOT counted when the test-side edit is
+ *   comment-only, because "add a comment to a test" is not proof and must not be
+ *   able to buy a green gate.
+ *
+ *   KNOWN FALSE NEGATIVES, named rather than discovered later:
+ *     - `scripts/**` is typechecked by tsconfig.test.json but is NOT in the
+ *       shipped build, so a behaviour change confined to a CI/ops script is not
+ *       gated here.
+ *     - A regex literal containing `//` can make the scanner read the rest of the
+ *       line as a comment, hiding a same-line change. Swept: across all 99
+ *       tracked src/*.ts files, appending a statement to the file always changes
+ *       the stripped text, so no real file is currently blind to this.
+ *     - A commit that ships behaviour in one commit and its test in a later
+ *       commit is flagged on the first. That is the intended direction: the
+ *       moment it shipped, nothing had verified it.
+ *
+ * WHY A RANGE IS STILL THE RIGHT UNIT, AND WHAT IT COSTS.
+ *   `measureRange` accepts any range so an operator or a CI job can point the
+ *   gate at a landing unit (`UI2API_VERIFY_RANGE=<a>..<b>`), and the enforcing
+ *   half is a SEPARATE function so every branch — including the failing one — is
+ *   reachable without this repository. The default is the commit that just
+ *   landed, `HEAD^..HEAD`, which is measurable in CI because
+ *   test/clone-depth.test.ts already fails a truncated checkout outright. An
+ *   UNRESOLVABLE range is refused, never treated as a pass: a gate that cannot
+ *   see the commit must not report that the commit was clean.
+ * ===================================================================== */
+
+/** TypeScript with every COMMENT and every WHITESPACE character removed.
+ *
+ *  String and template-literal contents are preserved VERBATIM, delimiters
+ *  included. That asymmetry is the whole design and it is deliberate in both
+ *  directions:
+ *   - a comment is not executable, so removing it is what makes the false
+ *     positive go away (measured above: 2 of the naive rule's 6 hits);
+ *   - a literal IS the value, so blanking it would make `"dry run"` ->
+ *     `"CHANGED"` invisible — and that is precisely the shape of the
+ *     `vault tighten --apply` finding, a report whose text described a
+ *     different action from the one taken.
+ *
+ *  It is a character scanner rather than a regex because the naive forms are
+ *  destructive here and the repo has already been bitten by both: a
+ *  `.replace(/\/\/.*$/gm)` eats the `//` of every `https:` inside a string
+ *  literal, and a non-greedy block-comment regex mis-pairs on files with more
+ *  block terminators than openers. Tracking string/template state is what makes
+ *  both safe.
+ */
+export function stripTs(src: string): string {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  let st: "code" | "line" | "block" | "str" | "tpl" | "tplexp" = "code";
+  let quote = "";
+  while (i < n) {
+    const c = src[i] as string;
+    const d = src[i + 1];
+    if (st === "code") {
+      if (c === "/" && d === "/") { st = "line"; i += 2; continue; }
+      if (c === "/" && d === "*") { st = "block"; i += 2; continue; }
+      if (c === '"' || c === "'") { st = "str"; quote = c; out += c; i++; continue; }
+      if (c === "`") { st = "tpl"; out += c; i++; continue; }
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; continue; }
+      out += c; i++; continue;
+    }
+    if (st === "line") { if (c === "\n") st = "code"; i++; continue; }
+    if (st === "block") { if (c === "*" && d === "/") { st = "code"; i += 2; continue; } i++; continue; }
+    if (st === "str") {
+      out += c;
+      if (c === "\\" && i + 1 < n) { out += d as string; i += 2; continue; }
+      if (c === quote) st = "code";
+      i++; continue;
+    }
+    // template literal, and the code inside its ${…} holes
+    if (c === "\\") { out += c + (d ?? ""); i += 2; continue; }
+    if (c === "`") { out += c; st = "code"; i++; continue; }
+    if (c === "$" && d === "{") { out += "${"; st = "tplexp"; i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+/** One tsconfig's `include`/`exclude`, as data. Read rather than re-typed, so
+ *  the shipped compile set and this gate cannot drift apart. */
+export function tsconfigGlobs(repoDir: string, file: string): { include: string[]; exclude: string[] } {
+  const doc = JSON.parse(readFileSync(join(repoDir, file), "utf8")) as {
+    include?: unknown;
+    exclude?: unknown;
+  };
+  const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return { include: asList(doc.include), exclude: asList(doc.exclude) };
+}
+
+/** One include/exclude glob to an anchored matcher.
+ *  `**` spans zero or more path segments, `*` and `?` stay inside one. Enough
+ *  for the shapes a tsconfig `include` actually uses; anything else is escaped,
+ *  so an unrecognised glob matches literally rather than matching everything.
+ *  Built by hand rather than by chained `.replace()`: the first version used
+ *  sentinel characters to stand in for `**`, and the sentinels ended up INSIDE
+ *  the regex source as literal control characters, which is the shape that makes
+ *  a matcher throw on some inputs and match nothing on others. */
+export function globToMatcher(glob: string): (p: string) => boolean {
+  let out = "";
+  let i = 0;
+  while (i < glob.length) {
+    const c = glob[i] as string;
+    const d = glob[i + 1];
+    if (c === "*" && d === "*") {
+      if (glob[i + 2] === "/") {
+        out += "(?:.*/)?";
+        i += 3;
+      } else {
+        out += ".*";
+        i += 2;
+      }
+      continue;
+    }
+    if (c === "*") { out += "[^/]*"; i++; continue; }
+    if (c === "?") { out += "[^/]"; i++; continue; }
+    out += c.replace(/[.+^${}()|[\]\\]/, "\\$&");
+    i++;
+  }
+  const re = new RegExp(`^${out}$`);
+  return (p) => re.test(p);
+}
+
+const matchesAny = (p: string, globs: readonly string[]): boolean => globs.some((g) => globToMatcher(g)(p));
+
+export interface SurfaceModel {
+  /** globs tsconfig.json compiles into the shipped build — the behaviour surface */
+  behaviour: readonly string[];
+  /** globs the unit suite verifies — the accompaniment surface */
+  verification: readonly string[];
+  /** the directory the unit suite runs its files from, derived from package.json */
+  unitRoot: string;
+  prodConfig: string;
+  testConfig: string;
+  unitScript: string;
+}
+
+/** The two surfaces, DERIVED from three shipped files.
+ *
+ *  Not `["src/**"]` and `["test/**"]` typed out: this repo's rule is that a list
+ *  a human maintains rots on the day the layout moves, and the gate would then
+ *  judge a partial corpus — which is the failure every anti-vacuity pin in this
+ *  file exists to catch. Move a directory, update package.json and the
+ *  tsconfigs, and the gate follows without being edited.
+ */
+export function classifySurfaces(repoDir: string = ROOT): SurfaceModel {
+  const prod = tsconfigGlobs(repoDir, "tsconfig.json");
+  const testCfg = tsconfigGlobs(repoDir, "tsconfig.test.json");
+  const pkg = JSON.parse(readFileSync(join(repoDir, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const unitScript = String(pkg.scripts?.["test:unit"] ?? "");
+  const named = [...unitScript.matchAll(/(?:^|[\s"'])([\w.-]+\/[\w./-]+)/g)].map((m) => m[1] as string);
+  // The unit root is the LONGEST common directory prefix of the files the unit
+  // suite is told to run. Derived, and it fails loudly rather than guessing.
+  const dirs = [...new Set(named.map((p) => p.split("/").slice(0, -1).join("/")))];
+  let unitRoot = dirs.length > 0 ? dirs[0] as string : "";
+  for (const d of dirs.slice(1)) {
+    const a = unitRoot.split("/");
+    const b = d.split("/");
+    let k = 0;
+    while (k < a.length && k < b.length && a[k] === b[k]) k++;
+    unitRoot = a.slice(0, k).join("/");
+  }
+  const behaviour = prod.include.filter((g) => !matchesAny(g, prod.exclude));
+  const verification = testCfg.include.filter(
+    (g) => !matchesAny(g, testCfg.exclude) && !behaviour.includes(g) && g.split("/")[0] === unitRoot,
+  );
+  if (behaviour.length === 0) throw new Error(`tsconfig.json's include yielded no behaviour glob in ${repoDir} — the gate would judge nothing`);
+  if (verification.length === 0) throw new Error(`tsconfig.test.json's include yielded no verification glob under "${unitRoot}" in ${repoDir} — the gate could never see a test`);
+  return { behaviour, verification, unitRoot, prodConfig: "tsconfig.json", testConfig: "tsconfig.test.json", unitScript: "scripts[\"test:unit\"]" };
+}
+
+export type ShippedVerdict = "accompanied" | "unaccompanied" | "no-behaviour-change" | "empty-range";
+
+export interface ShippedFinding {
+  sha: string;
+  subject: string;
+  behaviourFiles: string[];
+  /** the verification files that moved with it — empty on a violation */
+  verificationFiles: string[];
+}
+
+export interface ShippedVerification {
+  range: string;
+  commitsMeasured: number;
+  behaviourFiles: string[];
+  verificationFiles: string[];
+  accompanied: ShippedFinding[];
+  unaccompanied: ShippedFinding[];
+  verdict: ShippedVerdict;
+  reason: string;
+}
+
+/** A blob at `sha`, or `null` when the path does not exist there.
+ *
+ *  Existence is ASKED rather than inferred from a failed `git show`: a `show`
+ *  that fails for any other reason (a truncated buffer, a lock) would otherwise
+ *  be read as "the file was added", and "added" is a behaviour change — so an
+ *  unreadable blob would become a FALSE POSITIVE, the one direction this gate
+ *  must never fail in. */
+function blobAt(repoDir: string, sha: string, path: string): string | null {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${sha}:${path}`], { cwd: repoDir, stdio: "ignore", timeout: 60_000 });
+  } catch {
+    return null;
+  }
+  try {
+    return gitIn(repoDir, "show", `${sha}:${path}`);
+  } catch (e) {
+    throw new Error(`git show ${sha}:${path} failed AFTER cat-file proved the path exists — refusing to classify it as a change: ${String(e)}`);
+  }
+}
+
+const parentOf = (repoDir: string, sha: string): string | null => {
+  try {
+    return gitIn(repoDir, "rev-parse", "--verify", `${sha}^1`).trim();
+  } catch {
+    return null;
+  }
+};
+
+/** The paths a commit landed, against its FIRST parent.
+ *
+ *  `-m --first-parent` is load-bearing and not decoration: plain `diff-tree` on a
+ *  merge commit returns NOTHING, so a merge that shipped behaviour with no test
+ *  would measure as an empty commit and pass. This repo has 19 merge commits,
+ *  so that is not hypothetical. */
+const commitPaths = (repoDir: string, sha: string): string[] =>
+  gitIn(repoDir, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", "--root", sha)
+    .split("\n")
+    .filter(Boolean);
+
+/** Did this path's CONTENT change in a way that can change behaviour?
+ *
+ *  Added or deleted counts: removing a guard is a behaviour change with no
+ *  surviving content to compare. For a `.ts` file the comparison is on the
+ *  comment/whitespace-stripped text. For a NON-ts file under the verification
+ *  surface (a JSON fixture, a markdown case table) it is a RAW comparison,
+ *  because the comment scanner would misread markdown and would make a changed
+ *  URL invisible — verified wrong in both directions while building this. */
+function changedMaterially(before: string | null, after: string | null, path: string): boolean {
+  if (before === null || after === null) return true;
+  return path.endsWith(".ts") ? stripTs(before) !== stripTs(after) : before !== after;
+}
+
+/** Measure a commit range against the two surfaces. Pure over git, no network. */
+export function measureRange(repoDir: string, range: string, surfaces: SurfaceModel = classifySurfaces(repoDir)): ShippedVerification {
+  let shas: string[];
+  try {
+    shas = gitIn(repoDir, "rev-list", range).split("\n").filter(Boolean);
+  } catch (e) {
+    throw new Error(`range "${range}" could not be resolved in ${repoDir}: ${String(e)} — an unseeable range is NOT a pass`);
+  }
+  const behaviourMatcher = surfaces.behaviour.map(globToMatcher);
+  const verificationMatcher = surfaces.verification.map(globToMatcher);
+  const accompanied: ShippedFinding[] = [];
+  const unaccompanied: ShippedFinding[] = [];
+  const behaviourFiles = new Set<string>();
+  const verificationFiles = new Set<string>();
+  for (const sha of shas) {
+    const parent = parentOf(repoDir, sha);
+    const subject = (() => {
+      try {
+        return gitIn(repoDir, "log", "-1", "--format=%s", sha).trim();
+      } catch {
+        return "(subject unreadable)";
+      }
+    })();
+    const beh: string[] = [];
+    const ver: string[] = [];
+    for (const p of commitPaths(repoDir, sha)) {
+      if (behaviourMatcher.some((m) => m(p))) {
+        if (changedMaterially(parent ? blobAt(repoDir, parent, p) : null, blobAt(repoDir, sha, p), p)) beh.push(p);
+      } else if (verificationMatcher.some((m) => m(p))) {
+        if (changedMaterially(parent ? blobAt(repoDir, parent, p) : null, blobAt(repoDir, sha, p), p)) ver.push(p);
+      }
+    }
+    for (const p of beh) behaviourFiles.add(p);
+    for (const p of ver) verificationFiles.add(p);
+    if (beh.length === 0) continue;
+    const finding: ShippedFinding = { sha, subject, behaviourFiles: beh, verificationFiles: ver };
+    if (ver.length > 0) accompanied.push(finding);
+    else unaccompanied.push(finding);
+  }
+  const base = { range, commitsMeasured: shas.length, behaviourFiles: [...behaviourFiles].sort(), verificationFiles: [...verificationFiles].sort(), accompanied, unaccompanied };
+  if (shas.length === 0) {
+    return { ...base, verdict: "empty-range", reason: `range "${range}" contains 0 commits — the gate measured nothing, which is not a pass` };
+  }
+  if (unaccompanied.length > 0) {
+    return {
+      ...base,
+      verdict: "unaccompanied",
+      reason: `${unaccompanied.length} of ${shas.length} commit(s) in "${range}" changed shipped behaviour with NO change to the verification surface`,
+    };
+  }
+  if (accompanied.length === 0) {
+    return { ...base, verdict: "no-behaviour-change", reason: `${shas.length} commit(s) in "${range}" moved no shipped behaviour` };
+  }
+  return { ...base, verdict: "accompanied", reason: `${accompanied.length} commit(s) in "${range}" changed shipped behaviour WITH a verification change` };
+}
+
+/** The enforcing half. THROWS on the one verdict that must not ship.
+ *
+ *  Separate from the measurement so the failing branch is reachable without this
+ *  repository, and so the failure message can carry the commit and the file —
+ *  "you shipped unverified behaviour" without the sha is not actionable. */
+export function assertShippedWithTests(v: ShippedVerification): void {
+  if (v.verdict === "empty-range") {
+    throw new Error(`UNVERIFIED SHIP, VACUOUSLY: ${v.reason}. A gate that measured zero commits must say so, not pass.`);
+  }
+  if (v.verdict === "unaccompanied") {
+    const detail = v.unaccompanied
+      .map((f) => `  ${f.sha.slice(0, 8)}  ${f.behaviourFiles.join(" ")}\n      "${f.subject}"`)
+      .join("\n");
+    throw new Error(
+      `UNVERIFIED SHIP: ${v.reason}.\n${detail}\n` +
+        `A behaviour change on a path with no test is unverified no matter how cleanly it compiles: the checks that ` +
+        `cannot detect the defect are exactly the ones that make it look verified. Ship the test with the change, in ` +
+        `the same commit.`,
+    );
+  }
+}
+
+/** The range the live half judges: the commit that just landed.
+ *
+ *  Env-overridable so a CI job or the operator can point the gate at a whole
+ *  landing unit instead. `HEAD^..HEAD` is the default because it is the unit
+ *  that is measurable in CI (test/clone-depth.test.ts already fails a truncated
+ *  checkout, so the parent is always there). */
+export function defaultVerifyRange(): string {
+  return process.env.UI2API_VERIFY_RANGE && process.env.UI2API_VERIFY_RANGE.trim() !== ""
+    ? process.env.UI2API_VERIFY_RANGE.trim()
+    : "HEAD^..HEAD";
+}
+
+/* ========================================================================
+ * GOAL 183: the gate over synthetic commit ranges, then over the real one.
+ * ===================================================================== */
+
+/** A REAL throwaway git repository carrying its OWN tsconfigs and package.json.
+ *
+ *  The configs matter as much as the commits: `classifySurfaces` derives both
+ *  surfaces from those three files, so a fixture that omitted them would prove
+ *  nothing about the derivation — the measurement would silently fall back to
+ *  whatever the gate hardcoded. Building the same layout the repo really has is
+ *  what makes the red/green proof a proof of the DERIVATION, not of a fixture. */
+function scratchRepoWithCommits(steps: Array<{ paths: Record<string, string | null>; subject: string }>): string {
+  const dir = mkdtempSync(join(tmpdir(), "ui2api-unverified-ship-"));
+  const g = (...args: string[]): string => execFileSync("git", args, { encoding: "utf8", cwd: dir, timeout: 120_000 });
+  g("init", "-q", "-b", "main");
+  g("config", "user.email", "gate@example.invalid");
+  g("config", "user.name", "unverified-ship gate");
+  // The layout, verbatim in shape: a shipped tsconfig, a test tsconfig that adds
+  // the verification tree, and a unit script naming files under it.
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"], exclude: ["node_modules", "dist", "test"] }, null, 2) + "\n",
+  );
+  writeFileSync(
+    join(dir, "tsconfig.test.json"),
+    JSON.stringify({ extends: "./tsconfig.json", compilerOptions: { noEmit: true }, include: ["src/**/*.ts", "test/**/*.ts"], exclude: ["node_modules", "dist"] }, null, 2) + "\n",
+  );
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "scratch", scripts: { "test:unit": "node --test test/a.test.ts test/b.test.ts" } }, null, 2) + "\n",
+  );
+  g("add", "-A");
+  g("commit", "-q", "-m", "layout: the shipped configs the gate derives from");
+  const shas: string[] = [];
+  for (const s of steps) {
+    for (const [p, body] of Object.entries(s.paths)) {
+      if (body === null) {
+        g("rm", "-q", "--", p);
+      } else {
+        const full = join(dir, p);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, body);
+        g("add", "-A", "--", p);
+      }
+    }
+    g("commit", "-q", "-m", s.subject);
+    shas.push(g("rev-parse", "HEAD").trim());
+  }
+  return dir;
+}
+
+const withScratch = <T>(dir: string, fn: () => T): T => {
+  try {
+    return fn();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+d("GOAL 183: a behaviour change must ship WITH its test", () => {
+  t("the two surfaces are DERIVED from the shipped configs, and generated/vendor trees fall out by construction", () => {
+    const s = classifySurfaces(ROOT);
+    assert.deepEqual([...s.behaviour], ["src/**/*.ts"], "the behaviour surface must be what tsconfig.json compiles — read, not typed");
+    assert.deepEqual([...s.verification], ["test/**/*.ts"], "the verification surface must be what tsconfig.test.json adds under the unit root");
+    assert.equal(s.unitRoot, "test", "the unit root must come from the files scripts[\"test:unit\"] actually names");
+    // The classification itself, on paths this repo really has. The generated /
+    // vendored / corpus / doc trees are the exclusion argument: they are NOT in
+    // tsconfig.json's include, so no hand-typed forbidden list is needed and
+    // there is no second place to forget an entry.
+    const isBehaviour = (p: string) => s.behaviour.some((g) => globToMatcher(g)(p));
+    for (const p of ["src/cli.ts", "src/runtime/session-store.ts", "src/prompt/http.ts"]) {
+      assert.ok(isBehaviour(p), `${p} is shipped source and must be the behaviour surface`);
+    }
+    for (const p of [
+      "test/foo.test.ts", "test/helpers/doc-scan.ts", "test/fixtures/registry/index.json",
+      "sites/gemini/server/index.js", "sites/gemini/.session/state.json",
+      "data/sessions/kimi.ai/default/state.json", "dist/runtime/browser.js",
+      "capabilities/gemini/manifest.json", "docs/VISION.md", "AGENTS.md", "package.json", "README.md",
+    ]) {
+      assert.ok(!isBehaviour(p), `${p} must NOT be a behaviour change — it is generated, vendored, corpus, config or prose`);
+    }
+  });
+
+  t("the behaviour definition is comment- and whitespace-insensitive but LITERAL-sensitive", () => {
+    // The two halves of the definition, each pinned in the direction that
+    // matters. A scanner that blanked string contents would make the second case
+    // pass and the first fail — which is how `"dry run"` -> `"CHANGED"` (the
+    // `vault tighten --apply` finding) would have gone unmeasured.
+    const base = 'export const MODE = "dry run";\n';
+    assert.equal(stripTs(base), stripTs(`${base}// a note that changes nothing\n`), "a line comment is not executable");
+    assert.equal(stripTs(base), stripTs(`/* block */\n${base}`), "a block comment is not executable");
+    assert.equal(stripTs(base), stripTs("export   const   MODE   =   \"dry run\"  ;\n"), "reformatting is not a behaviour change");
+    assert.notEqual(stripTs(base), stripTs('export const MODE = "CHANGED";\n'), "a changed string literal IS the behaviour change");
+    assert.notEqual(stripTs("const s = `a b`;"), stripTs("const s = `ab`;"), "whitespace INSIDE a literal is data, not formatting");
+    assert.notEqual(stripTs("const s = 'a';"), stripTs('const s = "a";'), "the delimiter is part of the literal");
+    // And the `//`-inside-a-string case the naive regex gets wrong: a naive
+    // `/\\/`-style line strip would eat the rest of this line.
+    const url = 'export const U = "https://x/y";\nexport const AFTER = 1;\n';
+    assert.notEqual(stripTs(url), stripTs(url.replace("AFTER = 1", "AFTER = 2")), "a // inside a string literal must not hide a real change after it");
+  });
+
+  t("the scanner is not blind on ANY real source file", (tt) => {
+    // The known false negative — a regex literal containing `//` can make the
+    // scanner read the rest of the line as a comment — is real, so it is
+    // MEASURED on the whole corpus rather than trusted. Appending a statement to
+    // a file must always change its stripped text; if it does not, that file's
+    // tail is invisible to this gate, and the file is named.
+    const files = gitIn(ROOT, "ls-files", "src/").split("\n").filter((f) => f.endsWith(".ts"));
+    assert.ok(files.length > 50, `anti-vacuity: only ${files.length} src files enumerated — the sweep would be judging a partial corpus`);
+    const blind: string[] = [];
+    for (const f of files) {
+      const body = readFileSync(join(ROOT, f), "utf8");
+      if (stripTs(body) === stripTs(`${body}\nexport const __GOAL183_PROBE__ = 1;\n`)) blind.push(f);
+    }
+    assert.deepEqual(blind, [], `these shipped source files have an invisible tail — the scanner stops reading before the end:\n${blind.join("\n")}`);
+    tt.diagnostic(`scanner sweep: ${files.length} shipped source files, 0 with an invisible tail`);
+  });
+
+  t("RED: a commit that changes shipped behaviour and NOTHING in the verification surface is refused", () => {
+    // The GOAL 183 shape, built for real: a credential-path behaviour change
+    // that landed without its gate. The refusal must name the commit and the
+    // file, because "you shipped unverified behaviour" without them is not
+    // actionable.
+    const repo = scratchRepoWithCommits([
+      {
+        paths: { "src/runtime/vault.ts": 'export function tighten(root: string, apply: boolean) {\n  return apply ? "CHANGED" : "dry run";\n}\n' },
+        subject: "vault tighten --apply is parsed now",
+      },
+    ]);
+    withScratch(repo, () => {
+      const v = measureRange(repo, "HEAD^..HEAD");
+      assert.equal(v.verdict, "unaccompanied", "a behaviour change with no test change is the defect this gate exists for");
+      assert.equal(v.commitsMeasured, 1, "the range really did contain the one commit");
+      assert.deepEqual(v.behaviourFiles, ["src/runtime/vault.ts"], "the changed file must be named");
+      assert.deepEqual(v.verificationFiles, [], "no verification file moved");
+      assert.throws(() => assertShippedWithTests(v), /UNVERIFIED SHIP[\s\S]*src\/runtime\/vault\.ts/, "the refusal must name the file");
+      assert.throws(() => assertShippedWithTests(v), /vault tighten --apply is parsed now/, "the refusal must name the commit subject, so the author can find it");
+    });
+  });
+
+  t("GREEN: the same change shipped WITH a test passes, and the pass is a real measurement", () => {
+    const repo = scratchRepoWithCommits([
+      {
+        paths: {
+          "src/runtime/vault.ts": 'export function tighten(root: string, apply: boolean) {\n  return apply ? "CHANGED" : "dry run";\n}\n',
+          "test/a.test.ts": 'import { test } from "node:test";\ntest("apply is reported as CHANGED", () => {});\n',
+        },
+        subject: "vault tighten --apply is parsed now, with its test",
+      },
+    ]);
+    withScratch(repo, () => {
+      const v = measureRange(repo, "HEAD^..HEAD");
+      assert.equal(v.verdict, "accompanied", "behaviour plus a test is the legal shape");
+      assert.deepEqual(v.verificationFiles, ["test/a.test.ts"], "the verification move must be measured, not assumed");
+      assert.doesNotThrow(() => assertShippedWithTests(v), "a change that shipped with its test must not be refused");
+    });
+  });
+
+t("RANGE PERTURBATION: the verdict tracks the COMMITS IN the range, measured on real repositories", (tt) => {
+    // The honest mutation for a git-reading gate. Mutating the detector's own
+    // regex proves nothing: a detector can be broken and still pass its own
+    // unit test. What has to move is the INPUT — here, the commit set inside a
+    // real range.
+    //
+    // Three ranges over two real repositories, and the property that matters:
+    // a test landing in a LATER commit does NOT retroactively rescue an earlier
+    // behaviour change. The verdict is per-commit, so the commit that shipped
+    // unaccompanied is judged on its own terms. That is the intended direction
+    // (at the moment it landed, nothing had verified it) and it is the property
+    // a range-level "some commit in here touched a test" rule would silently
+    // lose — so it is pinned, not left to chance.
+    const mk = (split: boolean) =>
+      scratchRepoWithCommits(
+        split
+          ? [
+              { paths: { "src/runtime/vault.ts": 'export const tighten = (a: boolean) => (a ? "CHANGED" : "dry run");\n' }, subject: "the behaviour change" },
+              { paths: { "test/a.test.ts": 'import { test } from "node:test";\ntest("tighten", () => {});\n' }, subject: "the gate, written in a LATER commit" },
+            ]
+          : [
+              {
+                paths: {
+                  "src/runtime/vault.ts": 'export const tighten = (a: boolean) => (a ? "CHANGED" : "dry run");\n',
+                  "test/a.test.ts": 'import { test } from "node:test";\ntest("tighten", () => {});\n',
+                },
+                subject: "the behaviour change, with its gate in the SAME commit",
+              },
+            ],
+      );
+
+    const together = mk(false);
+    const split = mk(true);
+    try {
+      // `--all` enumerates every reachable commit, so these ranges are not
+      // HEAD~n guesses and cannot drift by an off-by-one when a fixture grows.
+      const togetherRange = measureRange(together, "--all", classifySurfaces(together));
+      const splitRange = measureRange(split, "--all", classifySurfaces(split));
+      // Same detector, same code, SAME behaviour change, ONE COMMIT different.
+      assert.equal(togetherRange.verdict, "accompanied", "behaviour + gate in one commit is GREEN");
+      assert.doesNotThrow(() => assertShippedWithTests(togetherRange), "and must not be refused");
+      assert.equal(splitRange.verdict, "unaccompanied", "the same change with its gate in a LATER commit is still RED — a test that arrives later never verified the moment it shipped");
+      assert.equal(splitRange.commitsMeasured, 3, "the split range must really hold 3 commits (layout + behaviour + later gate)");
+      assert.equal(splitRange.unaccompanied.length, 1, "exactly the behaviour commit must be named");
+      assert.equal(splitRange.unaccompanied[0]?.behaviourFiles.join(" "), "src/runtime/vault.ts", "and the offending file must be named on it");
+      assert.throws(() => assertShippedWithTests(splitRange), /UNVERIFIED SHIP[\s\S]*src\/runtime\/vault\.ts/, "the split shape must be refused, naming the file");
+      tt.diagnostic(`range perturbation: together(${togetherRange.commitsMeasured})=${togetherRange.verdict}  split(${splitRange.commitsMeasured})=${splitRange.verdict}`);
+    } finally {
+      rmSync(together, { recursive: true, force: true });
+      rmSync(split, { recursive: true, force: true });
+    }
+  });
+
+  t("a comment-only and a formatting-only src change with no test are NOT a violation", () => {
+    // The false-positive control, executed rather than argued. This is the
+    // class that decides whether the gate survives: a gate that fires on a
+    // comment is a gate whose readers learn to skip it.
+    const repo = scratchRepoWithCommits([
+      { paths: { "src/runtime/vault.ts": "export const N = 1;\n" }, subject: "the file exists" },
+      {
+        paths: { "src/runtime/vault.ts": "export const N = 1;\n\n// MEASURED: this note is prose, not executable code.\n" },
+        subject: "a comment explaining the line above",
+      },
+      { paths: { "src/runtime/vault.ts": "export    const    N    =    1;\n" }, subject: "a reformat" },
+    ]);
+    withScratch(repo, () => {
+      const v = measureRange(repo, "HEAD~2..HEAD", classifySurfaces(repo));
+      assert.equal(v.verdict, "no-behaviour-change", "comment and formatting changes are not behaviour changes");
+      assert.doesNotThrow(() => assertShippedWithTests(v), "the legal comment/reformat shape must not be refused");
+      // And the FIRST of the three IS a behaviour change, so the classifier is
+      // not simply reporting nothing on this repo. It sits at HEAD~2 (the last
+      // three are: exists, comment, reformat), so the single-commit range that
+      // contains only it is HEAD~3..HEAD~2.
+      const real = measureRange(repo, "HEAD~3..HEAD~2", classifySurfaces(repo));
+      assert.equal(real.commitsMeasured, 1, "the single-commit range must really hold exactly the 'file exists' commit");
+      assert.equal(real.verdict, "unaccompanied", "the commit that really added a statement must still be caught");
+    });
+  });
+
+  t("a comment-only edit to a TEST does not buy a green gate", () => {
+    // The cheap defeat. If any change under test/ counted, "add a comment to an
+    // existing test" would silence the gate, and a gate that can be silenced by
+    // editing prose is not a gate. The test-side edit must carry code.
+    const repo = scratchRepoWithCommits([
+      {
+        paths: {
+          "src/runtime/vault.ts": 'export const tighten = (a: boolean) => (a ? "CHANGED" : "dry run");\n',
+          "test/a.test.ts": 'import { test } from "node:test";\ntest("tighten", () => {});\n',
+        },
+        subject: "behaviour + test",
+      },
+      {
+        paths: { "src/runtime/vault.ts": 'export const tighten = (a: boolean) => (a ? "APPLIED" : "dry run");\n' },
+        subject: "the behaviour changes again",
+      },
+      { paths: { "test/a.test.ts": 'import { test } from "node:test";\n// a note about the test below\ntest("tighten", () => {});\n' }, subject: "a comment added to the test" },
+    ]);
+    withScratch(repo, () => {
+      // The last commit alone changed a test, so it has no behaviour of its own.
+      const last = measureRange(repo, "HEAD~1..HEAD", classifySurfaces(repo));
+      assert.equal(last.verdict, "no-behaviour-change", "a test-only commit moves no behaviour");
+      // The third commit is the violation: behaviour with no test move. It sits at
+      // HEAD~1 (layout, behaviour+test, behaviour-again, test-comment), so the
+      // range holding only it is HEAD~2..HEAD~1.
+      const mid = measureRange(repo, "HEAD~2..HEAD~1", classifySurfaces(repo));
+      assert.equal(mid.commitsMeasured, 1, "the range must really hold only the second behaviour commit");
+      assert.equal(mid.verdict, "unaccompanied", "the behaviour commit must be flagged on its own, before the comment lands");
+      assert.throws(() => assertShippedWithTests(mid), /UNVERIFIED SHIP/, "and it must be refused");
+    });
+  });
+
+  t("an EMPTY range is refused as vacuous, not passed", () => {
+    // A gate that measures zero commits and reports "clean" is the exact shape
+    // that produced test/clone-depth.test.ts's CI incident: right about what it
+    // could see, silent about what it could not, and trusted anyway.
+    const v = measureRange(ROOT, "HEAD..HEAD");
+    assert.equal(v.verdict, "empty-range", "a range containing no commits must classify as empty");
+    assert.throws(() => assertShippedWithTests(v), /measured nothing, which is not a pass/, "zero commits must never read as a pass");
+  });
+
+  t("an UNRESOLVABLE range is refused, never treated as clean", () => {
+    assert.throws(
+      () => measureRange(ROOT, "no-such-ref..no-such-ref"),
+      /could not be resolved[\s\S]*an unseeable range is NOT a pass/,
+      "a range that cannot be resolved must fail loudly — a truncated checkout must not report that nothing was unverified",
+    );
+  });
+
+  t("LIVE: the range that just landed is measurable, and is reported with its numbers", (tt) => {
+    const range = defaultVerifyRange();
+    const v = measureRange(ROOT, range);
+    assert.notEqual(v.verdict, "empty-range", `the default range "${range}" resolved to 0 commits in this checkout — the gate would be measuring nothing`);
+    assert.ok(v.commitsMeasured >= 1, "the landing range must contain at least the commit that just landed");
+    tt.diagnostic(
+      `landing range ${v.range}: ${v.commitsMeasured} commit(s), ${v.behaviourFiles.length} behaviour file(s), ` +
+        `${v.verificationFiles.length} verification file(s), ${v.accompanied.length} accompanied, ${v.unaccompanied.length} unaccompanied -> ${v.verdict}`,
+    );
+  });
+
+  t("LIVE: what just landed shipped its behaviour WITH a test (enforced)", () => {
+    // The enforcing half on the real repository. It is a separate test from the
+    // measurability one above so that "the gate could not see anything" and "the
+    // gate saw a violation" are two distinguishable failures.
+    assertShippedWithTests(measureRange(ROOT, defaultVerifyRange()));
+  });
+});

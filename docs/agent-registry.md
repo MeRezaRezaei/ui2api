@@ -52,3 +52,6 @@
 | `cli-input-validation-seam-l2-redispatch-4` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 seam — verification (5 test files, check:verbatim, commit) | 2026-10-05T06:01:36Z | running |
 | `L1-sweep-probe-overlap` | L1 | execute | codeg-orchestrator | src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json | 2026-10-04T16:22:05Z | DONE 8/8 own gate, 91/91 pool battery, src+test tsc clean, mutation red captured; UNCOMMITTED by design (sibling lanes hold staged files: src/cli.ts, docs/agent-registry.md) |
 | `cli-input-validation-seam-l2-redispatch-5` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 seam — commit staged work | 2026-10-05T06:23:08Z | running |
+| L2-A-wire-latency | L2 | measure | L1-latency-launch | /tmp/l2a-measure wire/HTTP split (task b9890655-766b-4321-8d39-eb2e27436096) | 2026-10-05T10:18:01+02:00 | running |
+| L2-B-pool-reuse | L2 | analysis | L1-latency-launch | /tmp/l2b-pool reuse+freshness audit (task b965a09b-a971-4ce7-87eb-74a1c5c34b5c) | 2026-10-05T10:18:01+02:00 | running |
+| L2-C-browser-attach | L2 | analysis | L1-latency-launch | /tmp/l2c-browser launch/attach cost (task 4ac6030a-e721-45df-a678-6f1a0647fab6) | 2026-10-05T10:18:01+02:00 | running |
