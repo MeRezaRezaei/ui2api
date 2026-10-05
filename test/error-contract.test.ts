@@ -254,3 +254,129 @@ d("a KNOWN driver fault reaches /prompt as its NAMED cause, not an anonymous 500
     assert.equal(new HttpClientError(413, "payload_too_large", "x") instanceof DriverRefusal, false);
   });
 });
+
+/**
+ * THE SCANNER MUST BE ABLE TO EXPRESS A REAL SERVED CODE.
+ *
+ * MEASURED DEFECT, not a style nit. The helper harvested the served vocabulary
+ * with `[a-z_]+` — LOWERCASE LETTERS AND UNDERSCORE ONLY, no digit. The daemon
+ * serves `ui2api_driver_error`, whose `2` sits inside `ui2**2**api`, so:
+ *
+ *     "code: \"ui2api_driver_error\"".match(/code: "([a-z_]+)"/)  ->  null
+ *     /2/.test("ui2api_driver_error")                             ->  true
+ *
+ * The contract gate was therefore blind to the exact code `POST /prompt` was
+ * changed to answer (0169578 / ca7d62c), where it previously erased a KNOWN
+ * driver fault into an anonymous `internal_error` 500. A gate that cannot see a
+ * code the server actually serves is not measuring the error contract; it is
+ * measuring a vocabulary someone typed. Measured BEFORE the fix: the scanner
+ * found 16 codes; AFTER: 17, and the one that appeared is
+ * `ui2api_driver_error` (502) — the code the previous lane's own write-up
+ * flagged as invisible and left unfixed.
+ *
+ * WHY THIS BLOCK EXISTS RATHER THAN A COUNT. A hand-typed `=== 17` is the same
+ * disease one layer down: it is a number someone typed, and it silently rots
+ * the moment a code is added or removed. What is pinned here instead is the
+ * PROPERTY — (a) the recogniser's own character class can express a digit, a
+ * hyphen and an uppercase letter, (b) it still REFUSES a non-code, and (c) the
+ * measured vocabulary really does contain a code the old class could not
+ * express. Narrow the class back to `[a-z_]+` and this block goes RED on all
+ * three, naming the class.
+ */
+d("the error-code SCANNER can express a code the daemon really serves", () => {
+  const HELPER = "test/helpers/error-contract-measure.ts";
+
+  t("THE ONE harvest class is identifier-shaped: a digit, a hyphen and an uppercase in; prose out", () => {
+    const helper = readFileSync(HELPER, "utf8");
+
+    // ONE class, shared. The measured defect was a class that could not express a
+    // code the daemon serves; the class-per-pattern shape is what let that happen
+    // in one place while a sibling pattern (and a sibling test's own private copy,
+    // test/error-contract.test.ts:171 `[a-z0-9_]`) already read differently. So the
+    // helper declares the class ONCE and every harvest pattern is built from it.
+    const declared = /const CODE_CLASS = "([^"]+)"/.exec(helper);
+    assert.ok(declared, `precondition: ${HELPER} declares exactly one harvest character class, so a second copy cannot drift`);
+    const cls = declared[1]!;
+    // …and no pattern may smuggle a private one back in: every code-literal
+    // capture in the file must interpolate the shared class.
+    const inline = [...helper.matchAll(/new RegExp\(`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1]!);
+    assert.ok(inline.length >= 4, `precondition: the envelope, typed-constructor, poolRefusal and doc-table harvests all go through new RegExp, found ${inline.length}`);
+    for (const prefix of inline) {
+      assert.ok(
+        prefix.includes("[${CODE_CLASS}]"),
+        `a harvest pattern hard-codes its own character class instead of the shared CODE_CLASS (${prefix}) — a second copy is the measured defect waiting to happen`,
+      );
+    }
+    const literals = helper.match(/"\[([^\]]+)\]\+"/g) ?? [];
+    assert.deepEqual(literals, [], `no harvest pattern may carry an inline code class, found ${JSON.stringify(literals)}`);
+
+    const capture = new RegExp(`^([${cls}]+)$`);
+    // THE EXPRESSIVENESS PROPERTY. A digit, a hyphen and an uppercase letter are
+    // all legal in a code shape this codebase uses — `ui2api_driver_error` (the
+    // `2` sits inside `ui2api`) is SERVED on both routes, `vault-probe-threw` is
+    // served on `/status`. A class that cannot express one of them cannot measure
+    // a code that uses it.
+    for (const real of ["ui2api_driver_error", "vault-probe-threw", "NotFound"]) {
+      assert.ok(
+        capture.test(real),
+        `the harvest class [${cls}] cannot express ${JSON.stringify(real)} — a code this codebase really uses is therefore invisible to the gate (the measured defect: /[a-z_]+/ could not see ui2api_driver_error on either route)`,
+      );
+    }
+    // …and it must NOT have been widened into "anything", which would make it
+    // vacuous. A space, a dot, a colon, a slash, a quote and the empty string are
+    // not code shapes; a scanner that accepts them accepts prose.
+    for (const notCode of ["", " ", "internal error", "bad.request", "code: code", "a/b", "x y"]) {
+      assert.ok(
+        !capture.test(notCode),
+        `the harvest class [${cls}] accepts ${JSON.stringify(notCode)} — a widened-to-vacuum scanner is worse than a narrow one`,
+      );
+    }
+    // A star would be the same vacuity wearing a quantifier: one or more, never zero
+    // or unbounded, so the capture can never be an empty string.
+    assert.ok(!cls.includes("*") && !cls.includes("+"), `the class must be a plain character set with no quantifier, got [${cls}]`);
+  });
+
+  t("the MEASURED vocabulary really contains a code the old [a-z_]+ class could not see", () => {
+    const emitted = measureEmitted();
+    // The fix must be OBSERVABLE: if every measured code still fit `^[a-z_]+$`
+    // then this fix changed nothing and the block above is prose.
+    const outsideOldClass = [...emitted.keys()].filter((c) => !/^[a-z_]+$/.test(c));
+    assert.ok(
+      outsideOldClass.includes("ui2api_driver_error"),
+      `the served vocabulary must carry a code the old class could not express; found ${JSON.stringify(outsideOldClass)}`,
+    );
+  });
+
+  t("ui2api_driver_error is MEASURED as a 502, and BOTH routes emit it — this is the pin the old scanner could not hold", () => {
+    const emitted = measureEmitted();
+    assert.equal(
+      emitted.get("ui2api_driver_error"),
+      502,
+      `ui2api_driver_error must be measured from source with its status; the vocabulary is ${JSON.stringify([...emitted.entries()])}`,
+    );
+    // …and it must be measured, not merely counted: the code reaches the wire on
+    // BOTH surfaces, from BOTH files, and the gate sees one entry because both
+    // spell it identically. A third spelling would be a second contract.
+    for (const file of ["src/prompt/http.ts", "src/prompt/openai.ts"]) {
+      const src = readFileSync(file, "utf8");
+      assert.match(
+        src,
+        /error:\s*\{[\s\S]{0,300}?code:\s*"ui2api_driver_error"/,
+        `${file} must answer the driver refusal as {error:{code:"ui2api_driver_error"}} — the envelope the scanner reads`,
+      );
+    }
+    // The two routes agree ON THE CODE and on the STATUS: one vocabulary entry,
+    // produced by both files, at 502 on each.
+    const sites = ["src/prompt/http.ts", "src/prompt/openai.ts"].map((f) => {
+      const src = readFileSync(f, "utf8");
+      const i = src.indexOf('code: "ui2api_driver_error"');
+      const before = src.slice(Math.max(0, i - 400), i);
+      const st = [...before.matchAll(/send(?:Json)?\(\s*(?:res|w)\s*,\s*(\d{3})/g)];
+      return Number(st[st.length - 1]![1]);
+    });
+    assert.deepEqual(sites, [502, 502], `/prompt and /v1 must answer ui2api_driver_error at the SAME status, measured ${JSON.stringify(sites)}`);
+    // And the shipped doc names it, with that status — the bidirectional check.
+    assert.equal(parseDocTable(readFileSync("README.md", "utf8")).get("ui2api_driver_error"), 502, "the doc table must carry ui2api_driver_error at 502");
+    assert.deepEqual(contractGaps(emitted, parseDocTable(readFileSync("README.md", "utf8"))), [], "doc and source must agree on every code, including the one that was invisible");
+  });
+});

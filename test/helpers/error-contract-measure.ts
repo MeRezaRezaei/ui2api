@@ -26,9 +26,38 @@ import { readFileSync } from "node:fs";
 
 export type Emitted = Map<string, number>;
 
+/**
+ * THE CHARACTER CLASS EVERY HARVEST PATTERN BELOW USES, and why it is this one.
+ *
+ * MEASURED DEFECT: the class was `[a-z_]+` — lowercase letters and underscore
+ * only, NO DIGIT. The daemon serves `ui2api_driver_error` (the `2` is inside
+ * `ui2api`), so every pattern here returned `null` for it and the error-contract
+ * gate was blind to the exact code `POST /prompt` was changed to answer
+ * (0169578 / ca7d62c), where it previously erased a known driver fault into an
+ * anonymous `internal_error` 500. A gate that cannot see a code the server
+ * actually serves is not measuring the error contract; it is measuring a
+ * vocabulary someone typed. Vocabulary measured 16 codes before, 17 after; the
+ * one that appeared is `ui2api_driver_error` (502).
+ *
+ * WHY `[A-Za-z0-9_-]+` AND NOT "ANYTHING". An identifier shape, confirmed
+ * against the real literals: `ui2api_driver_error` needs the digit,
+ * `vault-root-unresolvable` / `host-unreadable` / `vault-probe-threw`
+ * (src/prompt/http.ts:545,560,591,1553) need the hyphen, and uppercase is legal
+ * so a future `NotFound` is not silently invisible either. It still REFUSES a
+ * space, a dot, a colon, a slash, an embedded quote and the empty string — so it
+ * cannot swallow prose, which is the failure mode of widening to `[^"]*`.
+ *
+ * IT IS PINNED, NOT HOPED FOR: `test/error-contract.test.ts` reads every
+ * character class out of this file, asserts each one can express all three of
+ * those shapes and rejects all of those non-codes, and asserts the measured
+ * vocabulary really contains a code the old class could not see. Narrow this
+ * class back to `[a-z_]+` and that suite goes RED naming it.
+ */
+const CODE_CLASS = "A-Za-z0-9_-";
+
 /** Codes carried inside an `{ error: { ... code: "x" } }` envelope, with the status of its send(). */
 function envelopeCodes(src: string, into: Emitted): void {
-  const re = /error:\s*\{[\s\S]{0,400}?code:\s*"([a-z_]+)"/g;
+  const re = new RegExp(`error:\\s*\\{[\\s\\S]{0,400}?code:\\s*"([${CODE_CLASS}]+)"`, "g");
   for (const m of src.matchAll(re)) {
     const before = src.slice(Math.max(0, m.index - 600), m.index);
     // the status literal of the enclosing send(res, NNN, {...}) / sendJson(res, NNN, ...)
@@ -46,7 +75,7 @@ function envelopeCodes(src: string, into: Emitted): void {
  * that is documented but never thrown still fails the bidirectional check.
  */
 function typedClientErrorCodes(src: string, into: Emitted): void {
-  for (const m of src.matchAll(/new HttpClientError\(\s*(\d{3})\s*,\s*"([a-z_]+)"/g)) {
+  for (const m of src.matchAll(new RegExp(`new HttpClientError\\(\\s*(\\d{3})\\s*,\\s*"([${CODE_CLASS}]+)"`, "g"))) {
     into.set(m[2]!, Number(m[1]));
   }
 }
@@ -60,7 +89,7 @@ function poolRefusalCodes(src: string, into: Emitted): void {
   // silently ignored by V8 and was never a regex API. Removing it is provably
   // behaviour-preserving (measured: /a/.exec("a", {timeout:5}) -> ["a"]).
   const status = Number(/Answer (\d{3})/.exec(src.slice(Math.max(0, start - 500), start))?.[1] ?? 0);
-  for (const m of body.matchAll(/return \{ code: "([a-z_]+)" \}/g)) into.set(m[1]!, status);
+  for (const m of body.matchAll(new RegExp(`return \\{ code: "([${CODE_CLASS}]+)" \\}`, "g"))) into.set(m[1]!, status);
 }
 
 /** Everything the daemon actually emits, measured. */
@@ -77,10 +106,10 @@ export function measureEmitted(): Emitted {
   return out;
 }
 
-/** The doc's table rows: status + code, as shipped. */
+/** The doc's table rows: status + code, as shipped. Same class, so a hyphenated code is readable in a doc row too. */
 export function parseDocTable(doc: string): Emitted {
   const out: Emitted = new Map();
-  for (const m of doc.matchAll(/^\|\s*(\d{3})\s*\|\s*`([a-z_]+)`\s*\|/gm)) out.set(m[2]!, Number(m[1]));
+  for (const m of doc.matchAll(new RegExp(`^\\|\\s*(\\d{3})\\s*\\|\\s*\\\`([${CODE_CLASS}]+)\\\`\\s*\\|`, "gm"))) out.set(m[2]!, Number(m[1]));
   return out;
 }
 
