@@ -276,8 +276,58 @@ evidence that it is. Nothing here is closed on the strength of a `grep` hit or
 the ledger's age; where the code and the old wording disagreed, the code won and
 the disagreement is named.
 
-## OPEN — NONE
+## ROUND N+194 — five lanes, five closure classes (2026-10-05)
 
-**Every item this file tracked is closed, each with its closing evidence above.**
-The next wave starts by hunting NEW friction rather than by re-reading this list —
-which is the failure mode this file exists to prevent.
+Dispatched by `brain-L0-restart` from the round N+193 hunt ranking. All five slices were
+**collision-free** (checked with `git status --short <paths>` before dispatch — each lane's
+paths were clean, so no lane waited on another), so they went out as five parallel siblings
+in ONE step. Each lane was mutation-proven and the fixes were independently re-verified at
+fan-in.
+
+| lane | closed | commit |
+| --- | --- | --- |
+| `l1-profile-ingest-array-guard` | `profile-ingest.ts` `prefs?.account_info?.find` — optional chaining guarded ABSENCE, not wrong TYPE, so a scalar `account_info` threw and `profile add-all` aborted mid-loop with earlier accounts already written (**partial write**). Now `Array.isArray`, degradation not throw. | `d7f1d3c` |
+| `l1-openai-body-gate` | the `/v1` body reader had no object gate, so `body === null` reached `Boolean(body.stream)` and answered **500** with a leaked `TypeError` instead of the daemon's named 400. Mirrored `http.ts:738`. | `f4601cb` |
+| `l1-registry-status-provenance` | `/registry` republished `metadata.json`'s `status` verbatim, so a manifest could claim `verified` **with no record** while `/sites` said `unverified-candidate` for the same package. One resolver now owns both. Blast radius **0 of 33** — no shipped package ever claimed it. | `8bba548` |
+| `l1-capability-gate-real-predicate` | **two gates certifying a private copy**: `isGuarded` re-implemented the real predicate (weakening the real one left the mutation-proof test GREEN), and the `CHAT` corpus was ten hand-typed names (a new chat runner passed, measured exit 0). Predicate extracted once; corpus derived. | `c1edbe9` |
+| `l1-timeout-gate-unblind` | the timeout-discipline gate read a fixed 1200-char window and asked an unanchored `/\.kill\(/`, so an unbounded spawn was vouched for by a **neighbouring child's kill 40 chars away** (measured: `scanSource` returned `[]`), and a real kill 1400 chars out was a false positive. Now the kill is **attributed to the child the spawn bound**. | `9e937a7` |
+
+Fan-in re-verification (orchestrator, not the writing lanes): `tsc --noEmit` **0**,
+`tsc -p tsconfig.test.json --noEmit` **0**, and the four gate files **55 tests / 54 pass /
+0 fail / 1 skipped**, plus the two openai surfaces **30/30**. `gate-wiring`'s both-directions
+rule held: no lane created a new `test/*.test.ts` that package.json would have had to name.
+
+**The pattern across all five, and it is the point:** every one of these gates/codes was
+**green while defective** — a gate that vouched for a copy, a status passed through as a
+claim, a 1200-char window, an optional chain in the place of a type check. A green suite is
+evidence about the assertions that ran, never about the code's honesty.
+
+## OPEN — none that I can prove are still open
+
+**Everything this file tracked is closed, each with its closing evidence above**, and round
+N+194 closed five more. The remaining round N+193 residue is either fixed or **blocked on
+another workstream**, and this file will not record a blocked item as open — it records the
+block. Unfixed, in rank order, all re-confirmed still real at N+194:
+
+1. `src/prompt/pool.ts:1008` — `worker.busy = false` before the usability probe (`:1015`) and
+   `drainWorker` (`:1036`); up to `WORKER_PROBE_TIMEOUT_MS` = 5s in which a concurrent
+   same-site `acquire()` takes the worker, so `release()` `discardPage()`s it **and** hands the
+   same object to a waiter. **Two requests on one tab.** BLOCKED: another agent is editing
+   `pool.ts` right now.
+2. `src/runtime/profile-ingest.ts` — `Local State.profile.info_cache` is unguarded the same
+   way `account_info` was; a scalar there degrades to a wrong identity rather than crashing.
+3. `src/prompt/openai.ts` — the `>2_000_000` body guard rejects with a bare
+   `Error("body too large")` and is answered **400 `invalid_json`** where the daemon answers
+   **413 `payload_too_large`**; and the `/v1` invalid-JSON envelope has no `code` field.
+4. `src/runtime/browser.ts:537` — throws with the detached Chrome **un-killed** (`killGroup`
+   registers at `:546`, after), and the orphan holds the ProcessSingleton lock, refusing every
+   later `chrome start` until a manual pkill.
+5. `src/runtime/chrome-daemon.ts:258/335` — status-then-spawn TOCTOU + non-atomic
+   `writeFileSync`; two starts can record the **dead** child's pid as `origin:"spawned"`,
+   making the live Chrome unstoppable.
+6. `src/prompt/pool.ts:945` — `restartBrowser()` sets `this.workers = []` with no
+   `driver.close()`, so attach-mode contexts leak forever and untracked, and `drainWorker`
+   hands an untracked page to a waiter.
+
+The next wave hunts NEW friction rather than re-reading this list — which is the failure
+mode this file exists to prevent.
