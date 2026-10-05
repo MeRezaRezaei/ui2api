@@ -11,6 +11,8 @@ import {
   resolveDataDir,
   validManifestCapability,
   readModelVerification,
+  honestPackageStatus,
+  chatSurfaceStatus,
 } from "../src/prompt/registry.js";
 import { listAccounts } from "../src/runtime/session-store.js";
 import { resolvePackagedProfile } from "../src/profile/profile.js";
@@ -233,6 +235,125 @@ describe("prompt registry", () => {
     // A scaffold-only package with no metadata stays unverified.
     const unver = packages.filter((p) => p.verified === false);
     assert.ok(unver.length > 0, "some packages are honestly NOT verified");
+  });
+
+  // ── STATUS PROVENANCE: an EARNED `verified` must be BACKED by a record ──────
+  //
+  // MEASURED defect: `buildRegistryPackages()` read `metadata.json`'s `status`
+  // as a bare string and republished it verbatim, so a package could CLAIM
+  // `status: "verified"` with no `verified` record behind it. `/registry` is the
+  // ONLY info source an external consumer has and it publishes `status` right
+  // next to the `verified` RECEIPT field, so an unearned claim was
+  // indistinguishable on the wire from an earned one — a fabricated capability
+  // claim. The same file's `packageStatusOf()` (what `/sites` reads) had always
+  // required the record, so the two surfaces gave opposite answers for one
+  // package, and the dishonest one was the one every consumer reads.
+  //
+  // The fixture half is what pins the RULE, on the exported resolver that
+  // `buildRegistryPackages()` itself calls (so a fixture cannot pass while the
+  // registry does something else). The corpus half is what pins the BLAST
+  // RADIUS: it fails the day a REAL package grows an unearned `verified`, which
+  // is the exact drift class this gate exists for.
+  it("an unearned `verified` status degrades to `unverified-candidate` (no record -> no earned claim)", () => {
+    // The hostile fixture: claims the earned classification and carries nothing.
+    const liar = honestPackageStatus({ status: "verified" });
+    assert.equal(liar.status, "unverified-candidate", "status:'verified' with NO record must not be published as earned");
+    assert.equal(liar.verified, false, "…and no receipt is invented for it");
+
+    // A record that is present but incomplete is the same defect in a subtler
+    // shape, so every field the RegistryVerified shape names is exercised.
+    for (const bad of [
+      { since: "2026-09-19", evidence: "proof 13965" }, // no `via`
+      { since: "2026-09-19", via: "headed Xvfb" }, // no `evidence`
+      { evidence: "proof 13965", via: "headed Xvfb" }, // no `since`
+      { since: "", evidence: "proof 13965", via: "headed Xvfb" }, // empty is not a record
+      { since: "   ", evidence: "proof 13965", via: "headed Xvfb" },
+      { since: 2026, evidence: "proof 13965", via: "headed Xvfb" }, // wrong type
+      true, // the boolean a manifest is allowed to write
+      "verified", // a bare string
+      null,
+    ]) {
+      const r = honestPackageStatus({ status: "verified", verified: bad });
+      assert.equal(r.status, "unverified-candidate", `incomplete record ${JSON.stringify(bad)} must not buy an earned status`);
+      assert.equal(r.verified, false, `incomplete record ${JSON.stringify(bad)} must not be published as a receipt`);
+    }
+
+    // A GENUINELY verified package still passes: the gate is not "demote all".
+    const real = honestPackageStatus({
+      status: "verified",
+      verified: { since: "2026-09-19", evidence: "proof PASS 13965", via: "headed Chrome on Xvfb :99 replaying a session.lock.json capture", scope: "chat" },
+    });
+    assert.equal(real.status, "verified", "a complete record MUST still surface as `verified` — otherwise the gate is an over-correction");
+    assert.ok(real.verified !== false, "the receipt is published alongside the claim it backs");
+    assert.equal(real.verified.since, "2026-09-19", "the date is the disclosure a consumer branches on, so it survives");
+    assert.ok(real.verified.evidence.length > 0 && real.verified.via.length > 0, "…and it is complete");
+
+    // An honest LIMITATION is not an earned claim, so gating it would hide a
+    // blocker behind a softer word — `dormant`/`dead-end` must pass through.
+    assert.equal(honestPackageStatus({ status: "dormant" }).status, "dormant");
+    assert.equal(honestPackageStatus({ status: "dead-end" }).status, "dead-end");
+    // Operator strings that assert nothing are not the earned class either.
+    assert.equal(honestPackageStatus({ status: "active" }).status, "active");
+    assert.equal(honestPackageStatus({ status: "scaffold" }).status, "scaffold");
+    // Absent / malformed metadata is the scaffold case, unchanged.
+    assert.equal(honestPackageStatus({}).status, "unknown");
+    assert.equal(honestPackageStatus(null).status, "unknown");
+    assert.equal(honestPackageStatus("nonsense").status, "unknown");
+  });
+
+  it("BLAST RADIUS: no shipped package publishes an unearned `verified` (corpus-wide invariant, not a snapshot)", () => {
+    const packages = buildRegistryPackages();
+    // The invariant, stated over the REAL corpus. Deliberately NOT a snapshot of
+    // today's statuses: a future package legitimately gaining a verified record
+    // must keep `verified`, and a future package falsely claiming it must fail
+    // here. Only the earned-claim/receipt disagreement is fatal.
+    for (const pkg of packages) {
+      if (pkg.status === "verified") {
+        assert.notEqual(pkg.verified, false, `${pkg.id}: publishes status "verified" with NO verification record — an unearned claim`);
+      }
+      // And the converse, so the gate cannot be "fixed" by demoting everything:
+      // a real receipt still has to be readable off the wire.
+      if (pkg.verified !== false) {
+        assert.ok(pkg.verified.since.length > 0, `${pkg.id}: a published receipt must carry its date`);
+      }
+    }
+    // The gate must not have demoted the genuinely-verified corpus: the packages
+    // whose `metadata.json` carries a complete record keep it. Derived, never
+    // hardcoded, so the count cannot rot when a package is added.
+    const withRecord = packages.filter((p) => p.verified !== false);
+    assert.ok(withRecord.length > 0, "some shipped packages carry a real verification record and must keep it");
+
+    // CROSS-SURFACE AGREEMENT. The defect was two surfaces reading ONE package
+    // and disagreeing: `/registry` republished the declared string while
+    // `/sites` (via `packageStatusOf`) required the record. Pinning the
+    // agreement is what stops that from returning — derived from disk, over
+    // every installed id, so it cannot rot when the corpus changes.
+    //
+    // HONEST LIMIT of this whole file, stated rather than hidden: because NO
+    // shipped package ever claimed `status: "verified"`, the corpus invariant
+    // above cannot tell a resolver that is consulted from one that is bypassed
+    // at the call site — a future edit could re-introduce the raw string read
+    // and stay green here. The fixture half pins the RULE; this half pins that
+    // the two consumers of one file never diverge. Closing the remaining gap
+    // needs `buildRegistryPackages()` to be drivable against a fixture package,
+    // and the package root is resolved from `import.meta.url` with no override,
+    // so it would mean a new env knob — out of scope for a status-provenance
+    // fix, and noted rather than faked.
+    const byId = new Map(packages.map((p) => [p.id, p]));
+    for (const id of listInstalledPackageIds()) {
+      const served = chatSurfaceStatus(id);
+      const published = byId.get(id);
+      if (!published) continue; // url-less / no packaged profile: /registry does not list it
+      // `/sites` reports a CHAT-surface class (builtin, unverified-candidate,
+      // dormant, dead-end, verified); `/registry` reports the package's own
+      // declared status. They are different vocabularies by design, so the
+      // invariant is narrower and exact: an EARNED claim on one surface with no
+      // record behind it is a lie, and a record on one surface with no earned
+      // claim on the other is a contradiction.
+      if (served === "verified") {
+        assert.notEqual(published.verified, false, `${id}: /sites says verified but /registry publishes no verification record`);
+      }
+    }
   });
 
   it("exposes per-package stored accounts consistent with GET /accounts (vault on disk)", (t) => {

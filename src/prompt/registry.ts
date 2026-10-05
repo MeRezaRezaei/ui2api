@@ -183,6 +183,90 @@ interface Metadata {
   verified?: RegistryVerified | boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE STATUS PROVENANCE GATE
+//
+// ================================ WHAT WENT WRONG ============================
+//
+// `buildRegistryPackages()` read `metadata.json`'s `status` as a bare string and
+// republished it verbatim on `/registry` and `/capabilities/<site>`:
+//
+//     if (typeof meta.status === "string" && meta.status.trim()) status = meta.status.trim();
+//
+// So a package could CLAIM the one status in the shipped vocabulary that means
+// "a live round-trip was recorded and I can point at it" — `verified` — with no
+// `verified` record behind it. The registry is the ONLY info source an external
+// consumer has, and it publishes `status` next to a `verified` RECORD field, so
+// an unearned `status: "verified"` reads on the wire exactly like an earned one:
+// a fabricated capability claim, handed to every consumer, in the one place this
+// repo's own rule says nothing is claimed without evidence.
+//
+// The contradiction was already visible in this very file, which is how the rule
+// is DERIVED rather than invented: `packageStatusOf()` (line ~419) — the
+// resolver `/sites`, `prompt --sites` and `requirements` all call — has always
+// returned `verified` ONLY from a full record and never from the string. The
+// same package therefore reported `verified` on `/registry` while `/sites`
+// reported `unverified-candidate` for it. Two surfaces, one package, opposite
+// answers, and the dishonest one is the one every consumer reads. So the gate
+// below is not a new policy: it is the `/sites` rule applied to the surface that
+// forgot it.
+//
+// ============================== THE RULE =====================================
+//
+// The EARNED classification is `verified`. It survives only when the record that
+// `RegistryVerified` already defines is present and complete — `since`,
+// `evidence`, `via` all non-empty strings, the same shape `packageStatusOf()`
+// demands and `validate-registry.mjs` already refuses otherwise. Absent that
+// record the declared string is not trusted and the status degrades to
+// `unverified-candidate`, the honest word this module already uses for exactly
+// "driveable, no recorded live round-trip" (`defaultChatSurface()` line ~546).
+//
+// Everything else passes through untouched, DELIBERATELY:
+//
+//   - `dormant` / `dead-end` are not claims of success, they are the honest
+//     report of a limitation, and demoting them would hide a blocker.
+//   - `active` / `scaffold` / any future operator string is not an earned
+//     classification, so gating it would be inventing a rule from nothing.
+//
+// The alternative rule — "only publish statuses from a known enum" — was
+// rejected on measurement: it would rewrite 9 of the 33 shipped packages
+// (`active`, `scaffold`, `dead-end`, `dormant`) and invent vocabulary the
+// packages do not use. Narrow the gate to the earned claim instead.
+
+// The one status in the shipped vocabulary that asserts a verification HAPPENED.
+const EARNED_STATUS = "verified";
+// What a package with driveable selectors and no recorded round-trip is called.
+const UNEARNED_STATUS = "unverified-candidate";
+
+/** The shape `RegistryVerified` requires before a `verified` claim is honoured. */
+function isCompleteVerifiedRecord(v: unknown): v is RegistryVerified & { evidence: string; via: string } {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  const nonEmpty = (x: unknown): boolean => typeof x === "string" && x.trim().length > 0;
+  return nonEmpty(r.since) && nonEmpty(r.evidence) && nonEmpty(r.via);
+}
+
+/**
+ * The ONE status resolver: a package's declared `metadata.json` status, gated on
+ * the verification record that has to back an earned classification.
+ *
+ * Returned as a pair because they are one fact: `status: "verified"` is the
+ * claim and `verified: {...}` is the receipt. Deriving them in one place is what
+ * stops the two from disagreeing — which is exactly the defect this replaces.
+ */
+export function honestPackageStatus(meta: unknown): { status: string; verified: RegistryVerified | false } {
+  const m = (meta && typeof meta === "object" ? meta : {}) as Metadata;
+  const declared = typeof m.status === "string" && m.status.trim() ? m.status.trim() : "unknown";
+  const record = isCompleteVerifiedRecord(m.verified)
+    ? { since: m.verified.since, ...consumerVerifiedRecord(m.verified) }
+    : false;
+  // An earned claim with no receipt behind it is not published as earned. The
+  // word it degrades to is the one this module already uses for that state, so
+  // a consumer branching on `status` sees the same word everywhere it can.
+  const status = declared === EARNED_STATUS && record === false ? UNEARNED_STATUS : declared;
+  return { status, verified: record };
+}
+
 interface ManifestCapability {
   id: string;
   name?: string;
@@ -428,9 +512,14 @@ function packageStatusOf(siteId: string): ChatSurfaceStatus | "unknown" {
   if (typeof meta?.status === "string") {
     if (meta.status === "dormant" || meta.status === "dead-end") return meta.status;
   }
-  const v = meta?.verified;
-  if (v && typeof v === "object" && typeof v.since === "string" && typeof v.evidence === "string" && typeof v.via === "string") {
-    return "verified";
+  // The SAME record predicate `buildRegistryPackages()` gates its published
+  // `status` on (THE STATUS PROVENANCE GATE below). Sharing it is what makes
+  // "/registry says verified" and "/sites says verified" the same statement:
+  // two different record tests would let the two surfaces drift apart on a
+  // half-written record, and the honest answer would live on whichever surface
+  // nobody was reading.
+  if (isCompleteVerifiedRecord(meta?.verified)) {
+    return EARNED_STATUS;
   }
   return "unknown";
 }
@@ -974,20 +1063,29 @@ export function buildRegistryPackages(): RegistryPackage[] {
       manifest = null;
     }
     const caps = Array.isArray(manifest?.capabilities) ? manifest.capabilities : [];
+    // ONE status resolver for both fields (see THE STATUS PROVENANCE GATE
+    // above). It used to be the two lines below, which republished
+    // `metadata.json`'s `status` verbatim:
+    //
+    //     if (typeof meta.status === "string" && meta.status.trim()) status = meta.status.trim();
+    //
+    // so `status: "verified"` was published as an EARNED classification with no
+    // verification record behind it, while `/sites` — which reads the same file
+    // through `packageStatusOf()` — reported the same package as
+    // `unverified-candidate`. The consumer-facing registry is the surface that
+    // must never be the more generous of two readings of one package.
     let status = "unknown";
     let verified: RegistryVerified | false = false;
     try {
       const meta = JSON.parse(
         readFileSync(resolve(pkgDir, "metadata.json"), "utf8")
       ) as Metadata;
-      if (typeof meta.status === "string" && meta.status.trim()) status = meta.status.trim();
+      const honest = honestPackageStatus(meta);
+      status = honest.status;
       // A truthy `verified` value must be a full record; anything else (true,
       // bogus) is refused here and by validate-registry.mjs so consumers can
       // trust the field.
-      const v = meta.verified;
-      if (v && typeof v === "object" && typeof v.since === "string" && typeof v.evidence === "string" && typeof v.via === "string") {
-        verified = { since: v.since, ...consumerVerifiedRecord(v) };
-      }
+      verified = honest.verified;
     } catch {
       // metadata.json absent → scaffold/experimental package, status stays "unknown"
     }
