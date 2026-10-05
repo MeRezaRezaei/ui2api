@@ -391,6 +391,35 @@ with two contradictory verdicts, and in two of the three the *false* cell was th
 already states — nothing is claimed without evidence — was being violated by the summary, while the
 evidence underneath was correct.
 
+### ROUND N+194g — a crash-resume ledger cannot hold a present-tense number (2026-10-05)
+
+`test/doc-unverifiable-counts.test.ts` was **RED** on four committed hits in `docs/agent-registry.md`
+(`skills-truth 18`, `gate-wiring 52`, `105/105`, `test/wire-layer-overhead-truth.test.ts 96`). The
+class is structural, not cosmetic: that file is an **append-only historical ledger**, so a bare
+tally in it was true on the day a lane ran it and is false after the next commit — **it can never
+be kept true**, because its truth is a function of a repo that has since moved. `AGENTS.md` already
+forbids exactly this shape in its own words (GOAL 110: *"a hand-typed total is unverifiable and can
+only rot silently — get the truth from a run, never from prose"*).
+
+`84e59d2` restructured the ledger so every row carries its own run's timestamp and states that a
+tally inside a row **is that row's dated observation and not a current total**, plus where the live
+number actually comes from (`npm run test:unit` prints the real totals). **Row count verified 61 → 61
+with `comm` showing zero ids lost** — a crash-resume reader must still find every lane that existed,
+and that is the whole reason the file exists.
+
+**AND THE ANTI-VACUITY CHECK IS WHAT MAKES THIS TRUSTWORTHY** — a gate that passes because it
+stopped reading would be worse than the red it started with, so I ran it myself rather than accept
+the lane's word for it. A freshly appended bare count in an undated passage is **still caught**
+(`undated: ['gate-wiring 52@147']`), and the three real registry tallies are now correctly reported
+as **records** with their attribution (`skills-truth 18 <- passage line 75: 2026-10-04`). The gate
+distinguishes them; it did not simply go quiet.
+
+One honest limit, measured rather than assumed: the tier-2 rule only fires on a line carrying a
+**measurement-context word** (`tests`, `suite`, `green`, `records`, …). A bare `gate-wiring 52` with
+no such word is invisible to it — the count rule needs the measurement framing to read it as a
+claim at all. That is the correct trade (otherwise every number in a doc becomes a candidate) but
+it means the rule is a *claim* detector, not a *count* detector.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
