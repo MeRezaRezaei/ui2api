@@ -942,7 +942,53 @@ export class ChatPool {
         // already gone
       }
       this.browser = undefined;
+      /* GOAL 240 — THE DROPPED IDLE WORKERS WERE NEVER TORN DOWN.
+       *
+       * `this.workers = []` used to be the whole eviction, and every OTHER
+       * eviction in this file closes what it drops: the spawn-failure path
+       * (:911), the measured-dead paths (:1049, :1056), the busy watchdog
+       * (:1183), the sweep (:1289) and `close()` (:1444) all call
+       * `driver.close()`. This one did not, so an IDLE worker's page was left
+       * open with nothing left that could ever reach it: `drainWorker` is gated
+       * on `this.workers.includes(worker)` (:1077) and `close()`/the sweep now
+       * iterate an empty array. In attach mode that page is a tab in the
+       * OPERATOR'S OWN Chrome, and it stays there for the life of that browser.
+       * A BUSY dropped worker was never the visible symptom, because its own
+       * later `release()` reaches `discardPage()` (:1069) — which is exactly
+       * why this rotted unnoticed. And `/status` reported `0` workers the whole
+       * time, so the pool respawned to `max` on top of the orphans.
+       *
+       * WHY ONLY THE IDLE ONES. Closing a BUSY worker here would be a NEW and
+       * much worse defect: `restartBrowser()` runs from the spawn-failure path
+       * (:915), which can fire while an unrelated request is mid-flight on
+       * another page, and closing that page kills a live request out from under
+       * its caller. A busy dropped worker already self-cleans — `release()`
+       * tears its page down — and its slot is already excluded from the pool by
+       * the `includes` gate, so nothing is handed out twice. So the busy case is
+       * deliberately left alone: close what cannot self-clean, not what can.
+       *
+       * SAFE IN ATTACH MODE, and that is the reason it is not `this.browser`
+       * above: `ChatDriver.close()` (src/prompt/driver.ts:960) closes the PAGE
+       * alone when `defaultContext` is set — the shared context of an attached
+       * browser is never touched — and reaches for `this.browser` only under
+       * `ownsBrowser`, which is false for a pool driver (the pool always passes
+       * a browser, driver.ts:242) and becomes true only for a browser the DRIVER
+       * itself launched at driver.ts:295, which is never the operator's. The
+       * attach gate at :936 is untouched by this change.
+       *
+       * Each close is guarded and the loop does not abort on one failure: a
+       * wedged tab is one orphan, and the tabs after it would be orphans too if
+       * the first throw ended the sweep. Same shape as `close()` (:1444). */
+      const dropped = this.workers;
       this.workers = [];
+      for (const w of dropped) {
+        if (w.busy) continue; // in use: its own release() still tears this page down
+        try {
+          await w.driver.close();
+        } catch {
+          /* tab already gone */
+        }
+      }
       // Waiting requests re-acquire on a fresh browser (their waiters are
       // re-triggered through acquire()). GOAL 83: the waiter carries its reject
       // handle, so a failed re-acquire is settled with the NAMED cause instead

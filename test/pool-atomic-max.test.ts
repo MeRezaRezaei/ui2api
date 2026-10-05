@@ -122,3 +122,125 @@ d("GOAL 103: the pool's max ceiling is atomic", () => {
     assert.ok(!/this\.workers\.length < this\.max\) \{\s*\n\s*return this\.spawn/.test(SRC), "the non-atomic check must be gone");
   });
 });
+
+/* ==========================================================================
+ * GOAL 240 — `restartBrowser()` must not orphan a pooled driver's page.
+ *
+ * THE DEFECT THIS PINS. `restartBrowser()` was the ONLY eviction in pool.ts
+ * that dropped `this.workers` without closing what it dropped. Every other one
+ * calls `driver.close()` — the spawn-failure path, the measured-dead paths,
+ * the busy watchdog, the sweep, `close()`. So an IDLE worker's page was left
+ * open with nothing left able to reach it (`drainWorker` is gated on
+ * `this.workers.includes(worker)`; `close()` and the sweep now iterate an empty
+ * array). In attach mode that page is a TAB IN THE OPERATOR'S OWN CHROME and it
+ * stays there for the life of that browser. A busy dropped worker self-cleans
+ * through its own `release()`, which is why this stayed invisible, and `/status`
+ * reported `0` workers throughout — so the pool respawned to `max` on top of the
+ * orphans.
+ *
+ * WHAT IS ASSERTED — BEHAVIOUR, BY FALSIFIER. Three properties, each pinned
+ * with a driver or a browser rigged to FAIL LOUDLY if the code touches it:
+ *
+ *   (a) each dropped idle driver's `close()` runs EXACTLY ONCE. A double close
+ *       is its own bug — `ChatDriver.close()` is idempotent in shape but not in
+ *       contract, and a counter pinned at exactly 1 catches both "never closed"
+ *       and "closed twice".
+ *   (b) the shared browser's `close()` is NEVER reached in attach mode. The fake
+ *       browser THROWS on `close()` and records the touch, so the assertion is
+ *       proof of non-reach rather than a reading of intent — the operator's own
+ *       Chrome must survive a rotation (GOAL 119).
+ *   (c) one driver's close FAILING must not abort the loop. Driver #1 rejects;
+ *       the test asserts driver #2 was still closed. Without the per-driver
+ *       guard, one wedged tab would orphan every tab behind it.
+ *
+ * `restartBrowser()` is private, so it is reached through the same cast the
+ * release tests use for `workers`. No browser is ever launched: the browser is
+ * a plain object and `spawn()` is never reached.
+ * ========================================================================== */
+
+/** A driver double whose `close()` is counted, and optionally fails. */
+function countingDriver(name: string, log: string[], fail = false) {
+  let closes = 0;
+  return {
+    driver: {
+      page: { evaluate: () => Promise.resolve(1), context: () => ({ pages: () => [] }) },
+      close: async () => {
+        closes++;
+        log.push(`close:${name}`);
+        if (fail) throw new Error(`tab ${name} wedged`);
+      },
+      ask: async () => ({}),
+      discardPage: async () => {
+        log.push(`discard:${name}`);
+      },
+    },
+    closes: () => closes,
+  };
+}
+
+/** A pool in ATTACH mode holding a rigged shared browser, plus N idle workers. */
+function attachPoolWithIdleWorkers(n: number, opts: { failFirst?: boolean } = {}) {
+  const log: string[] = [];
+  let browserCloses = 0;
+  const browser = {
+    close: async () => {
+      browserCloses++;
+      log.push("close:BROWSER");
+      throw new Error("the operator's own Chrome was closed — this is the bug this test exists for");
+    },
+  };
+  const pool = new ChatPool({ profiles: [], dataDir: "data", max: Math.max(n, 1), attach: true } as any);
+  (pool as any).browser = browser;
+  const drivers = Array.from({ length: n }, (_, i) => countingDriver(`d${i}`, log, opts.failFirst === true && i === 0));
+  const workers = drivers.map((d, i) => ({ profileId: "gemini", driver: d.driver, busy: false }) as any);
+  (pool as any).workers = workers;
+  return { pool, drivers, workers, log, browserCloses: () => browserCloses };
+}
+
+t("GOAL240: restartBrowser() closes every dropped IDLE driver — exactly once each", async () => {
+  const { pool, drivers, log, browserCloses } = attachPoolWithIdleWorkers(3);
+
+  await (pool as any).restartBrowser();
+
+  for (const d of drivers) {
+    assert.equal(d.closes(), 1, "a dropped idle driver's page must be closed EXACTLY once — never left open, never closed twice");
+  }
+  assert.deepEqual(log, ["close:d0", "close:d1", "close:d2"], "every dropped driver must be torn down, in worker order");
+  assert.equal((pool as any).workers.length, 0, "the array is emptied as before");
+
+  // (b) falsifier: the rigged browser THROWS on close(). Reaching it at all
+  // would throw out of restartBrowser(); the zero proves it was never reached.
+  assert.equal(browserCloses(), 0, "restartBrowser() must NOT close the operator's own browser in attach mode (GOAL 119)");
+  await pool.close().catch(() => undefined);
+});
+
+t("GOAL240: one dropped driver's close() failing does not abort the loop for the rest", async () => {
+  // (c) falsifier: driver d0's close() rejects. Without a per-driver guard the
+  // throw ends the sweep and d1/d2 are orphaned too — which is the same defect
+  // this GOAL closes, reached one step later.
+  const { pool, drivers, log } = attachPoolWithIdleWorkers(3, { failFirst: true });
+
+  await (pool as any).restartBrowser(); // must NOT reject
+
+  assert.equal(drivers[0].closes(), 1, "the failing driver was attempted, not skipped");
+  assert.equal(drivers[1].closes(), 1, "a sibling's wedged close must not orphan this tab");
+  assert.equal(drivers[2].closes(), 1, "and the one behind that too");
+  assert.ok(log.includes("close:d2"), "the loop reached the last driver");
+  await pool.close().catch(() => undefined);
+});
+
+t("GOAL240: a BUSY dropped worker is left for its own release() — closing it here would kill a live request", async () => {
+  // The counterweight. `restartBrowser()` runs from the spawn-failure path,
+  // which can fire while an unrelated request is mid-flight on another page. A
+  // busy dropped worker already self-cleans through `release()`, so tearing it
+  // down here would close a tab out from under a running caller.
+  const { pool, workers, drivers, log } = attachPoolWithIdleWorkers(2);
+  workers[0].busy = true; // in use by a live request
+
+  await (pool as any).restartBrowser();
+
+  assert.equal(drivers[0].closes(), 0, "a busy dropped worker must NOT be closed here — its own release() still owns that page");
+  assert.equal(drivers[1].closes(), 1, "the idle sibling is still closed");
+  assert.ok(!log.includes("discard:d0"), "no teardown of the busy page is started on its behalf");
+  await pool.close().catch(() => undefined);
+});
