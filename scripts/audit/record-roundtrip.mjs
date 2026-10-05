@@ -347,11 +347,28 @@ function daemonCode(p) {
 const TRIAGE = {
   TRANSPORT_REFUSED: "transport-refused",
   REQUEST_REJECTED: "harness-request-rejected",
+  SERVICE_FAULTED: "service-faulted",
   MEASURED: "measured",
 };
 
 let triage = TRIAGE.MEASURED;
 let triageReason = "";
+
+// The codes the daemon emits when ITS OWN last-resort net caught a throw
+// (src/prompt/http.ts:1839 `internal_error`, and the runner catch's
+// `runner_error` at :1700). Both are redaction placeholders — the real message
+// is deliberately withheld from the client — so a client cannot tell a site
+// that failed to answer from the daemon crashing while asking.
+//
+// MEASURED on the live daemon: deepseek and kimi each answer
+// `HTTP 500 {code:"internal_error", message:"internal error"}` after ~60s, at an
+// IDLE pool, reproducibly, and identically when the request is issued by hand
+// with curl straight at POST /prompt — so it is not this harness. That is a
+// real fault, but it is a fault in the thing being MEASURED, not a verdict
+// about the SITE: recording it as one would repeat, one layer up, the exact
+// defect the pre-fix harness had (a condition that arrived looking like a site
+// outcome and was filed as one). It is reported, and nothing is written.
+const DAEMON_FAULT_CODES = new Set(["internal_error", "runner_error"]);
 
 if (transportError !== null) {
   triage = TRIAGE.TRANSPORT_REFUSED;
@@ -364,10 +381,18 @@ if (transportError !== null) {
     `(daemon code: ${code || "<none>"}; daemon message: ${daemonMessage(payload) || "<empty>"}). ` +
     `This is the harness's own request being refused, so it is NOT a round trip and it is NOT a verdict about ${site}. ` +
     `A 4xx here is one of: unknown_site, prompt/capability required, unauthorized, site_not_dispatched, unknown endpoint.`;
+} else if (DAEMON_FAULT_CODES.has(daemonCode(payload) ?? "")) {
+  triage = TRIAGE.SERVICE_FAULTED;
+  triageReason =
+    `HTTP ${httpStatus} from ${url} after ${elapsedMs}ms carrying the daemon's own fault code ` +
+    `\`${daemonCode(payload)}\` (a redaction placeholder — the real message is withheld from clients by ` +
+    `design). This is a fault in the daemon under measurement, NOT a verdict about ${site}: the daemon threw, so it is ` +
+    `unknown whether the site was reached at all. Recording it against the site would repeat the pre-fix defect one layer ` +
+    `up. Re-measure with UI2API_DEBUG=1 on the daemon to get the internal cause.`;
 }
 
-// A refusal writes NOTHING. This is the whole point of the triage: the
-// pre-fix harness turned its own HTTP 400 into a row reading
+// A non-measured triage writes NOTHING. This is the whole point: the pre-fix
+// harness turned its own HTTP 400 into a row reading
 // `class: UNCLASSIFIED, probeNonceMatched: false`, which no reader could tell
 // from a site that was asked and did not answer.
 if (triage !== TRIAGE.MEASURED) {
