@@ -325,8 +325,10 @@ async function runEveryProbe(start: Start, opts: { refusal?: typeof DriverRefusa
   // A NAMED driver refusal, not a nameless fault: the real 502 the two routes
   // now agree on. `explodes` below drives the anonymous 500 — both classes are
   // delivered, because one is a server fault and the other is a site refusal and
-  // the contract distinguishes them. The stub's own call counter is asserted, so
-  // this cannot "arrive" without the stub driver actually being asked.
+  // the contract distinguishes them. Both probes now use `idlePool` and BOTH
+  // assert the stub's own call counter, so neither can "arrive" without the stub
+  // driver actually being asked. `explodes` was measured doing the opposite; see
+  // its block below.
   {
     const asked = { n: 0 };
     await withDaemon(start, { pool: idlePool({ max: 4, maxWaiters: 4, waiterTimeoutMs: 60_000 }, refuses, asked) }, async (port) => {
@@ -353,9 +355,33 @@ async function runEveryProbe(start: Start, opts: { refusal?: typeof DriverRefusa
   });
 
   // A REAL internal fault — never a caller mistake dressed as one.
-  await withDaemon(start, { pool: cappedPool({ max: 4, maxWaiters: 4, waiterTimeoutMs: 60_000 }, explodes) }, async (port) => {
-    rec("internal_error", "POST /prompt with a driver that throws", await call(port, "POST", "/prompt", { site: "deepseek", prompt: "hi" }));
-  });
+  //
+  // THE IDLE POOL IS LOAD-BEARING HERE, and it was a VACUOUS PROBE until measured.
+  // This probe used `cappedPool`, whose worker is `busy: true`. `ChatPool.acquire`
+  // (src/prompt/pool.ts:878) looks for an existing worker with `!w.busy`, does not
+  // find one, and — because `workers.length + spawning < max` — falls into the
+  // SPAWN branch at :912 and builds a REAL page. The stub is then never asked and
+  // the wire answers whatever the spawn failure is.
+  //
+  // MEASURED, not assumed (a scratch harness driving both pools against the real
+  // `startPromptd` and counting the stub's own calls):
+  //   cappedPool (busy:true)  -> asked = 0, status 500 code internal_error, and
+  //                              the daemon logged `unknown site: deepseek` from
+  //                              `ChatPool.spawn` — a PAGE-OPEN failure wearing a
+  //                              fault's name;
+  //   idlePool   (busy:false) -> asked = 1, status 500 code internal_error, from
+  //                              the stub's own TypeError.
+  // Both answer the same status and the same code, so the GATE could not tell them
+  // apart — the probe measured a page-open failure and recorded it as the
+  // `internal_error` a real driver fault produces. That is precisely the vacuity
+  // the sibling `refuses` probe above was fixed for; this one was left behind.
+  {
+    const asked = { n: 0 };
+    await withDaemon(start, { pool: idlePool({ max: 4, maxWaiters: 4, waiterTimeoutMs: 60_000 }, explodes, asked) }, async (port) => {
+      rec("internal_error", "POST /prompt with a driver that throws", await call(port, "POST", "/prompt", { site: "deepseek", prompt: "hi" }));
+      assert.equal(asked.n, 1, "precondition: the stub driver really was asked — a busy-worker pool spawns a REAL one, so this probe measures a page-open failure and records it as a driver fault");
+    });
+  }
 
   // The three pool classes, each produced by the REAL pool.
   await withDaemon(start, { pool: cappedPool({ max: 1, maxWaiters: 0, waiterTimeoutMs: 60_000 }, noPage) }, async (port) => {
