@@ -2,7 +2,7 @@ import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { chatSurfaceStatus, findPackageDir, listInstalledPackageIds } from "../src/prompt/registry.js";
+import { chatSurfaceStatus, findPackageDir, listInstalledPackageIds, measuredRoundTripFor } from "../src/prompt/registry.js";
 
 /**
  * GOAL 92: the shipped site inventory's status column is a consumer-facing
@@ -95,13 +95,24 @@ export function publishedRoundTripIds(doc: string): string[] {
 }
 
 /** FORWARD direction — every published round-trip claim must be backed by a
- *  real `verified` machine record. Exported so the falsifier reuses it. */
+ *  real `verified` machine record. Exported so the falsifier reuses it.
+ *
+ *  READS THE RECEIPT DIRECTLY (`readRoundTripRecord`), not the resolver.
+ *  That is a correction, not a preference. This function used to ask
+ *  `chatSurfaceStatus(id) === "verified"`, which made the resolver stand in for
+ *  the receipt — and since the round-trip seam landed, the resolver answers
+ *  `verified` only where a receipt AND a MEASURED row both exist. So asking it
+ *  here silently redefined "has a receipt" into "has a receipt and a
+ *  measurement", and the honest finding (7 receipts, 0 measurements) arrived as
+ *  7 bogus "no verified metadata record" gaps — the test reporting receipts as
+ *  MISSING when they are present and complete. The receipt predicate belongs to
+ *  the reader below; the measurement predicate is asserted separately, by
+ *  test/round-trip-record-truth.test.ts, which owns the measurement record. */
 export function roundTripGaps(doc: string): string[] {
   const gaps: string[] = [];
   for (const { id, status } of parseStatusRows(doc)) {
     if (!rowClaimsRoundTrip(status)) continue;
-    const machine = chatSurfaceStatus(id);
-    if (machine !== "verified") gaps.push(`\`${id}\` claims a live round-trip in the shipped table but the machine status is "${machine}" (no verified metadata record)`);
+    if (readRoundTripRecord(id) === null) gaps.push(`\`${id}\` claims a live round-trip in the shipped table but carries no complete verified metadata record`);
   }
   return gaps;
 }
@@ -259,10 +270,38 @@ d("GOAL 92: the shipped site-status column cannot claim a round-trip the machine
     assert.deepEqual(published, recorded, "the published claim set and the recorded receipt set must be identical");
   });
 
-  t("the resolver's own verdict matches the record it claims to read", () => {
+  t("the resolver's own verdict matches the records it claims to read", () => {
+    // THE RESOLVER NOW READS A SECOND RECORD, and this assertion had to change
+    // with it — stated rather than quietly loosened, because the OLD version of
+    // this line asserted `resolver === receipts`, which the measurement seam
+    // makes false BY DESIGN and for a good reason.
+    //
+    // `chatSurfaceStatus()` no longer mints `verified` from
+    // `metadata.json` alone: since the round-trip seam it also requires a
+    // MEASURED row in capabilities/roundtrip.json (src/prompt/registry.ts,
+    // `measuredRoundTripFor`, consulted by `packageStatusOf`). So the invariant
+    // is now `resolver === (receipts ∩ measurements)` — the receipt AND the
+    // measurement, never one without the other.
+    //
+    // The DIRECTION is what matters and it is unchanged by this edit: a
+    // measurement may only ever DEMOTE. `resolver ⊆ receipts` still holds, and
+    // that subset is asserted below, so a measurement can never promote a site
+    // that has no receipt — which is the one way this seam could have made the
+    // registry lie in the opposite direction.
     const byResolver = resolverVerifiedIds();
-    const byRecord = recordedRoundTripIds();
-    assert.deepEqual(byResolver, byRecord, `chatSurfaceStatus() and the metadata.json receipts disagree.\n  resolver: ${byResolver.join(", ") || "(none)"}\n  record:   ${byRecord.join(", ") || "(none)"}`);
+    const receipts = recordedRoundTripIds();
+    const measured = receipts.filter((id) => measuredRoundTripFor(id).measured).sort();
+    assert.deepEqual(
+      byResolver,
+      measured,
+      `chatSurfaceStatus() must publish \`verified\` exactly where a metadata.json receipt AND a MEASURED round trip both exist.\n  resolver:    ${byResolver.join(", ") || "(none)"}\n  measured:    ${measured.join(", ")|| "(none)"}\n  receipt-only: ${receipts.filter((id) => !measured.includes(id)).join(", ") || "(none)"}`,
+    );
+    // The subset that must NEVER move: no measurement anywhere can promote.
+    assert.deepEqual(
+      byResolver.filter((id) => !receipts.includes(id)),
+      [],
+      `the resolver published \`verified\` for ${byResolver.filter((id) => !receipts.includes(id)).join(", ")} with NO metadata.json receipt — a measurement may only ever demote, never promote`,
+    );
   });
 
   t("each recorded receipt is a real dated record, not a placeholder", () => {

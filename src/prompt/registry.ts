@@ -246,6 +246,182 @@ function isCompleteVerifiedRecord(v: unknown): v is RegistryVerified & { evidenc
   return nonEmpty(r.since) && nonEmpty(r.evidence) && nonEmpty(r.via);
 }
 
+// ── THE ROUND-TRIP MEASUREMENT SEAM (capabilities/roundtrip.json) ────────────
+//
+// WHAT THIS IS. A receipt shape is a claim that a round trip happened. Nothing
+// that `isCompleteVerifiedRecord` can see PROVES it: `verified.evidence` is
+// free text ("proof PASS 13965"), and no code parses that. So until this seam
+// existed, `/registry` published `status: "verified"` for 7 packages on the
+// strength of prose alone, and a reader could not tell a measured round trip
+// from a sentence asserting one.
+//
+// THE DESIGN'S OWN CLAIM WAS WRONG ABOUT ITS OWN SEAM, and this is the
+// correction. The design named `honestPackageStatus` (the function above) as the
+// place to enforce the measurement. Measured against the tree: it cannot work
+// there. Its degrade branch fires only when a package DECLARES
+// `status: "verified"`, and all 7 packages carrying a complete receipt declare
+// `status: "active"` instead — so that branch has never fired for a single
+// shipped package. The status a consumer actually reads is minted by
+// `packageStatusOf` below, which is also what `chatSurfaceStatus` and
+// `buildRegistryPackages` call, so THAT is where the measurement is consulted.
+// Enforcing it in `honestPackageStatus` would have been a gate that could not
+// fire — precisely the defect class this seam exists to kill.
+//
+// THE DIRECTION, which is the whole honesty argument and is not symmetric:
+//
+//   MEASUREMENT WINS.  A measured row that disagrees with the receipt degrades
+//   the claim to the word this module already uses for "not earned"
+//   (`unverified-candidate`).
+//   A MEASUREMENT MAY NEVER PROMOTE.  No row, and no combination of rows, can
+//   raise a package that lacks a receipt to `verified`. Promotion is the
+//   author's judgement; only demotion is mechanical.
+//
+// AND THE HONEST CONSEQUENCE, stated here because it is a visible behaviour
+// change and not a silent one: with the record as shipped, 7 packages hold a
+// receipt and NO measured row, so all 7 now publish `unverified-candidate`
+// rather than `verified`. That is not the seam inventing a negative result —
+// `unverified-candidate` says exactly what is true, which is "not measured".
+// Claiming otherwise from an absent measurement would be a fabricated positive,
+// which is the one thing this repo forbids outright. Consumers that branch on
+// `status` keep working: the word is the existing one, and surfacing is
+// unaffected (`chatSurfaceStatus` already returned `unverified-candidate` for
+// every id-less/scaffold package).
+
+/** One row of the published round-trip record, as read. */
+export interface RoundTripRow {
+  site?: unknown;
+  capability?: unknown;
+  class?: unknown;
+  provenance?: unknown;
+  measuredAt?: unknown;
+  httpStatus?: unknown;
+  answerChars?: unknown;
+  probeNonceMatched?: unknown;
+  doneReason?: unknown;
+  poolAtRequest?: unknown;
+  daemonCommit?: unknown;
+}
+
+/** Repo-relative location of the round-trip record, walked up like
+ *  `modelVerificationPath` so a built `dist/` copy still resolves. */
+function roundTripRecordPath(): string {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  for (const up of [2, 3]) {
+    let p = here;
+    for (let i = 0; i < up; i++) p = dirname(p);
+    const candidate = resolve(p, "capabilities", "roundtrip.json");
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(process.cwd(), "capabilities", "roundtrip.json");
+}
+
+const ROUNDTRIP_SCHEMA = "ui2api/roundtrip/1";
+
+export interface RoundTripReading {
+  /** A NAMED failure instead of an empty measurement, so an unreadable record
+   *  can never read as "nothing measured, therefore degrade" — which would be
+   *  a fabricated negative. */
+  refusal: string | null;
+  schema: string | null;
+  stalenessWindowDays: number;
+  rows: RoundTripRow[];
+}
+
+/** Pure fs read of the published round-trip record. Never throws: every failure
+ *  becomes a NAMED `refusal`, mirroring `readModelVerification` above, because a
+ *  record that cannot be read must be VISIBLE rather than silently treated as an
+ *  absence of measurement. */
+export function readRoundTripRecord(): RoundTripReading {
+  const abs = roundTripRecordPath();
+  const base: RoundTripReading = { refusal: null, schema: null, stalenessWindowDays: 30, rows: [] };
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch (e) {
+    return {
+      ...base,
+      refusal: `round-trip record unreadable at capabilities/roundtrip.json (${(e as Error).message}) — status falls back to the receipt alone and the gate reports the record as MISSING`,
+    };
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (e) {
+    return {
+      ...base,
+      refusal: `round-trip record at capabilities/roundtrip.json is not parseable JSON (${(e as Error).message}) — status falls back to the receipt alone and the gate reports the record as UNPARSEABLE`,
+    };
+  }
+  if (parsed.schema !== ROUNDTRIP_SCHEMA) {
+    return {
+      ...base,
+      refusal: `round-trip record declares schema ${JSON.stringify(parsed.schema)}, expected ${JSON.stringify(ROUNDTRIP_SCHEMA)} — status falls back to the receipt alone`,
+    };
+  }
+  const win = parsed.stalenessWindowDays;
+  const rows = Array.isArray(parsed.rows) ? (parsed.rows as RoundTripRow[]) : [];
+  return {
+    refusal: null,
+    schema: ROUNDTRIP_SCHEMA,
+    stalenessWindowDays: typeof win === "number" && Number.isFinite(win) && win > 0 ? win : 30,
+    rows,
+  };
+}
+
+/**
+ * THE PREDICATE: does a MEASURED row exist for `siteId`?
+ *
+ * "MEASURED" is deliberately narrow, and every clause is load-bearing:
+ *
+ *   - `provenance === "harness"`. A row converted from prose
+ *     (`method: "imported-from-prose"`, `probeNonceMatched: null`) is a real
+ *     measurement of SOMETHING, and it is kept in the record so the history is
+ *     not lost — but it backs nothing, because its text cannot be attributed to
+ *     the request that fetched it.
+ *   - `probeNonceMatched === true`. THE ANTI-STALE-ECHO CORE. A warm daemon pool
+ *     reuses pages, so text left on the page by an earlier prompt reads back as
+ *     this prompt's answer. Only a nonce generated per measurement and echoed by
+ *     the model proves the served text is THIS request's.
+ *   - `class === "ANSWERS"` AND `httpStatus` 2xx AND `answerChars > 0` AND
+ *     `doneReason === "stable"`. The answer must have stopped growing.
+ *   - `measuredAt` inside the staleness window. A month-old measurement of a
+ *     working site is not evidence about today's site, and CI can never re-measure
+ *     (no session, no Chrome owner), so the window is the only thing standing
+ *     between this record and a permanent lie.
+ */
+export function measuredRoundTripFor(siteId: string, now: number = Date.now()): { measured: boolean; reason: string } {
+  const rec = readRoundTripRecord();
+  if (rec.refusal) return { measured: false, reason: rec.refusal };
+  const mine = rec.rows.filter((r) => typeof r.site === "string" && r.site === siteId);
+  if (mine.length === 0) return { measured: false, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
+  const settled = mine.filter((r) => {
+    if (r.provenance !== "harness") return false;
+    if (r.probeNonceMatched !== true) return false;
+    if (r.class !== "ANSWERS") return false;
+    const st = typeof r.httpStatus === "number" ? r.httpStatus : 0;
+    if (st < 200 || st >= 300) return false;
+    if (typeof r.answerChars !== "number" || r.answerChars <= 0) return false;
+    if (r.doneReason !== "stable") return false;
+    if (typeof r.measuredAt !== "string") return false;
+    const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
+    return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
+  });
+  if (settled.length > 0) {
+    return {
+      measured: true,
+      reason: `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" (nonce matched, ANSWERS, ${settled[0]!.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
+    };
+  }
+  const why = mine
+    .map((r) =>
+      r.provenance !== "harness"
+        ? `provenance=${String(r.provenance)} (imported from prose — backs nothing)`
+        : `probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)}`,
+    )
+    .join("; ");
+  return { measured: false, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
+}
+
 /**
  * The ONE status resolver: a package's declared `metadata.json` status, gated on
  * the verification record that has to back an earned classification.
@@ -519,6 +695,13 @@ function packageStatusOf(siteId: string): ChatSurfaceStatus | "unknown" {
   // half-written record, and the honest answer would live on whichever surface
   // nobody was reading.
   if (isCompleteVerifiedRecord(meta?.verified)) {
+    // THE MEASUREMENT GATE. The receipt above says a round trip happened; this
+    // says whether one is RECORDED as machine-measured. Both must hold before
+    // `verified` is minted, and the measurement may only ever DEMOTE (see the
+    // seam note above for the direction argument and for why this is here and
+    // not in `honestPackageStatus`).
+    const m = measuredRoundTripFor(siteId);
+    if (!m.measured) return UNEARNED_STATUS;
     return EARNED_STATUS;
   }
   return "unknown";
