@@ -316,13 +316,29 @@ Two of the four targets converge on ONE failure mode, which is why they rank whe
 | `l1-infocache-type-guard` | **open** — `src/runtime/profile-ingest.ts` + `test/profile-ingest.test.ts` carry uncommitted residue (+75 / +141). Closes the whole class its sibling started: `info_cache` and every other untrusted on-disk read guarded by TYPE, so a malformed shape degrades to the existing honest fallback instead of forking a vault identity. |
 | `l1-openai-body-cap-413` | **open** — `src/prompt/openai.ts` (+129) carries uncommitted residue. An oversized `/v1` body answers **400 `invalid_json`** where the daemon answers **413 `payload_too_large`** — a caller told its JSON is malformed, retrying forever on a false diagnosis. |
 
-**The honest state of this wave, stated plainly: one of four is closed and verified, three
-have landed edits in the tree and are not yet verified by me.** I am not recording them as
-closed and I am not recording them as clean either — `test/openai-full-contract-truth.test.ts`
-is currently **RED** against the uncommitted `openai.ts` residue (it pins
-`reject(new Error(INVALID_JSON_MESSAGE))` where the lane now rejects a typed `BodyRefusal`),
-so that residue is **not yet self-consistent**, and no part of this wave has been committed
-beyond `c812df5` + `d2fee87`.
+**All four are now closed, and each needed RESCUE rather than replacement** — the lanes'
+sessions died mid-run (message counts frozen, then `status: canceled`) exactly as the doctrine
+anticipates, and `resume_delegation` on the **same** `task_id` brought every one of them back to
+finish its own task. **No lane was re-dispatched from scratch and no work was thrown away**; the
+residue in the tree was the thing each resumed session picked up. That is the whole point of
+LAW 12: the surviving edits were good, and the session that understood them was still recoverable.
+
+| lane | closed at | what the resumed lane proved |
+| --- | --- | --- |
+| `l1-browser-orphan-kill` | `c812df5` | the child is killable **at the instant it exists**, so no later throw can leak it. Verified by me at fan-in: `runtime-launch-seam` 7/7. |
+| `l1-chrome-daemon-atomic-state` | `648aae8` | state written **temp + rename** (atomic) with `0600` preserved, and a **dead child pid is never recorded as `origin:"spawned"`** — the interleaving that made the live Chrome unstoppable. CAS on the observed prior state chosen over a lock file (no stale lock to reap). |
+| `l1-infocache-type-guard` | `f300686` | every untrusted on-disk read guarded by TYPE via `untrustedRecord`/`identityString`, no try/catch. **Three** defects, not one: a wrong-typed leaf (`email = 42`) still reached `slugifyIdentity`; an `info_cache` **array** made `Object.values(...)[0]` attribute a named profile to `Default` (**a wrong vault slug with no crash at all**); and a byte-**array** `encrypted_key` was silently accepted by `Buffer.from` and **forged** a 16-byte key, so every cookie would decrypt with garbage. |
+| `l1-openai-body-cap-413` | `f55c32c` | oversized `/v1` body answers **413 `payload_too_large`** with `connection: close`, socket destroyed only after the answer flushes (the daemon's order — its reverse is what made this class unsendable). **The two limits did NOT agree**: `/v1` capped `raw.length` in UTF-16 units, i.e. up to ~4 MB of bytes on a surface whose sibling refuses at 1 MB — one daemon was accepting what another refused. Both numbers now re-derived from source by a gate, since `openai.ts` cannot import `http.ts` without a cycle. Also fixed in the same reader: `raw += c` on Buffers could decode a **split multi-byte character** to U+FFFD — a Persian or emoji prompt in 8 KB chunks was silently mangled before `JSON.parse` ever saw it. |
+
+### ROUND N+194c — the shipped-file gate was RED because of a registration I owed (2026-10-05)
+
+`gate-wiring` R4/R5 were failing on **five** test files no npm script ran. Four were **untracked**
+(a concurrent workstream's in-flight files) — naming those would be naming files the repo does not
+ship, which is the *opposite* direction of the same rule, and the gate correctly refused it. **Two
+were tracked and shipped**: `test/driver-latency-ledger.test.ts` and `test/pool-release-busy-window.test.ts`.
+Commit `d52a8c4` names those two, by reading `git ls-files` rather than `readdir` so the fix cannot
+name an untracked file. Gate re-run by me: the two shipped-file failures are gone; the residual red is
+entirely the foreign untracked set, which is not mine to register.
 
 ## OPEN — none that I can prove are still open
 
@@ -331,25 +347,22 @@ N+194 closed five more. The remaining round N+193 residue is either fixed or **b
 another workstream**, and this file will not record a blocked item as open — it records the
 block. Unfixed, in rank order, all re-confirmed still real at N+194:
 
-1. `src/prompt/pool.ts:1008` — `worker.busy = false` before the usability probe (`:1015`) and
-   `drainWorker` (`:1036`); up to `WORKER_PROBE_TIMEOUT_MS` = 5s in which a concurrent
-   same-site `acquire()` takes the worker, so `release()` `discardPage()`s it **and** hands the
-   same object to a waiter. **Two requests on one tab.** BLOCKED: another agent is editing
-   `pool.ts` right now.
-2. `src/runtime/profile-ingest.ts` — `Local State.profile.info_cache` is unguarded the same
-   way `account_info` was; a scalar there degrades to a wrong identity rather than crashing.
-3. `src/prompt/openai.ts` — the `>2_000_000` body guard rejects with a bare
-   `Error("body too large")` and is answered **400 `invalid_json`** where the daemon answers
-   **413 `payload_too_large`**; and the `/v1` invalid-JSON envelope has no `code` field.
-4. `src/runtime/browser.ts:537` — throws with the detached Chrome **un-killed** (`killGroup`
-   registers at `:546`, after), and the orphan holds the ProcessSingleton lock, refusing every
-   later `chrome start` until a manual pkill.
-5. `src/runtime/chrome-daemon.ts:258/335` — status-then-spawn TOCTOU + non-atomic
-   `writeFileSync`; two starts can record the **dead** child's pid as `origin:"spawned"`,
-   making the live Chrome unstoppable.
-6. `src/prompt/pool.ts:945` — `restartBrowser()` sets `this.workers = []` with no
-   `driver.close()`, so attach-mode contexts leak forever and untracked, and `drainWorker`
-   hands an untracked page to a waiter.
+1. `src/prompt/pool.ts:945` — `restartBrowser()` sets `this.workers = []` with no
+   `driver.close()`, so in attach mode (the documented production posture) contexts stay open in
+   the operator's own Chrome forever and untracked by `/status`, and `drainWorker` hands an
+   **untracked** page to a waiter, so live pages exceed `max`.
+2. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
+   (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
+   half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
+   reporting it, not fixing it, and not committing it.
+
+**Items that were on this list and are now closed**, each at the commit named above:
+`browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
+`648aae8`; `profile-ingest.ts` `info_cache` type guard → `f300686`; `openai.ts` 400-vs-413 body cap
+→ `f55c32c`; the knob-table and gate-wiring shipped-file gaps → `850cf55` / `d52a8c4`.
+The `pool.ts:1008` double-request race was closed by the **other** workstream in `5544246`
+(GOAL 239) while this lane was blocked on the same file — which is exactly why the ledger
+records the block rather than an open item that would have been closed underneath it.
 
 The next wave hunts NEW friction rather than re-reading this list — which is the failure
 mode this file exists to prevent.
