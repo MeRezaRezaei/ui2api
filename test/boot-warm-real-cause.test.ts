@@ -77,10 +77,18 @@ function poolWhoseSpawnFails(cause: string, opts: Partial<PoolOptions> = {}): { 
   return { pool, attempts: () => attempts };
 }
 
-test("GOAL178: warm() returns the page-open error VERBATIM — the cause the pool used to discard", async () => {
+test("GOAL178: warm() returns the page-open cause as a NAMED code — not discarded, not verbatim", async () => {
   // A cause that no generic string would ever produce, so the assertion cannot
   // be satisfied by a paraphrase. EACCES on a 0700 profile is the measured class
   // this goal names.
+  //
+  // GOAL 240 changed the SHAPE, not the intent. GOAL 178's complaint was that the
+  // pool DISCARDED the cause and reported a generic phrase; the cause is still
+  // captured and still reaches the operator. What it is no longer is VERBATIM:
+  // this outcome is served on /status + /health as `bootWarm.outcome.reason`,
+  // and the message of a real page-open failure is an absolute path
+  // (`EACCES: permission denied, open '/home/<user>/.config/ui2api-chrome/…'`).
+  // The errno IS the diagnosis; the path never was.
   const { pool } = poolWhoseSpawnFails("EACCES: permission denied, open '/home/ui2api/.config/ui2api-chrome/Default'");
   try {
     const out: WarmOutcome = await pool.warm();
@@ -90,9 +98,11 @@ test("GOAL178: warm() returns the page-open error VERBATIM — the cause the poo
     assert.ok(out.attempts >= 1, "an attempt was really made — this is not the no-target shortcut");
     assert.equal(
       out.reason,
-      "EACCES: permission denied, open '/home/ui2api/.config/ui2api-chrome/Default'",
-      "the cause is the thrown message ITSELF, verbatim — not a summary, not a guess"
+      "(errno:EACCES)",
+      "the cause is the errno the throw itself carried — the diagnosis, not a summary, not a guess",
     );
+    assert.doesNotMatch(out.reason ?? "", /\/home\/ui2api/, "the absolute path the throw carried must not reach /status or /health");
+    assert.doesNotMatch(out.reason ?? "", /permission denied/, "nor the sentence around it");
   } finally {
     await pool.close();
   }
@@ -271,7 +281,25 @@ test("GOAL178: bootWarmBlock reports the outcome's cause and never substitutes a
   assert.equal(seam.outcome, null, "an unattempted warm carries no outcome — null, never a fabricated one");
   assert.match(seam.reason, /no boot warm was attempted/);
 
-  // A THROWN warm (the belt-and-braces path) still forwards its message.
+  // A THROWN warm (the belt-and-braces path) still forwards its cause — as a
+  // NAMED code, not the message. GOAL 240: this reason is served on /status and
+  // /health, so the sentence (which here would be a path on a real throw) is
+  // gone and the classification is what remains. `(unknown)` is the honest
+  // answer for a bare `Error` with neither an errno nor a known class: the
+  // point of the pin is that it does NOT become a generic phrase masquerading
+  // as a cause.
   const threw = bootWarmBlock({ st: fakeStatus(0, "no browser handle"), attempted: true, attached: false, thrown: new Error("no Chrome executable found for managed spawn") });
-  assert.match(threw.reason, /THREW \(no Chrome executable found for managed spawn\)/);
+  assert.match(threw.reason, /THREW \(unknown\)/, "a bare throw with no errno and no known class is named (unknown) — never a generic phrase standing in for a cause");
+  assert.doesNotMatch(threw.reason, /no Chrome executable found/, "the thrown sentence must not reach /status or /health");
+  // …but a throw that DOES carry an errno keeps it: that is the diagnosis an
+  // operator triages on, and losing it would be "no raw internals" quietly
+  // becoming "no detail".
+  const threwErrno = bootWarmBlock({
+    st: fakeStatus(0, "no browser handle"),
+    attempted: true,
+    attached: false,
+    thrown: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9222"), { code: "ECONNREFUSED" }),
+  });
+  assert.match(threwErrno.reason, /THREW \(errno:ECONNREFUSED\)/, "an errno survives as the named code");
+  assert.doesNotMatch(threwErrno.reason, /127\.0\.0\.1/, "the address is internal detail and must not be published");
 });

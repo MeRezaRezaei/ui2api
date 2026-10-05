@@ -816,73 +816,383 @@ d("the falsifier matrix: the OLD recogniser missed all four audit spellings, the
   });
 });
 
-// ────────────── the named OPERATOR diagnostics, inventoried ────────────────
+// ── GOAL 240 · THE NAMED VERDICTS, AND WHY THEY ARE NO LONGER EXEMPT ────────
 //
-// `/health` and `/status` publish internal state on purpose, under a stable
-// class label, for the operator. They are NOT answers to a caller and they are
-// NOT swept away silently: every one of them is pinned here by label, so a new
-// internal-text diagnostic cannot join that class unnoticed. Found and reported,
-// not suppressed.
+// The previous version of this file INVENTORIED five sites that publish
+// internal text on `/health` + `/status` and declared them out of scope, on the
+// reasoning that the operator surface exists to report internal state. That
+// reasoning was half right and it hid a real defect.
+//
+// THE JUDGMENT, which is the whole point of this section: a NAMED LABEL IS NOT
+// A SANITISED VALUE. `vault-unreadable` IS an honest, actionable verdict — the
+// operator learns their vault path is wrong, and suppressing that would make
+// `/health` decoration. But each of those five sites built its VALUE by
+// interpolating `e.message`, so the named verdict arrived wearing the thrown
+// text: node's fs layer reports `EACCES: permission denied, scandir
+// '/home/<user>/.config/…'`, and a page-open failure reports an absolute profile
+// path. `/health` and `/status` are readable by ANY process on the box, and by
+// anything on a wider bind — the same threat model the daemon's own
+// `internal_error` arm already refuses at the request net, where it logs the
+// full fault and sends a bare code.
+//
+// So the labels STAY (pinned below, by their new shape) and the VALUES became
+// NAMED CODES. The errno IS the diagnosis: `EACCES` and `ENOTDIR` are exactly
+// what an operator acts on, and they are a closed token vocabulary with no path
+// and no sentence in them. The rule is "no RAW internals", not "no detail".
+const POOL = readFileSync("src/prompt/pool.ts", "utf8");
+const BOTH = `${HTTP}\n${POOL}`;
+const { probeFaultNote } = await import("../src/prompt/pool.js");
 
-d("the named operator diagnostics are inventoried, not silently excluded", () => {
-  const DIAGNOSTICS: Array<{ label: string; shape: RegExp }> = [
-    { label: "vault-root-unresolvable", shape: /block\.error = `vault-root-unresolvable: \$\{/ },
-    { label: "vault-unreadable", shape: /block\.error = `vault-unreadable: \$\{/ },
-    { label: "host-unreadable", shape: /block\.error = block\.error \?\? `host-unreadable:/ },
-    { label: "health-vault-probe-threw", shape: /error: `health-vault-probe-threw: \$\{/ },
-    { label: "boot warm THREW", shape: /reason: `boot warm THREW \(\$\{msg\}\)/ },
+d("the named operator verdicts are still published, as NAMED CODES", () => {
+  // Each shape pins the NEW form. The label is what an operator reads and it
+  // must never be replaced by an unlabelled message — that is the leak this
+  // file exists to prevent — but a label BESIDE a raw `e.message` is the same
+  // leak wearing a name, so the value is pinned to a named code too.
+  const VERDICTS: Array<{ label: string; src: string; shape: RegExp }> = [
+    { label: "vault-root-unresolvable", src: HTTP, shape: /block\.error = \{ code: "vault-root-unresolvable", detail: fault\.detail \}/ },
+    { label: "vault-unreadable", src: HTTP, shape: /block\.error = \{ code: "vault-unreadable", detail: fault\.detail \}/ },
+    { label: "host-unreadable", src: HTTP, shape: /block\.error = block\.error \?\? \{ code: "host-unreadable", detail: probeFault\(e\)\.detail, host: d\.name \}/ },
+    { label: "vault-probe-threw", src: HTTP, shape: /error: \{ code: "vault-probe-threw", detail: fault\.detail \}/ },
+    { label: "boot warm THREW", src: HTTP, shape: /reason: `boot warm THREW \$\{fault\}/ },
+    { label: "liveness probe threw", src: POOL, shape: /reason: `liveness probe threw \$\{probeFaultNote\(e\)\}/ },
+    { label: "warm outcome cause", src: POOL, shape: /out\.reason = probeFaultNote\(e\)/ },
   ];
 
-  for (const dgn of DIAGNOSTICS) {
-    t(`${dgn.label} is still published under its label, on the operator surface`, () => {
-      assert.match(code(HTTP), dgn.shape, `the ${dgn.label} diagnostic must stay NAMED — an unlabelled raw message is the leak`);
+  for (const v of VERDICTS) {
+    t(`${v.label} is published under its label, as a NAMED CODE`, () => {
+      assert.match(code(v.src), v.shape, `the ${v.label} verdict must stay NAMED — an unlabelled raw message is the leak`);
     });
   }
 
-t("every internal-text site in the corpus is accounted for: a pinned label, or a mapped refusal arm", () => {
-    // CLOSED WORLD, derived — never a hand-typed total. The previous version of
-    // this test asserted `sites.length === 11`, a number I typed from a reading
-    // of the file; it failed at 13 the moment the detector's own fixes changed
-    // what the regex could see, which is the exact rot this repo's other gates
-    // were bitten by. So there is no count here. Instead each internal-text
-    // READ is located, and each one must fall inside either a pinned operator
-    // diagnostic label or one of the two mapped refusal arms — which are
-    // themselves pinned above. A new internal-text read that belongs to neither
-    // is reported by name, not absorbed by a number that moved.
-    const src = code(HTTP);
-    const READ =
-      /(?:\b(?:e|err|input\.thrown)\b(?:\s+instanceof Error \?)?\s*(?:\.message\b)?|\bString\((?:e|err|input\.thrown)\))/g;
-    const sites: Array<{ line: number; text: string }> = [];
-    for (const m of src.matchAll(READ)) {
-      const line = src.slice(0, m.index).split("\n").length;
-      // `e`/`err` alone is a bare catch variable, not a text read; only count
-      // the spellings that actually carry the internal TEXT.
-      if (!/\.message|String\(/.test(m[0])) continue;
-      sites.push({ line, text: m[0].replace(/\s+/g, " ") });
+  t("no named verdict interpolates a raw e.message beside its label", () => {
+    // The falsifier that matters most, because it is the OLD shape. The pins
+    // above cannot be the whole guarantee on their own: a site could be ADDED
+    // with a raw value and a matching pin. This asks the question directly, in
+    // the neighbourhood of each verdict, so the answer does not depend on the
+    // pin list staying complete.
+    for (const v of VERDICTS) {
+      const around = code(v.src);
+      const at = around.search(v.shape);
+      assert.notEqual(at, -1, `pin for ${v.label} must resolve before its neighbourhood can be judged`);
+      const window = around.split("\n").slice(Math.max(0, at - 3), at + 4).join("\n");
+      assert.doesNotMatch(
+        window,
+        /(?:\.message\b|String\()/,
+        `${v.label} publishes a raw Error.message beside its named code — the label is the verdict, the value must be a code`,
+      );
     }
-    assert.ok(sites.length >= 8, `only ${sites.length} internal-text reads located — the scan itself may have rotted`);
+  });
+});
 
-    // The regions that are ALLOWED to read internal text, each located by its
-    // own anchor rather than by a line number.
-    const regions: Array<{ why: string; anchor: RegExp }> = [
-      { why: "operator diagnostic: boot warm THREW", anchor: /const msg = input\.thrown instanceof Error \? input\.thrown\.message : String\(input\.thrown\)/ },
-      { why: "mapped: an HttpClientError whose message this repo authored", anchor: /send\(res, e\.status, \{ error: \{ code: e\.code, message: e\.message \} \}/ },
-      { why: "mapped: the pool refusal CLASSIFIER, which reads the message to name it and returns only a code", anchor: /const msg = e instanceof Error \? e\.message : String\(e\);/ },
-      { why: "operator diagnostic: vault-root-unresolvable", anchor: /block\.error = `vault-root-unresolvable: / },
-      { why: "operator diagnostic: vault-unreadable", anchor: /block\.error = `vault-unreadable: / },
-      { why: "operator diagnostic: host-unreadable", anchor: /block\.error = block\.error \?\? `host-unreadable:/ },
-      { why: "operator diagnostic: health-vault-probe-threw", anchor: /error: `health-vault-probe-threw: / },
-      { why: "operator diagnostic: boot warm THREW (label)", anchor: /reason: `boot warm THREW \(/ },
-      { why: "mapped: the request-shape arm of the internal_error net", anchor: /message: e instanceof Error \? e\.message : String\(e\)/ },
-      { why: "mapped: the request-shape CLASSIFIER, which tests the message against SHAPE_MESSAGES and keeps only the code", anchor: /SHAPE_MESSAGES\.some\(\(m\) => m\.re\.test\(e\.message\)\)/ },
-      { why: "mapped: the last-resort HttpClientError net", anchor: /send\(res, e\.status, \{ error: \{ code: e\.code, message: e\.message \} \}\);/ },
+// ── THE INVARIANT: no /health or /status field may carry RAW internals ──────
+//
+// Spelled structurally (a parse + a taint walk, not a regex over spellings), for
+// the reason this file's own header records: a recogniser pinned to one spelling
+// of a common idiom is not a gate. It asks ONE question of every value that can
+// reach an operator-surface payload — is it derived from a caught exception's own
+// text? `probeFault` is the ONE legal way to read a caught value onto these
+// surfaces, and it is legal precisely because it returns a closed token
+// vocabulary rather than the message.
+
+/** The files that build the `/health` + `/status` payloads. */
+const OPERATOR_SURFACES: Array<{ file: string; src: string }> = [
+  { file: "src/prompt/http.ts", src: HTTP },
+  { file: "src/prompt/pool.ts", src: POOL },
+];
+
+/** The declarations that construct an operator-surface value. Located by ANCHOR
+ *  rather than by line range, so a re-flow cannot silently move a payload out of
+ *  the check — the failure mode a line-numbered region list has, and the one
+ *  this file's own header already records as the shape of the GOAL 117 defect. */
+const OPERATOR_ANCHORS: Array<{ why: string; anchor: RegExp }> = [
+  { why: "healthVaultBlock builds /health's vault block", anchor: /export function healthVaultBlock\(/ },
+  { why: "bootWarmBlock builds /health + /status's bootWarm block", anchor: /export function bootWarmBlock\(/ },
+  { why: "livenessBlock builds /status + /health's liveness block", anchor: /function livenessBlock\(/ },
+  { why: "the /status route assembles the response", anchor: /req\.url === "\/status"/ },
+  { why: "the /health route assembles the response", anchor: /req\.url === "\/health"/ },
+  { why: "ChatPool.status assembles the pool block on both surfaces", anchor: /get status\(\): PoolStatus \{/ },
+  { why: "probeBrowser produces pool.browserProbe, republished on both surfaces", anchor: /probeBrowser\(\): BrowserProbe \{/ },
+  { why: "ChatPool.warm produces bootWarm.outcome.reason on both surfaces", anchor: /async warm\(\): Promise<WarmOutcome> \{/ },
+];
+
+/**
+ * Every value in `src` that carries raw internal text and reaches an
+ * operator-surface payload — i.e. a leak the invariant must report.
+ *
+ * Deliberately ASYMMETRIC about what counts as a leak: a named code, a measured
+ * number, an enum and a fixed constant are all legal, and detection fires only
+ * on a value derived from a caught exception's own text. That asymmetry is the
+ * false-positive guard — falsifier (c) below proves a named code stays clean
+ * while a seeded raw value is caught in the same shape.
+ */
+function detectRawInternalsOnOperatorSurfaces(src: string, file: string): string[] {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ES2022, true);
+  const found: string[] = [];
+  const lines = src.split("\n");
+
+  for (const anchor of OPERATOR_ANCHORS) {
+    const start = src.search(anchor.anchor);
+    if (start < 0) continue; // the anchor is pinned by its own test below
+
+    // Walk the whole file once per anchor, keeping only nodes at/after `start`
+    // and inside the anchored declaration. Scoping by declaration rather than by
+    // line count is what makes the region survive an edit that adds lines.
+    let decl: ts.Node | undefined;
+    (function walk(n: ts.Node): void {
+      if (!decl && n.getStart(sf) === start) decl = n;
+      if (!decl) n.forEachChild(walk);
+    })(sf);
+    if (!decl) continue;
+
+    const tainted = new Set<string>();
+    const reads: Array<{ line: number; text: string }> = [];
+    // One pass, in source order, so a `catch` binding is known before the reads
+    // below it are judged. A backward pass would be the same for these shapes
+    // but would stop deriving the file from the order it is actually written in.
+    (function scoped(n: ts.Node): void {
+      if (ts.isCatchClause(n) && n.variableDeclaration && ts.isIdentifier(n.variableDeclaration.name)) {
+        tainted.add(n.variableDeclaration.name.text);
+      }
+      if (ts.isPropertyAccessExpression(n) && (n.name.text === "message" || n.name.text === "stack")) {
+        const root = n.expression;
+        if (ts.isIdentifier(root) && tainted.has(root.text)) {
+          reads.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, text: n.getText(sf) });
+        }
+      }
+      if (
+        ts.isCallExpression(n) &&
+        ts.isIdentifier(n.expression) &&
+        n.expression.text === "String" &&
+        n.arguments[0] &&
+        ts.isIdentifier(n.arguments[0]) &&
+        tainted.has(n.arguments[0].text)
+      ) {
+        reads.push({ line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, text: n.getText(sf) });
+      }
+      n.forEachChild(scoped);
+    })(decl);
+
+    for (const r of reads) {
+      // THE ONE LEGAL READER: a caught value handed to the redaction seam. The
+      // exemption names the FUNCTION, not a shape, and the seam's own closed
+      // return vocabulary is pinned separately below — so widening the seam
+      // turns every call site red rather than silently legal.
+      if ((lines[r.line - 1] ?? "").includes("probeFault")) continue;
+      found.push(`${file}:${r.line} ${anchor.why} — ${r.text}`);
+    }
+  }
+  return found;
+}
+
+d("no /health or /status field may carry a raw Error.message, an absolute path, or a stack line", () => {
+  for (const { file, src } of OPERATOR_SURFACES) {
+    t(`${file}: every operator-surface value is a named code, not raw internal text`, () => {
+      const leaks = detectRawInternalsOnOperatorSurfaces(src, file);
+      assert.deepEqual(
+        leaks,
+        [],
+        `raw internal text reaches an operator-surface payload: ${JSON.stringify(leaks, null, 2)}. A named label is not a sanitised value — publish the code, keep the label.`,
+      );
+    });
+  }
+
+  t("every operator-surface anchor still resolves — the region list cannot rot silently", () => {
+    // A region list that silently matches nothing is a gate that passes on an
+    // empty set, which is the vacuous-gate failure this file already records for
+    // a deleted real field. So the anchors are counted against the source.
+    const missing = OPERATOR_ANCHORS.filter((a) => !BOTH.search(a.anchor)).map((a) => a.why);
+    assert.deepEqual(missing, [], `an operator-surface anchor no longer resolves: ${JSON.stringify(missing)}`);
+  });
+
+  t("probeFault's RETURN values are closed tokens — it may read a message, never return one", () => {
+    // The exemption above is only safe while this holds. Pinned on the SHAPE of
+    // every RETURN (allow-list tokens, a matched token, or null), never on a
+    // hand-typed total that could drift.
+    //
+    // This arm DOES read `err.message` — deliberately, to recover an errno token
+    // that Playwright and node's net layer put there instead of on `code` (a
+    // plain `Error("connect ECONNREFUSED 127.0.0.1:9222")` has no `code`). What
+    // is forbidden is RETURNING one, and that is what is checked here: every
+    // return is either a fixed token, the result of a bounded match, or null.
+    const body = code(POOL);
+    const fn = /export function probeFault\([\s\S]*?\n\}/.exec(body)?.[0] ?? "";
+    assert.ok(fn.length > 0, "probeFault must exist for the operator surfaces to have a legal reader");
+    const returns = [...fn.matchAll(/return \{ code: "(\w+)", detail: ([^}]*) \};/g)].map((m) => ({ code: m[1], detail: m[2]!.trim() }));
+    assert.ok(returns.length >= 4, `probeFault has ${returns.length} return arms — the check itself may have rotted`);
+    for (const r of returns) {
+      assert.ok(
+        ["errno", "type", "unknown"].includes(r.code),
+        `probeFault returned an unlisted code "${r.code}" — the vocabulary is closed, so a new arm must be a deliberate one`,
+      );
+      assert.ok(
+        /^(fault\.detail|errno|inMessage\[1\]|ctor|null)$/.test(r.detail) || r.detail === "null",
+        `probeFault's ${r.code} arm returns "${r.detail}" — only a fixed token, a bounded match, or null may leave this function`,
+      );
+    }
+    assert.match(fn, /ERRNO\.test\(errno\)/, "the errno-code arm must be an ALLOW-LIST test, so naming a fault never means maintaining a list of every way the OS can fail");
+    assert.match(fn, /NAMED_CLASSES\.has\(ctor\)/, "the class arm must be an ALLOW-LIST test, derived from the prototype and not from a field a thrower controls");
+    assert.match(fn, /ERRNO_IN_MESSAGE\.exec\(err\.message\)/, "the in-message errno arm must go through the bounded token match, and publish inMessage[1] — never the whole message");
+  });
+
+  t("probeFault classifies every real throw class — 'named code' is measured, not claimed", () => {
+    // Driven through the REAL function, not a re-implementation: a re-derived
+    // copy would keep passing after the shipped seam broke.
+    const cases: Array<{ thrown: unknown; expect: string; why: string }> = [
+      {
+        thrown: Object.assign(new Error("EACCES: permission denied, scandir '/home/me/.config/x'"), { code: "EACCES" }),
+        expect: "(errno:EACCES)",
+        why: "an OS errno survives as the token — the diagnosis, without the path",
+      },
+      { thrown: Object.assign(new Error("nope"), { code: "ENOTDIR" }), expect: "(errno:ENOTDIR)", why: "every errno, not a fixed list" },
+      { thrown: new TypeError("Cannot read properties of undefined (reading 'foo')"), expect: "(type:TypeError)", why: "a named error CLASS is a code; its sentence is not" },
+      { thrown: new RangeError("x"), expect: "(type:RangeError)", why: "the class arm is a closed set, and RangeError is in it" },
+      { thrown: new Error("a sentence with /home/me/secret in it"), expect: "(unknown)", why: "an unclassifiable throw is named UNKNOWN — honest, and never a summary that reads like a cause" },
+      { thrown: "a bare string throw", expect: "(unknown)", why: "a non-Error throw carries no class and no errno; it gets a name, not its text" },
     ];
-    const allowed = regions.map((r) => src.slice(0, src.search(r.anchor)).split("\n").length);
-    const uncovered = sites.filter((s) => !allowed.some((a) => Math.abs(a - s.line) <= 1));
+    for (const c of cases) {
+      assert.equal(probeFaultNote(c.thrown), c.expect, c.why);
+    }
+  });
+
+  t("THE FALSIFIER MATRIX: a seeded leak is caught, a named code is not, prose is neither", () => {
+    // (a) a probe throws with an ABSOLUTE PATH in its message → caught.
+    const pathLeak = `
+      export function healthVaultBlock(x: string): { error: unknown } {
+        const out: { error: unknown } = { error: null };
+        try {
+          out.error = { code: "vault-unreadable", detail: readIt(x) };
+        } catch (e) {
+          out.error = \`vault-unreadable: \${e instanceof Error ? e.message : String(e)}\`;
+        }
+        return out;
+      }
+      function readIt(x: string): string { throw new Error("EACCES: permission denied, scandir '/home/me/.config/ui2api/sessions'"); }
+    `;
+    assert.ok(
+      detectRawInternalsOnOperatorSurfaces(pathLeak, "falsifier-a.ts").length > 0,
+      "a probe that interpolates the thrown message must be reported, even when the message carries an absolute path",
+    );
+
+    // (b) a probe throws a TypeError whose message is the classic one → caught.
+    const typeLeak = `
+      export function healthVaultBlock(x: string): { error: unknown } {
+        const out: { error: unknown } = { error: null };
+        try {
+          out.error = { code: "vault-unreadable", detail: readIt(x) };
+        } catch (e) {
+          out.error = \`vault-unreadable: \${e.message}\`;
+        }
+        return out;
+      }
+      function readIt(x: string): string { throw new TypeError("Cannot read properties of undefined (reading 'foo')"); }
+    `;
+    assert.ok(
+      detectRawInternalsOnOperatorSurfaces(typeLeak, "falsifier-b.ts").length > 0,
+      "a .message read beside a named label is a leak whatever the message says",
+    );
+
+    // (c) THE FALSE-POSITIVE GUARD. A named code is legal — this is the
+    // assertion that keeps the invariant from decaying into "no detail on
+    // /health", which would make /health useless to the operator.
+    const namedCode = `
+      export function healthVaultBlock(x: string): { error: unknown } {
+        const out: { error: unknown } = { error: null };
+        try {
+          out.error = { code: "vault-unreadable", detail: readIt(x) };
+        } catch (e) {
+          out.error = { code: "vault-root-unresolvable", detail: probeFault(e).detail };
+        }
+        return out;
+      }
+      function readIt(x: string): string { throw new Error("EACCES"); }
+      export function probeFault(e: unknown): { detail: string | null } { return { detail: (e as { code?: string })?.code ?? null }; }
+    `;
     assert.deepEqual(
-      uncovered,
+      detectRawInternalsOnOperatorSurfaces(namedCode, "falsifier-c.ts"),
       [],
-      `internal text reaches the wire from an UNACCOUNTED site: ${JSON.stringify(uncovered)}. Every internal-text read must be a mapped refusal arm or a pinned operator diagnostic.`,
+      "a named code beside a named label is EXACTLY the shape this invariant requires — it must never be flagged",
+    );
+
+    // (d) THE PROSE TRAP. A doc comment quoting a path and an `e.message` must
+    // NEITHER satisfy NOR break the check. `test/install-host-containment.test.ts`
+    // was actually bitten by this class, so it is asserted rather than assumed.
+    const proseTrap = `
+      /**
+       * Historically this read \`e.message\` and so published
+       * "EACCES: permission denied, open '/home/me/.config/ui2api-chrome/Default'"
+       * on /health — see the GOAL 240 seam.
+       */
+      export function healthVaultBlock(x: string): { error: unknown } {
+        const out: { error: unknown } = { error: null };
+        try {
+          out.error = { code: "vault-unreadable", detail: readIt(x) };
+        } catch (e) {
+          out.error = { code: "vault-root-unresolvable", detail: probeFault(e).detail };
+        }
+        return out;
+      }
+      function readIt(x: string): string { throw new Error("EACCES"); }
+      export function probeFault(e: unknown): { detail: string | null } { return { detail: (e as { code?: string })?.code ?? null }; }
+    `;
+    assert.deepEqual(
+      detectRawInternalsOnOperatorSurfaces(code(proseTrap), "falsifier-d.ts"),
+      [],
+      "a doc comment quoting a path and an e.message must NOT manufacture a finding — the check judges code, not prose",
+    );
+    // …and the mirror, which is the half that actually bit that file: the same
+    // comment must not SATISFY the check and hide a real leak sitting below it.
+    const proseTrapHidingALeak = proseTrap.replace("detail: probeFault(e).detail", "detail: e.message");
+    assert.ok(
+      detectRawInternalsOnOperatorSurfaces(code(proseTrapHidingALeak), "falsifier-d2.ts").length > 0,
+      "a doc comment must not SATISFY the check and hide a real leak sitting right below it",
     );
   });
+});
+
+t("every internal-text site in the corpus is accounted for: a mapped refusal arm, or the one redaction reader", () => {
+  // CLOSED WORLD, derived — never a hand-typed total. The previous version of
+  // this test asserted `sites.length >= 8`, a number typed from a reading of the
+  // file; it failed the moment GOAL 240 legitimately REMOVED reads, which is the
+  // exact rot this repo's other gates were bitten by. So there is no floor here
+  // either. Instead each internal-text READ is located, and each one must fall
+  // inside either a mapped refusal arm or the one redaction reader — so a new
+  // read is reported by NAME rather than absorbed by a count that moved.
+  const src = code(BOTH);
+  const READ =
+    /(?:\b(?:e|err|input\.thrown)\b(?:\s+instanceof Error \?)?\s*(?:\.message\b)?|\bString\((?:e|err|input\.thrown)\))/g;
+  const sites: Array<{ line: number; text: string }> = [];
+  for (const m of src.matchAll(READ)) {
+    const line = src.slice(0, m.index).split("\n").length;
+    // `e`/`err` alone is a bare catch variable, not a text read; only count
+    // the spellings that actually carry the internal TEXT.
+    if (!/\.message|String\(/.test(m[0])) continue;
+    sites.push({ line, text: m[0].replace(/\s+/g, " ") });
+  }
+
+  // The regions that are ALLOWED to read internal text, each located by its own
+  // anchor rather than by a line number.
+  const regions: Array<{ why: string; anchor: RegExp }> = [
+    { why: "mapped: an HttpClientError whose message this repo authored", anchor: /send\(res, e\.status, \{ error: \{ code: e\.code, message: e\.message \} \}/ },
+    { why: "mapped: the pool refusal CLASSIFIER, which reads the message to name it and returns only a code", anchor: /const msg = e instanceof Error \? e\.message : String\(e\);/ },
+    { why: "mapped: the request-shape arm of the internal_error net", anchor: /message: e instanceof Error \? e\.message : String\(e\)/ },
+    { why: "mapped: the request-shape CLASSIFIER, which tests the message against SHAPE_MESSAGES and keeps only the code", anchor: /SHAPE_MESSAGES\.some\(\(m\) => m\.re\.test\(e\.message\)\)/ },
+    { why: "mapped: the last-resort HttpClientError net", anchor: /send\(res, e\.status, \{ error: \{ code: e\.code, message: e\.message \} \}\);/ },
+    { why: "internal-only, never published: the pool's retry CLASSIFIER, which tests the message for a restriction wall and returns only a boolean", anchor: /const msg = e instanceof Error \? e\.message : String\(e\);\n\s*const blocked =/ },
+    { why: "internal-only, never published: a thrown non-Error rewrapped as an Error so the waiter can be settled with an Error", anchor: /\(e\) => this\.settleWaiter\(waiter, e instanceof Error \? e : new Error\(String\(e\)\)\)/ },
+    { why: "internal-only, never published: the same rewrap on the queue-deadline re-acquire path", anchor: /\(e\) => this\.settleWaiter\(waiting, e instanceof Error \? e : new Error\(String\(e\)\)/ },
+    { why: "the redaction seam itself: reads a message to recover a BOUNDED errno TOKEN, returns only the token (pinned separately above)", anchor: /ERRNO_IN_MESSAGE\.exec\(err\.message\)/ },
+  ];
+  const allowed = regions
+    .filter((r) => r.anchor.test(src))
+    .map((r) => src.slice(0, src.search(r.anchor)).split("\n").length);
+  // The ONE legal reader: a caught value handed to the redaction seam. Derived
+  // from the corpus rather than hand-listed, so a new call site needs no edit.
+  const legal = [...src.matchAll(/probeFault(?:Note)?\(/g)].map((m) => src.slice(0, m.index).split("\n").length);
+
+  const uncovered = sites.filter((s) => [...allowed, ...legal].every((a) => Math.abs(a - s.line) > 1));
+  assert.deepEqual(
+    uncovered,
+    [],
+    `internal text reaches the wire from an UNACCOUNTED site: ${JSON.stringify(uncovered)}. Every internal-text read must be a mapped refusal arm or the one redaction reader.`,
+  );
 });

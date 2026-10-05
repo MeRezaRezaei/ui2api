@@ -278,7 +278,11 @@ test("the vault scan is bounded and never throws on a hostile vault root", () =>
     const bad = healthVaultBlock(fileRoot);
     assertHealthyShape(bad);
     assert.equal(bad.present, false);
-    assert.match(bad.error ?? "", /vault-unreadable/, "ENOTDIR must be a named vault error");
+    assert.equal(bad.error?.code, "vault-unreadable", "ENOTDIR must be a NAMED vault error code, not prose");
+    // GOAL 240: the errno is the diagnosis and it survives; the SENTENCE around
+    // it (which carries the absolute path) does not. Asserting the absence is
+    // the half that matters — a named code alone would also pass on a leak.
+    assert.equal(bad.error?.detail, "ENOTDIR", "the actionable token is preserved beside the label");
     assert.equal(healthOk(bad, CHAT_MODELS), false);
     rmSync(fileRoot, { recursive: true, force: true });
 
@@ -290,7 +294,8 @@ test("the vault scan is bounded and never throws on a hostile vault root", () =>
       },
     });
     assertHealthyShape(hostile);
-    assert.match(hostile.error ?? "", /host-unreadable/);
+    assert.equal(hostile.error?.code, "host-unreadable");
+    assert.ok(hostile.error?.host, "the host the failure was scoped to is kept — a host name is not a path, and it is what makes the fault locatable");
     assert.equal(healthOk(hostile, CHAT_MODELS), false);
 
     assert.ok(HEALTH_VAULT_MAX_HOSTS > 0, "the host cap must be a real bound");

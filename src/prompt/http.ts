@@ -41,6 +41,11 @@
 //                 {chatModels, registryPackages, vaultAccounts, vaultUsable},
 //                 vault {root, present, hosts, accounts, usable, unusable,
 //                 unusableReasons[{host,slug,reason}]}, pool, posture, liveness}
+//                 (GOAL 240: every NAMED verdict above carries a NAMED CODE beside
+//                 it — vault.error is {code, detail}, and no field on /health or
+//                 /status may carry a raw Error.message, an absolute path, or a
+//                 stack line. The LABEL is the diagnosis; the VALUE beside it is
+//                 never the thrown text.)
 //   GET  /requests -> the bounded request ring (GOAL 87): the last N requests
 //                 with {method, path, status, durationMs, site, account,
 //                 outcome} so a wedged or refused request is visible. Prompts,
@@ -55,6 +60,8 @@ import {
   ChatPool,
   DEFAULT_REQUEST_TIMEOUT_MS,
   POOL_REFUSAL_CODES,
+  probeFault,
+  probeFaultNote,
   type BrowserLiveness,
   type PoolRefusalCode,
   type PoolStatus,
@@ -449,13 +456,40 @@ export function poolStuckness(st: PoolStatus): PoolStuckness {
  *    try/catch so one bad host is data (a named error), not a 500, and hard
  *    caps on hosts and rows so a pathological vault cannot make /health slow.
  */
+/** The NAMED reason a vault probe failed, published as `vault.error`. */
+export interface HealthVaultError {
+  /** The stable class label — the actionable verdict, and it never changes. */
+  code: "vault-root-unresolvable" | "vault-unreadable" | "host-unreadable" | "vault-probe-threw";
+  /**
+   * The operator-actionable TOKEN: the OS errno (`EACCES`, `ENOTDIR`) or a
+   * built-in error class name. `null` when the throw carried neither.
+   *
+   * GOAL 240: this field USED to be a string built by interpolating
+   * `e.message`, which put an absolute path on a LAN-readable surface (node's
+   * fs messages read `EACCES: permission denied, scandir '/home/<user>/…'`).
+   * The errno IS the diagnosis and it is what an operator acts on; the sentence
+   * around it was never the actionable part. `host` is carried separately
+   * because a host DIRECTORY NAME is not a secret and is the one detail that
+   * makes a per-host failure locatable.
+   */
+  detail: string | null;
+  /** Which vault host the failure was scoped to, for `host-unreadable`. */
+  host?: string;
+}
+
 export interface HealthVaultBlock {
   /** Absolute vault root (`<sitesDir>/sessions`), or null when it cannot be resolved. */
   root: string | null;
   /** True when the vault root exists and could be listed. */
   present: boolean;
-  /** NAMED error when the root could not be listed (EACCES, ENOTDIR, …). */
-  error: string | null;
+  /**
+   * NAMED error when the root could not be listed (EACCES, ENOTDIR, …), or null.
+   *
+   * A STRUCTURED named code, not prose — see {@link HealthVaultError}. Consumers
+   * branch on `error.code`; nobody has to regex an English sentence to learn
+   * whether the vault path is wrong.
+   */
+  error: HealthVaultError | null;
   /** Host directories actually examined. */
   hosts: number;
   /** Host directories that exist but are not directories — named, counted. */
@@ -501,7 +535,12 @@ export function healthVaultBlock(sitesDir: string, deps: HealthVaultDeps = {}): 
     root = vaultRoot(sitesDir);
     block.root = root;
   } catch (e) {
-    block.error = `vault-root-unresolvable: ${e instanceof Error ? e.message : String(e)}`;
+    // GOAL 240: `vault-root-unresolvable` is the label and it is the whole
+    // point of this block — the operator learns their vault path is wrong. What
+    // changed is the VALUE: it used to interpolate `e.message`, so a bad path
+    // put the absolute path itself on the wire. The errno survives instead.
+    const fault = probeFault(e);
+    block.error = { code: "vault-root-unresolvable", detail: fault.detail };
     return block;
   }
   let entries: import("node:fs").Dirent[];
@@ -510,9 +549,14 @@ export function healthVaultBlock(sitesDir: string, deps: HealthVaultDeps = {}): 
     block.present = true;
   } catch (e) {
     // ENOENT is "no vault yet" — NOT an error: a fresh install has no sessions
-    // dir and that is not a fault. Anything else (EACCES, ENOTDIR, EIO) is.
+    // dir and that is not a fault. Anything else (EACCES, ENOTDIR, EIO) is,
+    // and the errno IS the named code — this arm already preferred `code`, and
+    // `e.message` was only ever the fallback for a throw with no errno.
     const code = (e as { code?: string }).code;
-    if (code !== "ENOENT") block.error = `vault-unreadable: ${code ?? (e instanceof Error ? e.message : String(e))}`;
+    if (code !== "ENOENT") {
+      const fault = probeFault(e);
+      block.error = { code: "vault-unreadable", detail: fault.detail };
+    }
     return block;
   }
   const dirs = entries.filter((d) => d.isDirectory());
@@ -539,7 +583,10 @@ export function healthVaultBlock(sitesDir: string, deps: HealthVaultDeps = {}): 
     } catch (e) {
       // One bad host must never be a 500 on /health: record it as a named
       // error against the block and keep counting the rest.
-      block.error = block.error ?? `host-unreadable: ${d.name}: ${e instanceof Error ? e.message : String(e)}`;
+      // GOAL 240: `host-unreadable` stays; the `e.message` beside it goes. The
+      // host DIRECTORY NAME is kept deliberately — it is a site host, not a
+      // path, and it is the one detail that makes a per-host failure locatable.
+      block.error = block.error ?? { code: "host-unreadable", detail: probeFault(e).detail, host: d.name };
       continue;
     }
     for (const row of rows) {
@@ -1024,13 +1071,20 @@ export function bootWarmBlock(input: {
   }
   const measuredAt = new Date().toISOString();
   if (input.thrown !== undefined) {
-    const msg = input.thrown instanceof Error ? input.thrown.message : String(input.thrown);
+    // GOAL 240: `boot warm THREW` is the LABEL and stays — it is the honest
+    // record that the attempt threw while the daemon carried on. The VALUE
+    // beside it stopped being `e.message`: this reason is served on /status AND
+    // /health, and a page-open failure's message is an absolute path. The named
+    // fault code keeps the diagnosis (`errno:EACCES` reads as "the profile is
+    // not readable"; `errno:ECONNREFUSED` as "nothing is on the attach port")
+    // without carrying the home directory.
+    const fault = probeFaultNote(input.thrown);
     return {
       attempted: true,
       ok: false,
       idlePages: idle,
       browser,
-      reason: `boot warm THREW (${msg}) — the daemon started anyway because a request opens its own page on demand, but the warm attempt did not succeed`,
+      reason: `boot warm THREW ${fault} — the daemon started anyway because a request opens its own page on demand, but the warm attempt did not succeed`,
       measuredAt,
       outcome,
     };
@@ -1483,10 +1537,18 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         try {
           vault = healthVaultBlock(dataDir);
         } catch (e) {
+          // The label is the verdict — the vault probe itself threw, which is a
+          // different fault from "the vault is unreadable" and is why it keeps
+          // its own name. GOAL 240 changed only the VALUE: this used to
+          // interpolate `e.message`, so a throw from inside the probe published
+          // its message (and any path in it) on a surface every process on the
+          // box can read. All the COUNTS stay zero, which is honest: nothing
+          // was measured.
+          const fault = probeFault(e);
           vault = {
             root: null,
             present: false,
-            error: `health-vault-probe-threw: ${e instanceof Error ? e.message : String(e)}`,
+            error: { code: "vault-probe-threw", detail: fault.detail },
             hosts: 0,
             skipped: 0,
             accounts: 0,

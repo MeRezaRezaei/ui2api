@@ -197,6 +197,126 @@ export const POOL_REFUSAL_CODES = {
 /** A code from `POOL_REFUSAL_CODES` — the set the daemon labels a 503 with. */
 export type PoolRefusalCode = keyof typeof POOL_REFUSAL_CODES;
 
+/* ── GOAL 240 · A NAMED LABEL IS NOT A SANITISED VALUE ───────────────────────
+ *
+ * The judgment this seam exists to record. `/health` and `/status` publish
+ * their failures under a stable class label (`vault-unreadable`,
+ * `host-unreadable`, `health-vault-probe-threw`, `boot warm THREW`, `liveness
+ * probe threw`), and every one of those labels is an HONEST, ACTIONABLE verdict
+ * this project is built on: "your vault path is wrong" is exactly what an
+ * operator needs, and suppressing it would make `/health` decoration.
+ *
+ * What was wrong is the VALUE BESIDE the label. Each of those five sites
+ * interpolated `e.message` (or `String(e)`) straight onto the wire, so the
+ * named verdict arrived wearing the thrown text: an `EACCES` message from node's
+ * fs layer is `EACCES: permission denied, scandir '/home/<user>/.config/ui2api-
+ * chrome/sessions'`, and a driver throw carries whatever the site or Playwright
+ * put in it. Those two surfaces are read by ANY process on the box, and by
+ * anything on a wider bind — which is the same threat model the daemon's own
+ * `internal_error` arm already refuses: `src/prompt/http.ts` logs the full fault
+ * with its stack and sends `{code: "internal_error", message: "internal error"}`
+ * to the CLIENT. Redacting a secret and erasing the evidence are different acts;
+ * the evidence belongs in the daemon's own log, not in a health-check's JSON.
+ *
+ * So the rule is "no RAW internals", NOT "no detail":
+ *   - the LABEL stays — it is the diagnosis, and it is the actionable part;
+ *   - the VALUE becomes a NAMED CODE — the same code-first vocabulary the
+ *     refusal bodies and `HttpClientError.code` already use, so no consumer has
+ *     to learn a second dialect;
+ *   - the operator still gets the DETAIL they act on: the errno (`EACCES`,
+ *     `ENOTDIR`, `ECONNREFUSED`) or the thrown value's constructor name, which
+ *     is what a human actually reads when triaging. What goes is the free text:
+ *     the path, the sentence, the stack line.
+ *
+ * WHY A NEW SEAM AND NOT A LOCAL FIX AT EACH SITE: these five sites live in two
+ * files and are reached from two different probes, and the drift this corrects
+ * is precisely that they were each fixed-or-not independently. One exported
+ * function, called from every site, is what makes "every site was fixed" a
+ * structural fact rather than a review item.
+ */
+
+/** A named reason for a probe that threw, as published beside its label. */
+export type ProbeFaultCode =
+  /** An OS errno was on the throw (`EACCES`, `ENOTDIR`, `ECONNREFUSED`, …). */
+  | "errno"
+  /** A recognised built-in error class (`TypeError`, `RangeError`, …). */
+  | "type"
+  /** A thrown value this seam cannot classify — named, never guessed at. */
+  | "unknown";
+
+/** The errno set is left open on purpose: naming a fault must never mean
+ *  maintaining a list of every way the OS can fail. Anything matching this shape
+ *  is an errno by Node's own convention and is safe to echo (it is a fixed
+ *  token, never a path or a sentence). */
+const ERRNO = /^[A-Z][A-Z0-9_]{1,31}$/;
+/** Error classes whose NAME is the whole diagnosis. Fixed, closed, and derived
+ *  from the prototype rather than from a field a thrower controls. */
+const NAMED_CLASSES = new Set(["TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError"]);
+
+/** An errno token EMBEDDED in a message, as opposed to on `err.code`.
+ *
+ * MEASURED, and it is why this arm exists: Playwright and node's own net layer
+ * routinely throw a plain `Error` whose message is
+ * `connect ECONNREFUSED 127.0.0.1:9222` — with NO `code` property. A seam that
+ * only read `err.code` therefore answered `(unknown)` for the single most
+ * common daemon fault there is, which is a real loss of operator value, and
+ * "no raw internals" must not quietly become "no detail".
+ *
+ * It is safe, and safe for a reason that is structural rather than hopeful: what
+ * this arm publishes is the MATCHED TOKEN, never the surrounding text. The token
+ * is bounded by `ERRNO`'s shape (`E` + capitals/underscores/digits, no slash, no
+ * space, no dot), so it cannot be a path, a sentence, a hostname or a stack
+ * frame. Everything the match discards — the `connect`, the `127.0.0.1:9222` — is
+ * exactly the internal detail the invariant forbids. This is the same shape as
+ * the daemon's own `SHAPE_MESSAGES` request classifier: test the message, keep
+ * the code.
+ *
+ * The scan is anchored on word boundaries and takes the FIRST match, so a
+ * message carrying an errno early (node puts it there) is not lost to a later
+ * one, and a message with none falls through to the arms below. */
+const ERRNO_IN_MESSAGE = /\b(E[A-Z][A-Z0-9_]{1,31})\b/;
+
+/**
+ * Reduce a thrown value to a NAMED fault code — never its text.
+ *
+ * Returns the tuple the health/status sites publish:
+ *   `[code, detail]` where `code` is the {@link ProbeFaultCode} and `detail` is
+ *   the operator-actionable token (`EACCES`, `TypeError`) or `null`.
+ *
+ * `detail` is deliberately an allow-list of TOKENS, not a message: an errno and
+ * a built-in class name are both closed vocabularies with no path and no
+ * sentence in them, so neither can leak what the throw happened to carry. A
+ * thrown value outside both sets yields `[unknown, null]` — an honest "this threw
+ * and I will not guess" rather than a summary that reads like a cause.
+ *
+ * The RAW message is not returned, not truncated, and not hashed: this function
+ * is a redaction boundary, and the raw text stays where it already belongs — in
+ * the daemon's own log via the `console.error` at the request-fault arm.
+ */
+export function probeFault(e: unknown): { code: ProbeFaultCode; detail: string | null } {
+  const err = e as { code?: unknown; constructor?: { name?: unknown }; message?: unknown } | null | undefined;
+  const errno = err?.code;
+  if (typeof errno === "string" && ERRNO.test(errno)) return { code: "errno", detail: errno };
+  const ctor = err?.constructor?.name;
+  if (typeof ctor === "string" && NAMED_CLASSES.has(ctor)) return { code: "type", detail: ctor };
+  // The errno may be IN the message rather than on `code` — see ERRNO_IN_MESSAGE.
+  // Only the matched TOKEN is returned; the rest of the message is discarded,
+  // which is what keeps this arm inside the invariant.
+  if (typeof err?.message === "string") {
+    const inMessage = ERRNO_IN_MESSAGE.exec(err.message);
+    if (inMessage) return { code: "errno", detail: inMessage[1] };
+  }
+  return { code: "unknown", detail: null };
+}
+
+/** The one-line form every `/health` + `/status` probe site publishes beside its
+ *  label: `(<code>:<detail>)`, or just `(<code>)` when there is no detail. Kept
+ *  here so no site can invent its own punctuation and drift from the others. */
+export function probeFaultNote(e: unknown): string {
+  const { code, detail } = probeFault(e);
+  return detail === null ? `(${code})` : `(${code}:${detail})`;
+}
+
 /* GOAL 87 — the reaper's default interval. 30s is frequent enough that a dead
    idle page is evicted long before the next request would have hit it, and rare
    enough that the probe (one `evaluate` round-trip per idle page) is noise. */
@@ -239,10 +359,21 @@ export type WarmOutcome = {
   /** Attempts that threw. */
   failed: number;
   /**
-   * THE REAL CAUSE of the first failure, VERBATIM from the thrown error
-   * (`Error.message`, or `String(e)` for a non-Error throw) — null when no
-   * attempt failed. Never a summary, never a guess: this is what the throw
-   * itself said, so an EACCES stays an EACCES.
+   * THE REAL CAUSE of the first failure, as a NAMED code beside its label —
+   * `probeFaultNote`'s `(errno:EACCES)` / `(type:TypeError)` / `(unknown)`
+   * form, and `null` when no attempt failed.
+   *
+   * GOAL 240 corrected the SHAPE, never the intent. This was
+   * `e.message` verbatim, which is the whole point of GOAL 178 (the pool used
+   * to discard the cause and report a generic phrase, and a generic phrase is
+   * indistinguishable from a guess) — but it is published on `/status` and
+   * `/health` as `bootWarm.outcome.reason`, and a page-open failure's message
+   * is an absolute path (`EACCES: permission denied, open
+   * '/home/ui2api/.config/ui2api-chrome/Default'`). The cause survives as the
+   * token an operator actually triages on — the errno IS the diagnosis, and
+   * `ECONNREFUSED` still reads as "nothing is listening on the attach port"
+   * without carrying a home directory. A throw this seam cannot classify is
+   * `(unknown)`: honest, and never a summary that looks like a cause.
    */
   reason: string | null;
 };
@@ -544,7 +675,14 @@ export class ChatPool {
         if (b.isConnected()) return { state: "up", reason: "browser.isConnected() === true", checkedAt };
         return { state: "down", reason: "browser.isConnected() === false — the handle is set but the browser is disconnected (respawned on the next request)", checkedAt };
       } catch (e) {
-        return { state: "down", reason: `liveness probe threw (${e instanceof Error ? e.message : String(e)}) — a handle that cannot answer is not a live browser`, checkedAt };
+        // GOAL 240: the LABEL is the honest verdict and stays; the VALUE beside
+        // it becomes a named code, never `e.message`. This reason is published
+        // twice on the operator surface (`pool.browserProbe` and, republished,
+        // `liveness.browserProbe` on /status AND /health), and a Playwright
+        // throw carries its own paths — so the message was internal text on a
+        // LAN-readable surface. The token (`TypeError`, `errno:EACCES`) is what
+        // an operator triages on; the sentence is in the daemon's log.
+        return { state: "down", reason: `liveness probe threw ${probeFaultNote(e)} — a handle that cannot answer is not a live browser`, checkedAt };
       }
     }
     if (typeof b.contexts === "function") {
@@ -615,8 +753,12 @@ export class ChatPool {
       // before. `warm()` still never rejects — a daemon that cannot warm must
       // still start (a request opens its own page on demand), which is the
       // GOAL-176 failure mode this whole block exists to preserve.
+      //
+      // GOAL 240 changed the SHAPE of that capture: the raw `e.message` is
+      // replaced by the named fault code, because this outcome is served
+      // verbatim on /status + /health and the message is an absolute path.
       out.failed++;
-      out.reason = e instanceof Error ? e.message : String(e);
+      out.reason = probeFaultNote(e);
       break;
     }
   }
