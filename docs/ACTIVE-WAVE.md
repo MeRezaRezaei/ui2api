@@ -358,6 +358,39 @@ Also fixed directly by me at fan-in: `ff9bd19` — `test/chrome-daemon-reuse.tes
 rebuilt two rounds earlier caught it on its first honest run, which is the clearest evidence yet
 that the rebuilt gate bites.
 
+### ROUND N+194f — the README was wrong in three places, and said so (2026-10-05)
+
+Dispatched on the `site-status-truth` lane's own follow-up. **The brief was wrong twice and the
+lane corrected both**, which is now the third time in two rounds that has happened.
+
+- **The duplicated table is in `capabilities/README.md`, not root `README.md`** — measured 0 id-rows
+  in the root file, and no test reads a root-README site table.
+- **The count is 9 duplicated ids, not 8.** Pre-fix: **42 rows / 33 ids / 9 duplicated**. Post-fix:
+  **33 / 33 / 0**.
+
+**And three of the nine disagreed on the FACT, not merely the wording** — the same site published
+with two different verdicts, which is the serious case:
+
+| id | the wrong cell said | the code-backed cell says |
+| --- | --- | --- |
+| `zenmux` | `⬜ dead-end` | `dormant` — what `/registry` actually publishes |
+| `xiaomimimo` | `✅ grounded (package)` | `dead-end` — DNS-pinned to 127.0.0.1; the table read as a healthy site |
+| `chatglm` | `⬜ scaffold — url-less` | `unverified-candidate` (url-less) — url-less vs driveable is not a wording nuance |
+
+The other six were same-fact-different-wording (`duckduckgo` as `**VERIFIED**` and as
+`✅ grounded (package)`), or a probe-sweep row that had drifted into looking like a status row.
+
+`858e87b` also pins the class: `duplicateStatusIds()`, a row-count == distinct-id-count check, and
+a **runtime-vocabulary** lead-word check so every cell leads with a word
+`chatSurfaceStatus`/`packageStatusOf` actually returns — **no invented status word**. The gate now
+goes **EXIT=1 naming all 9 with both cells quoted**, where the old one was **9/9 pass**.
+
+**Why this one matters more than a doc fix:** three sites were being published to a human reader
+with two contradictory verdicts, and in two of the three the *false* cell was the reassuring one
+(`xiaomimimo` read as a healthy grounded site when it is a DNS dead-end). The rule this repo
+already states — nothing is claimed without evidence — was being violated by the summary, while the
+evidence underneath was correct.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
@@ -367,26 +400,24 @@ order, all re-confirmed still real:
    (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
    half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
    reporting it, not fixing it, and not committing it.
-2. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: three test files no script
-   names (`hub-publish-host-gate`, `plugin-wigolo-fabricated-success`, `readback-overhead-gate`)
-   are all **UNTRACKED**, and `pool-sweep-probe-concurrency` is named but not tracked. Registering
-   an untracked file is the *opposite* direction of the rule and the gate correctly refuses it, so
-   this red clears when that workstream commits its files, and not before. **Not mine to force.**
-3. `src/prompt/pool.ts` — two consequences of `restartBrowser()`, both found by the lane that
-   closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
-   unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
-   and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
-4. **Round-trip evidence is prose.** `site-status-truth` now proves claim == receipt, but nothing
+2. **Round-trip evidence is prose.** `site-status-truth` now proves claim == receipt, but nothing
    machine-checks that a prompt actually returned an answer — a receipt asserts a round trip
    happened, it does not measure one. Closing that needs a per-package measured round-trip log,
    which is a new artefact rather than a test-file change.
-5. **`/health` and `/status` publish internal text under named labels** (`vault-root-unresolvable`,
+3. `/health` and `/status` publish internal text under named labels (`vault-root-unresolvable`,
    `vault-unreadable`, `host-unreadable`, `health-vault-probe-threw`, `boot warm THREW`) —
    inventoried and pinned by `9042b25` rather than excluded, because they are honest diagnostics and
    not a raw error echo. Worth a deliberate decision rather than an accident.
-6. **`README.md` carries 42 rows for 34 real ids**, so 8 ids appear twice with different wording
-   (e.g. `duckduckgo` is both `**VERIFIED**` and `✅ grounded (package)`). "The published claim" is
-   therefore currently a set over duplicate rows — a doc-shape rot `536960a` had to tolerate.
+4. `src/prompt/pool.ts` — two consequences of `restartBrowser()`, both found by the lane that
+   closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
+   unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
+   and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
+5. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
+   names (`hub-publish-host-gate`, `plugin-wigolo-fabricated-success`, `pool-sweep-probe-concurrency`,
+   `readback-overhead-gate`) are **UNTRACKED**, and `pool-sweep-probe-concurrency` is named but not
+   tracked. Registering an untracked file is the *opposite* direction of the rule and the gate
+   correctly refuses it, so this red clears when that workstream commits its files, and not before.
+   **Not mine to force.**
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
