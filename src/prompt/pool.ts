@@ -1005,21 +1005,58 @@ export class ChatPool {
       worker.busySince = undefined;
       return;
     }
-    worker.busy = false;
-    worker.busySince = undefined;
-    if (worker.dedicated) {
-      this.workers = this.workers.filter((w) => w !== worker);
-      await worker.driver.close();
-      return;
-    }
-    const usable = await isWorkerUsable(worker);
-    worker.checkedAt = new Date().toISOString();
-    if (!usable) {
-      this.workers = this.workers.filter((w) => w !== worker);
-      await worker.driver.close();
-      this.drain(worker.profileId);
-      return;
-    }
+    /* GOAL 239 — THE PAGE STAYS BUSY FOR THE WHOLE OF RELEASE.
+     *
+     * What was wrong: `worker.busy = false` was cleared HERE, at the TOP, and
+     * `release()` then went on to await two things — `isWorkerUsable(worker)`
+     * (bounded at WORKER_PROBE_TIMEOUT_MS, 5s) and `driver.discardPage()`.
+     * That left a window of up to 5s in which the page was ADVERTISED IDLE
+     * while the pool was still mid-teardown on it. MEASURED consequence: a
+     * concurrent `acquire()` for the same site matched `!w.busy` at the reuse
+     * scan, took the SAME object, and then the original `release()` finished
+     * and called `discardPage()` on it — under that second request — while also
+     * handing the same object to a queued waiter through `drainWorker`. Two
+     * requests on one tab, which is precisely the residue ROUND N+104 forbids.
+     * Parallel same-site agents are the documented common case, so the window
+     * was not a corner: it was the normal path.
+     *
+     * The fix is to hold the flag and release it in ONE place, at the end.
+     *
+     * It cannot leak, which is the only way this trade could be worse: the
+     * clearing lives in a `finally`, so a THROW anywhere in the probe, the
+     * close, the discard or the drain still hands the slot back rather than
+     * starving the pool with a page stuck busy forever. `keepInPool` is what
+     * keeps that `finally` honest: a page that has just been removed from
+     * `this.workers` (dedicated, or measured-dead) must NOT be handed to a
+     * waiter by `drainWorker` — the same reason the `reclaimed` guard above
+     * exists. `keepInPool` is set as the LAST statement of the surviving path,
+     * so anything that throws before it drains nothing and leaks nothing.
+     *
+     * The `busySince` stamp is REFRESHED rather than left at the request's
+     * start: the busy watchdog (`reclaimWedgedWorkers`) takes a page busy
+     * longer than `busyWatchdogMs` back out of the pool, and the age it should
+     * measure from here on is the age of the RELEASE, not of the request that
+     * already finished. And because holding the flag makes that reclaim window
+     * real, `drainWorker` is gated on the page still BEING in the pool — a
+     * sweep that reclaims a slow release stamps `reclaimed` and removes it, and
+     * handing that page to a waiter is the dead-page handoff the guard above
+     * was written to prevent. */
+    worker.busySince = Date.now();
+    let keepInPool = false;
+    try {
+      if (worker.dedicated) {
+        this.workers = this.workers.filter((w) => w !== worker);
+        await worker.driver.close();
+        return;
+      }
+      const usable = await isWorkerUsable(worker);
+      worker.checkedAt = new Date().toISOString();
+      if (!usable) {
+        this.workers = this.workers.filter((w) => w !== worker);
+        await worker.driver.close();
+        this.drain(worker.profileId);
+        return;
+      }
     // ROUND N+104 — the tab is per-request; the slot survives. Close the PAGE,
     // keep the BROWSER, so the next request in this slot opens clean while the
     // warm connection and session — the parts that are expensive and that the
@@ -1029,11 +1066,18 @@ export class ChatPool {
     // or the slot is never drained and the queue stalls behind it. Failing to
     // close a tab is a leak we can observe; throwing here is a hang we cannot.
     try {
-      await worker.driver.discardPage?.();
-    } catch {
-      /* a wedged tab is the next request's problem, and getPage() rebuilds */
+        await worker.driver.discardPage?.();
+      } catch {
+        /* a wedged tab is the next request's problem, and getPage() rebuilds */
+      }
+      keepInPool = true;
+    } finally {
+      worker.busy = false;
+      worker.busySince = undefined;
+      if (keepInPool && !worker.reclaimed && this.workers.includes(worker)) {
+        this.drainWorker(worker);
+      }
     }
-    this.drainWorker(worker);
   }
 
   private drainWorker(worker: PoolWorker): void {
