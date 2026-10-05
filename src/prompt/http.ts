@@ -739,12 +739,238 @@ const MAX_BODY_BYTES = 1e6;
  * The failure stays a real, useful 500 with the capability id and a stable
  * reason_code — only the raw internal text is removed. `UI2API_DEBUG=1` still
  * prints the full error server-side, where an operator can see it.
+ *
+ * ── GOAL (capability-failure-blind): THE NAMED CAUSE IS LOGGED ALWAYS ──────
+ *
+ * MEASURED DEFECT, and it is why a bug survived for years rather than one fold.
+ * The raw error was printed ONLY under `UI2API_DEBUG === "1"`, and the shipped
+ * unit (`scripts/ops/units/ui2api-api.service`, installed by
+ * `scripts/ops/install-services.sh`) NEVER sets that variable. So on the real
+ * deployment a runner fault produced a journal line saying THAT it failed and
+ * nothing about WHY. `youtube_search` sat in that silence for years while
+ * `AGENTS.md` published it as VERIFIED with live proof: the runner navigated to
+ * `www.youtube.com`, the profile pinned the bare `youtube.com` host, and the
+ * SSRF guard's exact-host equality refused it — a permanent, total, structural
+ * failure of the flagship capability, invisible in the journal, and only ever
+ * found by a measurement that happened to ask for the named cause.
+ *
+ * TWO TIERS NOW, and the first is the one the deployed box actually has:
+ *   - ALWAYS: one redacted line naming the CAUSE class and a bounded, redacted
+ *     cause sentence. No env var, no opt-in, no restart-with-a-flag.
+ *   - `UI2API_DEBUG=1`: the full raw error, UNCHANGED, as the deeper escape
+ *     hatch an operator deliberately opts into.
+ *
+ * WHY THE ALWAYS LINE IS REDACTED RATHER THAN RAW. A journal is not a caller
+ * surface — and it must not quietly become one — but it is not a private one
+ * either: it is readable by the service account and every privileged reader,
+ * it is pasted out by `journalctl`, and it is retained. So this line obeys the
+ * same rule the rest of this file obeys, stated in the direction that is
+ * actually useful: the DIAGNOSIS travels, the internal detail does not. A path,
+ * a `node_modules` segment, a stack frame, a source reference and a URL's
+ * path/query are removed; the guard name, the hosts and the deadline are KEPT,
+ * because those are the diagnosis and a redaction that deletes the diagnosis is
+ * a second lie.
+ *
+ * THE ASYMMETRY IS THE POINT and is preserved on purpose: a LOG may name the
+ * cause — `SSRF guard: refusing to navigate https://www.youtube.com — origin
+ * pinning serves only youtube.com` — and a RESPONSE never will. The 500 body
+ * below interpolates the capability id and NOTHING else; the armed gate
+ * `test/no-internal-error-echo.test.ts` certifies that half, and nothing here
+ * weakens it.
  */
+
+/** What a fault cause sentence may say at most, before it is elided. */
+const CAUSE_MAX_CHARS = 240;
+
+/**
+ * The CAUSE classes a capability-runner fault is labelled with, in the LOG.
+ *
+ * THIS IS THE LOG TWIN OF `CLASSES` in `./error-redaction.ts`, and it is
+ * deliberately NOT merged with it, for a reason that is a direction, not a
+ * preference: that table decides what a CONSUMER may read, and its whole design
+ * is to DELETE the diagnosis (a host, a title, a timer) because the consumer is
+ * contractually promised nothing. This table decides what the OPERATOR may read,
+ * where the diagnosis is the entire point. Merging them would force one of the
+ * two to be wrong, and the failure mode of forcing it is the bug this block
+ * exists to kill: an operator who cannot read the cause cannot find the defect.
+ *
+ * Every label is a closed token, so it is safe to publish on `/status` — see
+ * `capabilityFailures` below — with no redaction pass of any kind.
+ */
+const FAULT_CAUSE_CLASSES: ReadonlyArray<{ re: RegExp; code: string }> = [
+  { re: /SSRF guard: refusing to navigate/i, code: "ssrf-guard-refusal" },
+  { re: /no answer appeared on .* within \d+ms/i, code: "no-answer-within-deadline" },
+  { re: /no composer found|composer still empty|newChat reset not verified/i, code: "composer-unavailable" },
+  { re: /Target page, context or browser has been closed|Target closed|page died/i, code: "page-dismissed" },
+  { re: /\bpool (?:saturated|closed|queue timeout)\b/i, code: "pool-refusal" },
+  { re: /ERR_CHALLENGE|consent wall|abuse signal|\brate limit|\b429\b|\btoo many requests\b/i, code: "site-challenge-or-wall" },
+  { re: /no stored (?:session|account) for|slug-?collision/i, code: "account-unavailable" },
+  { re: /\bENOENT\b|\bEACCES\b|no such file or directory/i, code: "file-or-vault-unreadable" },
+  { re: /not implemented|unknown capability|no such capability/i, code: "capability-not-implemented" },
+];
+
+/**
+ * A bare token is safe to print and safe to store. Everything else is NOT, and
+ * the reason is log injection, which is the log-side twin of the leak this file
+ * is built to prevent: `capability` is caller-supplied (`String(body.capability
+ * ?? "")`), so before this it reached the journal verbatim and a caller could
+ * forge log lines, or park an unbounded string in a retained journal. Anything
+ * that is not a plain token is reported as `unknown` — honest, and forge-proof.
+ */
+const LOG_TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+function logToken(v: string): string {
+  return LOG_TOKEN.test(v) ? v : "unknown";
+}
+
+/**
+ * The log-side redaction. KEEPS the cause, DROPS the internals.
+ *
+ * NOT `redactInternalError()`, and the difference is the whole point of this
+ * block: that function is the CONSUMER projection and is built to delete the
+ * diagnosis, so routing the journal through it would reproduce the original
+ * defect in a new coat — a line that is safe and says nothing. This one is the
+ * opposite: it removes an absolute path, a `node_modules` segment, a stack
+ * frame, a source reference and a URL's path+query, and leaves the guard name,
+ * the host and the deadline standing, because those are what make a bug
+ * findable.
+ *
+ * The URL rule deserves its note. `https://www.youtube.com/results?search_query=…`
+ * reduces to `https://www.youtube.com`. That keeps the ONE fact the youtube
+ * defect turned on (bare host vs `www`) and drops a query string, which on this
+ * project is a caller's own search text — user data that has no business in a
+ * retained journal for the sake of a diagnosis that does not need it.
+ */
+function redactFaultCause(text: string): string {
+  let out = text;
+  // A dependency path first, so the generic path rule cannot leave `node_modules`
+  // visible inside a path it did not match.
+  out = out.replace(/\bnode_modules\b/g, "<dep>");
+  // Source references: `foo.ts`, `dist/cli.js:88:3`, `a.mjs`.
+  out = out.replace(/\b[\w@./-]+\.(?:ts|tsx|js|mjs|cjs|json)(?::\d+){0,2}/g, "<src>");
+  // URLs, BEFORE the path rule and for a measured reason. The path rule matches
+  // `//host/seg` (a scheme-relative shape), so running it first turned
+  // `https://www.youtube.com/results` into `https:/<path>` and DESTROYED the
+  // one host the youtube defect turned on. Order is load-bearing here, and the
+  // redaction pin in test/capability-failure-diagnosable.test.ts is what caught
+  // it — the source-shaped assertions all passed while this was broken.
+  out = out.replace(/https?:\/\/[^\s"'<>)\]]+/gi, (m) => {
+    try {
+      const u = new URL(m);
+      return `${u.protocol}//${u.host}`;
+    } catch {
+      return "<url>";
+    }
+  });
+  // Absolute filesystem paths: two or more segments, so a bare `/v1` survives
+  // and the `//host` a URL rule just reduced to does not match.
+  out = out.replace(/(?:\/[\w@.+-]+){2,}\/?/g, "<path>");
+  // Stack frames, both the leading-`at` form and the inline `at f (x)` form.
+  // The Playwright "Call log:" is dropped as a BLOCK: it is a run of
+  // `- waiting for locator('#id')` lines plus indented continuations, and a DOM
+  // selector is reconnaissance against a live site, so the whole block goes.
+  // It stops at the first line that is neither a bullet nor indented, so a
+  // cause sentence printed AFTER the block still survives — a redaction that ate
+  // the diagnosis along with the log was the failure mode this file exists to
+  // avoid, and the pin below is what holds that line.
+  out = out.replace(/Call log:(?:\n[ \t]*-[^\n]*|\n[ \t]+[^\n]*)*/g, " ");
+  out = out.replace(/^\s*at\s+\S.*$/gm, " ").replace(/\bat\s+[\w.$<>]+\s*\([^)]*\)/g, " ");
+  // A DOM selector or a Playwright call, wherever else it appears.
+  out = out.replace(/(['"`])[#.][^'"`]*\1/g, "<selector>");
+  out = out.replace(/\b(?:locator|getByRole|getByText|getByLabel|waitForSelector|querySelector\w*|evaluate)\s*(?:\([^)]*\)|\.)\s*\w*/g, "<dom>");
+  // A Playwright "Call log:" dump is a block of newlines, so flattening kills its
+  // shape before the bound below ever sees it.
+  out = out.replace(/\s+/g, " ").trim();
+  if (out.length > CAUSE_MAX_CHARS) out = `${out.slice(0, CAUSE_MAX_CHARS - 1).trimEnd()}…`;
+  return out;
+}
+
+/**
+ * The named cause class of a fault's TEXT — a closed vocabulary in every branch,
+ * which is what makes it publishable on `/status` with no redaction pass at all.
+ *
+ * It takes the TEXT, not the thrown value, and that is deliberate rather than
+ * incidental. The armed gate `test/no-internal-error-echo.test.ts` requires every
+ * read of internal exception text in this file to be an accounted region, so
+ * reading `err.message` in two places would have meant widening that gate twice.
+ * Reading it in exactly ONE place — `capabilityFaultLine` below — means the
+ * widening is one row with one anchor, and the arm below is a `for` loop over a
+ * string, which is not a text read at all.
+ */
+function faultCauseCode(text: string): string {
+  for (const c of FAULT_CAUSE_CLASSES) if (c.re.test(text)) return c.code;
+  return "unknown";
+}
+
+/**
+ * The ALWAYS-ON journal line, and THE ONE place in this file that reads a
+ * caught value's message.
+ *
+ * It returns both the line and the cause code, so the caller below logs the
+ * first and records the second without a second read — one read, one redaction,
+ * one place to audit. It is a separate function from `capabilityFailure` so the
+ * redaction is one reviewable unit and the caller-facing half cannot
+ * accidentally grow a hole: the armed gate treats a file-declared helper that
+ * does NOT return its argument as a sanitising boundary, and this one returns a
+ * string it built — never `err`.
+ */
+function capabilityFaultLine(capability: string, err: unknown): { line: string; code: string } {
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : String(err ?? "");
+  const code = faultCauseCode(text);
+  const cause = redactFaultCause(text);
+  return {
+    code,
+    line: `[ui2api] capability ${logToken(capability)} failed: cause=${code}${cause ? ` — ${cause}` : ""}`,
+  };
+}
+
+/**
+ * The durable, log-independent health signal.
+ *
+ * `/status` is how a capability failure is diagnosable when nobody is reading the
+ * journal — a health-checker loop, a deploy probe, a poll. It carries a COUNT
+ * and the most recent CAUSE CODE, and the cause code is a closed token from
+ * `FAULT_CAUSE_CLASSES`, never a message: `9042b25` and `f1fafff` established
+ * that rule for this route (a raw `e.message` on `/status` is how a vault-probe
+ * throw once published its path), and a journal sentence is not a licence to
+ * repeat that on a served surface. One record, no array — a bounded block, so
+ * it cannot grow with the failure count.
+ *
+ * The SITE is deliberately not carried here. `capabilityFailure` is called with
+ * the capability id, and the armed gate pins that exact call spelling
+ * (`capabilityFailure(capability, e)`); widening the signature to thread the
+ * site through would put a security gate's own pin at risk for a field the
+ * operator can already read off the capability name. The capability name is the
+ * discriminator a caller actually asks with.
+ */
+const capabilityFailures: { count: number; last: { capability: string; cause: string; at: string } | null } = {
+  count: 0,
+  last: null,
+};
+
+function recordCapabilityFailure(capability: string, code: string): void {
+  capabilityFailures.count += 1;
+  capabilityFailures.last = { capability: logToken(capability), cause: code, at: new Date().toISOString() };
+}
+
 function capabilityFailure(capability: string, err: unknown): string {
+  // The always-on tier. Written FIRST so it cannot be lost behind the debug
+  // branch below, and so a reviewer reading top-down meets the durable line
+  // before the opt-in one. ONE read of the caught message happens here, inside
+  // `capabilityFaultLine`; the code it classifies with is handed to the /status
+  // record rather than recomputed, so this file reads internal text exactly once
+  // for this path.
+  const fault = capabilityFaultLine(capability, err);
+  console.error(fault.line);
+  recordCapabilityFailure(capability, fault.code);
+  // The opt-in tier, unchanged: the full raw error for an operator who asks.
   if (process.env.UI2API_DEBUG === "1") {
-    console.error(`[ui2api] capability ${capability} failed:`, err);
+    console.error(`[ui2api] capability ${capability} failed (full internal error, UI2API_DEBUG=1):`, err);
   }
-  return `capability "${capability}" failed inside the runner — see the daemon log (UI2API_DEBUG=1) for the internal error`;
+  // The response half. It interpolates `capability` and NOTHING derived from
+  // `err` — that is the invariant the armed gate certifies, so the cause
+  // sentence deliberately does not appear here.
+  return `capability "${capability}" failed inside the runner — see the daemon log, which names the cause`;
 }
 
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -1493,7 +1719,16 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
         // GOAL 100: disclose the daemon's OWN posture (auth mode + active
         // trust knobs) so "is it safe to expose this?" is answerable without
         // reading the source. Shapes/counts only — never a token value.
-        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st), posture: daemonPosture(process.env, bindAddr), bootWarm });
+        //
+        // `capabilityFailures` is the log-INDEPENDENT half of the diagnosability
+        // fix: a count and the most recent NAMED CAUSE CODE, so a capability that
+        // is structurally broken (the youtube_search case: an SSRF-guard refusal
+        // on every single call) is visible to a health-checker loop with nobody
+        // reading a journal. It carries a closed-vocabulary code and a
+        // caller-sanitised capability token — never a message, never a path —
+        // because this is a SERVED surface, and `9042b25`/`f1fafff` already
+        // established that rule here.
+        return send(res, 200, { ok: true, pool: st, liveness: livenessBlock(st), posture: daemonPosture(process.env, bindAddr), bootWarm, capabilityFailures: { count: capabilityFailures.count, last: capabilityFailures.last } });
       }
       // GOAL 87 — the bounded request ring, read-only. Same localhost-only +
       // optional-bearer posture as every other route here (it lives behind the

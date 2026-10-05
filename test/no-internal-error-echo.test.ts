@@ -1181,6 +1181,28 @@ t("every internal-text site in the corpus is accounted for: a mapped refusal arm
     { why: "internal-only, never published: a thrown non-Error rewrapped as an Error so the waiter can be settled with an Error", anchor: /\(e\) => this\.settleWaiter\(waiter, e instanceof Error \? e : new Error\(String\(e\)\)\)/ },
     { why: "internal-only, never published: the same rewrap on the queue-deadline re-acquire path", anchor: /\(e\) => this\.settleWaiter\(waiting, e instanceof Error \? e : new Error\(String\(e\)\)/ },
     { why: "the redaction seam itself: reads a message to recover a BOUNDED errno TOKEN, returns only the token (pinned separately above)", anchor: /ERRNO_IN_MESSAGE\.exec\(err\.message\)/ },
+    // ── ADDED BY GOAL (capability-failure-blind) — ONE row, and it is an
+    // EXTENSION, not a relaxation. The gate's rule is unchanged and still
+    // absolute: every read of internal exception text must be an accounted
+    // region. What was added is a capability failure's ONE read, and it was
+    // deliberately collapsed from two to one before this row was written — the
+    // cause CLASSIFIER takes the text rather than the thrown value precisely so
+    // that this file reads a caught message exactly once on that path, and so
+    // the widening below is one anchored row rather than two.
+    //
+    // WHY IT IS SAFE, stated so a reviewer can refuse it if they disagree: the
+    // read happens in `capabilityFaultLine`, whose return value is a string it
+    // BUILDS — the input is put through `redactFaultCause` (paths, node_modules,
+    // stack frames, source refs, DOM selectors and a URL's path+query all
+    // removed) and through `faultCauseCode` (a closed token vocabulary) before
+    // anything is returned, and the result reaches exactly two sinks: a
+    // `console.error` on stderr, and `/status`'s `capabilityFailures.cause`,
+    // which carries the CODE only. Neither is a response body, and the response
+    // half of the same function still interpolates the capability id and nothing
+    // else — the pin below (`the returned sentence interpolates the capability
+    // and NOTHING from the error`) is the structural half of that claim, and
+    // test/capability-failure-diagnosable.test.ts is the behavioural half.
+    { why: "internal-only, never published: the capability-failure JOURNAL line, which reads the message once and returns a redacted, bounded line plus a closed-vocabulary cause code (neither reaches a response body)", anchor: /const text = err instanceof Error \? err\.message : typeof err === "string" \? err : String\(err \?\? ""\);/ },
   ];
   const allowed = regions
     .filter((r) => r.anchor.test(src))

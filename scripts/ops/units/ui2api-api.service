@@ -61,6 +61,27 @@ Environment=UI2API_HEADED=1
 # change via a JSON object keyed by site id.
 Environment=UI2API_DEFAULT_MIN_INTERVAL_MS=1500
 Environment=UI2API_SITE_MIN_INTERVAL_MS={"kimi":4000,"deepseek":4000}
+# UI2API_DEBUG IS DELIBERATELY NOT SET HERE, and this line is the record of why.
+#
+# A capability-runner fault used to print its CAUSE only under
+# `UI2API_DEBUG === "1"`, and this unit never set it — so on the real deployment
+# the journal said a runner failed and nothing about why. That silence is why
+# `youtube_search` stayed published as VERIFIED for years while every single call
+# was refused by the SSRF guard (the profile pinned the bare `youtube.com` host
+# and the runner navigated `www.youtube.com`; exact-host equality refused it).
+#
+# The cause line is now UNCONDITIONAL — one redacted line naming the cause class
+# and a bounded cause sentence — so this unit needs no flag to be diagnosable,
+# and that is the point of the arrangement: the deployed box must not depend on
+# an env var nobody sets to explain itself. The raw full error remains behind
+# `UI2API_DEBUG=1` for an operator who asks for it.
+#
+# DO NOT "fix" a future diagnosability complaint by adding
+# `Environment=UI2API_DEBUG=1` here. It would flood the retained journal with
+# raw Playwright diagnostics, absolute paths and stack frames on every fault,
+# and it would still be a flag: the property being protected is that the
+# DEPLOYED default explains itself. `GET /status` carries the same signal
+# log-independently (`capabilityFailures`: a count + the last named cause code).
 Environment=DISPLAY=:99
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node /opt/ui2api/dist/cli.js promptd
