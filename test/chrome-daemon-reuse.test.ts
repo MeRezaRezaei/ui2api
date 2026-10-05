@@ -234,7 +234,10 @@ const SRC = readPin("src/runtime/chrome-daemon.ts");
 
 /** A pid that is guaranteed not to be alive: fork one, reap it, use its pid. */
 function deadPid(): number {
-  const r = spawnSync("/bin/sh", ["-c", "exit 0"]);
+  // The timeout is not optional here: `spawnSync` with no `timeout` blocks the
+  // whole suite forever, which is precisely the class
+  // `test-timeout-discipline.test.ts` exists to catch — and it caught this one.
+  const r = spawnSync("/bin/sh", ["-c", "exit 0"], { timeout: 5_000, killSignal: "SIGKILL" });
   const pid = r.pid;
   assert.ok(typeof pid === "number" && pid > 0, "could not obtain a reaped pid for the dead-pid case");
   assert.equal(isPidAlive(pid as number), false, "a reaped child must not read as alive");
