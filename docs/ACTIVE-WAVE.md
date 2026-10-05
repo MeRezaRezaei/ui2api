@@ -559,36 +559,90 @@ the guard name, both hosts and the deadline. `/status` gains `capabilityFailures
 and still says only *"see the daemon log, which names the cause"* — a log may name the cause, a
 response may not. Registered as `dd0a587`.
 
+### ROUND N+194k — two more instances of the class, and a lane that caught its OWN new gate silently missing (2026-10-05)
+
+**`0ed14f9` — the duplicated parser is DELETED, not repaired.** `declaredContract()` in
+`test/pool-refusal-truth.test.ts` now **is** the shared `parseDocTable`. The measured consequence
+of the copy was worse than blind vocabulary: **that copy decided which codes the reachability gate
+iterated**, so the shipped `502 ui2api_driver_error` row was in the README table and *promised but
+never tested*.
+
+**And the indirection gap was CLOSED, not bounded.** `SHAPE_MESSAGES` codes reach the wire through
+`code: shapeCode` — a literal-shaped scanner cannot see them. `shapeMessageCodes()` reads the
+table's own rows and derives the status from the **send site consuming `shapeCode`**, and it
+**throws by name** if it cannot read the table, the boundary, the guard or the send. No AST, no
+`src/` edit. The `?? "bad_request"` fallback was proven unreachable (`some()` implies `find()` over
+the same table and string), so it is not counted as served; `measureShapeFallback()` returns it by
+name instead.
+
+**Vocabulary 17 → 19**, with `400 unknown_site` and `400 not_chat` newly visible and each given a
+**real loopback probe** rather than a presence check. Both anti-vacuity proofs quoted: restoring the
+copy turns **2 pins red**; deleting the `shapeMessageCodes(http)` call turns **5 red**; and making
+it *silently* blind turns **7 red**.
+
+**The line in that report worth keeping:** *"My first sweep pin was itself defective three ways
+(22 false positives → 2 → silently matching nothing) — a gate for the silent-miss class that
+silently missed."* A lane built a gate to catch exactly this round's class and it **quietly matched
+nothing** until the lane ran its own anti-vacuity. That is the class reproducing inside the remedy,
+and it is the strongest argument in this file for mandating the falsifier on every gate.
+
+**`5fb6983` — `COMPOSER-DRIFT` already existed and was unreachable from the wire.** The lane's brief
+said "add a member"; the truth was sharper. Two measured reasons: `NO_COMPOSER_PATTERN` keyed on the
+**driver's internal sentence**, which `redactInternalError` rewrites before any client sees it; and
+its branch required an `observedPage` the refusal path never reports. So the lane added
+`UNATTRIBUTED-NO-COMPOSER` — the **page-less twin**, not a widening of the existing member. The
+matcher is built by **calling the owner**: `redactInternalError(<driver's throw>)`, then detaching the
+shared `RETRY` tail. The only string typed is the *input*, never the output — so a name match, which
+would be a second copy of a sentence owned by `error-redaction.ts`, was correctly rejected. Measured:
+the fallback and no-answer projections share the same `RETRY` tail, so a fragment match pulls them in
+behind it, and that is now pinned.
+
+**The decision that mattered: CONTRADICTS, not "qualifies".** The surface did not work at
+measurement time and the row is inside the staleness window. Letting `verified` stand with a caveat
+is the blindness one level up. So `measuredRoundTripFor` grew a third verdict, `contradicted`, which
+**may only ever demote, never promote** — and the gate now says so in words:
+
+```
+`kimi` … carries no MEASURED row: MEASURED AND FAILED — … 1 row(s) whose DERIVED class is a
+named FAILURE, the newest being chat class=UNATTRIBUTED-NO-ANSWER httpStatus=502 …
+This is NOT the same as never having measured: the round trip was performed and the surface
+DID NOT WORK, which CONTRADICTS a published `verified` claim rather than qualifying it.
+It establishes NO cause … and it may only ever DEMOTE, never promote.
+```
+
+That is the sentence this whole session was reaching for. Three sites are published `verified`,
+were measured, and **failed** — and the gate can now say so precisely instead of reporting them as
+merely unmeasured.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
 order, all re-confirmed still real:
 
-1. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
-   (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
-   half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
-   reporting it, not fixing it, and not committing it.
-2. **The four sites still unmeasured** — `deepseek` (honest 502 `COMPOSER-DRIFT`), `kimi` and
-   `tencent-aistudio` (honest 502 `ui2api_driver_error`, a sign-in/consent wall), `youtube` (now
-   navigable, but its round-trip row predates the SSRF fix). **The gate is honestly RED and that is
-   its job working** — these four are published `verified` and no measurement yet says so.
-3. `COMPOSER-DRIFT` has **no classifier member**, so it derives `UNCLASSIFIED` and the seam refuses
-   to write it — a real outcome the vocabulary cannot express. Tenth instance of the class.
-4. **Indirection blindness, same class:** `SHAPE_MESSAGES` codes (`unknown_site`, `not_chat`,
-   `bad_request` at `http.ts:1806-1815`) reach the wire **via a variable**, so the now-correct
-   source scanner cannot see them either; and `test/pool-refusal-truth.test.ts:81` holds a
-   **second hand-copied `parseDocTable`** still carrying the old `[a-z_]+` class.
-5. `src/capabilities/gmail.ts` still carries youtube's **bare-host-vs-www** shape and is not covered
-   by the www-sibling table — the same latent defect class `7e3e3a6` just fixed for youtube.
-6. `scripts/ops/deploy.sh`'s sibling concerns: `host-independence` RED is pre-existing on another
-   lane's `test/pool-atomic-max.test.ts:192` (verified with the deploy edits stashed).
-7. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten.
-8. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
-   (2026-09-29/30) that **disagree with their verified receipts** — a real honesty question
-   nobody has answered.
-9. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
-   names are **UNTRACKED**. The gate correctly refuses to register a file the repo does not ship, so
-   this red clears when that workstream commits, and not before. **Not mine to force.**
+1. **Three sites published `verified` whose own measurement CONTRADICTS them** — `kimi`,
+   `tencent-aistudio` (`UNATTRIBUTED-NO-ANSWER`, a sign-in/consent wall) and `deepseek`
+   (`UNATTRIBUTED-NO-COMPOSER`). The gate is correctly red and correctly named. **The remaining
+   question is a product decision, not a defect: those receipts were earned on a real round trip
+   and have since stopped working, so demoting them is a judgement about the published claim.** I am
+   not making that call unilaterally and I am not relaxing the gate to hide it.
+2. `youtube` still carries no measured row — the SSRF fix landed after its last measurement.
+3. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors and
+   3 test failures from a concurrent lane's half-finished edit, making
+   `tsc -p tsconfig.test.json` exit 2 for the whole tree. Reported, not touched.
+4. `COMPOSER-DRIFT` remains unreachable over the wire (with a page present, the redacted sentence
+   does not match its matcher) — its new page-less twin covers the real case.
+5. `explodes`'s `internal_error` probe has the busy-worker vacuity its sibling `refuses` had: its
+   stub is never asked, so that 500 is really a page-open failure. Left rather than widened.
+6. The harvest is still regex-based, so a **runtime-built** code string would re-blind it — bounded
+   loudly by the resolver's named throws, not silently.
+7. The duplicate-reparse sweep covers `test/*.ts` at depth 1 only.
+8. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has eleven.
+9. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio that
+   **disagree with their verified receipts** — now visibly consistent with the three CONTRADICTED
+   verdicts above, which is the first time this file can point at corroboration rather than a hunch.
+10. `gate-wiring` GOAL 145 / R4 — still red, **entirely foreign**: four test files no script names
+    are UNTRACKED. The gate correctly refuses to register a file the repo does not ship. **Not mine
+    to force.**
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
