@@ -643,6 +643,52 @@ so I verified its claims rather than trusting a report I no longer had: `tsc --n
 four-file set **97/97**, and `round-trip-record-truth` **22/21/1** with that 1 being the intended
 CONTRADICTED red on the three sites, unchanged.
 
+### ROUND N+194m — a refused measurement becomes a record, and the advice becomes executable (2026-10-05)
+
+**`6495a00` — `UNATTRIBUTED-NO-TRANSCRIPT`, and the lane DECLINED to split it.** The brief asked
+whether "the site offers no transcript" and "our selector went stale" are one class or two — a
+distinction that matters, because a stale selector is a bug *in this repo* and would otherwise stay
+invisible exactly the way `youtube_search` did. **The lane measured two videos and proved they are
+one**: `E5p4TgCNd1I` and `vr0EqEj0-zo` both returned the **byte-identical** sentence, and the runner's
+refusal asserts neither cause. The response separates nothing, so a split would be a guess. It named
+the file that *would* have to change (`src/capabilities/youtube.ts` would check for a caption track
+and refuse differently) and did **not** do it, because that would desync the shipped row from a
+daemon it may not redeploy. **Proving a non-split by measurement beats guessing a split.**
+
+The derivation inverts the composer-drift problem elegantly: `/capability` answers
+`send(res, result.ok ? 200 : 502, result)`, so this sentence is **not** rewritten by
+`redactInternalError` — so the runner now **exports** its clause
+(`NO_TRANSCRIPT_CONTROL_REFUSAL`, `src/capabilities/youtube.ts:117`) and the classifier builds the
+pattern **from that import**. A reword in the owner moves the matcher. Measured row:
+`youtube_transcript | UNATTRIBUTED-NO-TRANSCRIPT | 502 | elapsedMs 3222`.
+
+**And it QUALIFIES rather than CONTRADICTS** — a `verified` claim is about the *surface*, the row is
+about *one `videoId`* — which is a third distinct reading, alongside `ANSWERS` (succeeds) and
+`UNATTRIBUTED-NO-COMPOSER` (contradicts). Vocabulary 11 → 12, case count re-derived.
+
+**That lane also had the ARMED privacy gate flag its own row** — youtube's clause quotes the site's
+`'Show transcript'` label, which is a quoted string in a published field. It narrowed the **scan**
+(excluding the derived refusal vocabulary, read out of the classifier) rather than the **property**,
+and asserted the teeth: a real quoted answer in the same field still trips it. That is the correct
+handling of a gate flagging your own work.
+
+**`d5de77b` — the gate's remediation advice is now executable.** It was one hardcoded template at
+`test/round-trip-record-truth.test.ts:197` derived from nothing. `roundTripProbeAdvice()`
+(`src/prompt/registry.ts:940`) now derives every input from facts that module already owns:
+chat-ness from `defaultChatSurface()` (the same allow-list `/v1` is built from), capabilities through
+the **same** `validManifestCapability` filter `/registry` serves, and args from the **declared**
+`inputSchema` — never the regex guess, which has been wrong before. A gate re-reading manifests would
+be a second reader of one dataset, so the advice belongs on the registry side. It executes nothing.
+
+youtube before → `--site youtube --capability chat` (undeclared → HTTP 400; also missing
+`--import tsx`). After: *"has NO chat surface (it is absent from GET /sites), so it cannot be probed
+as chat at all"* followed by all **7 declared capabilities** with real `--args` shapes. A real chat
+site (kimi) gets `--capability chat` **first**, because that is the only shape that derives `ANSWERS`.
+
+**That lane's anti-vacuity caught its own first pins passing vacuously** — they called the advice
+function directly and still passed when the hardcoded string was restored to the message. The pins
+now read `remedyFor()`, the single verdict→advice path, and reverting the message REDs 2 pins.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
@@ -652,25 +698,24 @@ order, all re-confirmed still real:
    genuinely measured, and the measurement **CONTRADICTS** the claim: `kimi` and `tencent-aistudio`
    (`UNATTRIBUTED-NO-ANSWER`, a sign-in/consent wall) and `deepseek` (`UNATTRIBUTED-NO-COMPOSER`,
    the site's own UI changed). Those receipts were earned on real round trips and have since stopped
-   working. **Recommendation: demote to `unverified-candidate` and keep the CONTRADICTED
-   measurement as the receipt**, so the claim stays inspectable rather than quietly deleted. The gate
-   may only ever demote, never promote. I am not making this call unilaterally and I am **not**
-   relaxing the gate to hide it.
-2. `youtube_transcript` produces a real, named outcome (`no-transcript-button: 'Show transcript' not
-   offered`) that **no classifier member can hold**, so the record loses it — the same refusal that
-   cost `deepseek` its row before `UNATTRIBUTED-NO-COMPOSER` existed.
-3. The gate's derived remediation advice still says `--site youtube --capability chat` for youtube —
-   a site with **no chat model**. Actively wrong guidance, generated by the gate itself.
-4. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors and
+   working. **Recommendation: demote to `unverified-candidate`, keep the CONTRADICTED measurement as
+   the receipt** so the claim stays inspectable rather than quietly deleted. The gate may only ever
+   demote, never promote. Not making this call unilaterally; **not** relaxing the gate to hide it.
+2. `youtube.ts` **cannot separate its own two causes** — "no captions" from "selector rot". Closing
+   that needs a runner change plus a redeploy, which no lane was permitted to do.
+3. `measuredRoundTripFor` is **per-site**, so a failing capability on an otherwise-working site
+   (`youtube_transcript` on a healthy `youtube_search`) is invisible at site level.
+4. `COMPOSER-DRIFT` **with a page present** is still unreachable — its page-less twin covers the real
+   case.
+5. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors and
    3 test failures from a concurrent lane's half-finished edit, making
    `tsc -p tsconfig.test.json` exit 2 tree-wide. Reported, not touched.
-5. `model-verification.json`'s `SIGN-OUT` rows for those same three sites now visibly **agree** with
-   the three CONTRADICTED verdicts — the first time this file can point at corroboration rather than
-   a hunch, and the strongest evidence for recommendation (1).
-6. `docs/AGENT_INTEGRATION.md:55` says the classifier has **nine** members; it has eleven. Unpinned doc.
-7. `gate-wiring` GOAL 145 / R4 — still red, **entirely foreign**: four test files no script names are
-   UNTRACKED. The gate correctly refuses to register a file the repo does not ship. **Not mine to
-   force.**
+6. `model-verification.json`'s `SIGN-OUT` rows for those same three sites now visibly **agree** with
+   the three CONTRADICTED verdicts — the strongest evidence yet for recommendation (1).
+7. `docs/AGENT_INTEGRATION.md:55` says the classifier has **nine** members; it has **twelve**. The doc
+   has now been wrong across three growths and remains unpinned.
+8. `gate-wiring` GOAL 145 / R4 — still red, **entirely foreign**: four test files no script names are
+   UNTRACKED. **Not mine to force.**
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
