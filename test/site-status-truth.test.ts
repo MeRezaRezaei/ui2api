@@ -171,6 +171,49 @@ export function setStatusCell(doc: string, id: string, cell: string): string {
   return doc.replace(/^(\|\s*`([a-z0-9-]+)`\s*\|)[^|]*/gm, (whole, head: string, rowId: string) => (rowId === id ? `${head} ${cell} ` : whole));
 }
 
+/**
+ * ── ONE STATUS CELL PER SITE ID ─────────────────────────────────────────────
+ *
+ * THE DEFECT THIS FORBIDS. The shipped inventory carried 42 `| id | status |`
+ * rows for 33 site ids, so 9 ids were published TWICE, each pair in a different
+ * vocabulary — `duckduckgo` as both `**VERIFIED**` and `✅ grounded (package)`,
+ * `zenmux` as both `dormant — EXCLUDED from chat surface` and `⬜ dead-end`, and
+ * so on. Two consequences, and the second is the serious one:
+ *
+ *  1. A reader cannot tell which cell is authoritative. Both look like a status.
+ *  2. Every check above had to TOLERATE it: the published claim had to be
+ *     computed as a set over duplicate rows, because the table it reads is not a
+ *     function of the id. That is the tell — a table whose meaning depends on
+ *     which duplicate row you read is not derivable, and a duplicate row
+ *     silently doubles whatever a row-scanner counts.
+ *
+ * WHY A DUPLICATE ID IS NOT MERELY REDUNDANT: where the two cells disagreed they
+ * disagreed about the underlying FACT, not the wording (measured at fix time —
+ * `zenmux` dormant vs dead-end is `/registry` saying `dormant` and the table
+ * saying `dead-end`; `xiaomimimo` `dead-end` vs `✅ grounded (package)`). An
+ * earned classification and a grounded one drifting apart in the reader's mind is
+ * exactly what this repo's rule — nothing is claimed without evidence — exists to
+ * prevent, and no prose fix prevents it. So it is a build failure, not a style.
+ *
+ * The canonical vocabulary is the one the RUNTIME already publishes, derived from
+ * `capabilities/<id>/metadata.json` + `packageStatusOf` / `chatSurfaceStatus`:
+ * `verified`, `unverified-candidate`, `builtin`, `dormant`, `dead-end`. Nothing
+ * here invents a status word.
+ */
+export function duplicateStatusIds(doc: string): string[] {
+  const seen = new Map<string, string[]>();
+  for (const { id, status } of parseStatusRows(doc)) {
+    const cells = seen.get(id) ?? [];
+    cells.push(status.trim());
+    seen.set(id, cells);
+  }
+  return [...seen.entries()]
+    .filter(([, cells]) => cells.length > 1)
+    .map(([id, cells]) => `\`${id}\` is published ${cells.length} times: ${cells.map((c) => JSON.stringify(c)).join("  vs  ")}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 d("GOAL 92: the shipped site-status column cannot claim a round-trip the machine record does not support", () => {
@@ -229,6 +272,60 @@ d("GOAL 92: the shipped site-status column cannot claim a round-trip the machine
       assert.ok(rec.evidence.trim().length >= 40, `\`${id}\` receipt.evidence is too short to be a round-trip record`);
       assert.ok(rec.via.trim().length >= 10, `\`${id}\` receipt.via is too short to name how it was verified`);
     }
+  });
+
+  t("ONE status cell per site id — the table is a FUNCTION of the id", () => {
+    const rows = parseStatusRows(README);
+    // non-vacuity: uniqueness over 0 or 1 rows is vacuous, so the table must
+    // actually carry a per-site inventory for this rule to mean anything.
+    assert.ok(rows.length >= 20, `expected the inventory table to carry >=20 site rows, found ${rows.length}`);
+    assert.equal(
+      rows.length,
+      new Set(rows.map((r) => r.id)).size,
+      "the row count and the distinct-id count must be equal — a gap IS a duplicated id, and the detail below names each one",
+    );
+    assert.deepEqual(
+      duplicateStatusIds(README),
+      [],
+      "the shipped table publishes a site id more than once, so a reader sees two different status cells for the same site and cannot tell which one the code backs",
+    );
+  });
+
+  t("every status cell leads with a status word the RUNTIME publishes", () => {
+    // The vocabulary is derived, not typed here: it is what the resolver itself
+    // can return, so a cell that invents a fourth wording cannot pass as prose.
+    const RUNTIME_VOCABULARY = new Set(["verified", "unverified-candidate", "builtin", "dormant", "dead-end", "scaffold", "active", "unknown"]);
+    const offenders: string[] = [];
+    for (const { id, status } of parseStatusRows(README)) {
+      const word = status.trim().split(/[\s—(:(]/, 1)[0]!.toLowerCase().replace(/^\*+|\*+$/g, "");
+      if (!RUNTIME_VOCABULARY.has(word)) offenders.push(`\`${id}\` leads with "${word}", which the runtime never publishes`);
+    }
+    assert.deepEqual(offenders, [], `status cells must lead with a word /registry or /sites actually publishes:\n  ${offenders.join("\n  ")}`);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE FALSIFIER — a uniqueness gate that cannot go RED is not a gate. The scratch
+// input is the SHIPPED table plus ONE re-introduced duplicate row, which is
+// exactly the 2026-10-05 defect.
+// ─────────────────────────────────────────────────────────────────────────────
+
+d("negative (c) UNIQUENESS: publishing one site id twice is RED", () => {
+  t("(c) a re-introduced second row for a site already in the table is caught, naming both cells", () => {
+    assert.deepEqual(duplicateStatusIds(README), [], "precondition: the real table publishes every id exactly once");
+    // the shipped `duckduckgo` row, re-inserted verbatim under a second spelling
+    // of the same id — the named example of the defect this gate exists for.
+    const dup = README.match(/^\|\s*`duckduckgo`\s*\|.*$/m)![0];
+    assert.ok(rowClaimsRoundTrip(parseStatusRows(dup)[0]!.status), "precondition: the duplicated row really is a status row");
+    const scratch = `${README}\n| \`duckduckgo\` | ⬜ dead-end | a second, contradictory status cell for the same id |\n`;
+    const gaps = duplicateStatusIds(scratch);
+    assert.ok(
+      gaps.length === 1 && gaps[0]!.includes("`duckduckgo`") && gaps[0]!.includes("published 2 times"),
+      `a duplicated id must be reported naming the id and both cells, got ${JSON.stringify(gaps)}`,
+    );
+    // and the id must be visible in BOTH cells, or the report is not actionable
+    assert.match(gaps[0]!, /grounded \(package\)/, "the report must quote the surviving cell");
+    assert.match(gaps[0]!, /dead-end/, "the report must quote the re-introduced cell");
   });
 });
 
