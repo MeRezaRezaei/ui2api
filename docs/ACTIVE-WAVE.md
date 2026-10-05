@@ -302,6 +302,28 @@ rule held: no lane created a new `test/*.test.ts` that package.json would have h
 claim, a 1200-char window, an optional chain in the place of a type check. A green suite is
 evidence about the assertions that ran, never about the code's honesty.
 
+### ROUND N+194b — the Chrome-wedging pair, one lane CLOSED (2026-10-05)
+
+Four lanes dispatched in one step from the same ranking, again collision-checked first.
+Two of the four targets converge on ONE failure mode, which is why they rank where they do:
+**a Chrome this repo cannot account for wedges the box.** `chrome start` refuses with
+`Failed to create … ProcessSingleton`, forever, until a human runs `pkill`.
+
+| lane | state |
+| --- | --- |
+| `l1-browser-orphan-kill` | **CLOSED — `c812df5`.** `killGroup` was defined and wired at `:546`, *after* `await connectWithTimeout(...)`, so every throw between the spawn and that line propagated with a real `google-chrome` still running. Now the child is killable at the instant it exists. Verified by me at fan-in, not by the writing lane: `test/runtime-launch-seam.test.ts` **7/7**, including `THE ORPHAN KILL — the spawned process is killable at the instant it exists`. |
+| `l1-chrome-daemon-atomic-state` | **open** — `src/runtime/chrome-daemon.ts` + `test/chrome-daemon-reuse.test.ts` carry uncommitted residue (+187 / +246 lines). Its half of the same failure mode: a racing `start` records a **dead** child's pid as `origin:"spawned"`, so `chrome stop` kills nothing and the live Chrome becomes unstoppable. |
+| `l1-infocache-type-guard` | **open** — `src/runtime/profile-ingest.ts` + `test/profile-ingest.test.ts` carry uncommitted residue (+75 / +141). Closes the whole class its sibling started: `info_cache` and every other untrusted on-disk read guarded by TYPE, so a malformed shape degrades to the existing honest fallback instead of forking a vault identity. |
+| `l1-openai-body-cap-413` | **open** — `src/prompt/openai.ts` (+129) carries uncommitted residue. An oversized `/v1` body answers **400 `invalid_json`** where the daemon answers **413 `payload_too_large`** — a caller told its JSON is malformed, retrying forever on a false diagnosis. |
+
+**The honest state of this wave, stated plainly: one of four is closed and verified, three
+have landed edits in the tree and are not yet verified by me.** I am not recording them as
+closed and I am not recording them as clean either — `test/openai-full-contract-truth.test.ts`
+is currently **RED** against the uncommitted `openai.ts` residue (it pins
+`reject(new Error(INVALID_JSON_MESSAGE))` where the lane now rejects a typed `BodyRefusal`),
+so that residue is **not yet self-consistent**, and no part of this wave has been committed
+beyond `c812df5` + `d2fee87`.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above**, and round
