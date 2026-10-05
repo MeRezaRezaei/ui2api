@@ -13,7 +13,7 @@
 | `L1-sweep-probe-overlap` | L1 | execute | codeg-orchestrator | src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json | 2026-10-04T16:22:05Z | running |
 | `reuse-audit-l2` | L2 | VERIFY (audit report) | orchestrator | reuse+freshness audit report (Q1-Q5, <=500w) | 2026-10-04T18:22:18+02:00 | done (report delivered in-chat) |
 | `readpath-callers` | L2 | read-only audit slice C: awaitAnswer read-path callers | L0-orchestrator | none (read-only sub-report) | 2026-10-04T18:27:39+02:00 | running |
-| `lane-browser-launch` | L1 | execute | codeg-orchestrator | src/runtime/browser.ts + src/runtime/session-store.ts latency slice | 2026-10-04T18:33:50+02:00 | running |
+| `lane-browser-launch` | L1 | execute | codeg-orchestrator | src/runtime/browser.ts + src/runtime/session-store.ts latency slice | 2026-10-04T18:33:50+02:00 | done — DECLINE committed 2e62cf7 (.brain/decisions/L1-latency-launch-2026-10-04.md); re-measured independently, agrees |
 | `readback-headroom` | L1 | execute (readback-overhead measurement) | parent-orchestrator | `src/runtime/dom-primitives.ts` + ONE new test file | 2026-10-04T18:40:21+02:00 | running |
 | `consent-wall-poll` | L1 | execute | orchestrator (L0) | `src/prompt/driver.ts` + `test/consent-wall-poll.test.ts` | 2026-10-04T16:40:43Z | running |
 | `pool-acquire-measure` | L1 | measurement (re-run after STOP) | ORCH-L0 | src/prompt/pool.ts + 1 new test | 2026-10-04T16:40:45Z | running |
@@ -40,3 +40,13 @@
 | `l2-style-audit` | L2 | VERIFY (mutation-gate house style + freshness gate) | codeg parent (pool/driver attach-mode lane) | read-only report: mutation-gate house style, readback-freshness gate, awaitAnswer baseline, injection-verdict + owner-guard contracts | 2026-10-04T22:01:15+02:00 | running |
 | L2-C-style-audit | L2 | read-only audit | L1-latency-launch | DONE: mutation house style + FOUND defeatable freshness baseline | 2026-10-04T22:04:35+02:00 | completed |
 | `ui2api-poolA-bench` | L2 | execution/verify | codeg-parent-poolA-profile | /tmp/poolA/report.md (bench.mts, report.md) | 2026-10-04T20:07:28Z | done — awaiting parent MERGE/FIRE decision |
+| `cli-input-validation-seam-l2-redispatch-2` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 validation seam (unknown-flag / malformed-numeric / needs-companion refusals) | 2026-10-04T20:11:55Z | running |
+| `codex-l1-wigolo-redaction` | L1 | execute | codeg-l0 | src/prompt/error-redaction.ts + test/error-redaction.test.ts | 2026-10-05T06:59:40+02:00 | running |
+| `cli-input-validation-seam-l2-redispatch-3` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 validation seam — finish verification (5 test files + check:verbatim + commit) | 2026-10-05T05:03:03Z | running |
+| `acp-body-cap-goal236-l1` | L1 | EXECUTE (goal 236) | codeg-l0 | src/agent/acp.ts + test/acp-body-cap.test.ts (ACP request-body byte cap / 413 payload_too_large) | 2026-10-05T07:10:00Z | running |
+| `araprat-refusal-fold` | L1 | EXECUTE (goal: docs/ACTIVE-WAVE.md open item #3) | orchestrator | src/capabilities/araprat.ts + test/mutating-capability-postcondition.test.ts | 2026-10-05T07:11:39+02:00 | running |
+| `opencode-goal238-publish-anchor` | L1 | execute (GOAL 238: hub publish host anchor) | opencode-L0-orchestrator | src/cli.ts cmdHubPublish guard + test/install-host-containment.test.ts gate | 2026-10-05T07:14:04+02:00 | running |
+| `error-redaction-owner-L1` | L1 | execute (finish dead lane, ACTIVE-WAVE OPEN ITEM #2) | orchestrator | src/prompt/error-redaction.ts, src/prompt/verification-class.ts, test/error-redaction.test.ts, test/verification-class.test.ts | 2026-10-05T07:14:29+02:00 | running |
+| verify-commit-map-lane(RESUME) | L1 | EXECUTE (ACTIVE-WAVE #5: commit-map CONSUMER — extend committed file-shape checker with repo-grounded mode + add test + correct runbook CHECK 3) | orchestrator (L0) | scripts/ci/verify-commit-map.sh, test/commit-map-consumer.test.ts, docs/RECONSTRUCTION-RUNBOOK.md | 2026-10-05T05:46:45Z | running (resumed; prior commit 92f129f kept, extending) |
+| hub-publish-host-gate (GOAL 238) | L1 | EXECUTE/VERIFY (goal 238) | orchestrator | src/cli.ts cmdHubPublish host gate + test/hub-publish-host-gate.test.ts | '2026-10-05T05:46:54Z' | running |
+| `cli-input-validation-seam-l2-redispatch-4` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 seam — verification (5 test files, check:verbatim, commit) | 2026-10-05T06:01:36Z | running |

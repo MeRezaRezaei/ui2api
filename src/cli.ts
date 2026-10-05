@@ -89,8 +89,10 @@ interface Flags {
   acp?: boolean;
   /**
    * The generator API's `opts.skill` (emits SKILL.md + skill-loader.mjs into the
-   * server dir). Declared HERE ONLY so `generate --skill` can be REFUSED by name
-   * instead of ignored as an unknown token — see generateTargetRefusal.
+   * server dir). Declared HERE ONLY so the refusal can NAME it on `generate`
+   * (generateTargetRefusal) and on every OTHER command (skillFlagRefusal) — it is
+   * not a capability of any CLI command, and a flag nothing reads is the exact
+   * false success this class is about.
    */
   skill?: boolean;
   mirror?: boolean;
@@ -136,10 +138,10 @@ function parseFlags(argv: string[]): Flags {
     if (argv[i] === "--force") f.force = true;
     if (argv[i] === "--port") f.port = Number(argv[++i]) || undefined;
     if (argv[i] === "--acp") f.acp = true;
-    // `--skill` is parsed ONLY so the refusal can NAME it (generateTargetRefusal).
-    // It is NOT a capability of any command: generate()'s `opts.skill` has no
-    // CLI surface, and an unparsed token would be ignored as silently as --acp
-    // was — the same false success, one step further from the source.
+    // `--skill` is parsed so the refusals can NAME it: it is not a capability of
+    // any command (only `generate()`'s `opts.skill` has the emitter), so both
+    // generateTargetRefusal (generate) and skillFlagRefusal (every other command)
+    // refuse it by name rather than let it pass as heard-and-ignored.
     if (argv[i] === "--skill") f.skill = true;
     if (argv[i] === "--mirror") f.mirror = true;
     if (argv[i] === "--registry-repo") f.registryRepo = argv[++i];
@@ -351,6 +353,14 @@ export function numericFlagsFrom(parserSource: string): Set<string> {
 // records ("There is no per-command `--help`"). Making help per-command is a
 // behaviour ADDITION outside this seam's mandate (it would have to invent a
 // help path per command); fixing it here would mean refusing a form that works.
+/**
+ * What `parseFlags` itself accepts — 40, the LIVE 40/40 flag table. The
+ * refusal quotes THIS number, never `KNOWN_FLAGS.size`: the set it judges also
+ * carries the `--help` carve-out above, so counting it would make the message
+ * claim 41 flags where the parser has 40. A refusal that miscounts the surface
+ * it is defending is the same class of defect it was written to kill.
+ */
+const PARSED_FLAG_COUNT = knownFlagsFrom(parseFlags.toString()).size;
 const KNOWN_FLAGS = new Set([...knownFlagsFrom(parseFlags.toString()), "--help"]);
 const NUMERIC_FLAGS = numericFlagsFrom(parseFlags.toString());
 
@@ -401,8 +411,12 @@ export function flagTokens(argv: string[]): FlagToken[] {
 }
 
 /** `ui2api` has no diff/levenshtein, but a near-miss is the one thing that turns
- *  a refusal into a next step instead of a dead end. Distance 1-3 only, so a
- *  suggestion is never noise. Pure. */
+ *  a refusal into a next step instead of a dead end. MEASURED, so the radius is
+ *  a fact and not a taste: every real typo lands at 1-2 (`xhost-al`->`--xhost-all`
+ *  1, `poolmin`->`--pool-min` 1, `por`->`--port` 1, `regstry-repo` 1, `siet`->`--site`
+ *  2), while at radius 3 the refusal pointed `--bogus` at `--out` (distance 3) —
+ *  a wrong pointer is worse than none, because the operator then trusts it. So
+ *  the radius is 2. Pure. */
 function nearestKnownFlag(flag: string): string | undefined {
   const target = flag.replace(/^--/, "");
   let best: { name: string; dist: number } | undefined;
@@ -410,7 +424,7 @@ function nearestKnownFlag(flag: string): string | undefined {
     const name = known.replace(/^--/, "");
     const a = name.split("");
     const b = target.split("");
-    if (Math.abs(a.length - b.length) > 3) continue;
+    if (Math.abs(a.length - b.length) > 2) continue;
     const row: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
     for (let i = 1; i <= a.length; i++) {
       let prev = row[0]!;
@@ -422,7 +436,7 @@ function nearestKnownFlag(flag: string): string | undefined {
       }
     }
     const dist = row[b.length]!;
-    if (dist >= 1 && dist <= 3 && (!best || dist < best.dist)) best = { name: known, dist };
+    if (dist >= 1 && dist <= 2 && (!best || dist < best.dist)) best = { name: known, dist };
   }
   return best?.name;
 }
@@ -445,9 +459,9 @@ export function unknownFlagRefusal(argv: string[]): string {
     if (KNOWN_FLAGS.has(t.flag)) continue;
     const near = nearestKnownFlag(t.flag);
     return (
-      `unknown flag ${t.flag} — nothing ran. This CLI knows exactly ${KNOWN_FLAGS.size} flags ` +
-      `and ${t.flag} is not one, so it would have been ignored ` +
-      `in silence and the command would have exited as if it had been heard.` +
+      `unknown flag ${t.flag} — nothing ran. This CLI parses exactly ${PARSED_FLAG_COUNT} ` +
+      `flags and ${t.flag} is not one, so it would have been ignored in silence and the ` +
+      `command would have exited as if it had been heard.` +
       (near ? ` Did you mean ${near}?` : "") +
       ` Run \`ui2api --help\` for the full command and flag list. Nothing was written.`
     );
@@ -782,9 +796,9 @@ async function doInteractiveLogin(url: string, host: string, sessionDir: string)
 }
 
 /**
- * `generate` emits the **MCP** server only. `--acp` (and `--skill`) are the two
- * flags that used to make that claim false.
- *
+ * `generate` emits the **MCP** server only. `--acp` is the flag that made
+ * that claim false (`--skill` is undeclared and is refused by the unknown-flag
+ * seam instead — see SCOPE below).
  * THE DEFECT, measured. `ui2api generate <host> --acp` ran, printed
  * `Generated MCP server -> …/server/index.ts`, exited 0 — byte-identical to the
  * same command without the flag, and no `acp.ts` in either case. `flags.acp` was
@@ -809,8 +823,16 @@ async function doInteractiveLogin(url: string, host: string, sessionDir: string)
  *     success.
  *
  * So the honest fix is the cheap one: name the real path, exit nonzero, write
- * nothing. Same shape as GOAL 85's `addAllModeArg` contradiction refusal.
+ * nothing. Same shape as GOAL 85's `addAllModeArg` contradiction refusal, and
+ * the same throw-not-log seam GOAL 215's preflight uses (so a refused flag is a
+ * NONZERO EXIT a script can test, never an exit 0 that reads as success).
  * Pure — no I/O — so it is unit-testable without spawning the CLI.
+ *
+ * `--skill` is handled HERE too, and that is load-bearing rather than thorough:
+ * the flag is parsed so it can be NAMED, and `KNOWN_FLAGS` is derived from
+ * `parseFlags` — so parsing it stops the unknown-flag seam from catching it. It
+ * must therefore be refused on every command, which is why `skillFlagRefusal`
+ * below covers the ones this handler never sees.
  */
 export function generateTargetRefusal(flags: Pick<Flags, "acp" | "skill">): string {
   const named: string[] = [];
@@ -830,6 +852,32 @@ export function generateTargetRefusal(flags: Pick<Flags, "acp" | "skill">): stri
         `(generate(map, dir, "mcp", { skill: true })).`
       : "") +
     ` Nothing was written.`
+  );
+}
+
+/**
+ * The SAME `--skill` refusal for every command that is not `generate`.
+ *
+ * WHY IT NEEDS ITS OWN SEAM. `--skill` is parsed (so the message can name it),
+ * and `parseFlags` is what `KNOWN_FLAGS` is derived from — so parsing it makes
+ * the unknown-flag seam STOP catching it. Left there, `ui2api prompt --skill`
+ * would be a silent no-op on every command except the one handler that refuses
+ * it: a known, accepted, ignored flag, i.e. this exact defect class, reintroduced
+ * by the cure. So the flag is KNOWN-and-REFUSED everywhere rather than
+ * KNOWN-and-inert on most commands.
+ *
+ * `generate` is excluded because `cmdGenerate` owns the richer message (it also
+ * carries the ACP remedy when both flags are passed), and it throws from the
+ * handler — after this preflight, which is why the exclusion is required.
+ *
+ * Pure — no I/O, no exit.
+ */
+export function skillFlagRefusal(cmd: string | undefined, flags: Pick<Flags, "skill">): string {
+  if (cmd === "generate" || !flags.skill) return "";
+  return (
+    `ui2api ${cmd ?? ""} --skill: --skill has no CLI surface at all — only the generator API ` +
+    `emits SKILL.md (generate(map, dir, "mcp", { skill: true })), so the flag would have been ` +
+    `accepted and ignored (a silent no-op, exit 0). Nothing was written.`
   );
 }
 
@@ -2102,13 +2150,19 @@ async function main(): Promise<void> {
   // "auto" and started, so the run they asked for was not the run they got.
   // Same throw-not-log seam as above, same nonzero exit.
   //
-// `--pool-min 0` IS NOT THIS SEAM'S BUSINESS, and not because it is ambiguous
-    // — it is NOT ambiguous. This comment used to call it a deferred product
-    // question; `src/prompt/pool.ts:502-504` had already answered it (both the flag
-    // and env paths land on the default of 1, so `0` has always meant auto, floor 1).
-    // So this fires ONLY on input that is not a number at all, and `0` keeps
-    // meaning exactly what it means today. See the long note at the seam above.
-    const badNumeric = numericFlagRefusal(process.argv.slice(2));
+  // `--pool-min 0` IS NOT THIS SEAM'S BUSINESS. GOAL 215 leaves it AMBIGUOUS ON
+  // PURPOSE — whether `0` means "zero" or "auto" is a real product question with
+  // two defensible answers that no gate settles — so this refusal fires ONLY on
+  // input that is not a number at all (absent, blank, `Number(...) === NaN`) and
+  // `0` keeps meaning EXACTLY what it means today. Do NOT "fix" it here: that is
+  // the operator's call, not this seam's. See the long note at the seam above.
+  //
+  // FOOTNOTE, and deliberately NOT a resolution: `src/prompt/pool.ts:502-504`
+  // already clamps the floor (`this.min = Math.max(1, min)`), so whatever the
+  // product question is worth, `0` cannot mean "zero pages" through that path
+  // today. Recorded as an observation about CURRENT behaviour, which is the only
+  // thing this seam is allowed to speak to — it does not settle the question.
+  const badNumeric = numericFlagRefusal(process.argv.slice(2));
   if (badNumeric) throw new Error(badNumeric);
   // ── GOAL 215 SEAM 3: A FLAG THAT ONLY MEANS SOMETHING *WITH* ANOTHER ───────
   // These are CONTRADICTIONS, not inertness: the flag was typed, it is read only
@@ -2120,6 +2174,13 @@ async function main(): Promise<void> {
   // LEGAL — refusing `--xhost-all` on `prompt` would be hostile, not strict.
   const needsCompanion = needsCompanionRefusal(cmd, arg, flags);
   if (needsCompanion) throw new Error(needsCompanion);
+  // ── `--skill` HAS NO CLI SURFACE, so it refuses on every command that is not
+  // `generate` (cmdGenerate carries the richer message, incl. the ACP remedy).
+  // It is a PARSED flag only so the message can name it — and because
+  // KNOWN_FLAGS derives from parseFlags, parsing it makes the unknown-flag seam
+  // stop catching it. Without this it would be a silent no-op everywhere else.
+  const skillOnly = skillFlagRefusal(cmd, flags);
+  if (skillOnly) throw new Error(skillOnly);
   switch (cmd) {
     case "hub": {
       if (arg === "publish") return cmdHubPublish(rest[0] ?? process.env.UI2API_HUB_HOST ?? "", flags);

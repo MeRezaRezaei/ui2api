@@ -260,6 +260,66 @@ const runnerFiles = (): string[] =>
     .filter((f) => f.endsWith(".ts"))
     .sort();
 
+/* ---- THE REAL WALL-GUARD PREDICATE: ONE implementation, exported ---- */
+
+/**
+ * The arm every chat runner shares: the driver's answer handed back verbatim
+ * inside a literal `ok: true`. It is what makes the wall defect POSSIBLE, so it
+ * is also what identifies a chat runner (see `chatRunnerSites`).
+ */
+export const DRIVER_ANSWER_ARM = /answer:\s*r\.answer/;
+
+/**
+ * What counts as guarding that arm against a restriction wall: a branch on the
+ * driver's own `doneReason` verdict, or any use of the `restrictions` evidence.
+ * THE regex the gate actually judges with — it is exported and it is the ONLY
+ * copy in the file (see `servesWallAsSuccess`, and the mutation proof that
+ * drives it).
+ */
+export const WALL_GUARD =
+  /doneReason\s*===\s*"restricted"|restrictions\?\.length|\.restrictions\b/;
+
+/** How far either side of the arm the guard is searched for. */
+export const WALL_GUARD_WINDOW = 700;
+
+/**
+ * THE REAL PREDICATE — "this runner serves a restriction wall as a success".
+ *
+ * It is a single named function for ONE reason, and the reason is a gate that
+ * could not fail: this predicate used to be spelled out TWICE — once as the
+ * inline scan over the corpus and once as an `isGuarded` closure inside the
+ * mutation proof. Weakening the real corpus scan therefore left the mutation
+ * proof GREEN, so the test named "the wall guard is load-bearing" certified a
+ * private copy rather than the thing it exists to certify. Both call sites now
+ * drive THIS function, so weakening it here is a loud failure rather than a
+ * silently blind gate. (The same pattern as `fabricatedLiteralAnswers` below.)
+ *
+ * Expects a COMMENT-BLANNED source (`code(...)`), exactly as the corpus scan
+ * feeds it — a mention of `restrictions` inside a comment must not pass for a
+ * guard.
+ */
+export function servesWallAsSuccess(stripped: string): boolean {
+  const m = DRIVER_ANSWER_ARM.exec(stripped);
+  if (!m) return false;
+  const around = stripped.slice(Math.max(0, m.index - WALL_GUARD_WINDOW), m.index + WALL_GUARD_WINDOW);
+  return !WALL_GUARD.test(around);
+}
+
+/**
+ * The chat-runner corpus, DERIVED from the tree rather than hand-typed.
+ *
+ * It used to be ten literal names, so a runner added tomorrow — or a capability
+ * whose chat arm lands today under a name nobody listed — was never scanned and
+ * the gate read green on a defect it was built to catch. Deriving it the same
+ * way the `*_list_conversations` cluster derives its corpus (`runnerFiles()`
+ * filtered by a structural predicate) makes a new chat runner covered the
+ * moment its module lands, with no edit to this file.
+ */
+export const chatRunnerSites = (): string[] =>
+  runnerFiles()
+    .filter((f) => DRIVER_ANSWER_ARM.test(code(read(join(RUNNER_DIR, f)))))
+    .map((f) => f.replace(/\.ts$/, ""));
+
 d("GOAL 148: no capability runner may report ok:true for an unobserved payload", () => {
   /* ---- 0. ANTI-VACUITY: the corpus this file judges must be real ---- */
 
@@ -336,28 +396,46 @@ d("GOAL 148: no capability runner may report ok:true for an unobserved payload",
     // the caller cannot even tell a wall from a site that simply had no
     // history. That is the doctrine's exact failure: a block page reported as a
     // completed answer, on the one surface a machine reads.
-    const CHAT = [
-      "chatgpt", "claude", "copilot", "deepseek", "gemini",
-      "kimi", "hunyuan", "venice", "huggingchat", "tencent-aistudio",
-    ];
+    // The corpus is DERIVED (see `chatRunnerSites`), never hand-typed: a chat
+    // runner that lands tomorrow is judged the moment its module exists.
+    const CHAT = chatRunnerSites();
 
-    const unguarded = CHAT.filter((site) => {
-      const raw = readIfPresent(join(RUNNER_DIR, `${site}.ts`));
-      if (!raw) return false;
-      const stripped = code(raw);
-      // The arm that forwards the driver's answer verbatim.
-      const m = /answer:\s*r\.answer/.exec(stripped);
-      if (!m) return false;
-      // Guarded = it branches on the wall, or on emptiness, before ok:true.
-      const around = stripped.slice(Math.max(0, m.index - 700), m.index + 700);
-      return !/doneReason\s*===\s*"restricted"|restrictions\?\.length|\.restrictions\b/.test(around);
-    });
+    // THE REAL PREDICATE — the same `servesWallAsSuccess` the mutation proof
+    // below drives. Not a lookalike: one implementation, two callers.
+    const unguarded = CHAT.filter((site) => servesWallAsSuccess(code(read(join(RUNNER_DIR, `${site}.ts`)))));
 
     assert.ok(unguarded.length > 0, "anti-vacuity: no unguarded chat arm found — see the disclosure below");
 
     // Disclosed, not hidden. These are the OPEN defects; the pin fails on a new
-    // one and on a stale entry, exactly as the cluster pin below does.
-    const KNOWN_WALL_ARMS = CHAT.slice();
+    // one and on a stale entry, exactly as the cluster pin below does. The
+    // disclosure stays hand-listed BY DESIGN — naming every open defect is the
+    // point, and the corpus it is checked against is derived.
+    const KNOWN_WALL_ARMS = [
+      "chatgpt",
+      "claude",
+      "copilot",
+      "deepseek",
+      "gemini",
+      "huggingchat",
+      "hunyuan",
+      "kimi",
+      "tencent-aistudio",
+      "venice",
+    ];
+
+    // The disclosure and the derived corpus must not drift apart: if the
+    // derivation stopped finding a disclosed runner, the pin above would go
+    // blind while the stale check below (which reads the file directly) stayed
+    // green — a disclosure quietly detached from the corpus it discloses.
+    for (const site of KNOWN_WALL_ARMS) {
+      assert.ok(
+        CHAT.includes(site),
+        `disclosure drift: ${site} is disclosed as an open wall arm but the derived chat corpus no longer ` +
+          `finds it in src/capabilities/${site}.ts (no \`answer: r.answer\` arm). Either the module was ` +
+          `renamed/removed — update KNOWN_WALL_ARMS — or the derivation itself is broken. A disclosure that ` +
+          `is no longer in the corpus it describes certifies nothing. Derived corpus: ${CHAT.join(", ") || "(none)"}`
+      );
+    }
 
     for (const site of unguarded) {
       assert.ok(
@@ -373,8 +451,9 @@ d("GOAL 148: no capability runner may report ok:true for an unobserved payload",
     for (const site of KNOWN_WALL_ARMS) {
       if (!existsSync(join(RUNNER_DIR, `${site}.ts`))) continue;
       const stripped = code(read(join(RUNNER_DIR, `${site}.ts`)));
-      const m = /answer:\s*r\.answer/.exec(stripped);
-      if (!m) continue;
+      // The same two constants the derived corpus is built from, so this loop
+      // cannot disagree with the scan above about what a chat arm is.
+      if (!DRIVER_ANSWER_ARM.test(stripped)) continue;
       assert.ok(
         unguarded.includes(site),
         `stale disclosure: src/capabilities/${site}.ts is listed as serving a wall as a success, but its arm now ` +
@@ -403,18 +482,39 @@ d("GOAL 148: no capability runner may report ok:true for an unobserved payload",
   });
 
   t("mutation proof: the wall guard is load-bearing (an unguarded arm must be reported)", () => {
-    // Drive the real predicate over a synthetic arm, both ways.
+    // Drive THE REAL PREDICATE over a synthetic arm, both ways. This is the
+    // same `servesWallAsSuccess` the corpus scan above filters with, and the
+    // same `code(...)` feed it gets there. It used to be a private `isGuarded`
+    // closure carrying its own copy of the guard regex — so weakening the real
+    // scan left THIS test green, and a test that certifies a copy is not a pin.
     const guarded = `const r = await driver.ask(p);
       if (r.doneReason === "restricted") return { capability: "x_chat", ok: false, data: undefined, restrictions: r.restrictions };
       return { capability: "x_chat", ok: true, data: { answer: r.answer } };`;
     const unguarded = `const r = await driver.ask(p);
       return { capability: "x_chat", ok: true, data: { answer: r.answer } };`;
-    const isGuarded = (s: string): boolean =>
-      /doneReason\s*===\s*"restricted"|restrictions\?\.length|\.restrictions\b/.test(
-        s.slice(Math.max(0, s.search(/answer:\s*r\.answer/) - 700), s.search(/answer:\s*r\.answer/) + 700)
-      );
-    assert.equal(isGuarded(guarded), true, "mutation proof: a wall-guarded arm must be recognised as guarded");
-    assert.equal(isGuarded(unguarded), false, "mutation proof: an unguarded arm must be reported — a pin blind to the defect is not a pin");
+
+    assert.equal(
+      servesWallAsSuccess(code(guarded)),
+      false,
+      "mutation proof: a wall-guarded arm must NOT be reported as serving a wall as a success"
+    );
+    assert.equal(
+      servesWallAsSuccess(code(unguarded)),
+      true,
+      "mutation proof: an unguarded arm must be reported — a pin blind to the defect is not a pin"
+    );
+
+    // The other half of "load-bearing": a guard that exists only in a COMMENT
+    // is not a guard. `code(...)` blanks comment bodies, so the real scan can
+    // never be satisfied by prose — and this proof says so.
+    const guardedInProse = `const r = await driver.ask(p);
+      // TODO: if (r.doneReason === "restricted") we should bail out here
+      return { capability: "x_chat", ok: true, data: { answer: r.answer } };`;
+    assert.equal(
+      servesWallAsSuccess(code(guardedInProse)),
+      true,
+      "mutation proof: a guard mentioned only in a comment must not pass for a guard"
+    );
   });
 
   /* ---- 2. THE MEASURED CLUSTER: the six list_conversations arms ---- */
