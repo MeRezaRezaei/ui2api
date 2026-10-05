@@ -314,14 +314,64 @@ function isFilesystemRoot(seg: string): boolean {
  *  path on a machine I cannot see", so it reports and names the token; an author
  *  with such a path writes it as `` `/opt/vendor/thing` `` in a fenced data block
  *  (stripped by `stripDataFences`) or rewords. That residual is the honest limit
- *  of a filesystem test, not an oversight. */
+ *  of a filesystem test, not an oversight.
+ *
+ *  ONE RESIDUAL WAS CLOSED, because it was not an oversight either — it was a
+ *  gate whose verdict depended on the MACHINE.
+ *
+ *  MEASURED 2026-10-05, pipeline 1552: this gate failed in CI on
+ *  skills/ui2api-operate/SKILL.md lines 175 and 177, reporting `/data` and
+ *  `/data/packages/<host>` as unregistered routes. Both are FILESYSTEM paths —
+ *  the live session vault — and both are correct in the prose. They are also
+ *  real paths ON THE AUTHOR'S MACHINE and non-existent in a clean checkout,
+ *  because `data/` is gitignored (.gitignore:3) and is created by running the
+ *  daemon. So `isFilesystemRoot("data")` returned true locally and false in CI:
+ *  the SAME COMMIT passed or failed depending on where it was checked out.
+ *
+ *  That is the worst shape a documentation gate can have, because the fix it
+ *  invites is to reword honest prose until the gate is quiet — and the prose it
+ *  would punish is the prose an agent needs in order not to write a publish
+ *  beside the real credentials.
+ *
+ *  The fix is to stop asking the FILESYSTEM about a repo-relative convention.
+ *  A path the repository itself declares — gitignored, or present in an ignore
+ *  file — is a path on every machine, checked out or not, so it is recognised
+ *  from the REPO rather than from disk. */
 function isPathToken(token: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(token)) return true;             // file://, ssh://, …
   if (/\.(?:ts|tsx|js|mjs|cjs|sh|bash|md|json|ya?ml|toml|lock|log|txt|conf|cfg|ini|service|socket|pid|so|dylib|dll|exe)$/i.test(token)) {
     return true;                                                       // a filename
   }
   const first = token.replace(/^\//, "").split("/")[0] ?? "";
-  return first !== "" && isFilesystemRoot(first);
+  if (first === "") return false;
+  if (isFilesystemRoot(first)) return true;                            // real dir here
+  return isRepoDeclaredDir(first);                                     // or declared by the repo
+}
+
+/** A first path segment the REPO declares, independent of any checkout state.
+ *
+ *  Reads the repository's own ignore files rather than the filesystem, because
+ *  the point is precisely that the directory is absent from a fresh checkout.
+ *  `data/` is gitignored in this repo, so a skill naming `/data/...` is naming a
+ *  real, conventional path on every machine — and a gate that cannot see that
+ *  is a gate that fails in CI and passes on the author's laptop. */
+function isRepoDeclaredDir(seg: string): boolean {
+  if (existsSync(join(ROOT, seg, ".gitkeep"))) return true;
+  for (const f of [".gitignore", ".dockerignore"]) {
+    const p = join(ROOT, f);
+    if (!existsSync(p)) continue;
+    let txt: string;
+    try { txt = readFileSync(p, "utf8"); } catch { continue; }
+    for (const raw of txt.split("\n")) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      // A gitignore line matches the segment itself, or the segment as a directory.
+      const pat = line.replace(/^\/+|\/+$/g, "").replace(/\/\*\*?.*$/, "");
+      if (pat === seg || pat === `${seg}/`) return true;
+      if (pat.startsWith(`${seg}/`)) return true;
+    }
+  }
+  return false;
 }
 
 export interface RouteClaim {

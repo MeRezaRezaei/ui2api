@@ -397,7 +397,30 @@ public_mirror:
   tags: ["ui2api"]
   timeout: 40 minutes
   interruptible: false
-  needs: ["verify"]
+  # !! DECOUPLED FROM `verify` ON PURPOSE — 2026-10-05 !!
+  #
+  #   This job used to `needs: ["verify"]`. That was correct-looking and wrong:
+  #   it made an unrelated RED TEST SUITE a veto over a privacy fix.
+  #
+  #   MEASURED: pipeline 1552 — `verify` failed on a documentation-truth
+  #   assertion (two `/data` path tokens claimed in skills/ui2api-operate/SKILL.md
+  #   with no registered route), so public_mirror was `skipped`, so the sanitiser
+  #   never ran, so `.brain` stayed in the PUBLIC repo for another cycle. The
+  #   test that failed had nothing to do with the corpus, the sanitiser, or
+  #   whether the export was clean.
+  #
+  #   The reasoning that made the coupling look safe — "don't publish from a red
+  #   pipeline" — does not transfer. `deploy` and `github_release` gate on verify
+  #   because shipping bad code is a real harm. This job gates on ITS OWN
+  #   verification (make-public-repo.sh exits non-zero unless every class passes,
+  #   and the push reads /tmp/mirror-work/public-verified) plus the private-dest-
+  #   ation visibility probe. A doc-truth failure is not evidence that the export
+  #   is unsafe, and a test suite must never be able to block publication of a
+  #   leak fix.
+  #
+  #   `rules:` already restricts this to main. Stage ordering still puts it after
+  #   build; it no longer waits on the test suite.
+  needs: []
   dependencies: []
   # FULL HISTORY, and this is load-bearing rather than a habit.
   #

@@ -70,3 +70,94 @@ release:
   # once and never forced.
   immutable_tags: true
   tag_prefix: build-
+# ===========================================================================
+# THE PUBLIC/PRIVATE DOCTRINE — added 2026-10-05 at the operator's instruction
+# ===========================================================================
+#
+# MEASURED STATE at the time of writing (all of it read, none of it assumed):
+#
+#   github.com/MeRezaRezaei/ui2api        PUBLIC   781 commits, 33 .brain files,
+#                                                     214 commits carry the corpus
+#   github.com/MeRezaRezaei/ui2api-full   PRIVATE    1 commit  (sanitised export)
+#   gitlab.pubg-sell.ir/…/ui2api          (working) the source of truth
+#
+# ! THE NAMING IS INVERTED RELATIVE TO THE INTENT, AND THAT IS THE POINT THAT
+# ! WAS MISSED. Read the two rows again:
+#
+#   The PUBLIC repo holds the FULL 781-commit history WITH the corpus.
+#   The PRIVATE "full" repo holds ONE sanitised commit.
+#
+# `ui2api-full` is named for what it SHOULD hold — the complete history — and
+# today it holds a sanitised single commit, while the public repo holds the
+# complete history and the corpus with it. A reader trusting the NAME would
+# conclude the private repo is safe and the public one is clean. Both inferences
+# are false. This is recorded here because a doctrine that cannot be checked
+# against a measurement is a doctrine nobody can enforce.
+#
+# ---------------------------------------------------------------------------
+# 1. EVERY PUBLIC GITHUB PROJECT HAS A PRIVATE TWIN. THERE IS NO EXCEPTION.
+# ---------------------------------------------------------------------------
+# The pair is the design, and the two halves are not interchangeable:
+#
+#   PRIVATE twin   the durability record. Complete history, every original commit
+#                  hash, `.brain` and all. This is what makes deleting the
+#                  self-hosted GitLab VPS cost nothing.
+#   PUBLIC repo    the same project with any brain removed from its HISTORY.
+#
+# The split is history-preserving on purpose: the two halves share a common
+# ancestor and a commit-map, so the full repo can be reconstructed later. A tip-
+# only strip does NOT achieve this — it drops the other commits entirely.
+#
+# 2. GITLAB IS THE WORKING MACHINE; GITHUB IS THE ARCHIVE.
+#   Branches and worktrees are created and pruned in GitLab constantly, because
+#   the host is low on storage and is meant to be transient. A branch leaves
+#   GitLab only after its tip is already on GitHub — "merged" is not a substitute
+#   for "backed up". GitHub is never pruned and never force-pushed.
+#
+# 3. THE PUBLIC PUSH IS THE ONE FORCE-PUSH, AND IT IS DELIBERATE.
+#   A sanitised history is a rewrite by definition: the same commits with brain
+#   paths removed, so every hash changes. This is the ONLY force-push permitted
+#   in this project, scoped to the public repo, and only after verification
+#   passes. Everywhere else, `no_force: true` above stands.
+#
+# 4. A PUBLIC REPO'S HISTORY CANNOT BE UN-PUBLISHED. ONLY REWRITTEN.
+#   And a rewrite does not reach forks, clones, or anyone who already fetched.
+#   So the strip must be right the FIRST time. This is why the gate is
+#   fail-closed rather than best-effort, and why "it was already pushed" is
+#   never an acceptable reason to lower a check.
+#
+# 5. `.brain` IS PRIVATE INTELLECTUAL PROPERTY AND NEVER GOES TO A PUBLIC REPO.
+#   Not at the tip, not in history, not quoted inside a file with an innocent
+#   path. It is the operator's own unedited words, internal infrastructure, and
+#   decisions not yet public.
+#
+# 6. THE SANITISER OWNS THE EXCLUSION LIST; NOBODY ELSE GETS A VOTE.
+#   scripts/ci/public-repo-paths.txt is derived from
+#   `git rev-list --all --objects` — every path that has EVER existed — and each
+#   entry is classified by CONTENT, not by name. It is reviewable precisely
+#   because it is a file and not a heredoc. The kit does not sanitise trees; the
+#   exclusion list is project policy and policy does not live in a shared
+#   component.
+#
+# 7. A GATE THAT CANNOT OPEN IS NOT A GATE.
+#   The marker `/tmp/mirror-work/public-verified` is written ONLY on the
+#   sanitiser's own exit status. A job that prints "VERDICT: PASS" and then
+#   withholds the push because it tested for a marker nothing wrote is worse
+#   than no gate, because it looks like protection. Measured: pipeline 1114 did
+#   exactly that for hours.
+#
+# ---------------------------------------------------------------------------
+# 8. THE CURRENT BLOCKER, recorded because it is NOT a sanitiser problem.
+# ---------------------------------------------------------------------------
+# The public copy has not been republished because `public_mirror` never RAN.
+# Its `needs: ["verify"]` was unmet: `verify` fails on an unrelated
+# documentation-truth assertion in test/skills-truth.test.ts (two `/data`
+# path tokens claimed in skills/ui2api-operate/SKILL.md with no matching
+# registered route). Pipeline 1552 shows public_mirror `skipped`, verify
+# `failed`.
+#
+# So the corpus is exposed for a reason that has nothing to do with the corpus:
+# an unrelated red gate is holding the publisher hostage. That coupling is a
+# defect. `public_mirror` sanitises and verifies INDEPENDENTLY of the project's
+# test suite — a doc-truth failure is not evidence that the sanitiser is unsafe,
+# and it must never be able to block publication of a privacy fix.
