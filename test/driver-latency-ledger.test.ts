@@ -242,3 +242,77 @@ d("THE LEDGER IS EXHAUSTIVE — an added or removed wait fails here", () => {
     );
   });
 });
+
+/* ---------------------------------------------------------------------------
+ * MEASURED RANGES — each expression evaluated as written, over the real jitter
+ * domain, and recorded through the fake page's waitForTimeout.
+ * ------------------------------------------------------------------------- */
+
+const TENCENT = { preComposeDelayMs: 8000 } as Record<string, unknown>;
+
+d("MEASURED RANGES (evaluated from source, recorded by the fake page)", () => {
+  const cases: Array<{ id: string; expr: string; ctx: Ctx; min: number; max: number }> = [
+    {
+      id: "newChat post-click dwell",
+      expr: "600 + Math.floor(Math.random() * 700)",
+      ctx: {},
+      min: 600,
+      max: 1299,
+    },
+    {
+      id: "urlTemplate hydration dwell",
+      expr: "150 + Math.floor(Math.random() * 250)",
+      ctx: {},
+      min: 150,
+      max: 399,
+    },
+    {
+      id: "preCompose cold-boot dwell (tencent preComposeDelayMs=8000)",
+      expr: "Math.round(this.profile.preComposeDelayMs + Math.random() * 600)",
+      ctx: { profile: TENCENT },
+      min: 8000,
+      max: 8600,
+    },
+    {
+      id: "send gate — the ONLY unconditional per-ask wait",
+      expr: "50 + Math.floor(Math.random() * 150)",
+      ctx: {},
+      min: 50,
+      max: 199,
+    },
+  ];
+
+  for (const c of cases) {
+    t(`${c.id}: ${c.min}–${c.max}ms`, () => {
+      const [lo, hi] = rangeOf(c.expr, c.ctx);
+      assert.equal(lo, c.min, `minimum of \`${c.expr}\` moved — the lower bound is not ${c.min}ms`);
+      assert.equal(hi, c.max, `maximum of \`${c.expr}\` moved — the upper bound is not ${c.max}ms`);
+      // Record it through the fake page: the harness is the thing under test for
+      // "a wait is a number handed to waitForTimeout", not a restated literal.
+      const page = fakePage();
+      for (const v of [lo, hi]) await0(page, v);
+      assert.deepEqual(
+        page.waits,
+        [lo, hi],
+        "the fake page must record exactly the measured budgets, and nothing else"
+      );
+    });
+  }
+
+  t("the send gate is the ONLY unconditional per-ask wait on the UI path", () => {
+    const unconditional = LEDGER.filter((r) => r.perAsk).map((r) => r.expr);
+    assert.deepEqual(
+      unconditional,
+      ["50 + Math.floor(Math.random() * 150)"],
+      `expected exactly the send gate as the sole unconditional per-ask wait, got ${JSON.stringify(unconditional)}. ` +
+        `A new unconditional wait is a real latency change and must be classified here deliberately.`
+    );
+    assert.equal(LEDGER.filter((r) => r.expr === "50 + Math.floor(Math.random() * 150)")[0].sites, 2,
+      "the send gate must exist on BOTH send branches (click and keyEnter) — exactly one runs per ask");
+  });
+});
+
+/** Await a recorded wait without pulling in a real timer. */
+function await0(page: ReturnType<typeof fakePage>, ms: number): Promise<void> {
+  return page.waitForTimeout(ms);
+}
