@@ -56,7 +56,7 @@ d("GOAL 114: never serve the user's own prompt back as the answer", () => {
   t("the driver REFUSES an echo by name instead of serving it", () => {
     const src = code(DRIVER);
     assert.match(src, /if \(isPromptEcho\(answer, prompt\)\)/, "askOnce must consult the echo verdict");
-    assert.match(src, /throw new Error\(\s*`answer-echo on/, "and it must throw a NAMED error");
+    assert.match(src, /throw new DriverRefusal\(\s*`answer-echo on/, "and it must throw a NAMED, TYPED refusal — the name states the cause and the TYPE is what lets `POST /prompt` answer it as itself (502 `ui2api_driver_error`) instead of erasing it into an anonymous 500; a bare `Error` here is the defect that erasure came from");
     assert.match(src, /answer selector matches the USER bubble/, "the message must name the actual cause");
   });
 
