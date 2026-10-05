@@ -233,13 +233,27 @@ function readJsonIfExists(p: string): unknown {
 
 export function detectProfileIdentity(profileDir: string): ProfileIdentity {
   const prefs = readJsonIfExists(join(profileDir, "Default", "Preferences")) as
-    | { account_info?: Array<{ email?: string }> }
+    | { account_info?: unknown }
     | null;
   const localState = readJsonIfExists(join(profileDir, "Local State")) as
     | { profile?: { info_cache?: Record<string, { name?: string; user_name?: string }> } }
     | null;
 
-  const email = prefs?.account_info?.find((a) => a.email)?.email;
+  // Guard `account_info` by TYPE, not by absence. Optional chaining only proves
+  // the key is present, and MEASURED on a real profile (2026-10-05) Chrome wrote a
+  // SCALAR there (a string, not the documented array), so `prefs?.account_info?.find`
+  // threw `account_info.find is not a function`. Both callers
+  // (profile-scan.ts importSiteSnapshot, xhost-capture.ts
+  // captureProfileFromLiveChrome) sit AFTER the temp copy and BEFORE the vault
+  // write, so the throw aborted `profile add-all` mid-loop with earlier accounts
+  // already written — a partial write. A wrong-typed prefs field is UNREADABLE
+  // identity data, not a fatal error: fall through to the Local State display
+  // name, and let the caller apply its `<user>-default` fallback.
+  const accountInfo = prefs?.account_info;
+  const accounts: Array<{ email?: string }> = Array.isArray(accountInfo)
+    ? (accountInfo as Array<{ email?: string }>)
+    : [];
+  const email = accounts.find((a) => a && a.email)?.email;
   // The "Default" profile's entry in Local State profile.info_cache has the
   // display name; other entries are named profiles (Person 1, ...).
   const cache = localState?.profile?.info_cache ?? {};

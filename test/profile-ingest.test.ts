@@ -18,6 +18,7 @@ import {
   expiresUtcToEpoch,
   cookieRowToPlaywrightCookie,
   ingestProfile,
+  detectProfileIdentity,
   type CookieRow,
 } from "../src/runtime/profile-ingest.js";
 
@@ -218,6 +219,51 @@ test("ingestProfile errors clearly when no Chrome profile is found", async () =>
       ingestProfile({ profileDir: join(dir, "nope"), targetHost: "x.example" }),
       /no chrome profile|cookies database/i
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A wrong-typed `account_info` (Chrome wrote a scalar, not the documented array)
+// used to throw `account_info.find is not a function` inside detectProfileIdentity,
+// which both callers invoke BEFORE the vault write — so `profile add-all` aborted
+// mid-loop with earlier accounts already written. Identity data that is
+// unreadable must degrade to the Local State display name, never abort.
+test("detectProfileIdentity survives a scalar account_info (type guard, not absence)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "u2a-ingest-scalar-"));
+  try {
+    const profile = join(dir, "profile");
+    mkdirSync(join(profile, "Default"), { recursive: true });
+    for (const bad of ["me@example.com", 42, { email: "nested@example.com" }, true]) {
+      writeFileSync(
+        join(profile, "Default", "Preferences"),
+        JSON.stringify({ account_info: bad })
+      );
+      writeFileSync(
+        join(profile, "Local State"),
+        JSON.stringify({ profile: { info_cache: { Default: { name: "Fallback Name" } } } })
+      );
+      const id = detectProfileIdentity(profile);
+      assert.equal(id.best, "Fallback Name", `account_info=${JSON.stringify(bad)}`);
+      assert.equal(id.email, undefined, `account_info=${JSON.stringify(bad)} leaked an email`);
+    }
+    // The documented array shape still works — the guard must not swallow it.
+    writeFileSync(
+      join(profile, "Default", "Preferences"),
+      JSON.stringify({ account_info: [{ email: "array@example.com" }] })
+    );
+    const good = detectProfileIdentity(profile);
+    assert.equal(good.email, "array@example.com");
+    assert.equal(good.best, "array@example.com");
+    // An array of non-object entries must not throw either.
+    writeFileSync(
+      join(profile, "Default", "Preferences"),
+      JSON.stringify({ account_info: [null, "str", 7] })
+    );
+    assert.equal(detectProfileIdentity(profile).email, undefined);
+    // Absent account_info is still absent (the pre-existing behaviour).
+    writeFileSync(join(profile, "Default", "Preferences"), JSON.stringify({}));
+    assert.equal(detectProfileIdentity(profile).email, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
