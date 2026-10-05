@@ -45,6 +45,16 @@ import { NO_ANSWER_REFUSAL_RE } from "./error-redaction.js";
 
 export const VERIFICATION_CLASSES = [
   "ANSWERS",
+  // A CAPABILITY surface returned real data over the wire. Every OTHER member
+  // keys on a CHAT ANSWER — `ANSWERS` needs `probeNonceMatched` + `answerChars>0`
+  // + `doneReason:"stable"`, and the six failure members all key on a page
+  // marker or a message the driver emitted. MEASURED: `araprat_search` answers
+  // HTTP 200 `ok:true` with 29 real rows, and under the pre-widening vocabulary
+  // that derived UNCLASSIFIED — a gate that structurally cannot fire for 26 of
+  // the 33 packages, since NO capability surface could ever be recorded as
+  // MEASURED. Same defect class this module exists to kill: a vocabulary that
+  // cannot express the thing it is asked to check.
+  "RETURNS-DATA",
   "SIGN-OUT",
   "WALL-CHALLENGE",
   "COMPOSER-DRIFT",
@@ -75,6 +85,45 @@ export interface PoolState {
   queued?: unknown;
 }
 
+/**
+ * The SHAPE of a returned capability result — never its content.
+ *
+ * This is deliberately the shape and nothing else. The record carrying it is
+ * published in the sanitized public mirror (`capabilities/roundtrip.json`), so a
+ * measurement kept only in `.brain/` or `data/` — both stripped by
+ * `scripts/ci/make-public-repo.sh` — would be unreviewable by anyone reading the
+ * repo. Key NAMES and a COUNT are what makes a capability round trip reviewable
+ * without publishing one row of the site's data.
+ *
+ * `count` and `rows` are BOTH recorded, and they must AGREE for the class to be
+ * derivable. They are not redundant: `count` is the number the RUNNER declared
+ * (`data.count` in the runner's own result), and `rows` is the number of records
+ * a machine actually counted in the returned collection. A runner that reports
+ * `count: 12` over 0 records is a runner whose claim and whose payload disagree,
+ * and a class meaning "the site returned real data" must not be derivable from
+ * the declared half alone — that is precisely a hand-typed class one layer down.
+ */
+export interface ResultShape {
+  topLevelKeys?: unknown;
+  /** Dotted path of the collection the rows were counted in, e.g. `data.results`. */
+  rowsPath?: unknown;
+  /** The runner's own declared count, read off the response. */
+  count?: unknown;
+  /** The number of records actually counted in that collection. */
+  rows?: unknown;
+  /** Dotted path of a single returned RECORD, for a detail-shaped result. */
+  recordPath?: unknown;
+  /** The sorted key names of that record (names only, never values). */
+  recordKeys?: unknown;
+  /** How many of that record's values are non-empty — a populated, not a shell. */
+  nonEmptyValues?: unknown;
+  /** The runner declared a count of ZERO somewhere: its own result is empty. */
+  declaredZeroCount?: unknown;
+}
+
+/** The service's OWN verdict on the capability it ran: `result.ok`. A capability
+ *  that answered `{ok:false, loginGated:true}` is a REFUSAL that reached the
+ *  wire, and it must never derive a data-returned class. */
 export interface Outcome {
   httpStatus: number;
   message: string;
@@ -84,6 +133,10 @@ export interface Outcome {
   answerText?: string;
   /** No HTTP response at all (client abort / 000). */
   noResponse?: boolean;
+  /** `result.ok` — the runner's own verdict, for a capability surface. */
+  capabilityOk?: unknown;
+  /** The shape of the returned result, for a capability surface. */
+  resultShape?: ResultShape | null;
 }
 
 export interface Classification {
@@ -245,6 +298,120 @@ export function noAnswerRefusalIn(message: string): string | null {
   return NO_ANSWER_REFUSAL_PATTERNS.find((re) => re.test(message))?.source ?? null;
 }
 
+/** A non-empty string, or nothing. The shape facts are read off a real response
+ *  as untrusted JSON, so nothing here trusts its type. */
+const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+const count = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) ? v : null);
+
+/**
+ * THE CAPABILITY-SURFACE EVIDENCE — the one derivation `RETURNS-DATA` rests on.
+ *
+ * WHAT IT PROVES, and what it does not: the service answered 2xx, the RUNNER
+ * declared `ok: true`, the returned payload is a well-formed object, and the
+ * collection it returned holds AT LEAST ONE record — with the runner's declared
+ * count and the machine-counted rows in AGREEMENT. That is "the site returned
+ * real data over the wire". It is deliberately NOT a claim about the CONTENT,
+ * and it is deliberately not a chat claim: a capability has no answer text and
+ * no nonce, so nothing here is borrowed from the chat rules.
+ *
+ * EVERY CLAUSE IS LOAD-BEARING, and each one closes a specific way this could
+ * have become a laundering machine:
+ *
+ *   - `capabilityOk === true`. A capability that answered `{ok:false}` with a
+ *     NAMED refusal — `loginGated`, a challenge, a restriction wall — reached
+ *     the wire and returned NOTHING. `ok:false` is the service's own word for
+ *     that, and reading it is what keeps a refusal out of this class. The
+ *     refusal then falls to the classes below (or to UNCLASSIFIED, which the
+ *     write seam refuses to record at all).
+ *   - `rows >= 1`. An EMPTY result set is NOT this class. See the empty-result
+ *     decision below.
+ *   - `count === rows`. The declared half alone is a claim; the counted half
+ *     alone is a shape. Requiring both to agree means a row cannot buy the class
+ *     by typing one of them.
+ *   - `topLevelKeys` non-empty. A payload with no keys is not a result, it is a
+ *     refusal that forgot to say `ok:false`.
+ */
+export function capabilityDataEvidence(o: {
+  httpStatus: number;
+  capabilityOk?: unknown;
+  resultShape?: ResultShape | null;
+}): { arm: "list"; rows: number; count: number; rowsPath: string; keys: number } | { arm: "record"; rows: number; count: null; rowsPath: string; keys: number } | null {
+  if (!(o.httpStatus >= 200 && o.httpStatus < 300)) return null;
+  if (o.capabilityOk !== true) return null;
+  const shape = o.resultShape;
+  if (!shape || typeof shape !== "object") return null;
+  const keys = shape.topLevelKeys;
+  if (!Array.isArray(keys) || keys.length === 0) return null;
+
+  // ARM 1 — a COUNTED COLLECTION. The runner declared its result size and the
+  // machine counted the records; the two must agree, at >= 1.
+  const rowsPath = text(shape.rowsPath);
+  const declared = count(shape.count);
+  const counted = count(shape.rows);
+  if (rowsPath && declared !== null && counted !== null && declared === counted && counted >= 1) {
+    return { arm: "list", rows: counted, count: declared, rowsPath, keys: keys.length };
+  }
+
+  // ARM 2 — a SINGLE RECORD. MEASURED, why this arm exists at all:
+  // `araprat_video_detail` answers `{ok:true, data:{id, url, title,
+  // description, related:[…], relatedCount:n}}` — one record, not a collection,
+  // and no count beside one. Under arm 1 alone that real, populated, live result
+  // derived UNCLASSIFIED, which is the SAME defect this class was added to kill
+  // one surface down: a vocabulary that cannot express what it is asked to
+  // check. So the second arm accepts a POPULATED record object instead of a
+  // counted collection.
+  //
+  // It is deliberately weaker than arm 1 and therefore deliberately GUARDED:
+  // `declaredZeroCount` is the write seam's record that the runner DECLARED a
+  // count of zero somewhere in the payload. A runner that says "my result is
+  // empty" has answered the empty-result question, and a populated sibling key
+  // must not talk its way past that. Arm 2 is only reachable when the runner
+  // declared no count of zero at all.
+  if (shape.declaredZeroCount === true) return null;
+  const recordPath = text(shape.recordPath);
+  const recordKeys = Array.isArray(shape.recordKeys)
+    ? shape.recordKeys.filter((k: unknown): k is string => typeof k === "string" && k.trim() !== "")
+    : [];
+  const nonEmpty = count(shape.nonEmptyValues);
+  if (!recordPath || recordKeys.length === 0 || nonEmpty === null || nonEmpty < 1) return null;
+  return { arm: "record", rows: 1, count: null, rowsPath: recordPath, keys: keys.length };
+}
+
+/**
+ * THE EMPTY-RESULT DECISION, stated once here because it changes what the class
+ * means: an empty `rows: []` is a SUCCESSFUL MEASUREMENT OF NOTHING, and it is
+ * filed on the UNCLASSIFIED side of the line, not under `RETURNS-DATA`.
+ *
+ * THE REASON, and it is a claim about the class rather than about the site: this
+ * class means "the surface returned DATA". Zero rows is a real round trip — the
+ * site answered, the read succeeded — but there is no data in it, and a
+ * `verified` capability claim is a claim that the capability PRODUCES results.
+ * Letting the empty case in would make the gate satisfiable by a surface that
+ * returns nothing forever, which is the "gate that cannot fail" defect wearing
+ * the opposite face.
+ *
+ * So an empty result is refused by `capabilityDataEvidence` (it requires
+ * `rows >= 1`), falls through every named condition, and derives UNCLASSIFIED —
+ * which is NOT a class, so the write seam reports the measurement and writes
+ * nothing. An operator who wants "the surface works and legitimately matches
+ * nothing" recorded must widen the rule on purpose with a NEW member, not have
+ * this one stretch to cover it. That is the same bar every other class in this
+ * file was held to.
+ */
+export function emptyCapabilityResult(o: { capabilityOk?: unknown; resultShape?: ResultShape | null }): boolean {
+  if (o.capabilityOk !== true) return false;
+  const shape = o.resultShape;
+  if (!shape || typeof shape !== "object") return false;
+  const declared = count(shape.count);
+  const counted = count(shape.rows);
+  if (declared !== null && counted !== null && declared === counted && counted === 0) return true;
+  // The SINGLE-RECORD arm's empty twin: the runner declared a count of ZERO
+  // somewhere in the payload, so it has already answered "my result is empty",
+  // and no populated sibling key may talk the record arm past that answer. Named
+  // here so the two arms cannot disagree about what "empty" means.
+  return shape.declaredZeroCount === true;
+}
+
 /** The closed, ordered decision. Order is the whole honesty argument, in two
  * places: a challenge is checked BEFORE a login, because a challenge
  * interstitials a login page too and "capture a session" is the wrong action for
@@ -278,6 +445,69 @@ export function classifyOutcome(o: Outcome): Classification {
 
   if (o.answerText && o.answerText.trim().length > 0 && o.httpStatus < 400) {
     return { cls: "ANSWERS", reason: `HTTP ${o.httpStatus} with real model output` };
+  }
+
+  // A CAPABILITY surface that returned real data over the wire.
+  //
+  // WHERE IT SITS, and why it is in FRONT of every refusal rule below: the
+  // refusals are all decided by a page marker or by a message the driver
+  // emitted, and the gate in front of them is the service's OWN refusal switch
+  // — `result.ok`. A named refusal (login-gated, challenge, restriction wall)
+  // reaches the wire as `{ok:false, ...}`, so it cannot reach this branch at all:
+  // `capabilityDataEvidence` requires `capabilityOk === true` and drops every
+  // `ok:false` shape on the floor, where the message/page rules below name it.
+  // Putting this AFTER them would have been defensible too, and would have
+  // changed nothing, because a `ok:false` refusal carrying rows would be a runner
+  // contradicting itself rather than a shape worth trusting.
+  //
+  // It sits after ANSWERS because a capability has no answer text to claim: a
+  // row that carries BOTH a matched nonce and a capability result is a chat
+  // round trip and is filed as ANSWERS, which is the stronger claim.
+  const capData = capabilityDataEvidence(o);
+  if (capData) {
+    if (!idle(o.poolAtRequest)) {
+      return {
+        cls: "UNCLASSIFIED",
+        reason: `the capability surface returned ${capData.rows} record(s) at ${capData.rowsPath}, but at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — under contention a shared browser's page is not this request's own result, so the read is a measurement of the queue, not of the surface`,
+      };
+    }
+    return {
+      cls: "RETURNS-DATA",
+      reason:
+        capData.arm === "list"
+          ? `HTTP ${o.httpStatus}, the runner's own verdict ok=true, and the returned payload is a well-formed object ` +
+            `(${capData.keys} top-level keys) whose collection at ${capData.rowsPath} holds ${capData.rows} record(s), ` +
+            `with the runner's declared count=${capData.count} agreeing with the counted rows. ` +
+            `This is a CLAIM ABOUT THE SURFACE'S OUTPUT SHAPE, not its content and not a chat answer: a capability ` +
+            `returns JSON, so no nonce applies, and this class says exactly one thing — the site returned real data over the wire.`
+          : `HTTP ${o.httpStatus}, the runner's own verdict ok=true, and the returned payload is a well-formed object ` +
+            `(${capData.keys} top-level keys) carrying a POPULATED RECORD at ${capData.rowsPath}, with the runner declaring ` +
+            `no count of zero anywhere (so this is not an empty result). This is a single-record result rather than a counted ` +
+            `collection, and it is the WEAKER of this class's two evidence arms: it says the surface returned a non-empty ` +
+            `result object, not how many records that object holds. Still a CLAIM ABOUT OUTPUT SHAPE, never about content, ` +
+            `and never a chat answer — a capability returns JSON, so no nonce applies.`,
+    };
+  }
+
+  // The service answered `ok:true` but returned an EMPTY collection. Said here
+  // rather than left to the generic fallback so the refusal is legible: see
+  // `emptyCapabilityResult` for why this is filed as the classifier's refusal
+  // rather than as a class, and what the honest widening would be.
+  if (emptyCapabilityResult(o)) {
+    const s = (o.resultShape ?? {}) as ResultShape;
+    const where =
+      typeof s.rowsPath === "string" && s.rowsPath
+        ? `the collection at ${s.rowsPath} came back EMPTY (declared count=${String(s.count)}, counted rows=${String(s.rows)})`
+        : `the runner DECLARED a count of zero somewhere in the payload (declaredZeroCount), so its own result is empty`;
+    return {
+      cls: "UNCLASSIFIED",
+      reason:
+        `HTTP ${o.httpStatus} with the runner's own verdict ok=true, but ${where}. That is a SUCCESSFUL MEASUREMENT OF NOTHING: ` +
+        `the read reached the site and the site returned no records, which is not evidence that the surface PRODUCES results, ` +
+        `so it is deliberately NOT filed as RETURNS-DATA — a class that admitted the empty case would let the gate be satisfied ` +
+        `by a surface that returns nothing forever. If "the surface works and legitimately matches nothing" is a claim worth ` +
+        `recording, it needs its OWN class member on purpose, not this one stretched to cover it.`,
+    };
   }
 
   // The selector matched nothing at all. This is NOT a sign of a model that
@@ -360,10 +590,38 @@ export interface ClassFacts {
   prereq?: unknown;
   poolAtRequest?: unknown;
   observedPage?: unknown;
+  resultShape?: unknown;
+  capabilityOk?: unknown;
 }
 
 export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> = {
   ANSWERS: { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: false, requiresIdlePool: false },
+  // RETURNS-DATA asserts THE SURFACE'S OUTPUT SHAPE, so the minimum that means
+  // anything is: a dated measurement, the method that took it, an evidence string
+  // that NAMES what came back (shape and row count), the runner's own `ok:true`
+  // verdict, and the resultShape the derivation reads — `resultShape` is in
+  // requiredFields rather than implied, because `classifyOutcome` refuses the
+  // class without it and a precondition that does not name it would let a row
+  // satisfy the gate's letter while its derivation says otherwise.
+  //
+  // The IDLE pool is REQUIRED and that is the strictest clause here, stricter
+  // than ANSWERS. A capability runner drives a SHARED browser out of the warm
+  // pool, so under contention the page the rows were read from may not even be
+  // this request's own result — which is the capability-surface form of the
+  // stale-echo hazard `probeNonceMatched` exists to kill on the chat surface.
+  // ANSWERS can afford to skip it because a per-measurement nonce proves the
+  // served text is THIS request's; a capability has no nonce to carry that
+  // proof, so an idle pool is the strongest guarantee available and it is
+  // therefore mandatory.
+  //
+  // It deliberately does NOT require observedPage: `/capability` answers the
+  // runner's result, not the driver's page observation, so demanding one would
+  // make the class unreachable rather than stricter.
+  "RETURNS-DATA": {
+    requiredFields: ["measuredAt", "method", "evidence", "capabilityOk", "resultShape"],
+    requiresPoolState: true,
+    requiresIdlePool: true,
+  },
   "SIGN-OUT": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: false, requiresIdlePool: false },
   "WALL-CHALLENGE": { requiredFields: ["measuredAt", "method", "evidence", "observedPage"], requiresPoolState: true, requiresIdlePool: true },
   "COMPOSER-DRIFT": { requiredFields: ["measuredAt", "method", "evidence", "observedPage"], requiresPoolState: true, requiresIdlePool: true },

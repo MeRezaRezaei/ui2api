@@ -193,7 +193,16 @@ test("THREE-WAY: the gap this gate derives is exactly the gap the record NAMES (
  *  classifier. The nonce gate is what stops a hand-typed ANSWERS from buying a
  *  `verified` status: a row that claims ANSWERS while its own fields cannot
  *  produce ANSWERS is caught HERE, by re-derivation — not by a name check,
- *  which a determined editor could satisfy by also renaming the fields. */
+ *  which a determined editor could satisfy by also renaming the fields.
+ *
+ *  THE CAPABILITY FACTS ARE FED TOO, and that is not optional bookkeeping. The
+ *  first version of this re-derivation passed only the chat fields, because the
+ *  chat fields were all the vocabulary could use — so when `RETURNS-DATA` landed
+ *  (a capability surface that returned real data over the wire), every capability
+ *  row would have re-derived UNCLASSIFIED no matter what it claimed, and the
+ *  gate would have failed every true measurement while a hand-typed class on the
+ *  same fields would have passed the OTHER assertions. A re-derivation that
+ *  cannot see the decisive fields is not a re-derivation of that class. */
 function rederive(row: Record<string, unknown>): string {
   const nonceOk = row.probeNonceMatched === true;
   const answerText = nonceOk ? "x".repeat(Number(row.answerChars) || 1) : "";
@@ -205,6 +214,8 @@ function rederive(row: Record<string, unknown>): string {
     noResponse: row.httpStatus === 0,
     poolAtRequest: pool ? { busy: pool.busy, total: pool.total, queued: pool.queued } : undefined,
     page: (row.observedPage ?? undefined) as never,
+    capabilityOk: row.capabilityOk,
+    resultShape: (row.resultShape ?? null) as never,
   }).cls;
 }
 
@@ -226,6 +237,115 @@ test("CLASS: a row may not claim ANSWERS unless its nonce matched, it was 2xx, i
     })
     .map((r) => `\`${String(r.site)}\` claims ANSWERS but probeNonceMatched=${String(r.probeNonceMatched)}, httpStatus=${String(r.httpStatus)}, answerChars=${String(r.answerChars)}, doneReason=${String(r.doneReason)} — ANSWERS requires a MATCHED per-measurement nonce (the anti-stale-echo core), a 2xx, real answer text and a stable read`);
   assert.deepEqual(lying, [], `ANSWERS claimed without the fields that produce it:\n${lying.join("\n")}`);
+});
+
+// ── the CAPABILITY-SURFACE class ─────────────────────────────────────────────
+//
+// THE DEFECT THIS KILLS, restated because it is the whole lane: every member of
+// the verification vocabulary keyed on a CHAT answer, so `araprat_search`
+// answering HTTP 200 `ok:true` with 29 real rows derived UNCLASSIFIED — not a
+// class — and the write seam refuses to write an UNCLASSIFIED row at all. So NO
+// capability surface could ever be recorded as MEASURED and the three-way gate
+// below was red on every capability-only package no matter how many times the
+// harness ran. A vocabulary that cannot express the thing it is asked to check.
+
+test("ANTI-VACUITY: the shipped record actually EXERCISES the capability class — the vocabulary is not unexercised", () => {
+  const capabilityRows = rows.filter((r) => r.capability !== "chat" && r.provenance === "harness");
+  const returnsData = capabilityRows.filter((r) => r.class === "RETURNS-DATA");
+  assert.ok(
+    capabilityRows.length > 0,
+    "capabilities/roundtrip.json carries no capability-surface row at all — the capability write path is " +
+      "never exercised in the shipped record, so RETURNS-DATA would be a class nothing can ever reach (the " +
+      "same 'a gate that cannot fire' defect, one level down from the one this class closes)",
+  );
+  assert.ok(
+    returnsData.length > 0,
+    `capability rows exist (${capabilityRows.map((r) => `${String(r.site)}/${String(r.capability)}=${String(r.class)}`).join(", ")}) ` +
+      `but NONE derives RETURNS-DATA — so no capability surface can be recorded as MEASURED. Measure one with ` +
+      `\`node --import tsx scripts/audit/record-roundtrip.mjs --site <id> --capability <cap> --args '<json>'\` against a live daemon.`,
+  );
+});
+
+test("CLASS: a capability row claiming RETURNS-DATA must have the fields that produce it (the hand-typing case)", () => {
+  // A row with the DECLARED half of the evidence only, the COUNTED half absent.
+  const declaredOnly = rederive({
+    class: "RETURNS-DATA",
+    httpStatus: 200,
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "ok", "data"], rowsPath: "data.results", count: 12, rows: null },
+    poolAtRequest: { busy: 0, total: 2, queued: 0 },
+    evidence: "class derived by classifyOutcome()",
+  });
+  assert.notEqual(
+    declaredOnly,
+    "RETURNS-DATA",
+    `a runner's DECLARED count alone derived RETURNS-DATA — the class must require the counted rows to agree with it, got ${declaredOnly}`,
+  );
+
+  // The two halves DISAGREEING: a runner claiming 12 over 0 records.
+  const disagreeing = rederive({
+    class: "RETURNS-DATA",
+    httpStatus: 200,
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "ok", "data"], rowsPath: "data.results", count: 12, rows: 0 },
+    poolAtRequest: { busy: 0, total: 2, queued: 0 },
+    evidence: "class derived by classifyOutcome()",
+  });
+  assert.notEqual(disagreeing, "RETURNS-DATA", `a self-contradicting result derived RETURNS-DATA (${disagreeing})`);
+});
+
+test("CLASS: an EMPTY capability result is a measurement of NOTHING and must not derive the data-returned class", () => {
+  // MEASURED against the live daemon: `duckduckgo_chat_history` answers HTTP 200
+  // `ok:true` with `{count: 0, chats: []}` for a session with no history — a real
+  // round trip that returned no records.
+  const empty = rederive({
+    class: "RETURNS-DATA",
+    httpStatus: 200,
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "ok", "data"], rowsPath: "data.chats", count: 0, rows: 0 },
+    poolAtRequest: { busy: 0, total: 2, queued: 0 },
+    evidence: "class derived by classifyOutcome()",
+  });
+  assert.notEqual(empty, "RETURNS-DATA", `an empty result set derived the data-returned class (${empty})`);
+  assert.equal(
+    empty,
+    "UNCLASSIFIED",
+    `an empty result set should land on the classifier's refusal so the write seam REPORTS it and writes nothing — a class that admitted it would let the gate be satisfied by a surface that returns nothing forever. Got ${empty}`,
+  );
+});
+
+test("CLASS: a capability REFUSAL (ok:false with a named reason) must not derive the data-returned class", () => {
+  // The login-gated shape, measured in src/capabilities/gated.ts:38
+  // (`loginGatedResult`) — `{ok:false, loginGated:true, error:"login-required: …"}`.
+  const refused = rederive({
+    class: "RETURNS-DATA",
+    httpStatus: 502,
+    capabilityOk: false,
+    resultShape: { topLevelKeys: ["capability", "ok", "error", "loginGated"], rowsPath: null, count: null, rows: null },
+    poolAtRequest: { busy: 0, total: 2, queued: 0 },
+    evidence: "POST /capability/araprat -> HTTP 502 login-required: araprat_comment needs an authorized captured araprat session",
+  });
+  assert.notEqual(refused, "RETURNS-DATA", `a login-gated refusal derived the data-returned class (${refused})`);
+
+  // …and it must not be the classifier's silent fallback either: a refusal that
+  // reached the wire is a MEASUREMENT, so it lands in the vocabulary or it is
+  // reported as a finding — never filed as a success.
+  assert.notEqual(refused, "ANSWERS", "a refusal is not an answer");
+  assert.notEqual(refused, "UNMEASURED", "UNMEASURED means never reached; this response WAS reached");
+});
+
+test("CLASS: the shipped capability rows re-derive from their OWN fields, and the read seam agrees", () => {
+  for (const r of rows.filter((x) => x.provenance === "harness")) {
+    assert.equal(rederive(r), r.class, `\`${String(r.site)}/${String(r.capability)}\` claims ${String(r.class)} and its own fields re-derive something else`);
+  }
+  for (const r of rows.filter((x) => x.class === "RETURNS-DATA")) {
+    const site = String(r.site);
+    assert.equal(
+      measuredRoundTripFor(site).measured,
+      true,
+      `\`${site}\` carries a RETURNS-DATA row the classifier derived, but the read seam does not count it: ${measuredRoundTripFor(site).reason}`,
+    );
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,7 +465,18 @@ test("PRIVACY: the published record carries no prompt text, no answer text, no a
       // the service returned. The vocabulary literals that legitimately appear
       // ('harness', 'ANSWERS', 'imported') live in non-prose fields and are
       // checked by the class test above.
-      for (const m of prose.matchAll(/'([^']{4,})'/g)) {
+      //
+      // AND THE APOSTROPHE IS NOT A QUOTE MARK, which this pattern only learned
+      // by being WRONG first. The classifier's reason prose says "the runner's
+      // own verdict" and "the runner's declared count", and the naive pattern
+      // paired the two apostrophes into a 200-character "quote" and reported two
+      // PRIVACY violations on two rows that carry no quoted service output at
+      // all. A quoted span opens after a space or a bracket, never immediately
+      // after a word character — so both boundaries are asserted, and a genuine
+      // quote (which is what this gate exists to catch) still matches. Fixing it
+      // the other way — deleting the check because it fired — would have left
+      // the load-bearing property unguarded for the wrong reason.
+      for (const m of prose.matchAll(/(?<![A-Za-z0-9_])'([^']{4,})'(?![A-Za-z0-9_])/g)) {
         offenders.push(`\`${String(row.site)}\` quotes ${m[0]} in its ${proseField} prose`);
       }
       if (/\bPONG-[0-9a-f]{8,}/i.test(prose)) offenders.push(`\`${String(row.site)}\` carries a literal probe nonce in ${proseField}`);

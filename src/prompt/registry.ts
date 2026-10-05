@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, verifyStoredAccount, withAccountVerdict, type StoredAccount } from "../runtime/session-store.js";
 import { consumerAccountsSummary, consumerProse, consumerVerifiedRecord, type ConsumerAccountsSummary } from "./consumer-surface.js";
-import { VERIFICATION_CLASSES } from "./verification-class.js";
+import { VERIFICATION_CLASSES, capabilityDataEvidence } from "./verification-class.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -300,6 +300,10 @@ export interface RoundTripRow {
   doneReason?: unknown;
   poolAtRequest?: unknown;
   daemonCommit?: unknown;
+  /** `result.ok` — the runner's own verdict. `null` on a chat row. */
+  capabilityOk?: unknown;
+  /** The SHAPE of the returned capability result (never its content). */
+  resultShape?: unknown;
 }
 
 /** Repo-relative location of the round-trip record, walked up like
@@ -371,23 +375,36 @@ export function readRoundTripRecord(): RoundTripReading {
 /**
  * THE PREDICATE: does a MEASURED row exist for `siteId`?
  *
- * "MEASURED" is deliberately narrow, and every clause is load-bearing:
+ * "MEASURED" is deliberately narrow, and every clause is load-bearing. It has
+ * TWO ARMS, because a round trip has two shapes — and admitting only the first
+ * was the defect this second arm exists to close:
  *
- *   - `provenance === "harness"`. A row converted from prose
- *     (`method: "imported-from-prose"`, `probeNonceMatched: null`) is a real
- *     measurement of SOMETHING, and it is kept in the record so the history is
- *     not lost — but it backs nothing, because its text cannot be attributed to
- *     the request that fetched it.
- *   - `probeNonceMatched === true`. THE ANTI-STALE-ECHO CORE. A warm daemon pool
- *     reuses pages, so text left on the page by an earlier prompt reads back as
- *     this prompt's answer. Only a nonce generated per measurement and echoed by
- *     the model proves the served text is THIS request's.
- *   - `class === "ANSWERS"` AND `httpStatus` 2xx AND `answerChars > 0` AND
- *     `doneReason === "stable"`. The answer must have stopped growing.
- *   - `measuredAt` inside the staleness window. A month-old measurement of a
- *     working site is not evidence about today's site, and CI can never re-measure
- *     (no session, no Chrome owner), so the window is the only thing standing
- *     between this record and a permanent lie.
+ * A CHAT surface is proven by a NONCE. A warm daemon pool reuses pages, so text
+ * left on the page by an earlier prompt reads back as this prompt's answer.
+ * Only a nonce generated per measurement and echoed by the model proves the
+ * served text is THIS request's. So the chat arm requires `probeNonceMatched ===
+ * true` AND `class === "ANSWERS"` AND a 2xx AND `answerChars > 0` AND
+ * `doneReason === "stable"`.
+ *
+ * A CAPABILITY surface returns JSON, not an answer, so a nonce proves nothing
+ * there — and MEASURED, every capability surface therefore derived
+ * `UNCLASSIFIED`, which is not a class, so `scripts/audit/record-trip.mjs`
+ * refused to write the row at all and NO capability package could ever be
+ * recorded as measured. The capability arm is proven by the returned result's
+ * SHAPE instead: `class === "RETURNS-DATA"` AND a 2xx AND the runner's own
+ * `ok === true` AND a well-formed `resultShape` whose DECLARED count and
+ * COUNTED rows agree at `>= 1`. The agreement is what keeps the arm honest —
+ * the declared half alone is a claim, the counted half alone is a shape, and
+ * requiring both is what stops a row from being filed on one of them.
+ *
+ * Both arms require `provenance === "harness"`. A row converted from prose
+ * (`method: "imported-from-prose"`, `probeNonceMatched: null`) is a real
+ * measurement of SOMETHING, and it is kept in the record so the history is not
+ * lost — but it backs nothing, because its text cannot be attributed to the
+ * request that fetched it. And both require `measuredAt` inside the staleness
+ * window: a month-old measurement of a working site is not evidence about
+ * today's site, and CI can never re-measure (no session, no Chrome owner), so
+ * the window is the only thing standing between this record and a permanent lie.
  */
 export function measuredRoundTripFor(siteId: string, now: number = Date.now()): { measured: boolean; reason: string } {
   const rec = readRoundTripRecord();
@@ -396,27 +413,52 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
   if (mine.length === 0) return { measured: false, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
   const settled = mine.filter((r) => {
     if (r.provenance !== "harness") return false;
-    if (r.probeNonceMatched !== true) return false;
-    if (r.class !== "ANSWERS") return false;
     const st = typeof r.httpStatus === "number" ? r.httpStatus : 0;
     if (st < 200 || st >= 300) return false;
-    if (typeof r.answerChars !== "number" || r.answerChars <= 0) return false;
-    if (r.doneReason !== "stable") return false;
     if (typeof r.measuredAt !== "string") return false;
     const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
-    return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
+    if (!(Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays)) return false;
+    if (r.class === "ANSWERS") {
+      if (r.probeNonceMatched !== true) return false;
+      if (typeof r.answerChars !== "number" || r.answerChars <= 0) return false;
+      if (r.doneReason !== "stable") return false;
+      return true;
+    }
+    if (r.class === "RETURNS-DATA") {
+      // The SAME derivation the classifier ran, imported rather than restated:
+      // two copies of this predicate is how the write seam and the read seam end
+      // up disagreeing about what counts as measured.
+      return capabilityDataEvidence({
+        httpStatus: st,
+        capabilityOk: r.capabilityOk,
+        resultShape: (r.resultShape ?? null) as { topLevelKeys?: unknown; rowsPath?: unknown; count?: unknown; rows?: unknown } | null,
+      }) !== null;
+    }
+    return false;
   });
   if (settled.length > 0) {
+    const first = settled[0]!;
+    const shape =
+      first.class === "RETURNS-DATA"
+        ? capabilityDataEvidence({
+            httpStatus: Number(first.httpStatus),
+            capabilityOk: first.capabilityOk,
+            resultShape: (first.resultShape ?? null) as { topLevelKeys?: unknown; rowsPath?: unknown; count?: unknown; rows?: unknown } | null,
+          })
+        : null;
     return {
       measured: true,
-      reason: `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" (nonce matched, ANSWERS, ${settled[0]!.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
+      reason:
+        first.class === "RETURNS-DATA" && shape
+          ? `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" — the capability ${String(first.capability)} returned ${shape.rows} record(s) at ${shape.rowsPath} (runner ok=true, declared count ${shape.count} = counted rows, HTTP ${first.httpStatus}, inside the ${rec.stalenessWindowDays}-day window)`
+          : `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" (nonce matched, ANSWERS, ${first.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
     };
   }
   const why = mine
     .map((r) =>
       r.provenance !== "harness"
         ? `provenance=${String(r.provenance)} (imported from prose — backs nothing)`
-        : `probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)}`,
+        : `${String(r.capability)}: probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)} capabilityOk=${String(r.capabilityOk)}`,
     )
     .join("; ");
   return { measured: false, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };

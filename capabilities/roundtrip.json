@@ -4,11 +4,11 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T14:28:34.439Z",
+  "generatedAt": "2026-10-05T15:13:01.117Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
-  "honestyRule": "`class` is ALWAYS the output of classifyOutcome() in src/prompt/verification-class.ts, re-derived by the gate from the machine fields below; a hand-typed class that disagrees with the derivation is a build failure. A row counts as MEASURED — the only thing that may back a published `verified` claim — when provenance === 'harness' AND probeNonceMatched === true AND class === 'ANSWERS' AND measuredAt is inside stalenessWindowDays. A row with provenance === 'imported' is a real measurement whose provenance is PROSE: it is kept for the record and it backs NOTHING. `evidence`, `prereq` and `notes` are prose and may never be credited as evidence by any gate.",
+  "honestyRule": "`class` is ALWAYS the output of classifyOutcome() in src/prompt/verification-class.ts, re-derived by the gate from the machine fields below; a hand-typed class that disagrees with the derivation is a build failure. A row counts as MEASURED — the only thing that may back a published `verified` claim — in ONE OF TWO ARMS, both narrow on purpose. CHAT: provenance === 'harness' AND probeNonceMatched === true AND class === 'ANSWERS' AND a 2xx AND answerChars > 0 AND doneReason === 'stable' AND measuredAt inside the window. CAPABILITY: provenance === 'harness' AND class === 'RETURNS-DATA' AND a 2xx AND capabilityOk === true AND a well-formed resultShape whose evidence is either a counted collection whose runner-declared count AGREES with the counted rows at >= 1, or a single POPULATED record where the runner declared no count of zero, AND measuredAt inside the window. An EMPTY result (declared count 0 over 0 counted rows, or a declared zero count anywhere) is a successful measurement of NOTHING and is deliberately NOT MEASURED: it reaches the wire and returns no records, which is not evidence that the surface produces results, and a class that admitted it would let the gate be satisfied by a surface that returns nothing forever. A row with provenance === 'imported' is a real measurement whose provenance is PROSE: it is kept for the record and it backs NOTHING. `evidence`, `prereq` and `notes` are prose and may never be credited as evidence by any gate.",
   "writeSeamNote": "Only scripts/audit/record-roundtrip.mjs writes this file, and it does so by POSTing to an ALREADY-DEPLOYED daemon over that daemon's own wire. The read-only service (src/prompt/http.ts) must never write here and must never certify itself. CI cannot run the harness at all (no vault session, no Chrome owner, no browser), which is exactly why daemonCommit and the staleness window are load-bearing rather than decoration.",
   "rows": [
     {
@@ -66,12 +66,186 @@
       "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200 with real model output",
       "prereq": "none beyond a live vault session for the site",
       "notes": "observedPage is the title and url the DAEMON reported after driving the site; only the constant nonce probe was ever sent to the site, so no private text can ride in it"
+    },
+    {
+      "site": "araprat",
+      "capability": "araprat_search",
+      "class": "RETURNS-DATA",
+      "provenance": "harness",
+      "method": "POST /capability/araprat {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T14:58:21.766Z",
+      "httpStatus": 200,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 4092,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 1,
+        "queued": 0
+      },
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "latencyMs",
+          "method",
+          "note",
+          "ok",
+          "wireNote"
+        ],
+        "rowsPath": "data.results",
+        "count": 29,
+        "rows": 29
+      },
+      "capabilityOk": true,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (7 top-level keys) whose collection at data.results holds 29 record(s), with the runner's declared count=29 agreeing with the counted rows. This is a CLAIM ABOUT THE SURFACE'S OUTPUT SHAPE, not its content and not a chat answer: a capability returns JSON, so no nonce applies, and this class says exactly one thing — the site returned real data over the wire.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
+    },
+    {
+      "site": "araprat",
+      "capability": "araprat_trending",
+      "class": "RETURNS-DATA",
+      "provenance": "harness",
+      "method": "POST /capability/araprat {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T14:58:38.090Z",
+      "httpStatus": 200,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 3309,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 1,
+        "queued": 0
+      },
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "latencyMs",
+          "method",
+          "note",
+          "ok",
+          "wireNote"
+        ],
+        "rowsPath": "data.videos",
+        "count": 30,
+        "rows": 30
+      },
+      "capabilityOk": true,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (7 top-level keys) whose collection at data.videos holds 30 record(s), with the runner's declared count=30 agreeing with the counted rows. This is a CLAIM ABOUT THE SURFACE'S OUTPUT SHAPE, not its content and not a chat answer: a capability returns JSON, so no nonce applies, and this class says exactly one thing — the site returned real data over the wire.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
+    },
+    {
+      "site": "araprat",
+      "capability": "araprat_video_detail",
+      "class": "RETURNS-DATA",
+      "provenance": "harness",
+      "method": "POST /capability/araprat {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T15:08:40.634Z",
+      "httpStatus": 200,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 9662,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 1,
+        "queued": 0
+      },
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "latencyMs",
+          "method",
+          "note",
+          "ok",
+          "wireNote"
+        ],
+        "rowsPath": "data.related",
+        "count": null,
+        "rows": 11,
+        "recordPath": "data",
+        "recordKeys": [
+          "id",
+          "related",
+          "relatedCount",
+          "title",
+          "url"
+        ],
+        "nonEmptyValues": 5,
+        "declaredZeroCount": false
+      },
+      "capabilityOk": true,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (7 top-level keys) carrying a POPULATED RECORD at data, with the runner declaring no count of zero anywhere (so this is not an empty result). This is a single-record result rather than a counted collection, and it is the WEAKER of this class's two evidence arms: it says the surface returned a non-empty result object, not how many records that object holds. Still a CLAIM ABOUT OUTPUT SHAPE, never about content, and never a chat answer — a capability returns JSON, so no nonce applies.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
+    },
+    {
+      "site": "duckduckgo",
+      "capability": "duckduckgo_chat",
+      "class": "RETURNS-DATA",
+      "provenance": "harness",
+      "method": "POST /capability/duckduckgo {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T15:13:01.117Z",
+      "httpStatus": 200,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 8218,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 3,
+        "queued": 0
+      },
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "latencyMs",
+          "method",
+          "note",
+          "ok"
+        ],
+        "rowsPath": null,
+        "count": null,
+        "rows": null,
+        "recordPath": "data",
+        "recordKeys": [
+          "answer",
+          "chunkCount",
+          "doneReason",
+          "model",
+          "url"
+        ],
+        "nonEmptyValues": 5,
+        "declaredZeroCount": false
+      },
+      "capabilityOk": true,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (6 top-level keys) carrying a POPULATED RECORD at data, with the runner declaring no count of zero anywhere (so this is not an empty result). This is a single-record result rather than a counted collection, and it is the WEAKER of this class's two evidence arms: it says the surface returned a non-empty result object, not how many records that object holds. Still a CLAIM ABOUT OUTPUT SHAPE, never about content, and never a chat answer — a capability returns JSON, so no nonce applies.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
     }
   ],
   "knownGaps": {
     "meaning": "Sites whose own capabilities/<id>/metadata.json carries a complete verified receipt (verified.since/evidence/via all non-empty) and whose capabilities/README.md status cell publishes that claim, but for which NO MEASURED row exists in this file. This is not a hand-typed test literal: it is DATA, and the gate asserts exact set equality against the gap it derives from this record plus those two other sources — so a gap APPEARING and a gap being quietly CLOSED are both build failures. Closing one means running scripts/audit/record-roundtrip.mjs against a live daemon, never editing this list.",
     "sites": [
-      "araprat",
       "deepseek",
       "kimi",
       "tencent-aistudio",

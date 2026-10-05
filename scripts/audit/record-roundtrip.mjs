@@ -128,8 +128,9 @@
 //   path resolution.
 //
 // EXIT CODES
-//   0  a MEASURED row was written (class=ANSWERS, nonce matched)
-//   5  a row was written recording the site's TRUE non-answer class — a correct
+// 0  a MEASURED row was written (class=ANSWERS with a matched nonce, or
+//      class=RETURNS-DATA with ok=true and >=1 counted row)
+//  5  a row was written recording the site's TRUE non-answer class — a correct
 //      measurement of a site that failed, gated or challenged, NOT a pass
 //   2  nothing was written — see the NAMED reason on stderr
 //   3  a malformed invocation
@@ -469,14 +470,149 @@ const rawDoneReason =
 const probeNonceMatched = isChat ? answerText.includes(`PONG-${nonce}`) : null;
 
 // The SHAPE of a capability result — never its content. Sorted top-level key
-// names, plus the length of the first top-level array, which is what makes a
-// capability row reviewable without publishing a single row of the site's data.
+// names, the dotted path of the collection the rows were counted in, the
+// runner's OWN declared count and the number of records actually counted in
+// that collection. Together they make a capability row reviewable without
+// publishing a single row of the site's data.
+//
+// THE COUNT IS FOUND, NOT GUESSED. The runner declares its own result size in
+// `count` / `total` next to the collection it produced (`data.count` beside
+// `data.results`), so the declared half is read off a named field of the
+// response rather than inferred, and the rows half is a real count of the
+// collection that sits beside it. `classifyOutcome` requires the two to AGREE
+// before RETURNS-DATA is derivable, so neither half alone can buy the class.
+//
+// MEASURED, why the old shape was not enough: it took the first top-level array
+// only. `araprat_search` answers `{capability, ok, method, latencyMs, data:
+// {query, count, results:[…]}, note, wireNote}` — there is NO top-level array at
+// all, so `firstArrayKey` was null and `firstArrayLength` null on the one
+// capability surface this repo has a live receipt for. The shape was
+// structurally incapable of describing a real result.
+const ROW_COUNT_KEYS = ["count", "total", "totalCount", "resultCount"];
+const MAX_SHAPE_DEPTH = 3;
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+/** Depth-first walk (bounded) yielding [dottedPath, value] for plain objects. */
+function walkObjects(root, prefix = "", depth = 0) {
+  if (depth > MAX_SHAPE_DEPTH || !isPlainObject(root)) return [];
+  const out = [];
+  for (const [k, v] of Object.entries(root)) {
+    const p = prefix ? `${prefix}.${k}` : k;
+    if (isPlainObject(v)) out.push([p, v], ...walkObjects(v, p, depth + 1));
+  }
+  return out;
+}
+/** The collection beside the runner's declared count, preferring one of records. */
+function collectionBeside(node) {
+  const arrays = Object.entries(node).filter(([, v]) => Array.isArray(v));
+  if (arrays.length === 0) return null;
+  return arrays.find(([, v]) => v.some((x) => isPlainObject(x))) ?? arrays[0];
+}
+function declaredCountIn(node) {
+  for (const k of ROW_COUNT_KEYS) {
+    const v = node[k];
+    if (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 0) return { key: k, value: v };
+  }
+  return null;
+}
+const isPopulatedRecord = (v) =>
+  isPlainObject(v) &&
+  Object.keys(v).length > 0 &&
+  Object.values(v).filter((x) => x !== null && x !== undefined && x !== "" && !(Array.isArray(x) && x.length === 0)).length > 0;
+const nonEmptyValueCount = (v) =>
+  Object.values(v).filter((x) => x !== null && x !== undefined && x !== "" && !(Array.isArray(x) && x.length === 0)).length;
 const resultShape = (() => {
-  if (isChat || !payload || typeof payload !== "object") return null;
-  const keys = Object.keys(payload).sort();
-  const arrayKey = keys.find((k) => Array.isArray(payload[k]));
-  return { topLevelKeys: keys, firstArrayKey: arrayKey ?? null, firstArrayLength: arrayKey ? payload[arrayKey].length : null };
+  if (isChat || !isPlainObject(payload)) return null;
+  const topLevelKeys = Object.keys(payload).sort();
+  // `declaredZeroCount` is the EMPTY-RESULT ANCHOR and it is recorded
+  // INDEPENDENTLY of the collection search: a runner that declares a count of
+  // zero anywhere has answered "my result is empty", and the classifier's
+  // single-record arm is gated on this flag so no populated sibling key can
+  // talk its way past that answer.
+  const declaredZeroCount = walkObjects(payload).some(([, node]) => {
+    const d = declaredCountIn(node);
+    return d !== null && d.value === 0;
+  });
+  const shape = { topLevelKeys, rowsPath: null, count: null, rows: null, recordPath: null, recordKeys: null, nonEmptyValues: null, declaredZeroCount };
+  // ARM 1: the runner's declared count is the anchor — find it, then take the
+  // collection that sits beside it. That is the runner's own account of its own
+  // result, and it is a named field of the response rather than an inference.
+  for (const [path, node] of walkObjects(payload)) {
+    const declared = declaredCountIn(node);
+    if (!declared) continue;
+    const coll = collectionBeside(node);
+    if (!coll) continue;
+    shape.rowsPath = path ? `${path}.${coll[0]}` : coll[0];
+    shape.count = declared.value;
+    shape.rows = coll[1].length;
+    return shape;
+  }
+  // No declared count anywhere: fall back to the first collection of records,
+  // but leave `count` null rather than inventing one. A row whose declared half
+  // is missing cannot derive RETURNS-DATA's list arm (the two must agree), so an
+  // undeclared runner is reported as a finding instead of being passed off as a
+  // counted result — and the walk CONTINUES to the record arm below rather than
+  // returning, because a result can carry BOTH an undeclared secondary
+  // collection and a populated primary record.
+  //
+  // MEASURED, and this is why it continues: `araprat_video_detail` answers
+  // `data:{id, url, title, description, related:[…11 records…], relatedCount:11}`.
+  // The first collection of records is `related`, whose sibling count is named
+  // `relatedCount` — a count of a SECONDARY collection, not of the result — so
+  // arm 1 is correctly unreachable and an early return left `recordPath` null,
+  // which derived UNCLASSIFIED for a real, populated, live video record.
+  if (shape.rowsPath === null) {
+    for (const [path, node] of walkObjects(payload)) {
+      const coll = collectionBeside(node);
+      if (coll && coll[1].some((x) => isPlainObject(x))) {
+        shape.rowsPath = path ? `${path}.${coll[0]}` : coll[0];
+        shape.rows = coll[1].length;
+        break;
+      }
+    }
+  }
+  if (shape.rowsPath === null) {
+    for (const [k, v] of Object.entries(payload)) {
+      if (Array.isArray(v)) {
+        shape.rowsPath = k;
+        shape.rows = v.length;
+        break;
+      }
+    }
+  }
+  // ARM 2 material, computed INDEPENDENTLY of the collection search above: the
+  // single POPULATED RECORD a detail-shaped result returns. Every runner in this
+  // repo nests its result under `data`, so that key is taken first, then any
+  // other populated object one level down.
+  // The root payload's OWN keys are candidates too, not just the objects the
+  // walk descends into. MEASURED: `araprat_video_detail`'s record IS
+  // `payload.data` — a sibling of nothing above it, so a walk that only looked
+  // for records NESTED inside a walked object never saw it and left
+  // `recordPath` null.
+  const candidateHosts = [["", payload], ...walkObjects(payload)];
+  for (const [path, node] of candidateHosts) {
+    const candidates = Object.entries(node)
+      .filter(([k]) => k === "data" || !shape.rowsPath || !shape.rowsPath.startsWith(k))
+      .sort((a, b) => (a[0] === "data" ? -1 : b[0] === "data" ? 1 : a[0].localeCompare(b[0])));
+    for (const [k, v] of candidates) {
+      if (!isPopulatedRecord(v)) continue;
+      const p = path ? `${path}.${k}` : k;
+      shape.recordPath = p;
+      shape.recordKeys = Object.keys(v).sort();
+      shape.nonEmptyValues = nonEmptyValueCount(v);
+      return shape;
+    }
+  }
+  return shape;
 })();
+
+// THE SERVICE'S OWN REFUSAL SWITCH: `result.ok`, read off the response. This is
+// the gate in front of RETURNS-DATA — a capability that answered `{ok:false}`
+// with a NAMED refusal (loginGated, a challenge, a restriction wall) reached the
+// wire and returned nothing, and `classifyOutcome` refuses the data class
+// without this being `true`.
+const capabilityOk = isChat ? null : payload && typeof payload.ok === "boolean" ? payload.ok : null;
 
 const classification = classifier.classifyOutcome({
   httpStatus,
@@ -485,6 +621,8 @@ const classification = classifier.classifyOutcome({
   noResponse: httpStatus === 0,
   poolAtRequest: poolAtRequest ? { busy: poolAtRequest.busy, total: poolAtRequest.total, queued: poolAtRequest.queued } : undefined,
   page: observedPage ?? undefined,
+  capabilityOk,
+  resultShape,
 });
 
 const answerSha256_16 = createHash("sha256").update(answerText).digest("hex").slice(0, 16);
@@ -494,7 +632,14 @@ const row = {
   capability,
   class: classification.cls,
   provenance: "harness",
-  method: `${wire === "v1" ? "POST /v1/chat/completions" : isChat ? "POST /prompt" : `POST /capability/${site}`} (nonce probe, pool sampled from GET /status before the request)`,
+  // The method must describe what was ACTUALLY sent, so the words differ by
+  // surface: the chat arm sent a per-measurement nonce probe, and the capability
+  // arm sent the capability's own args. The pre-fix row said "nonce probe" on a
+  // capability row that never sent one — a method string that lies about the
+  // measurement is the same defect as a class that lies about it.
+  method: isChat
+    ? `${wire === "v1" ? "POST /v1/chat/completions" : "POST /prompt"} (nonce probe, pool sampled from GET /status before the request)`
+    : `POST /capability/${site} {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)`,
   measuredAt: new Date().toISOString(),
   httpStatus,
   answerChars: [...answerText].length,
@@ -514,17 +659,28 @@ const row = {
     (typeof status?.commit === "string" && status.commit) ||
     null,
   resultShape,
+  // The runner's own verdict, for a capability surface. `null` on a chat row
+  // because a chat surface has no `ok` field — it is not invented for one.
+  capabilityOk,
   evidence: `class derived by classifyOutcome() via ${classifierVia}: ${classification.reason}`,
   prereq: idle
     ? "none beyond a live vault session for the site"
     : "NOT IDLE — the pool was busy/queued when the request started, so this row measures the queue, not the site",
   notes:
     capability !== "chat"
-      ? "capability surface: this row is machine-checkable in SHAPE only (HTTP status plus resultShape), not in answer content — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason"
+      ? "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
       : observedPage
         ? `observedPage is the title and url the DAEMON reported after driving the site; only the constant nonce probe was ever sent to the site, so no private text can ride in it`
         : "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row",
 };
+
+// A row is a ROUND TRIP when its class is one of the two that mean "the service
+// did its job": ANSWERS (a chat surface returned a nonce-matched answer) and
+// RETURNS-DATA (a capability surface returned a well-formed result with at least
+// one record). Everything else this writes is a correct measurement of a site
+// that failed, and exits 5 so a caller can tell the two apart.
+const MEASURED_CLASSES = new Set(["ANSWERS", "RETURNS-DATA"]);
+const isMeasuredClass = (cls) => MEASURED_CLASSES.has(cls);
 
 if (dryRun) {
   console.log(
@@ -542,7 +698,7 @@ if (dryRun) {
       2,
     ),
   );
-  process.exit(row.probeNonceMatched === true && row.class === "ANSWERS" ? 0 : 5);
+  process.exit(isChat ? (row.probeNonceMatched === true && row.class === "ANSWERS" ? 0 : 5) : isMeasuredClass(row.class) ? 0 : 5);
 }
 
 if (row.probeNonceMatched === true && row.class !== "ANSWERS") {
@@ -603,21 +759,55 @@ record.generatedAt = new Date().toISOString();
 // derives from, restated here rather than imported, because this file runs
 // standalone against a deployed daemon and importing the resolver would drag
 // the whole registry into the measurement path. It is deliberately the strict
-// conjunction: provenance=harness AND a MATCHED nonce AND ANSWERS AND a 2xx AND
-// answerChars>0 AND doneReason=stable AND inside the staleness window. A row
-// missing any of those leaves its site in the gap, which is the honest
-// direction to fail in.
+// conjunction, in TWO arms:
+//
+//   CHAT      provenance=harness AND a MATCHED nonce AND ANSWERS AND a 2xx AND
+//             answerChars>0 AND doneReason=stable AND inside the staleness window.
+//   CAPABILITY provenance=harness AND RETURNS-DATA AND a 2xx AND the runner's own
+//             ok=true AND resultShape whose declared count and counted rows AGREE
+//             AND rows>=1 AND inside the staleness window.
+//
+// A row missing any clause of its arm leaves its site in the gap, which is the
+// honest direction to fail in. The capability arm is what makes a capability
+// surface MEASURED-able at all: before it, every `ok:true` result with real rows
+// derived UNCLASSIFIED and the record could only ever carry chat rows, so 26 of
+// the 33 packages were permanently unmeasurable no matter how many times the
+// harness ran.
 const windowDays = Number(record.stalenessWindowDays) || 30;
-const isMeasuredRow = (r) => {
-  if (!r || typeof r !== "object") return false;
-  if (r.provenance !== "harness" || r.probeNonceMatched !== true || r.class !== "ANSWERS") return false;
-  const st = Number(r.httpStatus);
-  if (!(st >= 200 && st < 300)) return false;
-  if (!(Number(r.answerChars) > 0)) return false;
-  if (r.doneReason !== "stable") return false;
+const inWindow = (r) => {
   if (typeof r.measuredAt !== "string") return false;
   const age = (Date.now() - Date.parse(r.measuredAt)) / 86_400_000;
   return Number.isFinite(age) && age >= 0 && age <= windowDays;
+};
+const is2xx = (r) => {
+  const st = Number(r.httpStatus);
+  return st >= 200 && st < 300;
+};
+const isMeasuredRow = (r) => {
+  if (!r || typeof r !== "object") return false;
+  if (r.provenance !== "harness") return false;
+  if (!is2xx(r)) return false;
+  if (!inWindow(r)) return false;
+  if (r.class === "ANSWERS") {
+    if (r.probeNonceMatched !== true) return false;
+    if (!(Number(r.answerChars) > 0)) return false;
+    if (r.doneReason !== "stable") return false;
+    return true;
+  }
+  if (r.class === "RETURNS-DATA") {
+    if (r.capabilityOk !== true) return false;
+    const s = r.resultShape;
+    if (!s || typeof s !== "object") return false;
+    if (typeof s.rowsPath !== "string" || !s.rowsPath.trim()) return false;
+    if (!Array.isArray(s.topLevelKeys) || s.topLevelKeys.length === 0) return false;
+    const declared = Number(s.count);
+    const counted = Number(s.rows);
+    if (!Number.isInteger(declared) || !Number.isInteger(counted)) return false;
+    if (declared !== counted) return false;
+    if (counted < 1) return false;
+    return true;
+  }
+  return false;
 };
 const measuredSiteIds = new Set(record.rows.filter(isMeasuredRow).map((r) => r.site));
 
@@ -642,4 +832,4 @@ console.error(
 );
 // 0 = a real round trip. 5 = a row recording the site's TRUE failure class: a
 // correct measurement, not a pass, and a caller must be able to tell them apart.
-process.exit(row.class === "ANSWERS" ? 0 : 5);
+process.exit(isChat ? (row.class === "ANSWERS" ? 0 : 5) : isMeasuredClass(row.class) ? 0 : 5);

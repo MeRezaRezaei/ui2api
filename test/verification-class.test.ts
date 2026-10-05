@@ -8,9 +8,11 @@ import {
   NO_ANSWER_REFUSAL_PATTERNS,
   UNMATCHED_SELECTOR_PATTERNS,
   VERIFICATION_CLASSES,
+  capabilityDataEvidence,
   challengeMarkerIn,
   classifyOutcome,
   classPrecondition,
+  emptyCapabilityResult,
   loginMarkerIn,
   noAnswerRefusalIn,
   nonAnswerTextIn,
@@ -583,3 +585,257 @@ test("the ANSWERS set did not grow — re-filing is not promoting", () => {
   assert.deepEqual(unattributed, ["v0"], `only v0 may carry the unattributed refusal, got ${unattributed.join(", ")}`);
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RETURNS-DATA — the class that makes a CAPABILITY surface measurable
+//
+// THE DEFECT. Every member above keys on a CHAT ANSWER: ANSWERS needs a
+// matched per-measurement nonce plus `answerChars>0` plus `doneReason:"stable"`,
+// and the six failure members key on a page marker or a message the driver
+// emitted. MEASURED against the live daemon on 127.0.0.1:9797, `araprat_search`
+// answers HTTP 200 with `ok:true` and 29 real rows at `data.results` — and the
+// pre-widening vocabulary derived UNCLASSIFIED for it, which is not a class, so
+// `scripts/audit/record-roundtrip.mjs` refused to write the row at all. No
+// capability surface could ever be recorded as MEASURED: a checker whose
+// vocabulary cannot express the thing it is asked to check.
+//
+// WHAT THE INPUTS BELOW ARE. The 200/ok:true/29-row shape is the real measured
+// `POST /capability/araprat` response (the row it produced is in
+// capabilities/roundtrip.json); the empty one is the real measured
+// `duckduckgo_chat_history` response; the refusal is the real shape
+// `src/capabilities/gated.ts:38 loginGatedResult` emits.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ARAPRAT_ROWS = { topLevelKeys: ["capability", "data", "latencyMs", "method", "ok"], rowsPath: "data.results", count: 29, rows: 29 };
+
+test("RETURNS-DATA: a capability surface that returned real rows is a MEASURABLE outcome, not UNCLASSIFIED forever", () => {
+  const c = classifyOutcome({ httpStatus: 200, message: "", capabilityOk: true, resultShape: ARAPRAT_ROWS, poolAtRequest: IDLE });
+  assert.equal(c.cls, "RETURNS-DATA", `expected RETURNS-DATA, got ${c.cls}: ${c.reason}`);
+  assert.match(c.reason, /29 record\(s\)/);
+  assert.match(c.reason, /data\.results/);
+  // The class says ONE thing, and the reason must not let a reader read more
+  // into it: it is about the output SHAPE, not the content, and it borrows
+  // nothing from the chat rules.
+  assert.match(c.reason, /not its content and not a chat answer/);
+});
+
+test("RETURNS-DATA: the empty result set is a MEASUREMENT OF NOTHING and stays on the classifier's refusal", () => {
+  const c = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "data", "ok"], rowsPath: "data.chats", count: 0, rows: 0 },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(c.cls, "RETURNS-DATA", "an empty result set must not be filed as data returned");
+  assert.equal(c.cls, "UNCLASSIFIED", `the empty case must be the classifier's refusal, got ${c.cls}: ${c.reason}`);
+  // The reason must NAME the decision, because this is the line: the read
+  // reached the site and the site returned no records, which is not evidence
+  // that the surface produces results.
+  assert.match(c.reason, /SUCCESSFUL MEASUREMENT OF NOTHING/);
+  assert.match(c.reason, /needs its OWN class member on purpose/);
+  assert.equal(emptyCapabilityResult({ capabilityOk: true, resultShape: { count: 0, rows: 0, rowsPath: "data.chats" } }), true);
+});
+
+test("RETURNS-DATA: a refusal that reached the wire (ok:false, login-gated) must NEVER derive the data class", () => {
+  const c = classifyOutcome({
+    httpStatus: 502,
+    // The real `loginGatedResult` error string (src/capabilities/gated.ts:38).
+    message: "login-required: araprat_comment needs an authorized captured araprat session (ui2api profile capture <url> --login first); recipe shipped, not yet executable",
+    capabilityOk: false,
+    resultShape: { topLevelKeys: ["capability", "ok", "error", "loginGated"], rowsPath: null, count: null, rows: null },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(c.cls, "RETURNS-DATA", "a named refusal was filed as data returned — the single worst outcome of this widening");
+  assert.notEqual(c.cls, "ANSWERS", "a refusal is not an answer");
+  assert.notEqual(c.cls, "UNMEASURED", "UNMEASURED means never reached; this response WAS reached and must be named, not parked");
+});
+
+test("RETURNS-DATA: the DECLARED count alone, or the two halves disagreeing, derives nothing", () => {
+  const declaredOnly = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "data", "ok"], rowsPath: "data.results", count: 29, rows: null },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(declaredOnly.cls, "RETURNS-DATA", `a runner's declared count alone bought the class (${declaredOnly.cls})`);
+
+  const disagreeing = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { topLevelKeys: ["capability", "data", "ok"], rowsPath: "data.results", count: 29, rows: 0 },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(disagreeing.cls, "RETURNS-DATA", `a self-contradicting result (count 29 over 0 rows) bought the class (${disagreeing.cls})`);
+  assert.equal(capabilityDataEvidence({ httpStatus: 200, capabilityOk: true, resultShape: { topLevelKeys: ["a"], rowsPath: "data.results", count: 29, rows: 0 } }), null);
+
+  // A payload with no keys at all is not a result, it is a refusal that forgot
+  // to say ok:false.
+  const keyless = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { topLevelKeys: [], rowsPath: "data.results", count: 3, rows: 3 },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(keyless.cls, "RETURNS-DATA", `a keyless payload bought the class (${keyless.cls})`);
+});
+
+test("RETURNS-DATA: a non-2xx capability response is not this class however good its shape", () => {
+  const c = classifyOutcome({ httpStatus: 502, message: "", capabilityOk: true, resultShape: ARAPRAT_ROWS, poolAtRequest: IDLE });
+  assert.notEqual(c.cls, "RETURNS-DATA", `a 502 with a good shape bought the class (${c.cls})`);
+});
+
+test("RETURNS-DATA: under contention it is a measurement of the QUEUE, in both directions", () => {
+  // A capability runner drives a SHARED browser out of the warm pool, so at a
+  // busy pool the page the rows were read from may not be this request's own
+  // result — the capability form of the stale-echo hazard a nonce kills on chat.
+  const c = classifyOutcome({ httpStatus: 200, message: "", capabilityOk: true, resultShape: ARAPRAT_ROWS, poolAtRequest: BUSY });
+  assert.equal(c.cls, "UNCLASSIFIED", `rows read under contention were filed as a surface property (${c.cls})`);
+  assert.match(c.reason, /measurement of the queue/);
+});
+
+test("MUTUAL EXCLUSION: the widening stole nothing that was already derivable", () => {
+  // (1) a chat answer with a matched nonce is still ANSWERS, even when the row
+  // also carries a capability shape (a harness that recorded both).
+  const both = classifyOutcome({
+    httpStatus: 200,
+    answerText: "PONG-abc",
+    message: "",
+    capabilityOk: true,
+    resultShape: ARAPRAT_ROWS,
+    poolAtRequest: IDLE,
+  });
+  assert.equal(both.cls, "ANSWERS", `the capability branch swallowed a real answer (${both.cls}): ${both.reason}`);
+
+  // (2) every pre-existing failure class still derives from its own evidence,
+  // with no capability fields anywhere in the input.
+  assert.equal(classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("grok"), page: { title: "Attention Required! | Cloudflare", url: "https://grok.com/" }, poolAtRequest: IDLE }).cls, "WALL-CHALLENGE");
+  assert.equal(classifyOutcome({ httpStatus: 200, message: V0_EVIDENCE, poolAtRequest: IDLE }).cls, "NON-ANSWER-READ");
+  assert.equal(classifyOutcome({ httpStatus: 502, message: VENICE_EVIDENCE, poolAtRequest: IDLE }).cls, "ANSWER-UNREADABLE");
+  assert.equal(classifyOutcome({ httpStatus: 502, message: `${SHIPPED_REFUSAL} v0 requires sign-in before any answer can be produced.`, poolAtRequest: IDLE }).cls, "SIGN-OUT");
+
+  // (3) a plain 200 with neither chat nor capability evidence is STILL the
+  // classifier's refusal — the widening did not become an escape hatch.
+  const plain = classifyOutcome({ httpStatus: 200, message: "HTTP 200 in 9000ms", poolAtRequest: IDLE });
+  assert.equal(plain.cls, "UNCLASSIFIED", `a 200 with no evidence of anything became a class (${plain.cls})`);
+});
+
+test("RETURNS-DATA declares a machine-checkable precondition, stricter than ANSWERS's", () => {
+  const p = classPrecondition("RETURNS-DATA");
+  for (const f of ["measuredAt", "method", "evidence", "capabilityOk", "resultShape"] as const) {
+    assert.ok(p.requiredFields.includes(f), `RETURNS-DATA must require ${f} — the gate enforces requiredFields, so an unnamed field is an ungoverned one`);
+  }
+  assert.ok(p.requiresPoolState, "RETURNS-DATA must require poolAtRequest {busy,total}");
+  assert.ok(p.requiresIdlePool, "RETURNS-DATA must require an IDLE pool — a capability reads a SHARED browser, so a busy pool is a measurement of the queue");
+  // observedPage is deliberately NOT required: `/capability` answers the runner's
+  // result, not the driver's page observation, so demanding one would make the
+  // class unreachable rather than stricter.
+  assert.ok(!p.requiredFields.includes("observedPage"), "requiring observedPage would make RETURNS-DATA unreachable on /capability");
+  // It is derived from the same fields the classifier reads, which is what makes
+  // the re-derivation check (not a name check) the thing that catches a lie.
+  assert.deepEqual(
+    [...p.requiredFields].sort(),
+    ["capabilityOk", "evidence", "measuredAt", "method", "resultShape"].sort(),
+  );
+});
+
+test("the vocabulary grew by exactly ONE member, and no existing class changed meaning", () => {
+  // ANSWERS is still the ONLY class a chat answer can derive, and it is still
+  // gated on the same three things.
+  const answers = classifyOutcome({ httpStatus: 200, answerText: "PONG", message: "", poolAtRequest: IDLE });
+  assert.equal(answers.cls, "ANSWERS");
+  assert.equal(classifyOutcome({ httpStatus: 200, answerText: "   ", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "whitespace is not an answer");
+  assert.equal(classifyOutcome({ httpStatus: 500, answerText: "PONG", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "a 5xx is never ANSWERS");
+  assert.equal(VERIFICATION_CLASSES.length, 10, `the closed set is ${VERIFICATION_CLASSES.length}: ${VERIFICATION_CLASSES.join(", ")}`);
+  assert.ok(VERIFICATION_CLASSES.includes("RETURNS-DATA"));
+  assert.deepEqual(Object.keys(CLASS_PRECONDITIONS).sort(), [...VERIFICATION_CLASSES].sort());
+});
+
+test("RETURNS-DATA arm 2: a SINGLE-RECORD result is measurable — it is a record, not a collection", () => {
+  // MEASURED against the live daemon: `araprat_video_detail` answers
+  // `{ok:true, data:{id, url, title, description, related:[…], relatedCount:n}}`
+  // — one record beside a count that describes a SECONDARY collection, so the
+  // list arm cannot fire. Under arm 1 alone this real, populated, live result
+  // derived UNCLASSIFIED, which is the defect this class exists to kill, one
+  // surface down.
+  const c = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: {
+      topLevelKeys: ["capability", "data", "latencyMs", "method", "ok"],
+      rowsPath: null,
+      count: null,
+      rows: null,
+      recordPath: "data",
+      recordKeys: ["description", "id", "related", "relatedCount", "title", "url"],
+      nonEmptyValues: 5,
+      declaredZeroCount: false,
+    },
+    poolAtRequest: IDLE,
+  });
+  assert.equal(c.cls, "RETURNS-DATA", `a populated single record did not derive the class, got ${c.cls}: ${c.reason}`);
+  assert.match(c.reason, /POPULATED RECORD at data/);
+  assert.match(c.reason, /WEAKER of this class's two evidence arms/);
+});
+
+test("RETURNS-DATA arm 2 is GUARDED: an empty shell, an empty sibling, or a declared zero count is not data", () => {
+  const base = {
+    topLevelKeys: ["capability", "data", "ok"],
+    rowsPath: null,
+    count: null,
+    rows: null,
+    recordPath: "data",
+    recordKeys: ["id", "title"],
+    nonEmptyValues: 2,
+    declaredZeroCount: false,
+  };
+  // (1) a record with no populated values is a shell, not a result.
+  const shell = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { ...base, nonEmptyValues: 0 },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(shell.cls, "RETURNS-DATA", `an empty result object bought the class (${shell.cls})`);
+
+  // (2) a record with no keys at all is not a record.
+  const keyless = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: { ...base, recordKeys: [] },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(keyless.cls, "RETURNS-DATA", `a keyless record bought the class (${keyless.cls})`);
+
+  // (3) THE LOAD-BEARING ONE. MEASURED: `duckduckgo_chat_history` answers
+  // `{ok:true, data:{count: 0, chats: [], stores:[…5…], sidebar:{…}}}` — a
+  // populated `stores` array sits right beside the empty result, so without the
+  // `declaredZeroCount` anchor the record arm would have filed a genuinely EMPTY
+  // result as data returned. That is the exact failure the empty decision exists
+  // to prevent, reached through the arm added afterwards.
+  const emptyWithPopulatedSibling = classifyOutcome({
+    httpStatus: 200,
+    message: "",
+    capabilityOk: true,
+    resultShape: {
+      topLevelKeys: ["capability", "data", "ok"],
+      rowsPath: "data.chats",
+      count: 0,
+      rows: 0,
+      recordPath: "data",
+      recordKeys: ["chats", "count", "sidebar", "stores"],
+      nonEmptyValues: 3,
+      declaredZeroCount: true,
+    },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(emptyWithPopulatedSibling.cls, "RETURNS-DATA", `a populated sibling talked an EMPTY result into the class (${emptyWithPopulatedSibling.cls})`);
+  assert.equal(emptyWithPopulatedSibling.cls, "UNCLASSIFIED");
+  assert.match(emptyWithPopulatedSibling.reason, /SUCCESSFUL MEASUREMENT OF NOTHING/);
+});
