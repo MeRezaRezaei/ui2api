@@ -279,8 +279,132 @@ export const DRIVER_ANSWER_ARM = /answer:\s*r\.answer/;
 export const WALL_GUARD =
   /doneReason\s*===\s*"restricted"|restrictions\?\.length|\.restrictions\b/;
 
-/** How far either side of the arm the guard is searched for. */
+/**
+ * How far either side of an arm the guard used to be searched for. KEPT ONLY so
+ * the mutation proof can show the falsifier: the fixed window is the defect
+ * `wallArms` replaced, and a constant nothing reads is how a rot class starts.
+ */
 export const WALL_GUARD_WINDOW = 700;
+
+/** The `{` that opens the body following the parameter list at/after `from`. */
+function bodyOpen(src: string, from: number): number {
+  const p = src.indexOf("(", from);
+  if (p < 0) return -1;
+  let depth = 0;
+  for (let i = p; i < src.length; i++) {
+    if (src[i] === "(") depth++;
+    else if (src[i] === ")") {
+      depth--;
+      // Past the parameter list — a `{` inside it (a destructured or object-
+      // typed parameter) must not be mistaken for the body.
+      if (depth === 0) return src.indexOf("{", i);
+    }
+  }
+  return -1;
+}
+
+/**
+ * Declaration shapes an arm can live inside: a class member (the shape every
+ * runner in `src/capabilities/` uses), a free `function`, and a `const` arrow.
+ * The point is COVERAGE of the constructs an arm can be attributed to — the
+ * old scan attributed it to none and fell back to a character window.
+ */
+const DECLARATION_FORMS: readonly RegExp[] = [
+  /(?:private|public|protected)\s+(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g,
+  /(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(/g,
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\s*\*?\s*\(|\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]*?)?(?:=>|\{)/g,
+];
+
+export interface EnclosingRegion {
+  /** The declaration's own name, or `(file)` when the arm is at module scope. */
+  name: string;
+  text: string;
+  /** Offset of the declaration in the source it was sliced from. */
+  at: number;
+}
+
+/**
+ * The DECLARATION (class member / function / arrow) that actually ENCLOSES the
+ * offset `at` — the same attribution discipline as `enclosingBlock` in
+ * test/test-timeout-discipline.test.ts: candidates are taken nearest-first and a
+ * candidate whose body closes BEFORE `at` is rejected, so a call is never
+ * attributed to a method that had already ended.
+ */
+export function enclosingDeclaration(src: string, at: number): EnclosingRegion {
+  let best: EnclosingRegion | null = null;
+  let bestStart = -1;
+  for (const re of DECLARATION_FORMS) {
+    for (const m of src.matchAll(re)) {
+      if (m.index >= at) continue;
+      const open = bodyOpen(src, m.index);
+      if (open < 0 || open > at) continue;
+      const body = braceBlock(src, open);
+      if (!body) continue;
+      const start = src.indexOf(body, open);
+      if (start < 0 || start + body.length <= at) continue;
+      if (m.index > bestStart) {
+        bestStart = m.index;
+        best = { name: m[1] ?? "(anonymous)", text: body, at: start };
+      }
+    }
+  }
+  // No enclosing declaration (a module-scope arm, or a snippet that has none):
+  // the whole source IS the construct, which is the same fallback
+  // test-timeout-discipline takes when a call has no binding to attribute to.
+  return best ?? { name: "(file)", text: src, at: 0 };
+}
+
+export interface WallArm {
+  /** 1-based line of the arm in the source it was scanned from. */
+  line: number;
+  /** The declaration the arm was attributed to. */
+  method: string;
+  guarded: boolean;
+}
+
+/**
+ * EVERY `answer: r.answer` arm in a source, each attributed to the declaration
+ * it lives in and judged ONLY against that declaration.
+ *
+ * WHY NOT A CHARACTER WINDOW. `DRIVER_ANSWER_ARM` was exec'd, not matched
+ * globally, so a runner with several answer arms was judged on ONE of them and
+ * the verdict was reported as if it covered the file. Two falsifiers, both run
+ * by the audit lane against the real predicate:
+ *
+ *   (a) a GUARDED `listConversations` in the same file vouched for an
+ *       UNGUARDED `chat` arm 200 chars away;
+ *   (b) guard the FIRST arm, leave a SECOND one unguarded — still green.
+ *
+ * A fixed +/-700 window cannot fix either: the guard is simply somewhere else.
+ * So attribution is STRUCTURAL, exactly as test-timeout-discipline.test.ts
+ * attributes a kill to the child it names — a verdict is borrowed only from the
+ * construct the arm belongs to, never from a neighbour's character range.
+ *
+ * The guard is searched in the enclosing declaration's body BEFORE the arm,
+ * which is both tighter than a window and directionally true: a branch that
+ * runs after the `return` cannot have guarded it.
+ */
+export function wallArms(stripped: string): WallArm[] {
+  const arms: WallArm[] = [];
+  for (const m of stripped.matchAll(new RegExp(DRIVER_ANSWER_ARM.source, "g"))) {
+    const region = enclosingDeclaration(stripped, m.index);
+    const body = region.text;
+    const before = body.slice(0, m.index - region.at);
+    arms.push({
+      line: stripped.slice(0, m.index).split("\n").length,
+      method: region.name,
+      guarded: WALL_GUARD.test(before),
+    });
+  }
+  return arms;
+}
+
+/** The unguarded arms in one source, each named for the failure message. */
+export function unguardedWallArms(stripped: string, label = "src"): string[] {
+  return wallArms(stripped)
+    .filter((a) => !a.guarded)
+    .map((a) => `${label}:${a.line} (in ${a.method}()) forwards \`r.answer\` in a literal ok:true with no doneReason branch`);
+}
 
 /**
  * THE REAL PREDICATE — "this runner serves a restriction wall as a success".
@@ -294,15 +418,17 @@ export const WALL_GUARD_WINDOW = 700;
  * drive THIS function, so weakening it here is a loud failure rather than a
  * silently blind gate. (The same pattern as `fabricatedLiteralAnswers` below.)
  *
+ * TOTAL, and it is total because it is a projection of `wallArms`: EVERY arm in
+ * the source is judged, each against its own enclosing declaration, and the
+ * runner is reported when AT LEAST ONE arm is unguarded. The pre-fix version
+ * judged only the first arm found and answered for the whole file.
+ *
  * Expects a COMMENT-BLANNED source (`code(...)`), exactly as the corpus scan
  * feeds it — a mention of `restrictions` inside a comment must not pass for a
  * guard.
  */
 export function servesWallAsSuccess(stripped: string): boolean {
-  const m = DRIVER_ANSWER_ARM.exec(stripped);
-  if (!m) return false;
-  const around = stripped.slice(Math.max(0, m.index - WALL_GUARD_WINDOW), m.index + WALL_GUARD_WINDOW);
-  return !WALL_GUARD.test(around);
+  return unguardedWallArms(stripped).length > 0;
 }
 
 /**
@@ -438,14 +564,18 @@ d("GOAL 148: no capability runner may report ok:true for an unobserved payload",
     }
 
     for (const site of unguarded) {
+      // Every offending arm is NAMED in the message, not just the site — the
+      // widened scan can report more than one arm in a runner, and a message
+      // that printed one would hide the rest.
+      const arms = unguardedWallArms(code(read(join(RUNNER_DIR, `${site}.ts`))), `src/capabilities/${site}.ts`);
       assert.ok(
         KNOWN_WALL_ARMS.includes(site),
-        `NEW chat arm serving a wall as a success: src/capabilities/${site}.ts forwards \`r.answer\` in a ` +
-          `literal ok:true with no doneReason branch. ChatDriver returns {answer:"", doneReason:"restricted", ` +
-          `restrictions:[...]} on a wall (src/prompt/driver.ts:570-581) rather than throwing, so this arm ` +
-          `reports a paywall/limit/login block as {ok:true, data:{answer:""}} AND discards the restrictions ` +
-          `evidence. Branch on doneReason === "restricted" (as src/prompt/http.ts:1103 does for /prompt) and ` +
-          `return a named ok:false carrying the named hits.`
+        `NEW chat arm serving a wall as a success: ${arms.join("; ") || "(no arm located — the derivation and this report disagree)"}. ` +
+          `ChatDriver returns ` +
+          `{answer:"", doneReason:"restricted", restrictions:[...]} on a wall (src/prompt/driver.ts:570-581) ` +
+          `rather than throwing, so this arm reports a paywall/limit/login block as {ok:true, ` +
+          `data:{answer:""}} AND discards the restrictions evidence. Branch on doneReason === "restricted" ` +
+          `(as src/prompt/http.ts:1103 does for /prompt) and return a named ok:false carrying the named hits.`
       );
     }
     for (const site of KNOWN_WALL_ARMS) {
@@ -514,6 +644,74 @@ d("GOAL 148: no capability runner may report ok:true for an unobserved payload",
       servesWallAsSuccess(code(guardedInProse)),
       true,
       "mutation proof: a guard mentioned only in a comment must not pass for a guard"
+    );
+
+    /* ---- FALSIFIER (a): a NEIGHBOUR's guard 200 chars away vouched ----
+     * Both shapes below are GREEN under the pre-fix first-arm + +/-700-window
+     * predicate and RED under this one. Each one is driven through THIS
+     * function — the real corpus predicate, not a copy — so a fix that made
+     * them red without making the scan total would still fail here. */
+    const neighbourVouches = `
+      private async listConversations(): Promise<X> {
+        const r = await driver.ask(p);
+        if (r.doneReason === "restricted") return { capability: "x_list_conversations", ok: false, data: undefined, restrictions: r.restrictions };
+        return { capability: "x_list_conversations", ok: true, data: { answer: r.answer } };
+      }
+      private async chat(args: Record<string, unknown>): Promise<Y> {
+        const r = await driver.ask(p);
+        return { capability: "x_chat", ok: true, data: { answer: r.answer, chunkCount: r.chunkCount } };
+      }`;
+    assert.equal(
+      servesWallAsSuccess(code(neighbourVouches)),
+      true,
+      "falsifier (a): a guarded `listConversations` in the same file must NOT vouch for an unguarded `chat` arm " +
+        "200 chars away — the guard must be attributed to the declaration the arm lives in, not to a character range"
+    );
+
+    /* ---- FALSIFIER (b): the FIRST arm guarded, a LATER arm unguarded ---- */
+    const secondArmUnguarded = `
+      private async chat(args: Record<string, unknown>): Promise<Y> {
+        const r = await driver.ask(p);
+        if (r.doneReason === "restricted") return { capability: "x_chat", ok: false, data: undefined, restrictions: r.restrictions };
+        return { capability: "x_chat", ok: true, data: { answer: r.answer, chunkCount: r.chunkCount } };
+      }
+      private async chatFollowUp(args: Record<string, unknown>): Promise<Y> {
+        const r = await driver.ask(p);
+        return { capability: "x_chat_followup", ok: true, data: { answer: r.answer, chunkCount: r.chunkCount } };
+      }`;
+    assert.equal(
+      servesWallAsSuccess(code(secondArmUnguarded)),
+      true,
+      "falsifier (b): guarding the FIRST answer arm must not report the FILE safe — every arm in the runner is judged"
+    );
+
+    // And the same two shapes with the defect REMOVED must read clean, or the
+    // region attribution is simply reporting everything.
+    const bothGuarded = secondArmUnguarded.replace(
+      `        return { capability: "x_chat_followup", ok: true,`,
+      `        if (r.doneReason === "restricted") return { capability: "x_chat_followup", ok: false, data: undefined, restrictions: r.restrictions };\n        return { capability: "x_chat_followup", ok: true,`
+    );
+    assert.equal(
+      servesWallAsSuccess(code(bothGuarded)),
+      false,
+      "region attribution must clear the finding when the second arm is guarded too — a rule that reports every file is not a rule"
+    );
+    assert.equal(
+      servesWallAsSuccess(code(neighbourVouches.replace(`        return { capability: "x_chat", ok: true,`, `        if (r.doneReason === "restricted") return { capability: "x_chat", ok: false, data: undefined, restrictions: r.restrictions };\n        return { capability: "x_chat", ok: true,`))),
+      false,
+      "region attribution must clear the finding when the unguarded neighbour is guarded — a rule that reports every file is not a rule"
+    );
+
+    // The attribution itself is asserted, not assumed: a guard belongs to the
+    // declaration the arm lives in, so the names must come back distinct.
+    const arms = wallArms(code(neighbourVouches));
+    assert.deepEqual(
+      arms.map((a) => [a.method, a.guarded]),
+      [
+        ["listConversations", true],
+        ["chat", false],
+      ],
+      "every arm must be attributed to its own declaration and judged on its own — one arm borrowing a neighbour's verdict is the defect"
     );
   });
 
