@@ -1,6 +1,7 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { measureEmitted, parseDocTable, contractGaps } from "./helpers/error-contract-measure.js";
 
 /**
  * GOAL 91: the daemon's NAMED error codes are a consumer contract, so the
@@ -12,82 +13,18 @@ import { readFileSync } from "node:fs";
  *
  * Proven able to fail: the last block below runs the same checker against a
  * scratch doc that DROPS a code, and asserts it goes red.
+ *
+ * THE MEASUREMENT LIVES IN `test/helpers/error-contract-measure.ts`, and
+ * `test/production-readiness-gate.test.ts` criterion 3.3 calls the SAME
+ * functions. It is a helper rather than an import of this file because importing
+ * a `.test.ts` under `node --test` RE-REGISTERS its tests inside the importing
+ * run; and it is shared rather than duplicated because the defect being fixed
+ * was exactly that the two files could disagree — this one ran a real scan
+ * while the readiness gate only asserted the scanner's NAME appeared here, so
+ * emptying the scanner left the error contract unmeasured and every gate green.
  */
 
-const HTTP = readFileSync("src/prompt/http.ts", "utf8");
-const OPENAI = readFileSync("src/prompt/openai.ts", "utf8");
 const README = readFileSync("README.md", "utf8");
-
-type Emitted = Map<string, number>;
-
-/** Codes carried inside an `{ error: { ... code: "x" } }` envelope, with the status of its send(). */
-function envelopeCodes(src: string, into: Emitted): void {
-  const re = /error:\s*\{[\s\S]{0,400}?code:\s*"([a-z_]+)"/g;
-  for (const m of src.matchAll(re)) {
-    const before = src.slice(Math.max(0, m.index - 600), m.index);
-    // the status literal of the enclosing send(res, NNN, {...}) / sendJson(res, NNN, ...)
-    const statuses = [...before.matchAll(/(?:send|sendJson)\(\s*(?:res|w)\s*,\s*(\d{3})/g)];
-    const status = statuses.length ? Number(statuses[statuses.length - 1]![1]) : 0;
-    if (status) into.set(m[1]!, status);
-  }
-}
-
-/**
- * GOAL 104: a typed `HttpClientError` carries its code dynamically, so the
- * envelope scan above cannot see it. These codes are EMITTED, and they are
- * measured from the real constructor call sites — a precise pattern
- * (`new HttpClientError(<status>, "<code>"`), not a hand-kept list, so a code
- * that is documented but never thrown still fails the bidirectional check.
- */
-function typedClientErrorCodes(src: string, into: Emitted): void {
-  for (const m of src.matchAll(/new HttpClientError\(\s*(\d{3})\s*,\s*"([a-z_]+)"/g)) {
-    into.set(m[2]!, Number(m[1]));
-  }
-}
-
-/** poolRefusal answers one code per pool refusal, all under the status its own doc comment states. */
-function poolRefusalCodes(src: string, into: Emitted): void {
-  const start = src.indexOf("function poolRefusal");
-  if (start < 0) return;
-  const body = src.slice(start, src.indexOf("\n}", start));
-  // RegExp.prototype.exec takes ONE argument; a second `{ timeout }` arg is
-  // silently ignored by V8 and was never a regex API. Removing it is provably
-  // behaviour-preserving (measured: /a/.exec("a", {timeout:5}) -> ["a"]).
-  const status = Number(/Answer (\d{3})/.exec(src.slice(Math.max(0, start - 500), start))?.[1] ?? 0);
-  for (const m of body.matchAll(/return \{ code: "([a-z_]+)" \}/g)) into.set(m[1]!, status);
-}
-
-/** Everything the daemon actually emits, measured. */
-export function measureEmitted(): Emitted {
-  const out: Emitted = new Map();
-  envelopeCodes(HTTP, out);
-  envelopeCodes(OPENAI, out);
-  poolRefusalCodes(HTTP, out);
-  typedClientErrorCodes(HTTP, out);
-  // the last-resort net's named generic 500
-  if (/code:\s*"internal_error"/.test(HTTP)) out.set("internal_error", 500);
-  return out;
-}
-
-/** The doc's table rows: status + code, as shipped. */
-export function parseDocTable(doc: string): Emitted {
-  const out: Emitted = new Map();
-  for (const m of doc.matchAll(/^\|\s*(\d{3})\s*\|\s*`([a-z_]+)`\s*\|/gm)) out.set(m[2]!, Number(m[1]));
-  return out;
-}
-
-/** The single source of truth for "doc and code agree", shared by the pin and its negative. */
-export function contractGaps(emitted: Emitted, documented: Emitted): string[] {
-  const gaps: string[] = [];
-  for (const [code, status] of emitted) {
-    if (!documented.has(code)) gaps.push(`${code} (${status}) is emitted by the daemon but documented nowhere`);
-    else if (documented.get(code) !== status) gaps.push(`${code}: code emits ${status}, doc says ${documented.get(code)}`);
-  }
-  for (const [code, status] of documented) {
-    if (!emitted.has(code)) gaps.push(`${code} (${status}) is documented but the daemon never emits it`);
-  }
-  return gaps;
-}
 
 d("GOAL 91: the daemon's named error contract is documented and machine-pinned", () => {
   t("the emitted set is measured from source and the shipped doc agrees both ways", () => {

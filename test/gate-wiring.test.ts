@@ -899,8 +899,15 @@ test("R9b the unit browser guard FAILS on a missing browser — it must never SK
   // `skipped 3, fail 0`, a green box, and no record that the browser half of the
   // wigolo engine went untested. Read from the real module, not a copy.
   const src = readFileSync(join(ROOT, "test", "helpers", "browser-launchability.ts"), "utf8");
-  const fn = src.slice(src.indexOf("export async function guardBrowser"));
-  assert.ok(fn.length > 0, "guardBrowser is gone from the helper — the unit lane has no launchability guard");
+  const at = src.indexOf("export async function guardBrowser");
+  // `indexOf` returns -1 when absent, and `slice(-1)` is the LAST CHARACTER —
+  // so the unguarded form yielded a 1-character `fn` on which `fn.length > 0`
+  // PASSES, and only a later regex happened to catch it. That made "the guard is
+  // gone" a silent green: if the throw's wording below ever shifts, deleting
+  // guardBrowser stops being detected at all. The absence must be its own
+  // assertion, stated before anything is sliced.
+  assert.ok(at >= 0, "guardBrowser is gone from the helper — the unit lane has no launchability guard");
+  const fn = src.slice(at);
 
   // A skip is only acceptable where the SUBJECT is absent (no wigolo checkout),
   // never where the subject's browser is dead. The helper itself must not be able

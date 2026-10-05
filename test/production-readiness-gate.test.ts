@@ -23,7 +23,10 @@ import { execFileSync } from "node:child_process";
  * downgrading a `fail` to a `pass` without the underlying fix, is detectable.
  */
 
+import { measureEmitted, parseDocTable, contractGaps } from "./helpers/error-contract-measure.js";
+
 const READY = readFileSync(".brain/PRODUCTION_READINESS.md", "utf8");
+const README = readFileSync("README.md", "utf8");
 const HTTP = readFileSync("src/prompt/http.ts", "utf8");
 const INSTALL = readFileSync("src/registry/install.ts", "utf8");
 const DRIVER = readFileSync("src/prompt/driver.ts", "utf8");
@@ -87,10 +90,92 @@ const MEASURED: Record<string, () => boolean> = {
     const m = /KNOWN_UNFIXED[^=]*=\s*\[([^\]]*)\]/.exec(s);
     return !!m && m[1]!.trim() === "";
   },
-  "3.2": () => /--test-timeout=\d+/.test(PKG.scripts["test:unit"] ?? ""),
-  "3.3": () => /typedClientErrorCodes/.test(readFileSync("test/error-contract.test.ts", "utf8")),
+  // 3.2 — the BOUND, not the flag's presence. The previous predicate was
+  // `/--test-timeout=\d+/`, which matched `120000` (the working bound) AND
+  // `999999999` (unbounded, so a hang is never surfaced) AND `1` (so tight it
+  // kills every test). A gate that cannot tell a working bound from both a hang
+  // and an instant kill is not a gate. Falsifiers, both quoted in the lane
+  // report: under the old predicate, `--test-timeout=999999999` and
+  // `--test-timeout=1` each left this file 12/12 green.
+  //
+  // THE WINDOW IS NOT RE-TYPED HERE. It is DERIVED from the file that owns the
+  // number — `test/test-timeout-discipline.test.ts`, whose own criterion is
+  // literally "the suite declares an explicit per-test timeout" and which
+  // asserts `ms >= 30_000` and `ms <= 180_000`. Re-typing `120000` would be the
+  // same defect one level down: a number copied into a second gate, free to
+  // drift. So the bounds are read out of that file's own assertions, and a
+  // window that cannot be derived makes the criterion FAIL rather than pass
+  // vacuously.
+  "3.2": () => {
+    const script: string = PKG.scripts["test:unit"] ?? "";
+    const ms = Number(/--test-timeout=(\d+)/.exec(script)?.[1]);
+    if (!Number.isFinite(ms)) return false;
+    const owner = readFileSync("test/test-timeout-discipline.test.ts", "utf8");
+    const lo = Number(/assert\.ok\(\s*ms\s*>=\s*([\d_]+)/.exec(owner)?.[1]?.replace(/_/g, ""));
+    const hi = Number(/assert\.ok\(\s*ms\s*<=\s*([\d_]+)/.exec(owner)?.[1]?.replace(/_/g, ""));
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false; // the window is un-derivable => NOT a pass
+    return ms >= lo && ms <= hi;
+  },
+  // 3.3 — the MEASUREMENT, not the name of the measurer. The previous
+  // predicate was `/typedClientErrorCodes/.test(readFileSync("test/error-contract.test.ts"))`,
+  // which asserts that an IDENTIFIER appears in a file. Falsifier, quoted: with
+  // `typedClientErrorCodes`'s body emptied (its `new HttpClientError` scan
+  // deleted), that predicate stayed `true` and this file stayed 12/12 green with
+  // the real error contract UNMEASURED — which is precisely the failure this
+  // whole gate exists to prevent, committed inside the gate.
+  //
+  // So this criterion now RUNS the measurement. Both gates call the ONE
+  // implementation in `test/helpers/error-contract-measure.ts` (extracted, rather
+  // than importing `test/error-contract.test.ts`, because importing a `.test.ts`
+  // under `node --test` RE-REGISTERS its tests inside the importing run — the
+  // hazard `test/test-timeout-discipline.test.ts:245-250` already records). One
+  // implementation, so the readiness gate and the contract gate CANNOT disagree.
+  "3.3": () => {
+    const emitted = measureEmitted();
+    // non-vacuity: a measurement that finds nothing is not a pass, and neither is
+    // a small one — the envelope scan alone could satisfy a low floor.
+    if (emitted.size < 5) return false;
+    // and the codes the criterion is actually about: the TYPED constructor
+    // sites, which the envelope scan structurally cannot see.
+    const typed = [...emitted].filter(([c]) => !/^(internal_error|pool_|request_timeout|not_found|content_filter|rate_)/.test(c));
+    if (typed.length === 0) return false;
+    return contractGaps(emitted, parseDocTable(README)).length === 0;
+  },
   "3.4": () => existsSync("test/env-knob-truth.test.ts"),
-  "3.5": () => true, // tsc is measured by the operator's verification step; asserted structurally here
+  // 3.5 — HONESTLY RELABELLED, not measured.
+  //
+  // The previous predicate was literally `() => true`, under a criterion whose
+  // stored row reads "`npx tsc --noEmit` is clean | pass | measured on every flip".
+  // A label that says "verified" over a body that returns a constant is a
+  // fabricated gate — the exact disease this file's own header is about.
+  //
+  // WHICH, AND WHY: I RELABELLED rather than invoking `tsc`. Running a
+  // TypeScript program-graph build inside a `node:test` case is a real cost
+  // (tens of seconds, and it would re-enter the whole compiler on every
+  // `test:unit` run) for a verdict the project ALREADY computes twice per CI
+  // run — `npm run build` (tsconfig.json, src/) and `npm run typecheck`
+  // (tsconfig.test.json, the TEST tree that `build` excludes, GOAL 147). A
+  // criterion that claims to be measured and is not is worse than one that says
+  // "CI owns this", so it now says CI owns it AND PINS THAT HAND-OFF: this is a
+  // real predicate over the repository, not a constant. Delete
+  // `npm run typecheck` from either CI config, or stop compiling the test tree,
+  // and this criterion goes red — which is the defect class it can actually
+  // detect. What it does NOT claim is that `tsc`'s exit code was observed here;
+  // it did not, and nothing in this file says it was.
+  "3.5": () => {
+    // the test tree must be a compile target that EXISTS — otherwise
+    // `npm run typecheck` compiles src/ twice and the test tree is unchecked.
+    if (!existsSync("tsconfig.test.json")) return false;
+    if (!/test/.test(readFileSync("tsconfig.test.json", "utf8"))) return false;
+    // and BOTH CI lanes must actually invoke it (GitLab is the CI; the GitHub
+    // workflow is the redundant lane, and both are pinned by
+    // test/gate-wiring.test.ts's CI-config pair).
+    for (const ci of [".gitlab-ci.yml", ".github/workflows/ci.yml"]) {
+      if (!existsSync(ci)) return false;
+      if (!/npm run typecheck/.test(readFileSync(ci, "utf8"))) return false;
+    }
+    return true;
+  },
   // --- 4. truth of external claims ---
   // 4.1 and 4.2 are NOT measured as boolean pass — they are measured as
   // "does the recorded `fail` still describe reality?", so they are handled
