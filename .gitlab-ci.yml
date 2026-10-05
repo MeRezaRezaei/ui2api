@@ -682,10 +682,21 @@ public_mirror:
       # token ever appearing in argv (visible in /proc) or in a URL.
       if timeout 600 git -c credential.helper= clone -q --mirror \
            "https://github.com/$GITHUB_REPO.git" "$V/probe" 2>/dev/null; then
+        # Count with `wc -l`, never `grep -c`. MEASURED BUG: `grep -c` prints 0 AND
+        # exits 1 when nothing matches, so `... | grep -c '^\.brain/' || echo 0`
+        # produced the two-line string "0\n0". String-comparing that against "0"
+        # is false, and the check FAILED a repo that was provably clean — which is
+        # the one failure mode this whole check exists to avoid: a verification that
+        # cries wolf on the good case is switched off, and then it protects nothing.
         PBRAIN=$(timeout 120 git -C "$V/probe" log --all --oneline -- ".brain" 2>/dev/null | wc -l | tr -d ' ')
-        PTIP=$(timeout 60 git -C "$V/probe" ls-tree -r --name-only HEAD 2>/dev/null | grep -c '^\.brain/' || echo 0)
+        PTIP=$(timeout 60 git -C "$V/probe" ls-tree -r --name-only HEAD 2>/dev/null | grep '^\.brain/' | wc -l | tr -d ' ')
         echo "   published: brain-touching commits=$PBRAIN, .brain at tip=$PTIP"
-        if [ "${PBRAIN:-1}" != "0" ] || [ "${PTIP:-1}" != "0" ]; then
+        # Coerce to a digit before comparing. `wc -l` on empty input gives an
+        # empty string, and `[ "" -ne 0 ]` is an error rather than a verdict — a
+        # check that cannot answer must not be able to answer "fine".
+        case "$PBRAIN" in ''|*[!0-9]*) PBRAIN=1;; esac
+        case "$PTIP"   in ''|*[!0-9]*) PTIP=1;;   esac
+        if [ "$PBRAIN" -ne 0 ] || [ "$PTIP" -ne 0 ]; then
           echo "MIRROR-FAIL: the PUBLISHED repo carries brain material ($PBRAIN commits, $PTIP files at tip)."
           echo "            A public repo's history cannot be un-published. The only fixes are"
           echo "            DELETE AND RECREATE the public repo from a clean export, or rotate"
