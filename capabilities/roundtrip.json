@@ -4,7 +4,7 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T16:58:03.242Z",
+  "generatedAt": "2026-10-05T20:56:13.336Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
@@ -319,6 +319,48 @@
       "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool, no page reported, and the service's own message is its named composer refusal (\"deepseek did not present a usable prompt input on its chat page this time — the site may have changed its layout, or it may be showing a sign-in or consent wall. Retry; if it repeats, pick another model id from GET /v1/models.\") — the page never presented a usable prompt input. The sentence LISTS its candidate causes (the site changed its layout, or it is showing a sign-in or consent wall) and asserts NEITHER, and with no page reported a sign-in surface and an anti-bot wall were not ruled out either, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the selectors are stale\", not \"log in\", and not \"the site is challenging us\". What IS established is that the surface did not work at measurement time, which is a real measured outcome and CONTRADICTS a published `verified` claim rather than qualifying it.",
       "prereq": "none beyond a live vault session for the site",
       "notes": "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row"
+    },
+    {
+      "site": "youtube",
+      "capability": "youtube_search",
+      "class": "RETURNS-DATA",
+      "provenance": "harness",
+      "method": "POST /capability/youtube {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T20:56:13.335Z",
+      "httpStatus": 200,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 3161,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 0,
+        "queued": 0
+      },
+      "daemonCommit": "ca7d62cdc189bf9406b7f5e4bc9ef5d029ed5245",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "method",
+          "note",
+          "ok",
+          "scaffold"
+        ],
+        "rowsPath": "data.results",
+        "count": 10,
+        "rows": 10,
+        "recordPath": null,
+        "recordKeys": null,
+        "nonEmptyValues": null,
+        "declaredZeroCount": false
+      },
+      "capabilityOk": true,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (6 top-level keys) whose collection at data.results holds 10 record(s), with the runner's declared count=10 agreeing with the counted rows. This is a CLAIM ABOUT THE SURFACE'S OUTPUT SHAPE, not its content and not a chat answer: a capability returns JSON, so no nonce applies, and this class says exactly one thing — the site returned real data over the wire.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
     }
   ],
   "knownGaps": {
@@ -326,8 +368,7 @@
     "sites": [
       "deepseek",
       "kimi",
-      "tencent-aistudio",
-      "youtube"
+      "tencent-aistudio"
     ]
   }
 }
