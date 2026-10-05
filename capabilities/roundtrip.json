@@ -4,7 +4,7 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T15:13:01.117Z",
+  "generatedAt": "2026-10-05T15:36:00.953Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
@@ -241,6 +241,58 @@
       "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (6 top-level keys) carrying a POPULATED RECORD at data, with the runner declaring no count of zero anywhere (so this is not an empty result). This is a single-record result rather than a counted collection, and it is the WEAKER of this class's two evidence arms: it says the surface returned a non-empty result object, not how many records that object holds. Still a CLAIM ABOUT OUTPUT SHAPE, never about content, and never a chat answer — a capability returns JSON, so no nonce applies.",
       "prereq": "none beyond a live vault session for the site",
       "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
+    },
+    {
+      "site": "kimi",
+      "capability": "chat",
+      "class": "UNATTRIBUTED-NO-ANSWER",
+      "provenance": "harness",
+      "method": "POST /v1/chat/completions (nonce probe, pool sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T15:33:37.986Z",
+      "httpStatus": 502,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": false,
+      "doneReason": null,
+      "elapsedMs": 67513,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 1,
+        "queued": 0
+      },
+      "daemonCommit": "40f69661eb7481425e07b585ba353fe7ee8f88e9",
+      "resultShape": null,
+      "capabilityOk": null,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool, no page reported, and the service's own message is its named no-answer refusal (did not return an answer(?: within (?:\\d+)ms)?) — the refusal LISTS its candidate causes (busy, rate-limiting, sign-in or consent wall) and asserts NONE of them, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the site is rate-limited\", not \"log in\", and not contention. The action is to re-measure with a discriminator that separates the candidates the service itself named",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row"
+    },
+    {
+      "site": "tencent-aistudio",
+      "capability": "chat",
+      "class": "UNATTRIBUTED-NO-ANSWER",
+      "provenance": "harness",
+      "method": "POST /v1/chat/completions (nonce probe, pool sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T15:36:00.952Z",
+      "httpStatus": 502,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": false,
+      "doneReason": null,
+      "elapsedMs": 76164,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 3,
+        "queued": 0
+      },
+      "daemonCommit": "40f69661eb7481425e07b585ba353fe7ee8f88e9",
+      "resultShape": null,
+      "capabilityOk": null,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool, no page reported, and the service's own message is its named no-answer refusal (did not return an answer(?: within (?:\\d+)ms)?) — the refusal LISTS its candidate causes (busy, rate-limiting, sign-in or consent wall) and asserts NONE of them, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the site is rate-limited\", not \"log in\", and not contention. The action is to re-measure with a discriminator that separates the candidates the service itself named",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row"
     }
   ],
   "knownGaps": {
