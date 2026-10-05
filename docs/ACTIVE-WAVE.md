@@ -467,31 +467,88 @@ tencent-aistudio, youtube — and **all four are one reproducible daemon fault**
 roughly twenty commits. `AGENTS.md` names that exact lost-direction symptom and its remedy. That
 is the next lane, not a closed item.
 
+### ROUND N+194i — three real defects the measurement exposed, one of them invisible for years (2026-10-05)
+
+Measuring the four unmeasured sites turned an opaque failure into three named bugs. **The lane
+disproved my own hypothesis** — I told it the daemon was stale; it established the daemon was
+`999632e`, **126 commits behind HEAD**, rebuilt and redeployed it, and the fault **survived**. My
+diagnosis was wrong and the lane said so.
+
+**What was actually wrong — one fault, two answers, from the same daemon at the same commit:**
+
+| request | answer |
+| --- | --- |
+| `POST /prompt {site: kimi}` | **500** `{"code":"internal_error","message":"internal error"}` (63.7s) |
+| `POST /v1/chat/completions {model: kimi}` | **502** `{"code":"ui2api_driver_error","message":"kimi did not return an answer within 60000ms — …"}` (67.0s) |
+
+The daemon's own journal for the first already said the truth: `no answer appeared on kimi within
+60000ms. This site requires sign-in…`. So the cause was known, named and correct — and `/prompt`
+**erased it** into an anonymous 500, sending a capable integrator hunting a server fault when the
+truth is a login-gated site. `0169578`/`ca7d62c` introduced a typed `DriverRefusal` thrown by all
+seven named readback verdicts, and `/prompt` now answers `/v1`'s exact code through the imported
+sanitiser. **An unknown fault is still an anonymous 500**, caller mistakes are still 4xx, and the
+live body was checked for paths, `node_modules`, stack frames, `.ts:` references and Playwright
+diagnostics — clean, with the single `/v1/models` token deepEqual-pinned so a path cannot hide
+beside it. The armed `no-internal-error-echo` gate stayed 35/35: the previous lane projected the
+caught value and hit it, this one **classifies then projects**, which is the idiom that gate's own
+doc sanctions.
+
+**`youtube_search` could never navigate — and `AGENTS.md` publishes it as VERIFIED with live
+proof.** `capabilities/youtube/profile.json` pins the bare host `youtube.com`; the runner navigates
+`www.youtube.com`; `ssrf.ts:8-15` requires **exact host equality**. Live symptom, named by the
+guard itself: `SSRF guard: refusing to navigate … origin pinning serves only youtube.com`.
+
+**The lane ruled out the fix I suggested — by measurement, not taste.** I proposed repointing the
+profile url. It established that the url is not a label but the **vault key**: `resolveCapabilityAccount`
+(`http.ts:957`) and the registry rollup (`registry.ts:1359`) both derive `data/sessions/<host>/<email>/`
+from it, and the box holds one real youtube account under `youtube.com`. Repointing to `www` would
+have **silently emptied the account lookup**. Instead `7e3e3a6` ships
+`sameOriginAllowingWwwSibling()` — opt-in, separate from `sameOrigin()`, backed by a frozen literal
+table naming **exactly one host pair**, with no existing call site changed. Eleven off-host variants
+still refused, including `m.youtube.com`, `evil.www.youtube.com`, trailing-dot hosts and `:8443`.
+**Live after: `youtube_search` returned 8 real Persian results** — verified by me directly.
+
+**And a ninth instance of the class, a regex character class.** `test/helpers/error-contract-measure.ts:63`
+harvests the served code vocabulary with `/return \{ code: "([a-z_]+)" \}/g` — **no digit**, so it
+cannot match `ui2api_driver_error`, the very code `/prompt` was just changed to answer. The
+error-contract gate was blind to it **on both routes**. I verified this in one command before
+dispatching. Being worked.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
 order, all re-confirmed still real:
 
-1. **The four unmeasured sites** (deepseek, kimi, tencent-aistudio, youtube) — one stale-daemon
-   fault, being worked; see round N+194h.
+1. **The error-contract scanner's blind code** — `([a-z_]+)` cannot see `ui2api_driver_error`; being
+   worked.
 2. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
    (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
    half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
    reporting it, not fixing it, and not committing it.
-3. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten, and
-   the new one has no row in that table. Unpinned doc, found by `4cc0df0` and left as out of scope.
-4. `src/prompt/pool.ts` — two consequences of `restartBrowser()`, both found by the lane that
-   closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
-   unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
-   and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
-5. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
+3. **A capability fault is undiagnosable in production**: `capabilityFailure` logs its cause only
+   under `UI2API_DEBUG=1`, which the shipped systemd unit never sets — so a runner fault leaves no
+   trace on the box that has it. Found by `338393b`.
+4. `deepseek` measures an honest 502 `COMPOSER-DRIFT`, but the classifier has **no member for that
+   sentence**, so it derives `UNCLASSIFIED` and the seam refuses to write it. A real outcome the
+   vocabulary cannot express — the ninth instance of the class, in the classifier rather than a regex.
+5. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten, and
+   `RETURNS-DATA` has no row in that table. Unpinned doc.
+6. `src/prompt/pool.ts` — a **wedged** busy dropped worker is unreachable by `reclaimWedgedWorkers`
+   (`:1183` filters `this.workers`) so it never self-cleans; and `/status` still reports worker count
+   only, so even a bounded orphan is undetectable there.
+7. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
    (2026-09-29/30) that **disagree with their verified receipts**. Importing them would demote
-   three more sites — out of scope, and a real honesty question nobody has answered yet.
-6. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
-   names (`hub-publish-host-gate`, `plugin-wigolo-fabricated-success`, `pool-sweep-probe-concurrency`,
-   `readback-overhead-gate`) are **UNTRACKED**. Registering an untracked file is the *opposite*
-   direction of the rule and the gate correctly refuses it, so this red clears when that workstream
-   commits its files, and not before. **Not mine to force.**
+   three more sites — a real honesty question nobody has answered yet.
+8. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
+   names are **UNTRACKED**. Registering an untracked file is the *opposite* direction of the rule
+   and the gate correctly refuses it, so this red clears when that workstream commits, not before.
+   **Not mine to force.**
+
+**One operational defect this round produced and must not recur:** `deploy.sh`'s
+`--exclude 'node_modules/'` does not match a **symlink**, so an rsync `--delete` gutted
+`/opt/ui2api/node_modules`. The deploy aborted under `set -e` before any restart and the re-run's
+`npm ci` restored it — no outage, but it is a real trap in a deploy script. The fix is
+`--exclude 'node_modules'`.
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
