@@ -10,6 +10,7 @@ import {
   readRoundTripRecord,
   measuredRoundTripFor,
   roundTripProbeAdvice,
+  defaultChatSurface,
 } from "../src/prompt/registry.js";
 import { classifyOutcome, composerRefusalMatcher, controlAbsentClauses, VERIFICATION_CLASSES, type VerificationClass } from "../src/prompt/verification-class.js";
 import { NO_ANSWER_REFUSAL_CLAUSE } from "../src/prompt/error-redaction.js";
@@ -228,9 +229,32 @@ function remediationFor(id: string): string {
   );
 }
 
-/** The advice as the reader sees it, for a site — the same string the gap
- *  message embeds, so the assertion below reads what is actually printed. */
-const adviceText = (id: string): string => remediationFor(id);
+/** Every `--capability X` the REMEDY A READER RECEIVES names, in order — read
+ *  through `remedyFor`, the same function the failure message is built from, so
+ *  no path can print advice that bypasses these pins. */
+function remedyCapabilities(id: string): string[] {
+  return [...remedyFor(id).matchAll(/--capability (\S+)/g)].map((m) => m[1]!);
+}
+
+/** ONE function builds the remedy, so a pin can read the string a reader
+ *  actually receives. Measured, why this exists: the first version of these pins
+ *  called `roundTripProbeAdvice()` directly, and when the hardcoded
+ *  `--capability chat` string was put back into the message they STILL PASSED —
+ *  a pin on the derivation is worth nothing if the printed message can bypass
+ *  it. This is the only path from a verdict to the advice a reader is given. */
+function remedyFor(id: string): string {
+  const v = measuredRoundTripFor(id);
+  if (v.contradicted) {
+    return `A round trip WAS measured for \`${id}\` and it FAILED (${String(v.failureClass)}), which CONTRADICTS the published claim rather than qualifying it — ` +
+      `re-measure only after the named condition is addressed; re-running the same probe reproduces the same honest failure.`;
+  }
+  if (v.qualified) {
+    return `A round trip WAS measured for \`${id}\`, the argument it was given did not deliver (${String(v.qualifiedClass)}), and the refusal names its ` +
+      `candidate causes without choosing one — so this is NOT a surface failure and re-running the SAME probe reproduces it. Close it by probing ` +
+      `an argument the surface can serve, or by addressing what the class's own evidence names.`;
+  }
+  return remediationFor(id);
+}
 
 /** Every `--capability X` the advice names, in order. */
 function adviceCapabilities(advice: ReturnType<typeof roundTripProbeAdvice>): string[] {
@@ -244,17 +268,11 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
   const unbackedClaims = claimedIds().filter((id) => !measuredIds().includes(id));
   for (const id of unbackedClaims) {
     const v = measuredRoundTripFor(id);
-    // THE REMEDY IS NOT THE SAME for the two negatives, and printing one remedy
-    // for both is how a measured failure gets "fixed" by re-running the same
-    // measurement forever.
-    const remedy = v.contradicted
-      ? `A round trip WAS measured for \`${id}\` and it FAILED (${String(v.failureClass)}), which CONTRADICTS the published claim rather than qualifying it — ` +
-        `re-measure only after the named condition is addressed; re-running the same probe reproduces the same honest failure.`
-      : v.qualified
-        ? `A round trip WAS measured for \`${id}\`, the argument it was given did not deliver (${String(v.qualifiedClass)}), and the refusal names its ` +
-          `candidate causes without choosing one — so this is NOT a surface failure and re-running the SAME probe reproduces it. Close it by probing ` +
-          `an argument the surface can serve, or by addressing what the class's own evidence names.`
-        : remediationFor(id);
+    // THE REMEDY IS NOT THE SAME for the three negatives, and printing one remedy
+    // for all of them is how a measured failure gets "fixed" by re-running the
+    // same measurement forever. Built by `remedyFor`, so the pin below reads the
+    // SAME string this pushes into the failure message.
+    const remedy = remedyFor(id);
     gaps.push(
       `\`${id}\` holds a complete verified receipt AND publishes a live round-trip claim in capabilities/README.md, ` +
         `but capabilities/roundtrip.json carries no MEASURED row: ${v.reason}. ${remedy}`,
@@ -267,6 +285,181 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
       threeWayReport().join("\n") +
       `\n\nEach gap above is a REAL, currently-published claim the record cannot back.`,
   );
+});
+
+test("ADVICE: every DECLARED capability of every reported site appears in that site's advice, and no UNDECLARED one does", () => {
+  // THE WHOLE UNIVERSE, not a spot check. The gate reports on
+  // installed ∪ README-row ids, so the advice is asserted for every one of them:
+  // both directions, because a template satisfies neither.
+  //
+  //   DIRECTION 1 (no omission): every id the manifest declares must be named.
+  //   DIRECTION 2 (no fabrication): nothing else may be named — `chat` is legal
+  //     ONLY on a site that is genuinely on the chat surface, which is what makes
+  //     the youtube regression unprintable rather than merely unlikely.
+  const offenders: string[] = [];
+  for (const id of universe()) {
+    const advice = roundTripProbeAdvice(id);
+    const named = adviceCapabilities(advice);
+    const declared = advice.capabilities;
+    if (advice.note !== null) {
+      // shape "none": nothing to name, and it must say so rather than emit a command.
+      if (named.length > 0) offenders.push(`\`${id}\` claims no surface yet names ${named.join(", ")}`);
+      continue;
+    }
+    // THE REMEDY A READER RECEIVES, not only the derivation: `remedyFor` is what
+    // the failure message is built from, so this reads the printed string. A
+    // CONTRADICTED/QUALIFIED site legitimately gets PROSE (re-running the same
+    // probe reproduces the same honest failure), so its remedy names no command
+    // and is exempt from the command assertions — asserted to be prose below.
+    const remedy = remedyFor(id);
+    const remedyCaps = remedyCapabilities(id);
+    const v = measuredRoundTripFor(id);
+    if (v.contradicted || v.qualified) {
+      if (remedyCaps.length > 0) {
+        offenders.push(`\`${id}\` is ${v.contradicted ? "CONTRADICTED" : "QUALIFIED"} yet its remedy hands out a command (${remedyCaps.join(", ")}) — re-running the same probe reproduces the same honest failure`);
+      }
+      continue;
+    }
+    const missing = declared.filter((c) => !remedyCaps.includes(c));
+    if (missing.length > 0) {
+      offenders.push(`\`${id}\` declares ${missing.join(", ")} but its advice never names them — a reader is left unable to close it`);
+    }
+    const extra = remedyCaps.filter((c) => c !== "chat" && !declared.includes(c));
+    if (extra.length > 0) {
+      offenders.push(`\`${id}\` names ${extra.join(", ")} which its manifest does NOT declare — the daemon answers HTTP 400 unknown_capability for that`);
+    }
+    const chatNamed = remedyCaps.includes("chat");
+    if (chatNamed !== advice.chat) {
+      offenders.push(
+        `\`${id}\`: the printed advice names \`--capability chat\`=${String(chatNamed)} but the daemon's chat surface says ${String(advice.chat)}`,
+      );
+    }
+    // The chat sentinel, when present, must come FIRST: it is the only shape that
+    // can derive ANSWERS, so a reader who starts at the capability list is told to
+    // re-measure something that can only ever record RETURNS-DATA.
+    if (advice.chat && remedyCaps[0] !== "chat") offenders.push(`\`${id}\` has a chat surface but does not probe as chat FIRST`);
+    // …and the derivation and the printed remedy must AGREE, capability for
+    // capability. Two readers of the same data is the defect class; a pin that
+    // lets them diverge is how the youtube message came back.
+    assert.deepEqual(remedyCaps, named, `\`${id}\`: the printed remedy and the derivation name different capabilities`);
+  }
+  assert.deepEqual(offenders, [], `remediation advice that cannot be executed:\n${offenders.join("\n")}`);
+});
+
+test("ADVICE: every printed command matches the harness's REAL CLI contract, and every --args is a JSON object", () => {
+  // Matched to the shipped harness, not to a remembered spelling:
+  // scripts/audit/record-roundtrip.mjs reads `--site` / `--capability` / `--args`
+  // / `--dry-run`, REQUIRES `--import tsx` in a source checkout (no dist/), and
+  // refuses `--args` that is not a JSON OBJECT.
+  const harness = readFileSync(resolve(ROOT, "scripts/audit/record-roundtrip.mjs"), "utf8");
+  const offenders: string[] = [];
+  for (const id of universe()) {
+    const advice = roundTripProbeAdvice(id);
+    for (const cmd of advice.commands) {
+      if (!cmd.startsWith("node --import tsx scripts/audit/record-roundtrip.mjs ")) {
+        offenders.push(`\`${id}\`: \`${cmd}\` — the harness requires the --import tsx loader in a source checkout`);
+      }
+      if (!/ --site [a-z0-9-]+( |$)/.test(cmd)) offenders.push(`\`${id}\`: \`${cmd}\` carries no --site <id>`);
+      const m = /--args '([^']*)'/.exec(cmd);
+      if (m) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(m[1]!);
+        } catch (e) {
+          offenders.push(`\`${id}\`: \`${cmd}\` carries --args that is not valid JSON (${(e as Error).message})`);
+          continue;
+        }
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          offenders.push(`\`${id}\`: \`${cmd}\` carries --args that is not a JSON OBJECT — the harness refuses exit 3`);
+        }
+      }
+    }
+    // The advice must not drift from the harness's own vocabulary. Checked against
+    // how the script ACTUALLY reads a flag — `flag("site")` / `has("dry-run")`,
+    // not a literal `--site` (which is why the first version of this check found
+    // nothing and reported every flag as unknown). `--import` is node's own loader
+    // flag, consumed before the script runs, so it is exempt by construction.
+    const harnessFlags = new Set<string>();
+    for (const m of harness.matchAll(/\b(?:flag|has)\("([a-z-]+)"\)/g)) harnessFlags.add(`--${m[1]!}`);
+    for (const cmd of advice.commands) {
+      for (const m of cmd.matchAll(/ (--[a-z-]+)/g)) {
+        const flagName = m[1]!;
+        if (flagName === "--import") continue;
+        if (!harnessFlags.has(flagName)) {
+          offenders.push(`\`${id}\`: the advice prints ${flagName}, which scripts/audit/record-roundtrip.mjs never reads (it reads: ${[...harnessFlags].sort().join(" ")})`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `advice that does not match the harness contract:\n${offenders.join("\n")}`);
+});
+
+test("ADVICE: a site with neither a chat surface nor a declared capability says so — never an empty or invented command", () => {
+  // The falsifier for the honest-empty branch. MEASURED, no shipped package is in
+  // this state (all 33 declare capabilities and 22 are on the chat surface), so the
+  // branch is exercised through a PROVEN-ABSENT id rather than left unproven: a
+  // reader who lands on it must get a named reason, not `--capability chat` and
+  // not an empty string that looks like a command.
+  const advice = roundTripProbeAdvice("no-such-package-in-this-repo");
+  assert.equal(advice.shape, "none");
+  assert.equal(advice.chat, false);
+  assert.deepEqual(advice.commands, [], "a surface-less site must produce NO command at all");
+  assert.ok(advice.note !== null && advice.note.length > 0, "a surface-less site must produce a NAMED reason, not silence");
+  assert.match(advice.note!, /nothing this gate can tell you to run/, "the note must say plainly that there is nothing to run");
+  assert.doesNotMatch(advice.note!, /--capability/, "the note must not emit a command it is refusing to recommend");
+
+  // AND the branch is not hypothetical: a REAL reported id derives it. MEASURED,
+  // `hunyuan-yuanbao` is a capabilities/README.md row (so the gate reports on it)
+  // whose dir carries only CAPABILITIES.md — no manifest.json, hence no declared
+  // capability — and it is not on the chat surface either. So the honest-refusal
+  // branch is exercised by the shipped universe, not only by a synthetic id.
+  const shapeNone = universe().filter((id) => roundTripProbeAdvice(id).shape === "none");
+  assert.ok(
+    shapeNone.length > 0,
+    `no reported id derives shape "none", so the honest-refusal branch is unexercised — \`${"no-such-package-in-this-repo"}\` exercises it in this test, but a shipped id must too`,
+  );
+  for (const id of shapeNone) {
+    const advice = roundTripProbeAdvice(id);
+    assert.deepEqual(advice.commands, [], `\`${id}\` derives shape "none" yet emits ${advice.commands.length} command(s)`);
+    assert.ok(advice.note !== null && advice.note.length > 0, `\`${id}\` derives shape "none" with NO note`);
+    assert.doesNotMatch(advice.note!, /--capability/, `\`${id}\`'s refusal note emits a command it is refusing to recommend`);
+  }
+  // Both derivable shapes are exercised too, so "none" is a refusal rather than
+  // the common case hiding behind a green run.
+  const shapes = new Set(universe().map((id) => roundTripProbeAdvice(id).shape));
+  assert.ok(shapes.has("chat"), `the universe exercises no chat-shaped site, so the chat advice shape is unexercised: [${[...shapes].join(", ")}]`);
+  assert.ok(shapes.has("capability"), `the universe exercises no capability-only site, so the capability advice shape is unexercised: [${[...shapes].join(", ")}]`);
+});
+
+test("ADVICE: the youtube regression is unprintable — a capability-only site is never told to probe as chat", () => {
+  // The named defect, pinned at the site it happened on rather than described in
+  // prose. `youtube` is the package whose advice used to be
+  // `--site youtube --capability chat`: no chat composer, no `*_chat` capability,
+  // `builtinProfile: "none"`, `profile.json` composer/answer both empty, and
+  // absent from GET /sites. If a future change ever makes youtube chat-shaped, the
+  // first assertion below fires and this test must be revisited deliberately —
+  // which is the point: the pin fails LOUD rather than quietly becoming a lie.
+  const advice = roundTripProbeAdvice("youtube");
+  assert.equal(advice.chat, false, "youtube grew a chat surface — this pin names the old fact and must be re-derived, not deleted");
+  assert.ok(
+    !defaultChatSurface().some((e) => e.id === "youtube"),
+    "youtube appeared on GET /sites — the chat advice shape would then be correct for it and this pin must be re-derived",
+  );
+  // NOT asserted, and deliberately so: `chatSurfaceStatus("youtube")` is `verified`
+  // and that is CORRECT — it is the PACKAGE's status (youtube_search measures
+  // RETURNS-DATA), not a claim that youtube has a chat composer. It was this
+  // conflation that made the old advice look reasonable: a reader who saw
+  // `verified` for youtube and was then told to probe `--capability chat` had no
+  // signal that the two facts were about different surfaces. The advice therefore
+  // derives chat-ness from `defaultChatSurface()` — the surface `/v1` actually
+  // serves — and this pin holds THAT, not the package status.
+  assert.ok(
+    !remedyFor("youtube").includes("--capability chat"),
+    "the youtube advice still tells the reader to probe a chat surface youtube does not have",
+  );
+  assert.match(remedyFor("youtube"), /has NO chat surface/);
+  // …and it names the surface that IS there, with its declared argument shape.
+  assert.match(remedyFor("youtube"), /--capability youtube_search --args '\{"query":"<query>"\}'/);
 });
 
 test("THREE-WAY: an ARGUMENT-SCOPED non-delivery is QUALIFIED — never CONTRADICTED, and never MEASURED either", () => {
