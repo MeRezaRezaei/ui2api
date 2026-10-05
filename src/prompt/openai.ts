@@ -677,7 +677,7 @@ export function ignoredParametersOf(body: Record<string, unknown>): string[] {
   return IGNORED_REQUEST_PARAMETERS.filter((name) => Object.prototype.hasOwnProperty.call(body, name));
 }
 
-function sendJson(res: ServerResponse, status: number, data: unknown): void {
+function sendJson(res: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}): void {
   // GOAL 83: answer at most once. The daemon's aggregate deadline answers an
   // over-deadline /v1 request with a named 504 while this route's browser work
   // is still in flight; when that work finally settles, this guard makes the
@@ -686,7 +686,7 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
   if (res.headersSent || res.writableEnded || res.destroyed) return;
   const body = JSON.stringify(data);
   try {
-    res.writeHead(status, { "Content-Type": "application/json" });
+    res.writeHead(status, { "Content-Type": "application/json", ...headers });
     res.end(body);
   } catch {
     // socket already gone (client hung up / shutdown destroyed it)
@@ -927,17 +927,38 @@ export async function handleOpenAIRoutes(
     let body: Record<string, unknown>;
     try {
       body = await readJsonBody(req);
-    } catch {
+    } catch (e) {
+      // TWO body conditions, TWO answers — the same two the daemon's own reader
+      // produces (`readJson`, src/prompt/http.ts:717-756). Collapsing them into
+      // one 400 was this path's defect: the reader rejected an oversized body
+      // with a bare `Error("body too large")` that carried no status and no code,
+      // so the only answer available here was 400 `invalid_json` — telling a
+      // caller whose JSON is perfectly well-formed that its JSON is malformed.
+      // A client that trusts that answer and retries gets the same refusal
+      // forever. 413 `payload_too_large` is what POST /prompt answers for the
+      // same bytes on this same daemon, so it is what this surface answers here.
+      if (e instanceof BodyRefusal && e.status === 413) {
+        // The upload is still in flight and was deliberately stopped mid-stream
+        // (the reader paused it), so the socket must not be reused: answer with
+        // `connection: close`, then tear it down once the answer has flushed. The
+        // reverse order is what made this class unsendable on the daemon side
+        // (`http.ts:721-731`) — the destroy landed before the refusal could.
+        res.once("finish", () => req.destroy());
+        // `type` stays this surface's declared envelope; the STATUS and the CODE
+        // are what the daemon answers, and those are what a client branches on.
+        // The message is the daemon's own sentence and names only the limit — a
+        // 413 must never echo a body back, least of all one that is too big to
+        // have been read.
+        return openAiError2(res, 413, e.message, e.code, { connection: "close" });
+      }
       // The SAME sentence the thrower used (INVALID_JSON_MESSAGE, owned by
       // consumer-surface.ts). This used to re-type the words, which made one
       // caller mistake answerable in two ways on one daemon — see the owner.
       // The message stays client-safe: no internal text, no stack, nothing to
-      // redact. The envelope carries NO `code`, and that is the surface's
-      // DECLARED shape rather than an oversight — `test/openai-full-contract-
-      // truth.test.ts` pins "400 invalid JSON body" in its `CODE_EXEMPT` list.
-      // Naming a code here would fix that gate's row and it is the honest next
-      // step, but it is a contract change to a list this fix may not edit.
-      return openAiError2(res, 400, INVALID_JSON_MESSAGE);
+      // redact. The `code` is named — it is the daemon's own `invalid_json` for
+      // this exact condition (http.ts:743/756), and a 4xx a client cannot branch
+      // on is the same unnamed-refusal defect the daemon's codes exist to stop.
+      return openAiError2(res, 400, INVALID_JSON_MESSAGE, INVALID_JSON_CODE);
     }
     const stream = Boolean(body.stream);
     // `stream_options.include_usage` was accepted and dropped. It is the one
@@ -1380,23 +1401,99 @@ export async function handleOpenAIRoutes(
 
 // --- helpers ----------------------------------------------------------------
 
-function openAiError2(res: ServerResponse, status: number, message: string, code?: string): void {
-  sendJson(res, status, { error: { message, type: "invalid_request_error", code, param: null } });
+function openAiError2(res: ServerResponse, status: number, message: string, code?: string, headers?: Record<string, string>): void {
+  sendJson(res, status, { error: { message, type: "invalid_request_error", code, param: null } }, headers);
+}
+
+/**
+ * THE BODY CAP — MIRRORED FROM THE DAEMON'S OWN READER, DELIBERATELY.
+ *
+ * `MAX_BODY_BYTES` (`src/prompt/http.ts:679`) is the daemon's cap. It is a
+ * module-private `const`, and this module CANNOT import it: `http.ts` imports
+ * `handleOpenAIRoutes` from here, so the dependency cannot point the other way
+ * without a cycle — the same constraint that put `INVALID_JSON_MESSAGE` in
+ * `consumer-surface.ts` (see the note above `test/error-redaction.test.ts:296`).
+ * So the number is re-typed here, and `test/openai-full-contract-truth.test.ts`
+ * RE-DERIVES both copies from source and fails if they drift: two hand-typed
+ * copies are only safe while something checks them.
+ *
+ * THE NUMBER MOVED, on purpose. `/v1` used to compare `raw.length` — UTF-16 code
+ * units — against `2_000_000`, so this surface accepted bodies the daemon's own
+ * reader refuses on the SAME daemon (2M Persian characters is ~4 MB of bytes,
+ * four times the /prompt budget), and the two surfaces disagreed about what
+ * "too big" is. One daemon, one body budget: the /prompt cap is the one that was
+ * right, and `/v1` is now the stricter-consumer story everywhere else.
+ */
+const MAX_BODY_BYTES = 1e6;
+const PAYLOAD_TOO_LARGE_CODE = "payload_too_large";
+const INVALID_JSON_CODE = "invalid_json";
+
+/**
+ * The reader's TYPED refusal — the same shape as the daemon's `HttpClientError`
+ * (status + code + message), which the route answers from instead of flattening
+ * every body failure into one 400. A refused body has more than one cause and
+ * more than one honest answer, and a catch that cannot tell them apart is
+ * exactly how "too big" came to be reported as "your JSON is malformed".
+ *
+ * ONLY the oversize refusal uses it. The 400 path rejects with a plain `Error`
+ * (see the reader), so this class never carries a 400 and cannot be mistaken for
+ * the malformed-body answer.
+ */
+class BodyRefusal extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BodyRefusal";
+  }
 }
 
 /**
  * The `/v1` body reader. Its return type is `Record<string, unknown>` — NOT
  * `unknown` behind a cast at the call site — because the gate below is what
  * makes that type true, and the cast is what let the gate's absence go unseen.
+ *
+ * The size cap is checked per chunk, BEFORE any parse, and in BYTES on chunks
+ * that are still Buffers — the same three properties the daemon's reader has
+ * (`http.ts:714-734`). Counting string units against a limit the refusal calls
+ * "bytes" blows the real budget, and parsing a body past the cap is the cost the
+ * cap exists to avoid.
  */
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let raw = "";
+    // BYTES stay bytes until the cap has had its say. Chunks arrive as Buffers
+    // (no encoding is set on the stream) and `c.length` IS the byte count. The
+    // decode happens ONCE, after the cap, which also removes the UTF-8 boundary
+    // hazard of `raw += c`: a multi-byte character split across two chunks used
+    // to decode to U+FFFD on this path — a Persian or emoji prompt arriving in
+    // 8 KB chunks could be silently mangled before JSON.parse ever saw it.
+    const chunks: Buffer[] = [];
+    let size = 0;
     req.on("data", (c) => {
-      raw += c;
-      if (raw.length > 2_000_000) reject(new Error("body too large"));
+      const buf = typeof c === "string" ? Buffer.from(c, "utf8") : c;
+      size += buf.length;
+      if (size > MAX_BODY_BYTES) {
+        // Stop reading IMMEDIATELY: without this the client keeps streaming
+        // megabytes at a server that has already refused the request.
+        //
+        // The socket is NOT destroyed HERE. It used to be — on the daemon side
+        // that is why `payload_too_large` was a code no client could ever
+        // receive: the destroy killed the connection before the 413 could be
+        // written (`http.ts:721-731`). The read side stops; the route answers
+        // FIRST with `connection: close` and tears the socket down only after
+        // that answer has flushed. The client keeps the refusal AND the upload
+        // still stops.
+        req.pause();
+        req.removeAllListeners("data");
+        reject(new BodyRefusal(413, PAYLOAD_TOO_LARGE_CODE, `request body exceeds ${MAX_BODY_BYTES} bytes`));
+        return;
+      }
+      chunks.push(buf);
     });
     req.on("end", () => {
+      const raw = chunks.length === 1 ? chunks[0]!.toString("utf8") : Buffer.concat(chunks).toString("utf8");
       try {
         const parsed = raw ? JSON.parse(raw) : {};
         // THE OBJECT GATE the daemon's own reader has had since GOAL 145
@@ -1425,6 +1522,13 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
         // A body that is not JSON AT ALL is the same caller mistake as one that
         // is JSON but not an object (GOAL 145, http.ts:748). The `reject` above
         // does not throw, so this `catch` cannot re-wrap it.
+        //
+        // These two rejections stay a PLAIN `Error` on purpose: this reader's
+        // only refusal that needs a STATUS is the 413, so `BodyRefusal` carries
+        // that one alone. The 400 needs no status from the thrower because its
+        // answer — the daemon's own `invalid_json` — is named once at the catch,
+        // and `test/openai-surface.test.ts` pins that these two sites reject with
+        // the OWNED sentence, which this shape keeps.
         reject(new Error(INVALID_JSON_MESSAGE));
       }
     });

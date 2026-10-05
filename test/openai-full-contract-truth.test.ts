@@ -125,6 +125,41 @@ async function post(port: number, body: unknown, raw?: string) {
   }
 }
 
+/**
+ * THE CAP, as the two surfaces that must agree on it.
+ *
+ * `MAX_BODY_BYTES` in `src/prompt/http.ts` is module-private and `openai.ts`
+ * cannot import from `http.ts` (`http.ts` imports `handleOpenAIRoutes` from
+ * here — a cycle, and the same constraint that put `INVALID_JSON_MESSAGE` in
+ * `consumer-surface.ts`). So the number is typed twice and these two rows are
+ * what make that safe: a cap that drifts between `POST /prompt` and
+ * `POST /v1/chat/completions` on ONE daemon means one surface accepts a body the
+ * other refuses, which is the defect this whole fix is about.
+ */
+const OVERSIZE_CANARY = "UI2API_OVERSIZED_ECHO_CANARY_0123456789abcdef";
+const OVERSIZE_CAP_BYTES = 1e6;
+
+/**
+ * A body that is VALID JSON and over the cap — deliberately well-formed, because
+ * the defect is precisely that a well-formed oversized body was answered
+ * "request body is not valid JSON", which is false. It is padded with a canary
+ * so the echo hazard below has something recognisable to look for.
+ */
+function paddedBody(bytes: number): string {
+  const pad = OVERSIZE_CANARY.repeat(Math.ceil(bytes / OVERSIZE_CANARY.length) + 1);
+  return JSON.stringify({ model: "deepseek", messages: [{ role: "user", content: pad }] });
+}
+function oversizedBody(): string {
+  return paddedBody(OVERSIZE_CAP_BYTES);
+}
+
+/** Source with comments blanked out (newlines kept, so offsets still line up).
+ *  A shape gate that reads prose is a gate that rots the next time somebody
+ *  documents what they did. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " ")).replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
+}
+
 async function getModels(port: number) {
   const res = await fetch(`http://127.0.0.1:${port}/v1/models`);
   return { status: res.status, json: (await res.json()) as ModelsBody };
@@ -246,12 +281,21 @@ interface ErrorEnvelope {
 }
 
 /**
- * The two /v1 error paths that carry NO `code`. Named, not swept under the rug:
- * `openAiError2` is called without a code for a malformed body, and the
- * empty-messages 400 was written without one. Everything else names a code, and
- * this list is what makes THAT claim checkable instead of assumed.
+ * The /v1 error paths that carry NO `code`. Named, not swept under the rug.
+ *
+ * IT WAS TWO, AND ONE OF THEM IS NOW FIXED. `openAiError2` used to be called
+ * without a code for a malformed body, so a caller whose JSON was not JSON got a
+ * 400 it could not branch on — the unnamed-refusal shape the daemon's own named
+ * codes exist to prevent (`invalid_json`, `http.ts:743/756`). The reader still
+ * rejects that condition with the OWNED sentence; the ANSWER at the route now
+ * names the daemon's own code beside it, and this list lost that row. The
+ * empty-messages 400 is the one that stays.
+ *
+ * The list is what makes the remaining claim checkable instead of assumed: a new
+ * code-less path is a regression, a fixed one is a removal, and either way it is
+ * a decision rather than a drift.
  */
-const CODE_EXEMPT = ["400 invalid JSON body", "400 empty messages"] as const;
+const CODE_EXEMPT = ["400 empty messages"] as const;
 
 function assertErrorEnvelope(body: Json, where: string, exempt = false): void {
   const env = body?.error as ErrorEnvelope | undefined;
@@ -285,7 +329,8 @@ async function captureErrorPaths() {
       body: (await post(s.port, { model: "deepseek", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:..." } }] }] })).json(),
     });
     rows.push({ name: "400 empty messages", exempt: true, body: (await post(s.port, { model: "deepseek", messages: [] })).json() });
-    rows.push({ name: "400 invalid JSON body", exempt: true, body: (await post(s.port, null, "{not json")).json() });
+    rows.push({ name: "400 invalid JSON body", exempt: false, body: (await post(s.port, null, "{not json")).json() });
+    rows.push({ name: "413 payload_too_large", exempt: false, body: (await post(s.port, null, oversizedBody())).json() });
   } finally {
     s.close();
   }
@@ -313,6 +358,85 @@ test("§2 every error path answers the OpenAI error envelope {message,type,param
   // a fixed one is a removal. Either way it is a decision, not a drift.
   const codeLess = rows.filter((r) => typeof (r.body.error as ErrorEnvelope).code !== "string").map((r) => r.name).sort();
   assert.deepEqual(codeLess, [...CODE_EXEMPT].sort(), "the set of code-less error paths drifted — a new one must be named here, a fixed one removed");
+});
+
+test("§2 an oversized body is 413 payload_too_large — never 400 invalid_json", async () => {
+  const s = await serve({ pool: stubPool(CLEAN) });
+  try {
+    const r = await post(s.port, null, oversizedBody());
+    // The STATUS is the point: "too big" and "malformed" are different caller
+    // mistakes, and this surface used to answer the first as the second. A client
+    // that trusts a 400 and retries gets the same refusal forever, because no
+    // amount of retrying makes a 2 MB body into valid JSON.
+    assert.equal(r.status, 413, "an oversized body is 413, not a 400 that blames the caller's syntax");
+    assert.notEqual(r.status, 400);
+    const env = r.json().error as ErrorEnvelope;
+    assert.equal(env.code, "payload_too_large", "the daemon's own code, so one condition is answerable one way on one daemon");
+    assert.notEqual(env.code, "invalid_json", "an oversized body is NOT a JSON problem — saying so is the defect");
+    assert.equal(env.type, "invalid_request_error", "the /v1 envelope shape is unchanged");
+    assert.equal(env.param, null);
+    // The daemon's own sentence (`http.ts:731`), so the two surfaces do not
+    // word one refusal two ways. It names the LIMIT and nothing else.
+    assert.match(String(env.message), /^request body exceeds \d+ bytes$/, "the daemon's sentence, and it must not carry anything else");
+  } finally {
+    s.close();
+  }
+});
+
+test("§2 the 413 does NOT echo the request payload back", async () => {
+  const s = await serve({ pool: stubPool(CLEAN) });
+  try {
+    const r = await post(s.port, null, oversizedBody());
+    assert.ok(!r.text.includes(OVERSIZE_CANARY), "a 413 must not reflect the body it refused — that is a reflection/echo hazard on the largest payloads");
+    assert.ok(r.text.length < 512, `the refusal must stay small; got ${r.text.length} bytes of answer for a ${oversizedBody().length}-byte request`);
+    assert.ok(!/\.ts:\d+/.test(r.text) && !/node:internal/.test(r.text), "no internal detail in the refusal");
+  } finally {
+    s.close();
+  }
+});
+
+test("§2 the /v1 cap and the daemon's cap are the SAME number, and both count BYTES before the parse", async () => {
+  const httpSrc = readFileSync(new URL("../src/prompt/http.ts", import.meta.url), "utf8");
+  const openaiSrc = readFileSync(new URL("../src/prompt/openai.ts", import.meta.url), "utf8");
+  // Re-derived from source on BOTH sides, never hand-copied here: a cap that
+  // drifts between POST /prompt and POST /v1/chat/completions means one surface
+  // accepts a body the other refuses on the same daemon.
+  const daemonCap = Number(/const MAX_BODY_BYTES = ([\d.e+]+);/.exec(httpSrc)?.[1]);
+  const v1Cap = Number(/const MAX_BODY_BYTES = ([\d.e+]+);/.exec(openaiSrc)?.[1]);
+  assert.ok(Number.isFinite(daemonCap) && daemonCap > 0, "the daemon's cap must be re-derivable from src/prompt/http.ts");
+  assert.equal(v1Cap, daemonCap, "the two surfaces must hold the SAME cap — one daemon, one body budget");
+  // BEFORE the parse: parsing a body past the cap is the cost the cap exists to
+  // avoid, so the check has to live in the chunk handler, not after JSON.parse.
+  //
+  // COMMENTS ARE STRIPPED FIRST, and that is the whole point of doing it: this
+  // reader's prose explains the cap by naming `JSON.parse`, so a gate that
+  // measured raw source found the parse "first" and went red on the fix's own
+  // explanation. A gate that reads prose is a gate that rots on the next person
+  // who documents what they did — so it measures CODE.
+  const reader = stripComments(openaiSrc.slice(openaiSrc.indexOf("function readJsonBody")));
+  const capAt = reader.indexOf("size > MAX_BODY_BYTES");
+  const parseAt = reader.indexOf("JSON.parse");
+  assert.ok(capAt > -1, "the reader must compare the running byte count against the cap");
+  assert.ok(parseAt > -1, "precondition: the reader really does parse somewhere");
+  assert.ok(capAt < parseAt, "the cap must be compared BEFORE the parse, not after it");
+  // BYTES, not string units: the refusal says "bytes", so the count must be bytes.
+  assert.match(reader, /size \+= buf\.length/, "the cap counts BYTES on the raw chunks (the daemon learned this the hard way, http.ts:708-714)");
+  assert.ok(!/raw\.length >/.test(reader), "no string-unit cap may come back");
+  // and the 413 must be the daemon's OWN refusal, not a new spelling
+  assert.match(openaiSrc, /new BodyRefusal\(413, PAYLOAD_TOO_LARGE_CODE, `request body exceeds \$\{MAX_BODY_BYTES\} bytes`\)/, "the /v1 refusal must be the daemon's code and sentence, verbatim");
+});
+
+test("§2 a body UNDER the cap is still served — the cap is a bound, not a blanket refusal", async () => {
+  const s = await serve({ pool: stubPool(CLEAN) });
+  try {
+    const raw = paddedBody(Math.floor(OVERSIZE_CAP_BYTES / 2));
+    assert.ok(Buffer.byteLength(raw) < OVERSIZE_CAP_BYTES, "precondition: this body is under the cap");
+    const r = await post(s.port, null, raw);
+    assert.equal(r.status, 200, "a half-cap body is an ordinary request and must be answered, not refused");
+    assert.equal(r.json().choices[0].message.content, CLEAN.answer);
+  } finally {
+    s.close();
+  }
 });
 
 test("§2 a driver's named failure reaches the caller verbatim, never as a fabricated answer", async () => {
