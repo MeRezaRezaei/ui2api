@@ -4,7 +4,7 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T15:36:00.953Z",
+  "generatedAt": "2026-10-05T16:58:03.242Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
@@ -291,6 +291,32 @@
       "resultShape": null,
       "capabilityOk": null,
       "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool, no page reported, and the service's own message is its named no-answer refusal (did not return an answer(?: within (?:\\d+)ms)?) — the refusal LISTS its candidate causes (busy, rate-limiting, sign-in or consent wall) and asserts NONE of them, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the site is rate-limited\", not \"log in\", and not contention. The action is to re-measure with a discriminator that separates the candidates the service itself named",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row"
+    },
+    {
+      "site": "deepseek",
+      "capability": "chat",
+      "class": "UNATTRIBUTED-NO-COMPOSER",
+      "provenance": "harness",
+      "method": "POST /prompt (nonce probe, pool sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T16:58:03.237Z",
+      "httpStatus": 502,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": false,
+      "doneReason": null,
+      "elapsedMs": 60474,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 1,
+        "queued": 0
+      },
+      "daemonCommit": "ca7d62cdc189bf9406b7f5e4bc9ef5d029ed5245",
+      "resultShape": null,
+      "capabilityOk": null,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool, no page reported, and the service's own message is its named composer refusal (\"deepseek did not present a usable prompt input on its chat page this time — the site may have changed its layout, or it may be showing a sign-in or consent wall. Retry; if it repeats, pick another model id from GET /v1/models.\") — the page never presented a usable prompt input. The sentence LISTS its candidate causes (the site changed its layout, or it is showing a sign-in or consent wall) and asserts NEITHER, and with no page reported a sign-in surface and an anti-bot wall were not ruled out either, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the selectors are stale\", not \"log in\", and not \"the site is challenging us\". What IS established is that the surface did not work at measurement time, which is a real measured outcome and CONTRADICTS a published `verified` claim rather than qualifying it.",
       "prereq": "none beyond a live vault session for the site",
       "notes": "the daemon reported no page for this request, so observedPage is null and the page-keyed classes (WALL-CHALLENGE, SIGN-OUT, COMPOSER-DRIFT) could not have been derived for this row"
     }

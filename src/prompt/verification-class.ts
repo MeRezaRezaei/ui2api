@@ -13,8 +13,8 @@
 // into. No browser, no network, no clock. Everything the gate's pinned
 // assertions need is here and testable hermetically.
 //
-// WHY THE SET HAS NINE MEMBERS AND NOT FOUR: more than a couple have different
-// REMEDIES, and a class is defined by the action it licenses.
+// WHY THE SET HAS MORE THAN A COUPLE OF MEMBERS AND NOT FOUR: more than a couple
+// have different REMEDIES, and a class is defined by the action it licenses.
 //   WALL-CHALLENGE  -> docs/WIGOLO_BYPASS.md: reach for the wigolo tier, or
 //                       keep the honest ok:false. NEVER a retry loop — a
 //                       challenge on a real logged-in account is the one
@@ -25,6 +25,27 @@
 // show. Filing either as CONTENDED-TIMEOUT is a lie the gate itself rejects at
 // an idle pool. UNMEASURED is honest but silent: it says "nothing was
 // established" for a row where something WAS established.
+//
+// THE `UNATTRIBUTED-` PREFIX IS ONE IDEA, NOT TWO CLASSES THAT HAPPEN TO SHARE
+// A WORD. A refusal the SERVICE declined to attribute — it named the condition
+// and listed its candidate causes without asserting which is real — is filed
+// apart from the same condition with a discriminator attached, because the two
+// license DIFFERENT actions and only one of them may claim a cause:
+//   UNATTRIBUTED-NO-ANSWER   the read timed out with no page reported; the
+//                            service named busy / rate-limiting / a sign-in or
+//                            consent wall and asserted NONE of them.
+//   UNATTRIBUTED-NO-COMPOSER the page never presented a usable prompt input and
+//                            no page was reported; the service named a layout
+//                            change OR a sign-in or consent wall and asserted
+//                            NEITHER.
+// Filing the second as COMPOSER-DRIFT would assert a layout change nobody
+// observed; filing it as SIGN-OUT would assert a credential problem nobody
+// observed. MEASURED: this is the shape `deepseek` returns on its own wire today
+// (HTTP 502, no `title`/`url` on the refusal), and before the member existed it
+// derived UNCLASSIFIED — so the write seam REFUSED the row and a real, named,
+// diagnosable measurement of a real site was lost. A refused measurement is a
+// hole in the evidence, not evidence of absence: without this member the gate
+// reported `deepseek` as never measured, which understates what is known.
 //
 // NO MEMBER IS A FREE-TEXT ESCAPE HATCH. A class that can hold anything
 // re-creates the original defect one level up, so each class below has a
@@ -41,7 +62,7 @@
 // `./error-redaction.ts` owns the clause and builds the pattern; importing it
 // here is a dependency on the owner, never a second copy of the words. The same
 // shape as `CONCEPT_TERMS` / `consumerAccountRefusal` in `./consumer-surface.ts`.
-import { NO_ANSWER_REFUSAL_RE } from "./error-redaction.js";
+import { NO_ANSWER_REFUSAL_RE, RETRY, redactInternalError } from "./error-redaction.js";
 
 export const VERIFICATION_CLASSES = [
   "ANSWERS",
@@ -62,6 +83,18 @@ export const VERIFICATION_CLASSES = [
   "NON-ANSWER-READ",
   "ANSWER-UNREADABLE",
   "UNATTRIBUTED-NO-ANSWER",
+  // The page never presented a usable prompt input, and the service reported NO
+  // page, so the two things `COMPOSER-DRIFT` above needs in order to claim a
+  // cause are both absent. MEASURED: `deepseek` answers exactly this on its own
+  // wire — HTTP 502 whose message is the daemon's own redacted composer refusal,
+  // carrying no `title`/`url`. Under the pre-widening vocabulary that derived
+  // UNCLASSIFIED, which is not a class, so `scripts/audit/record-roundtrip.mjs`
+  // refused to write the row AT ALL: a real named outcome was measured and then
+  // thrown away, and the gate went on reporting the site as merely UNMEASURED.
+  // It is NOT COMPOSER-DRIFT (that class asserts the page loaded and was neither
+  // a sign-in surface nor a challenge — a claim this row's fields cannot make)
+  // and NOT SIGN-OUT (nothing observed a sign-in surface).
+  "UNATTRIBUTED-NO-COMPOSER",
   "UNMEASURED",
 ] as const;
 
@@ -215,6 +248,123 @@ export const NO_COMPOSER_PATTERN = /no composer found/i;
 
 /** The server's own phrase for "this site needs a signed-in session". */
 export const SIGN_IN_MESSAGE_PATTERN = /requires sign-in|sign in once|requires login|not logged in|unauthenticated/i;
+
+// ── THE COMPOSER REFUSAL, AND THE MATCHER THAT FINDS IT ─────────────────────
+//
+// MEASURED, THE GAP THIS EXISTS TO CLOSE. `deepseek` answers the daemon's own
+// wire with `HTTP 502 {"error":{"code":"ui2api_driver_error","message":"deepseek
+// did not present a usable prompt input on its chat page this time — the site
+// may have changed its layout, or it may be showing a sign-in or consent wall.
+// Retry; …"}}}`. That is a real, named, honest outcome of a real site. The
+// pre-widening classifier derived UNCLASSIFIED from it, because:
+//
+//   1. `NO_COMPOSER_PATTERN` (`/no composer found/i`) matches the DRIVER's own
+//      internal sentence (src/prompt/driver.ts), and that sentence never reaches
+//      a client — `redactInternalError` rewrites it into the consumer sentence
+//      above. The one matcher on this file that named the composer condition was
+//      matching text the wire does not carry, so the condition was unreachable
+//      from any measurement.
+//   2. even had it matched, the old COMPOSER-DRIFT branch requires an
+//      `observedPage`, and the refusal path reports no `title`/`url` at all.
+//
+// THE MATCHER IS COMPUTED BY THE MODULE THAT EMITS THE SENTENCE, exactly as
+// `NO_ANSWER_REFUSAL_PATTERNS` above is — and by the SAME call, which is the
+// point: `redactInternalError()` is the daemon's own consumer projection, so this
+// file never types a word of the sentence it matches. A reword of the emitter
+// moves this matcher with it instead of leaving it describing a shape nothing
+// produces any more.
+//
+// THE RAW PROBE IS THE ONE STRING TYPED HERE, and it is the string the DRIVER
+// throws (`no composer found on <id> (<url>) — the site UI may have changed.`),
+// so what is typed is the INPUT to the emitter rather than a copy of its OUTPUT.
+// That direction matters: were the OUTPUT typed here instead, a reword of the
+// emitter would leave this matcher matching nothing and delete the class while
+// every gate stayed green — the exact rot the `NO_ANSWER_REFUSAL_PATTERNS` note
+// records having already happened once. The obligation that the probe still maps
+// into the composer refusal (and not into some other class, nor into the
+// fallback) is a TEST-TIME pin in `test/verification-class.test.ts`, which reads
+// the driver's own throw out of `src/prompt/driver.ts` and asserts this render
+// is what the daemon hands a client for it. A derivation whose input lives in
+// another file cannot be proven here; it is pinned there, which is the same
+// division error-redaction.ts already draws for `CONCEPT_TERMS`.
+//
+// WHY A NAME MATCH ON THE CONSUMER SENTENCE WOULD HAVE BEEN WRONG, stated
+// because it is the tempting shortcut: the words "usable prompt input" and
+// "sign-in or consent wall" in that sentence are PROSE the redaction layer is
+// free to rewrite, and a hand-typed matcher over them is a second copy of a
+// sentence with no edge to the module that owns it. It would also be a matcher
+// with no way to say WHICH refusal it saw: the fallback projection and the
+// no-answer projection share the same `RETRY` tail and the same "the site may
+// be …" shape, so a hand-typed fragment pulled in behind a reword.
+/** The placeholder the site name is rendered into while the matcher is derived.
+ *  Exported so a gate can rebuild the clause the same way this file did. */
+export const COMPOSER_PROBE_SITE_HOLE = "SITEHOLE";
+const DRIVER_COMPOSER_REFUSAL_PROBE = `no composer found on ${COMPOSER_PROBE_SITE_HOLE} (https://example.invalid/) — the site UI may have changed.`;
+
+/** A site id / package id as the daemon spells it — the same shape
+ *  `scripts/audit/record-roundtrip.mjs` validates a `--site` against. It is a
+ *  hole rather than `.*` so the clause cannot be satisfied by an empty or
+ *  sentence-shaped stand-in for the site's name. */
+const SITE_NAME_HOLE = "[A-Za-z0-9._-]+";
+
+/** Escape a literal for use inside a pattern — the SAME character set the
+ *  owner's `termPattern` uses (metacharacters, but deliberately NOT `.`), so a
+ *  quoted clause still matches the pattern built from it. That is load-bearing:
+ *  `classifyOutcome` quotes the MATCHED SPAN in its reason, and the record-truth
+ *  gate re-derives every row from that quoted evidence, so escaping a character
+ *  the quote also carries would silently break re-derivation. */
+function literalPattern(literal: string): string {
+  return literal.replace(/[\\^$*+?()[\]{}|]/g, "\\$&");
+}
+
+export interface ComposerRefusalMatcher {
+  /** The consumer clause, with the site name left as a hole. */
+  clause: string;
+  re: RegExp;
+}
+
+let composerRefusalCache: ComposerRefusalMatcher | null | undefined;
+
+/**
+ * THE DERIVATION, memoised. It REFUSES to produce a matcher rather than produce
+ * a wrong one: if the owner's projection does not echo the site hole, or renders
+ * nothing, or throws, the answer is `null` — no class, no gate that can fire on
+ * a sentence the daemon no longer emits. A wrong matcher here would be worse
+ * than no matcher, because it would let an unrelated 5xx buy a named diagnosis.
+ */
+export function composerRefusalMatcher(): ComposerRefusalMatcher | null {
+  if (composerRefusalCache !== undefined) return composerRefusalCache;
+  composerRefusalCache = null;
+  try {
+    const rendered = redactInternalError(DRIVER_COMPOSER_REFUSAL_PROBE, { site: COMPOSER_PROBE_SITE_HOLE });
+    if (typeof rendered !== "string" || !rendered.includes(COMPOSER_PROBE_SITE_HOLE)) return composerRefusalCache;
+    // The owner's `RETRY` tail is shared by every refusal it projects, so it
+    // carries no discriminating power; it is stripped and then re-attached as
+    // OPTIONAL, which is what lets the same clause match the wire's full
+    // sentence AND a clause quoted inside evidence prose — the reason the
+    // no-answer matcher treats its trailing group as optional.
+    const tail = rendered.endsWith(` ${RETRY}`) ? ` ${RETRY}` : "";
+    const clause = (tail ? rendered.slice(0, rendered.length - tail.length) : rendered).trim();
+    if (!clause) return composerRefusalCache;
+    const body = literalPattern(clause).split(literalPattern(COMPOSER_PROBE_SITE_HOLE)).join(SITE_NAME_HOLE);
+    if (!body.includes(SITE_NAME_HOLE)) return composerRefusalCache;
+    composerRefusalCache = { clause, re: new RegExp(`${body}(?: ${literalPattern(RETRY)})?`) };
+  } catch {
+    composerRefusalCache = null;
+  }
+  return composerRefusalCache;
+}
+
+/** The daemon's own composer-refusal sentence, as a MATCHED SPAN of the
+ *  service's message. Returns the span rather than the pattern source so the
+ *  reason quotes the measurement's own words — and so the re-derivation the
+ *  record-truth gate performs over that quoted evidence can find it again. */
+export function composerRefusalIn(message: string): string | null {
+  const m = composerRefusalMatcher();
+  if (!m) return null;
+  const hit = m.re.exec(message);
+  return hit ? hit[0] : null;
+}
 
 /** The service's OWN wording for the no-answer timeout it reports.
  *
@@ -539,6 +689,52 @@ export function classifyOutcome(o: Outcome): Classification {
     return { cls: "COMPOSER-DRIFT", reason: `HTTP ${o.httpStatus}, the page LOADED (title: ${page.title} | url: ${page.url}) and is neither a sign-in surface nor a challenge, but the composer selector found nothing — action is a profile/selector retune, not a login` };
   }
 
+  // THE PAGE NEVER PRESENTED A USABLE PROMPT INPUT, and no page was reported.
+  //
+  // WHERE IT SITS, and why after COMPOSER-DRIFT: that class asserts the page
+  // LOADED and was neither a sign-in surface nor a challenge — a claim only an
+  // `observedPage` can support — so this branch is the page-less twin and
+  // REQUIRES the absence of a page. Putting it before would let it swallow rows
+  // the page-keyed rules above own, and a class that fires whether or not the
+  // discriminating evidence exists is a class that cannot be held to either
+  // reading.
+  //
+  // WHY IT IS ITS OWN MEMBER AND NOT A WIDENING OF COMPOSER-DRIFT: the service's
+  // own sentence LISTS two candidate causes — the site changed its layout, or it
+  // is showing a sign-in or consent wall — and asserts NEITHER. `COMPOSER-DRIFT`
+  // licenses "retune the selectors"; this row's fields cannot license that, and
+ // filing it there would assert a layout change nobody observed, while filing it
+  // as SIGN-OUT would assert a credential problem nobody observed. It is the
+  // page-less twin of `UNATTRIBUTED-NO-ANSWER` and carries the same rule: the
+  // condition is established, the CAUSE is not, and no cause may be assumed.
+  //
+  // It requires a 5xx because that is the shape a driver refusal actually
+  // arrives in (MEASURED: 502, `code=ui2api_driver_error`), and it requires an
+  // idle pool for the reason every other refusal branch here requires one: at a
+  // busy pool the row measures the queue. Neither clause is decoration — a 2xx
+  // carrying this sentence, or the same sentence at a busy pool, is refused as
+  // UNCLASSIFIED rather than filed under a named diagnosis.
+  const composerRefusal = composerRefusalIn(o.message);
+  if (composerRefusal && o.httpStatus >= 500 && o.httpStatus < 600) {
+    if (o.page) {
+      return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} carries the service's own composer refusal AND reports a page (title: ${o.page.title} | url: ${o.page.url}) — with a page in hand the condition can be attributed (challenge, sign-in surface, or a page that loaded without a composer), so this class declines it rather than claiming no cause` };
+    }
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `the service reported its named composer refusal at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — a measurement of the queue, not of the composer` };
+    }
+    return {
+      cls: "UNATTRIBUTED-NO-COMPOSER",
+      reason:
+        `HTTP ${o.httpStatus} at an IDLE pool, no page reported, and the service's own message is its named composer ` +
+        `refusal ("${composerRefusal}") — the page never presented a usable prompt input. The sentence LISTS its ` +
+        `candidate causes (the site changed its layout, or it is showing a sign-in or consent wall) and asserts ` +
+        `NEITHER, and with no page reported a sign-in surface and an anti-bot wall were not ruled out either, so NO ` +
+        `CAUSE IS ESTABLISHED here and none may be assumed: this is not "the selectors are stale", not "log in", and ` +
+        `not "the site is challenging us". What IS established is that the surface did not work at measurement time, ` +
+        `which is a real measured outcome and CONTRADICTS a published \`verified\` claim rather than qualifying it.`,
+    };
+  }
+
   if (unmatchedSelectorIn(o.message)) {
     if (!idle(o.poolAtRequest)) {
       return { cls: "UNCLASSIFIED", reason: `the service reports the answer selector matched nothing at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}) — a measurement of the queue, not of the selector` };
@@ -654,6 +850,24 @@ export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> =
   // rate-limited" or "log in", and the row stays a claim about a refusal whose
   // cause is UNKNOWN, never a diagnosis of one.
   "UNATTRIBUTED-NO-ANSWER": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
+  // UNATTRIBUTED-NO-COMPOSER asserts that a composer refusal was REPORTED and
+  // that no page came with it, so the minimum that means anything is the same
+  // three the no-answer twin requires: a dated measurement, the method that took
+  // it, and an evidence string that carries the service's own refusal sentence —
+  // an evidence string without it proves no refusal happened, and the class must
+  // not be reachable by a row that merely has no page.
+  //
+  // The idle pool is REQUIRED for the same reason it is required everywhere else
+  // in this set: at a busy pool the row is a measurement of the queue. It does
+  // NOT require `observedPage`, and that is not a weakening — it is the class's
+  // definition: this is the page-LESS twin, and demanding a page would make it
+  // unreachable rather than stricter (MEASURED: the refusal path reports no
+  // `title`/`url` at all, which is the whole reason the page-keyed COMPOSER-DRIFT
+  // could not see this row). What the row must NOT be allowed to carry is a
+  // CAUSE: nothing here licenses "the selectors are stale" or "log in", and the
+  // gate re-derives the class from these fields, so a row that claims a cause it
+  // cannot support fails on re-derivation rather than on a name check.
+  "UNATTRIBUTED-NO-COMPOSER": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
   // UNMEASURED keeps its strict meaning: never reached. RULE 5 lets it be bare
   // precisely because it asserts nothing, and RULE 9 forbids it from carrying a
   // measured status.

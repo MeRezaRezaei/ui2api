@@ -8,8 +8,11 @@ import {
   NO_ANSWER_REFUSAL_PATTERNS,
   UNMATCHED_SELECTOR_PATTERNS,
   VERIFICATION_CLASSES,
+  COMPOSER_PROBE_SITE_HOLE,
   capabilityDataEvidence,
   challengeMarkerIn,
+  composerRefusalIn,
+  composerRefusalMatcher,
   classifyOutcome,
   classPrecondition,
   emptyCapabilityResult,
@@ -21,7 +24,7 @@ import {
 } from "../src/prompt/verification-class.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { NO_ANSWER_REFUSAL_RE, renderNoAnswerRefusal, RETRY } from "../src/prompt/error-redaction.js";
+import { NO_ANSWER_REFUSAL_RE, redactInternalError, renderNoAnswerRefusal, RETRY } from "../src/prompt/error-redaction.js";
 
 // The classifier is pure, so every pin below is hermetic: no browser, no
 // network, no clock. The inputs are the values the DEPLOYED service actually
@@ -749,8 +752,9 @@ test("the vocabulary grew by exactly ONE member, and no existing class changed m
   assert.equal(answers.cls, "ANSWERS");
   assert.equal(classifyOutcome({ httpStatus: 200, answerText: "   ", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "whitespace is not an answer");
   assert.equal(classifyOutcome({ httpStatus: 500, answerText: "PONG", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "a 5xx is never ANSWERS");
-  assert.equal(VERIFICATION_CLASSES.length, 10, `the closed set is ${VERIFICATION_CLASSES.length}: ${VERIFICATION_CLASSES.join(", ")}`);
+  assert.equal(VERIFICATION_CLASSES.length, 11, `the closed set is ${VERIFICATION_CLASSES.length}: ${VERIFICATION_CLASSES.join(", ")}`);
   assert.ok(VERIFICATION_CLASSES.includes("RETURNS-DATA"));
+  assert.ok(VERIFICATION_CLASSES.includes("UNATTRIBUTED-NO-COMPOSER"));
   assert.deepEqual(Object.keys(CLASS_PRECONDITIONS).sort(), [...VERIFICATION_CLASSES].sort());
 });
 
@@ -838,4 +842,189 @@ test("RETURNS-DATA arm 2 is GUARDED: an empty shell, an empty sibling, or a decl
   assert.notEqual(emptyWithPopulatedSibling.cls, "RETURNS-DATA", `a populated sibling talked an EMPTY result into the class (${emptyWithPopulatedSibling.cls})`);
   assert.equal(emptyWithPopulatedSibling.cls, "UNCLASSIFIED");
   assert.match(emptyWithPopulatedSibling.reason, /SUCCESSFUL MEASUREMENT OF NOTHING/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE COMPOSER REFUSAL — UNATTRIBUTED-NO-COMPOSER
+//
+// WHAT THIS KILLS. MEASURED, `deepseek` answers the daemon's own wire with
+//   HTTP 502 {"error":{"code":"ui2api_driver_error","message":"deepseek did not
+//   present a usable prompt input on its chat page this time — the site may have
+//   changed its layout, or it may be showing a sign-in or consent wall. Retry; …"}}}
+// — a real, named, honest outcome of a real site, carrying no `title`/`url`.
+// `NO_COMPOSER_PATTERN` matches the DRIVER's internal sentence, which redaction
+// rewrites before any client sees it, and the page-keyed `COMPOSER-DRIFT` branch
+// needs an `observedPage` this path never reports. So the measurement derived
+// UNCLASSIFIED, the write seam REFUSED the row, and the record lost a true
+// measurement while the gate went on reporting the site as merely unmeasured.
+//
+// THE DERIVATION IS PROVEN HERE, NOT ASSERTED IN THE CLASSIFIER, because the
+// probe this file matches is typed in the classifier while the sentence it must
+// match is owned by `src/prompt/error-redaction.ts` and the raw refusal that
+// produces it is owned by `src/prompt/driver.ts`. The pin below reads the
+// DRIVER'S OWN THROW out of its source, projects it through the OWNER'S OWN
+// consumer function, and requires the shipped matcher to find it — so neither
+// half can drift alone without this going red.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DRIVER_SRC = readFileSync(resolve(process.cwd(), "src/prompt/driver.ts"), "utf8");
+
+/** The driver's own composer-refusal sentence, read out of its source — the
+ *  first template chunk of the `DriverRefusal` throw that names a composer. */
+function driverComposerRefusal(site: string, url: string): string {
+  const throws = [...DRIVER_SRC.matchAll(/throw new DriverRefusal\(\s*((?:`[^`]*`\s*\+\s*)*`[^`]*`)/g)];
+  const composerThrow = throws.find((m) => m[1]!.includes("no composer found"));
+  assert.ok(composerThrow, "src/prompt/driver.ts no longer throws a named composer refusal — the class this gate pins has no emitter left to measure");
+  const first = /`([^`]*)`/.exec(composerThrow[1]!)![1]!;
+  const rendered = first
+    .replace("${this.profile.id}", site)
+    .replace("${this.profile.url}", url)
+    .replace("${title}", "")
+    .replace("${url}", "");
+  assert.ok(!rendered.includes("${"), `the driver's composer throw grew a substitution this pin does not fill: ${rendered}`);
+  return rendered;
+}
+
+/** What the daemon actually hands a client for that refusal. */
+function wireComposerRefusal(site: string): string {
+  return redactInternalError(driverComposerRefusal(site, `https://${site}.example/`), { site });
+}
+
+test("the composer matcher is COMPUTED by the module that emits the sentence — the driver's own throw is what it matches", () => {
+  const m = composerRefusalMatcher();
+  assert.ok(m, "the derivation produced no matcher — the daemon's own projection must yield one, or the class is silently unreachable");
+  // The clause the matcher carries IS the owner's projection of the DRIVER'S OWN
+  // words, minus the shared `RETRY` tail. Nothing in this file's matcher is a
+  // hand-typed copy of that sentence.
+  const wire = wireComposerRefusal("deepseek");
+  assert.ok(
+    wire.includes(m.clause.replace(COMPOSER_PROBE_SITE_HOLE, "deepseek")),
+    `the shipped matcher does not match the daemon's own projection of the driver's own throw.\n  clause: ${m.clause}\n  wire:   ${wire}`,
+  );
+  // …and it is the SAME clause every other site produces, with only the name
+  // moving — which is what "derived" means here rather than "typed per site".
+  // The matched span additionally carries the shared `RETRY` tail when the wire
+  // has one, which is why the tail is an OPTIONAL group in the pattern.
+  assert.ok(
+    composerRefusalIn(wireComposerRefusal("kimi"))!.startsWith(m.clause.replace(COMPOSER_PROBE_SITE_HOLE, "kimi")),
+    "the derived clause must not depend on which site was measured",
+  );
+});
+
+test("the composer matcher is NOT a name match on prose: it matches neither the no-answer projection nor the generic fallback", () => {
+  const m = composerRefusalMatcher()!;
+  // Every refusal this daemon projects ends with the same `RETRY` tail and most
+  // of them name the site as the subject, so a hand-typed fragment — or a matcher
+  // built from the wrong projection — would pull these in behind it.
+  const otherProjections = [
+    redactInternalError("no answer appeared on kimi within 60000ms. This site requires sign-in.", { site: "kimi" }),
+    redactInternalError(new Error("boom at /opt/ui2api/src/prompt/driver.ts:730"), { site: "kimi" }),
+    redactInternalError("pool saturated (queue timeout)", { site: "kimi" }),
+    redactInternalError(new Error("Target page, context or browser has been closed"), { site: "kimi" }),
+  ];
+  for (const sentence of otherProjections) {
+    assert.equal(composerRefusalIn(sentence), null, `a DIFFERENT refusal matched the composer matcher: ${sentence}`);
+    assert.ok(!m.re.test(sentence), `the derived pattern matched a different refusal: ${sentence}`);
+  }
+});
+
+test("UNATTRIBUTED-NO-COMPOSER: the real deepseek shape on the daemon's own wire derives the class", () => {
+  const wire = `${wireComposerRefusal("deepseek")} — code=ui2api_driver_error`;
+  const c = classifyOutcome({ httpStatus: 502, message: wire, poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNATTRIBUTED-NO-COMPOSER", `expected UNATTRIBUTED-NO-COMPOSER, got ${c.cls}: ${c.reason}`);
+  // It must NOT be filed as either attributed reading: nothing observed a
+  // sign-in surface, and nothing observed a page that loaded without a composer.
+  assert.notEqual(c.cls, "SIGN-OUT");
+  assert.notEqual(c.cls, "COMPOSER-DRIFT");
+  assert.match(c.reason, /NO CAUSE IS ESTABLISHED/);
+  assert.match(c.reason, /CONTRADICTS a published `verified` claim rather than qualifying it/);
+});
+
+test("the class's reason quotes the MATCHED SPAN, so the gate's re-derivation from that evidence finds it again", () => {
+  // This is what makes the row re-derivable at all: test/round-trip-record-truth
+  // feeds `row.evidence` back through classifyOutcome. A reason that quoted the
+  // pattern SOURCE (escaped metacharacters and all) would not survive its own
+  // round trip; a reason that quoted nothing would leave the row's class
+  // unprovable from its own fields.
+  const c = classifyOutcome({ httpStatus: 502, message: `${wireComposerRefusal("deepseek")} — code=ui2api_driver_error`, poolAtRequest: IDLE });
+  const again = classifyOutcome({ httpStatus: 502, message: `class derived by classifyOutcome() via src/prompt/verification-class.ts: ${c.reason}`, poolAtRequest: IDLE });
+  assert.equal(again.cls, c.cls, `the evidence did not re-derive its own class: ${again.cls} vs ${c.cls}`);
+});
+
+test("FALSIFIER (b): the SAME 502 code carrying a DIFFERENT refusal is not this class", () => {
+  // `kimi` and `tencent-aistudio` answer the same status with the same daemon
+  // code — so the code cannot be the discriminator, and if it were, every
+  // driver refusal would read as a composer refusal.
+  const noAnswer = `${redactInternalError("no answer appeared on kimi within 60000ms.", { site: "kimi" })} — code=ui2api_driver_error`;
+  const c = classifyOutcome({ httpStatus: 502, message: noAnswer, poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNATTRIBUTED-NO-ANSWER", `a different refusal bought the composer class: ${c.cls}: ${c.reason}`);
+  assert.notEqual(c.cls, "UNATTRIBUTED-NO-COMPOSER");
+});
+
+test("FALSIFIER (c): the composer sentence at a 2xx, or with no status behind it, is not this class", () => {
+  const wire = wireComposerRefusal("deepseek");
+  for (const httpStatus of [200, 204, 400]) {
+    const c = classifyOutcome({ httpStatus, message: wire, poolAtRequest: IDLE });
+    assert.notEqual(c.cls, "UNATTRIBUTED-NO-COMPOSER", `HTTP ${httpStatus} bought a named failure diagnosis: ${c.cls}`);
+  }
+  // A 2xx that ALSO carries answer text is ANSWERS, which is the stronger claim
+  // and the earlier branch — a refusal sentence riding along with a real answer
+  // must not demote it.
+  const answered = classifyOutcome({ httpStatus: 200, message: wire, answerText: "PONG-abc", poolAtRequest: IDLE });
+  assert.equal(answered.cls, "ANSWERS");
+});
+
+test("the class is unreachable at a BUSY pool, and declines a row that DOES report a page", () => {
+  const wire = wireComposerRefusal("deepseek");
+  const busy = classifyOutcome({ httpStatus: 502, message: wire, poolAtRequest: BUSY });
+  assert.equal(busy.cls, "UNCLASSIFIED", `a busy pool bought a named diagnosis: ${busy.cls}`);
+  assert.match(busy.reason, /NON-idle pool/);
+  // With a page in hand the condition CAN be attributed, so the page-less class
+  // must decline rather than claim no cause — otherwise the page-keyed rules
+  // above would lose rows to a class that knows less than they do.
+  const withPage = classifyOutcome({
+    httpStatus: 502,
+    message: wire,
+    page: { title: "DeepSeek", url: "https://chat.deepseek.com/" },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(withPage.cls, "UNATTRIBUTED-NO-COMPOSER", `a reported page bought the page-LESS class: ${withPage.cls}`);
+  assert.match(withPage.reason, /declines it rather than claiming no cause/);
+});
+
+test("FALSIFIER (a): a HAND-TYPED class on fields that do not support it re-derives to UNCLASSIFIED", () => {
+  // Exactly what the write seam would refuse, and exactly what the record-truth
+  // gate's re-derivation catches: the row claims the class, its own evidence
+  // does not carry the refusal, so the shipped rule refuses the claim. Under the
+  // pre-widening vocabulary this row's fields derived UNCLASSIFIED and no gate
+  // could object to the typed name at all.
+  const claimed = classifyOutcome({
+    httpStatus: 502,
+    message: "class derived by classifyOutcome() via src/prompt/verification-class.ts: this row says UNATTRIBUTED-NO-COMPOSER",
+    poolAtRequest: IDLE,
+  });
+  assert.equal(claimed.cls, "UNCLASSIFIED", `a hand-typed class survived re-derivation: ${claimed.cls}`);
+});
+
+test("the driver's INTERNAL composer sentence with no page is still UNCLASSIFIED — only the wire's projection is a class", () => {
+  // The raw prose never reaches a client, so a matcher keyed on it describes a
+  // shape nothing on the wire produces. It must not become a second, reachable
+  // spelling of this class by accident.
+  const c = classifyOutcome({ httpStatus: 502, message: driverComposerRefusal("mystery", "https://mystery.example/"), poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNCLASSIFIED", `the driver's internal prose derived a class: ${c.cls}`);
+});
+
+test("UNATTRIBUTED-NO-COMPOSER declares a machine-checkable precondition, and it is the page-LESS twin of COMPOSER-DRIFT", () => {
+  const p = classPrecondition("UNATTRIBUTED-NO-COMPOSER");
+  assert.deepEqual([...p.requiredFields].sort(), ["evidence", "measuredAt", "method"]);
+  assert.ok(p.requiresPoolState);
+  assert.ok(p.requiresIdlePool, "at a busy pool the same refusal is a measurement of the queue");
+  assert.ok(
+    !p.requiredFields.includes("observedPage"),
+    "requiring observedPage would make the class unreachable — the refusal path reports no page, which is the whole reason this member exists",
+  );
+  // And the two composer classes stay DISTINCT in the closed set, with different
+  // remedies: one may claim a layout change, this one may not.
+  assert.notEqual(VERIFICATION_CLASSES.indexOf("COMPOSER-DRIFT"), VERIFICATION_CLASSES.indexOf("UNATTRIBUTED-NO-COMPOSER"));
+  assert.notEqual(classPrecondition("COMPOSER-DRIFT").requiredFields.includes("observedPage"), false);
 });

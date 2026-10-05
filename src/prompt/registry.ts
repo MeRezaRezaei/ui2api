@@ -406,11 +406,55 @@ export function readRoundTripRecord(): RoundTripReading {
  * today's site, and CI can never re-measure (no session, no Chrome owner), so
  * the window is the only thing standing between this record and a permanent lie.
  */
-export function measuredRoundTripFor(siteId: string, now: number = Date.now()): { measured: boolean; reason: string } {
+/**
+ * The verdict on a site's round trip. TWO absences are not one thing, and this
+ * is the type that says so.
+ *
+ * `measured` — a round trip that WORKED. It backs a `verified` claim.
+ *
+ * `contradicted` — a round trip that was PERFORMED and did not work: a harness
+ * row exists, inside the staleness window, whose DERIVED class is one of the
+ * named failure classes. This is not `measured`, and it is emphatically not the
+ * same thing as having no row at all.
+ *
+ * WHY THAT DISTINCTION IS A CORRECTNESS REQUIREMENT AND NOT A NICETY. A refused
+ * measurement is a hole in the evidence, not evidence of absence. Before this
+ * verdict existed, `measuredRoundTripFor` had exactly one negative answer, so a
+ * site whose freshest measurement was an honest, named, diagnosable failure read
+ * identically to a site nobody ever asked — and the gate reported "no measured
+ * row", which UNDERSTATES what is known. MEASURED on this record: `kimi` and
+ * `tencent-aistudio` carry `UNATTRIBUTED-NO-ANSWER` rows and `deepseek` an
+ * `UNATTRIBUTED-NO-COMPOSER` one, all refused by the write seam before their
+ * classes existed; every one of them was being published as "not measured".
+ *
+ * THE DIRECTION IS UNCHANGED AND ASYMMETRIC: a contradiction may only ever
+ * DEMOTE. `packageStatusOf` mints `unverified-candidate` for both negatives,
+ * because both fail to earn `verified`; what this type adds is the ability to
+ * say WHICH negative it was, so the gate can require that a contradicted site
+ * is not published as `verified` instead of merely noticing it is unmeasured.
+ */
+export interface RoundTripVerdict {
+  measured: boolean;
+  contradicted: boolean;
+  /** The DERIVED failure class behind a `contradicted` verdict, else null. */
+  failureClass: string | null;
+  reason: string;
+}
+
+/** The classes that mean "the round trip worked". Everything else in the closed
+ *  set is a MEASURED FAILURE except `UNMEASURED`, which asserts nothing at all —
+ *  it is the row that says "never reached", so it can neither back nor
+ *  contradict a claim. Derived from the vocabulary rather than re-listed, so a
+ *  member added later cannot be silently unreadable here. */
+const ROUNDTRIP_SUCCESS_CLASSES: ReadonlySet<string> = new Set(["ANSWERS", "RETURNS-DATA"]);
+
+export function measuredRoundTripFor(siteId: string, now: number = Date.now()): RoundTripVerdict {
   const rec = readRoundTripRecord();
-  if (rec.refusal) return { measured: false, reason: rec.refusal };
+  if (rec.refusal) return { measured: false, contradicted: false, failureClass: null, reason: rec.refusal };
   const mine = rec.rows.filter((r) => typeof r.site === "string" && r.site === siteId);
-  if (mine.length === 0) return { measured: false, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
+  if (mine.length === 0) {
+    return { measured: false, contradicted: false, failureClass: null, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
+  }
   const settled = mine.filter((r) => {
     if (r.provenance !== "harness") return false;
     const st = typeof r.httpStatus === "number" ? r.httpStatus : 0;
@@ -448,12 +492,45 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
         : null;
     return {
       measured: true,
+      contradicted: false,
+      failureClass: null,
       reason:
         first.class === "RETURNS-DATA" && shape
           ? `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" — the capability ${String(first.capability)} returned ${shape.rows} record(s) at ${shape.rowsPath} (runner ok=true, declared count ${shape.count} = counted rows, HTTP ${first.httpStatus}, inside the ${rec.stalenessWindowDays}-day window)`
           : `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" (nonce matched, ANSWERS, ${first.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
     };
   }
+
+  // A MEASURED ROUND TRIP THAT DID NOT WORK. Read before the generic "none is
+  // MEASURED" fallback, and only from rows the classifier DERIVED — the class is
+  // re-derived from the row's own machine fields by
+  // test/round-trip-record-truth.test.ts, so a hand-typed class cannot buy this
+  // state any more than it can buy `measured`.
+  const failed = mine.filter((r) => {
+    if (r.provenance !== "harness") return false;
+    const cls = typeof r.class === "string" ? r.class : "";
+    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
+    if (cls === "UNMEASURED" || ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
+    if (typeof r.measuredAt !== "string") return false;
+    const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
+    return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
+  });
+  if (failed.length > 0) {
+    const newest = failed.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
+    return {
+      measured: false,
+      contradicted: true,
+      failureClass: typeof newest.class === "string" ? newest.class : null,
+      reason:
+        `MEASURED AND FAILED — capabilities/roundtrip.json carries ${failed.length} row(s) for "${siteId}" whose DERIVED class is a named FAILURE, ` +
+        `the newest being ${String(newest.capability)} class=${String(newest.class)} httpStatus=${String(newest.httpStatus)} ` +
+        `answerChars=${String(newest.answerChars)} probeNonceMatched=${String(newest.probeNonceMatched)} measuredAt=${String(newest.measuredAt)} ` +
+        `(inside the ${rec.stalenessWindowDays}-day window). This is NOT the same as never having measured: the round trip was performed and the surface ` +
+        `DID NOT WORK, which CONTRADICTS a published \`verified\` claim rather than qualifying it. It establishes NO cause — read the class's own ` +
+        `evidence for what the service refused to attribute — and it may only ever DEMOTE, never promote.`,
+    };
+  }
+
   const why = mine
     .map((r) =>
       r.provenance !== "harness"
@@ -461,7 +538,7 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
         : `${String(r.capability)}: probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)} capabilityOk=${String(r.capabilityOk)}`,
     )
     .join("; ");
-  return { measured: false, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
+  return { measured: false, contradicted: false, failureClass: null, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
 }
 
 /**

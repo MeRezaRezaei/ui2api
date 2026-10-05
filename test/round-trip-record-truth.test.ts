@@ -124,7 +124,17 @@ const measuredIds = (): string[] => universe().filter((id) => measuredRoundTripF
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A readable, one-line-per-site report of all three sides, so a red run names
- *  the divergence instead of just saying the sets differ. */
+ *  the divergence instead of just saying the sets differ.
+ *
+ *  THE FOURTH READING, and why the MEASURED cell is not a yes/no. `measuredRoundTripFor`
+ *  distinguishes THREE states, because a refused measurement is not evidence of
+ *  absence: a site whose freshest row is an honest NAMED FAILURE was asked and
+ *  did not work, which is a different fact from never having been asked, and a
+ *  report that printed both as `MEASURED no` would be the understatement this
+ *  lane exists to remove. MEASURED, before this gate could say it: `kimi` and
+ *  `tencent-aistudio` carried `UNATTRIBUTED-NO-ANSWER` rows and `deepseek` an
+ *  `UNATTRIBUTED-NO-COMPOSER` one, and every one of them printed as plain
+ *  `MEASURED no` — indistinguishable from a site with no row at all. */
 function threeWayReport(): string[] {
   const claimed = new Set(claimedIds());
   const published = new Set(publishedIds());
@@ -132,10 +142,16 @@ function threeWayReport(): string[] {
   return universe()
     .filter((id) => claimed.has(id) || published.has(id) || measured.has(id))
     .map((id) => {
+      const verdict = measuredRoundTripFor(id);
+      const measuredCell = verdict.measured
+        ? "yes"
+        : verdict.contradicted
+          ? `no — CONTRADICTED by ${String(verdict.failureClass)}`
+          : "no ";
       const sides = [
         `CLAIMED ${claimed.has(id) ? "yes" : "no "}`,
         `PUBLISHED ${published.has(id) ? "yes" : "no "}`,
-        `MEASURED ${measured.has(id) ? "yes" : "no "}`,
+        `MEASURED ${measuredCell}`,
       ].join(" | ");
       return `  ${id.padEnd(20)} ${sides}`;
     });
@@ -145,12 +161,17 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
   const gaps: string[] = [];
   const unbackedClaims = claimedIds().filter((id) => !measuredIds().includes(id));
   for (const id of unbackedClaims) {
+    const v = measuredRoundTripFor(id);
+    // THE REMEDY IS NOT THE SAME for the two negatives, and printing one remedy
+    // for both is how a measured failure gets "fixed" by re-running the same
+    // measurement forever.
+    const remedy = v.contradicted
+      ? `A round trip WAS measured for \`${id}\` and it FAILED (${String(v.failureClass)}), which CONTRADICTS the published claim rather than qualifying it — ` +
+        `re-measure only after the named condition is addressed; re-running the same probe reproduces the same honest failure.`
+      : `Close it by running \`node scripts/audit/record-roundtrip.mjs --site ${id} --capability chat\` against a live daemon — never by editing the record by hand.`;
     gaps.push(
       `\`${id}\` holds a complete verified receipt AND publishes a live round-trip claim in capabilities/README.md, ` +
-        `but capabilities/roundtrip.json carries no MEASURED row: ${measuredRoundTripFor(id).reason}. ` +
-        `A claim no measurement backs is a hand-typed assertion. Close it by running ` +
-        `\`node scripts/audit/record-roundtrip.mjs --site ${id} --capability chat\` against a live daemon — ` +
-        `never by editing the record by hand.`,
+        `but capabilities/roundtrip.json carries no MEASURED row: ${v.reason}. ${remedy}`,
     );
   }
   assert.deepEqual(
@@ -159,6 +180,35 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
     `claims with no measured round trip (${unbackedClaims.length} of ${claimedIds().length} claimed):\n` +
       threeWayReport().join("\n") +
       `\n\nEach gap above is a REAL, currently-published claim the record cannot back.`,
+  );
+});
+
+test("THREE-WAY: a site whose round trip was MEASURED and FAILED is never published as verified", () => {
+  // THE TEETH OF THE DISTINCTION. A contradicted site must not reach a consumer
+  // as `verified`: `packageStatusOf` mints `unverified-candidate` for both
+  // negatives, and this asserts that for the negative that HAS a row — so a
+  // reader of `/registry` cannot be told a surface works when the freshest
+  // measurement of it says it did not.
+  const contradicted = universe()
+    .map((id) => ({ id, v: measuredRoundTripFor(id) }))
+    .filter((x) => x.v.contradicted)
+    .map((x) => x.id)
+    .sort();
+  if (contradicted.length === 0) {
+    // Not a pass by default: a record where nothing has ever failed cannot
+    // exercise this assertion, so say so rather than let a green run imply the
+    // branch was checked.
+    assert.ok(
+      rows.length > 0,
+      "capabilities/roundtrip.json carries no rows at all — the contradicted branch below is unexercised, so a green run here would prove nothing about it",
+    );
+    return;
+  }
+  const publishedVerified = contradicted.filter((id) => chatSurfaceStatus(id) === "verified");
+  assert.deepEqual(
+    publishedVerified,
+    [],
+    `these sites were MEASURED and the measurement FAILED, yet the resolver still publishes them as verified:\n  ${contradicted.join(", ")}\n${threeWayReport().join("\n")}`,
   );
 });
 
