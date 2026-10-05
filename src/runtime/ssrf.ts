@@ -15,6 +15,56 @@ export function sameOrigin(url: string, base: string): boolean {
 }
 
 /**
+ * The ONLY cross-host navigation allowance that exists in the origin-pinning
+ * guard — an EXPLICIT, per-package host PAIR, never a general "strip `www.` and
+ * compare" rule. A generic www-stripping rule would widen the guard for every
+ * package at once, and `www` is not a no-op in security terms: an attacker who
+ * controls `<host>.example` but not `<host>` gains nothing here, but a site
+ * whose bare host and www host are administered by DIFFERENT parties would
+ * silently become one origin. So the allowance is a literal table, keyed by the
+ * ALLOWED host, and it must be edited deliberately to grow.
+ *
+ * youtube.com / www.youtube.com: one property, one operator (Google). The
+ * package pinned the bare host (`capabilities/youtube/profile.json` url, which
+ * is also the VAULT KEY — `data/sessions/<host>/`, so it may not move without
+ * repointing a real stored account) while every runner URL is `www.youtube.com`,
+ * which is what the site actually serves. This pair is what lets those two
+ * facts coexist without weakening anything else.
+ */
+export const WWW_SIBLING_ALLOWANCE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "youtube.com": Object.freeze(["www.youtube.com"]),
+  "www.youtube.com": Object.freeze(["youtube.com"]),
+});
+
+/**
+ * `sameOrigin`, PLUS the one explicit www-sibling pair for the base's host.
+ *
+ * Deliberately NOT a generalization of `sameOrigin`:
+ *   - the scheme must still match exactly, so an `http://` sibling is refused
+ *     (protocol downgrade stays closed even across the allowance);
+ *   - the allowance only applies when the BASE host is a literal key of
+ *     `WWW_SIBLING_ALLOWANCE`, so a caller with a base of `evil.com` gets
+ *     nothing;
+ *   - the URL host must be one of that key's listed siblings LITERALLY, so
+ *     `youtube.com.evil.com`, `notyoutube.com` and `evil.www.youtube.com` are
+ *     all still refused (suffix/subdomain tricks do not match a whole-host
+ *     equality).
+ *
+ * Every existing call site keeps using strict `sameOrigin`; this is opt-in.
+ */
+export function sameOriginAllowingWwwSibling(url: string, base: string): boolean {
+  if (sameOrigin(url, base)) return true;
+  try {
+    const u = new URL(url, base);
+    const b = new URL(base);
+    if (u.protocol !== b.protocol) return false;
+    const siblings = WWW_SIBLING_ALLOWANCE[b.host];
+    if (!siblings) return false;
+    return siblings.includes(u.host);
+  } catch { return false; }
+}
+
+/**
  * Parse a caller-supplied channel reference into a safe, fully-qualified
  * `https` navigation URL on `allowedHost` — or throw with an honest message
  * naming the expected input. Never use raw caller input in a `page.goto()`.

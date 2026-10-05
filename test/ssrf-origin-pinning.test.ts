@@ -1,6 +1,6 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { sameOrigin, assertChannelUrl } from "../src/runtime/ssrf.js";
+import { sameOrigin, assertChannelUrl, sameOriginAllowingWwwSibling, WWW_SIBLING_ALLOWANCE } from "../src/runtime/ssrf.js";
 
 /**
  * GOAL 99: the origin-pinning guard had ZERO tests while 7 live call sites
@@ -87,5 +87,67 @@ d("GOAL 99: assertChannelUrl rebuilds from validated components", () => {
     // the mutation proof: feed the real functions the attack and require refusal
     assert.equal(sameOrigin("https://evil.com/steal", HTTPS), false, "cross-origin must be refused");
     assert.throws(() => assertChannelUrl("https://evil.com/@h"), /origin pinning refuses cross-origin/, "cross-origin channel must be refused");
+  });
+});
+
+/**
+ * The www-sibling allowance (the ONE cross-host navigation this repo allows).
+ * It exists because `capabilities/youtube/profile.json` pins the BARE host —
+ * which is also the VAULT KEY (`data/sessions/<host>/`), so it may not move
+ * without repointing a real stored account — while every URL
+ * `src/capabilities/youtube.ts` builds is `www.youtube.com`, the host the site
+ * actually serves. `sameOrigin` demands exact host equality, so youtube_search
+ * could never navigate at all.
+ *
+ * These tests exist to pin the allowance NARROW: the pair is literal and every
+ * other host — including ones that look like the pair — is still refused.
+ */
+d("www sibling allowance: literal host pair, everything else still refused", () => {
+  const BARE = "https://youtube.com";
+  const WWW = "https://www.youtube.com";
+
+  t("allows the youtube.com <-> www.youtube.com pair in both directions", () => {
+    assert.equal(sameOriginAllowingWwwSibling("https://www.youtube.com/results?search_query=x", BARE), true);
+    assert.equal(sameOriginAllowingWwwSibling("https://youtube.com/results?search_query=x", WWW), true);
+    // and plain same-origin still works through the sibling entry point
+    assert.equal(sameOriginAllowingWwwSibling(`${BARE}/watch?v=1`, BARE), true);
+  });
+
+  t("the allowance is OPT-IN: strict sameOrigin still refuses the pair", () => {
+    assert.equal(sameOrigin("https://www.youtube.com/results", BARE), false, "strict guard unchanged");
+    assert.equal(sameOrigin("https://youtube.com/results", WWW), false, "strict guard unchanged");
+  });
+
+  t("REFUSES every off-host / look-alike URL, including www tricks", () => {
+    const mustRefuse = [
+      "https://evil.com/",
+      "https://youtube.com.evil.com/",
+      "https://notyoutube.com/",
+      "https://evil.www.youtube.com/",
+      "https://www.youtube.com.evil.com/",
+      "https://youtube.com.www.evil.com/",
+      "https://m.youtube.com/",
+      "https://youtu.be/",
+      "https://youtube.com:8443/x",
+      "https://www.youtube.com./",
+    ];
+    for (const url of mustRefuse) {
+      assert.equal(sameOriginAllowingWwwSibling(url, BARE), false, `must refuse ${url}`);
+      assert.equal(sameOriginAllowingWwwSibling(url, WWW), false, `must refuse ${url} (www base)`);
+    }
+  });
+
+  t("REFUSES a protocol downgrade even across the allowed pair", () => {
+    assert.equal(sameOriginAllowingWwwSibling("http://www.youtube.com/results", BARE), false, "http sibling refused");
+    assert.equal(sameOriginAllowingWwwSibling("http://youtube.com/results", WWW), false, "http sibling refused");
+    assert.equal(sameOriginAllowingWwwSibling("file:///etc/passwd", BARE), false);
+    assert.equal(sameOriginAllowingWwwSibling("javascript:alert(1)", BARE), false);
+  });
+
+  t("a base host with NO allowance entry gains nothing (not a generic www rule)", () => {
+    // a hypothetical `evil.com` / `www.evil.com` pair is NOT same-origin here
+    assert.equal(sameOriginAllowingWwwSibling("https://www.evil.com/", "https://evil.com"), false);
+    assert.deepEqual(Object.keys(WWW_SIBLING_ALLOWANCE).sort(), ["www.youtube.com", "youtube.com"],
+      "the allowance table names exactly one host pair");
   });
 });

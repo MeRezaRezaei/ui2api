@@ -33,7 +33,7 @@
 // back what renders.
 import { resolvedHeadless, launchBrowser, loadCookies, sessionPath, usingUserChrome } from "../runtime/browser.js";
 import { attachPayload, attachRefusal, validateAttachRequest } from "../runtime/file-attach.js";
-import { sameOrigin, assertChannelUrl } from "../runtime/ssrf.js";
+import { sameOriginAllowingWwwSibling, assertChannelUrl } from "../runtime/ssrf.js";
 import {
   injectSnapshot,
   listAccounts,
@@ -155,7 +155,11 @@ export class YouTubeCapabilities {
   // pattern as every other runner). YouTube works anonymously; a snapshot,
   // when present, only pre-answers the consent wall.
   private async openPage(url: string): Promise<Page> {
-    if (!sameOrigin(url, this.profile.url)) {
+    // The pinned profile url is the bare host (and the VAULT KEY — see the host
+    // ladder below), while every URL this runner builds is the www host the
+    // site actually serves, so this call site opts into the ONE explicit
+    // www-sibling pair for youtube.com. Everything else stays strict.
+    if (!sameOriginAllowingWwwSibling(url, this.profile.url)) {
       throw new Error(
         `SSRF guard: refusing to navigate ${url} — origin pinning serves only ${new URL(this.profile.url).host}, never arbitrary URLs`
       );
