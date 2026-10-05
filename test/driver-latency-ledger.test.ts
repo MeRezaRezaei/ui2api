@@ -316,3 +316,120 @@ d("MEASURED RANGES (evaluated from source, recorded by the fake page)", () => {
 function await0(page: ReturnType<typeof fakePage>, ms: number): Promise<void> {
   return page.waitForTimeout(ms);
 }
+
+/* ---------------------------------------------------------------------------
+ * PROFILE DATA — read from the shipped profiles, never restated. A knob that a
+ * profile does not set costs nothing, so the ledger's padding claims are only
+ * true for the profiles that actually carry the field.
+ * ------------------------------------------------------------------------- */
+
+type Packaged = {
+  id?: string;
+  preComposeDelayMs?: number;
+  consentWall?: { accept: string; waitMs?: number; settleMs?: number };
+  stableMs?: number;
+  captureMs?: number;
+  dismiss?: string[];
+  urlTemplate?: string;
+};
+
+function packagedProfiles(): Map<string, Packaged> {
+  const out = new Map<string, Packaged>();
+  for (const dir of readdirSync("capabilities", { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    try {
+      out.set(
+        dir.name,
+        JSON.parse(readFileSync(`capabilities/${dir.name}/profile.json`, "utf8")) as Packaged
+      );
+    } catch {
+      /* a package dir without a readable profile.json is not a profile */
+    }
+  }
+  return out;
+}
+
+const PACKAGED = packagedProfiles();
+
+d("REAL PROFILE TIMING (read from the shipped profiles)", () => {
+  t("preComposeDelayMs is set on at most ONE builtin profile", () => {
+    const withIt = Object.entries(BUILTIN_PROFILES as Record<string, Packaged>)
+      .filter(([, p]) => p.preComposeDelayMs !== undefined)
+      .map(([id, p]) => [id, p.preComposeDelayMs]);
+    assert.deepEqual(
+      withIt,
+      [["tencent-aistudio", 8000]],
+      `preComposeDelayMs must stay scoped to the one profile whose SPA drops early sends; got ${JSON.stringify(withIt)}`
+    );
+  });
+
+  t("preComposeDelayMs is set on at most ONE packaged capability profile", () => {
+    const withIt = [...PACKAGED.entries()]
+      .filter(([, p]) => p.preComposeDelayMs !== undefined)
+      .map(([id, p]) => [id, p.preComposeDelayMs]);
+    assert.deepEqual(
+      withIt,
+      [["tencent-aistudio", 8000]],
+      `packaged preComposeDelayMs drifted; got ${JSON.stringify(withIt)}`
+    );
+  });
+
+  t("consentWall is set on at most ONE profile overall, and it is duckduckgo", () => {
+    const builtins = Object.entries(BUILTIN_PROFILES as Record<string, Packaged>)
+      .filter(([, p]) => p.consentWall?.accept)
+      .map(([id]) => id);
+    const packaged = [...PACKAGED.entries()].filter(([, p]) => p.consentWall?.accept).map(([id]) => id);
+    assert.deepEqual(builtins, [], `a builtin profile must not carry a consent wall; got ${JSON.stringify(builtins)}`);
+    assert.deepEqual(packaged, ["duckduckgo"], `exactly one packaged consent wall; got ${JSON.stringify(packaged)}`);
+  });
+
+  t("the consent-wall cost is a POLLED CEILING plus a settle, read from the real profile", () => {
+    const wall = PACKAGED.get("duckduckgo")!.consentWall!;
+    // The ceiling is a BUDGET the poll may exit early from, not a flat sleep.
+    assert.equal(wall.waitMs, 1800, "duckduckgo waitMs moved — it is the poll ceiling");
+    assert.equal(wall.settleMs, 900, "duckduckgo settleMs moved — it is paid only after an OBSERVED wall");
+    assert.match(
+      DRIVER_CODE,
+      /await awaitConsentWall\(wall\.waitMs \?\? 1800/,
+      "the wall wait must be the polled awaitConsentWall, not a blind sleep"
+    );
+  });
+
+  t("per-profile worst/best padding on a default ask (no newChat, no model, no urlTemplate)", () => {
+    const sendGate = rangeOf("50 + Math.floor(Math.random() * 150)", {});
+    const rows: Array<{ id: string; min: number; max: number; why: string }> = [];
+
+    // gemini — no preComposeDelayMs, no consentWall.
+    assert.equal(BUILTIN_PROFILES.gemini.preComposeDelayMs, undefined, "gemini must not carry a cold-boot dwell");
+    rows.push({ id: "gemini", ...{ min: sendGate[0], max: sendGate[1] }, why: "send gate only" });
+
+    // tencent-aistudio — preComposeDelayMs 8000 + the send gate.
+    const pre = rangeOf("Math.round(this.profile.preComposeDelayMs + Math.random() * 600)", {
+      profile: TENCENT,
+    });
+    rows.push({
+      id: "tencent-aistudio",
+      min: pre[0] + sendGate[0],
+      max: pre[1] + sendGate[1],
+      why: "preCompose cold-boot dwell + send gate",
+    });
+
+    // duckduckgo — send gate, plus the consent-wall path only on an OBSERVED wall.
+    rows.push({
+      id: "duckduckgo",
+      min: sendGate[0],
+      max: sendGate[1],
+      why: "send gate; wall poll (≤1800 ceiling, early exit) + 900 settle only when a wall is observed",
+    });
+
+    assert.deepEqual(
+      rows.map((r) => [r.id, r.min, r.max]),
+      [
+        ["gemini", 50, 199],
+        ["tencent-aistudio", 8050, 8799],
+        ["duckduckgo", 50, 199],
+      ],
+      "the per-profile default-ask padding moved; re-derive from the profile data rather than editing these numbers"
+    );
+  });
+});
