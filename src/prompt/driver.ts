@@ -213,6 +213,40 @@ export interface ChatDriverOptions {
  * of the sent text, not on mere shared vocabulary, so a site whose genuine
  * answer legitimately repeats a phrase from the prompt is still servable.
  */
+/**
+ * A NAMED refusal from the readback — the driver's own verdict, with a cause it
+ * can state — as distinct from an anonymous crash.
+ *
+ * WHY THIS TYPE EXISTS, MEASURED. Every one of these four refusals was a bare
+ * `new Error(...)`, so the TYPE carried nothing and the transport in front of
+ * the driver had exactly one way to classify a fault: as an unknown internal
+ * error. The consequence was measured live on the deployed daemon: `POST /prompt
+ * {"site":"kimi"}` answered **500 `{"code":"internal_error","message":"internal
+ * error"}`** after 63.7s while the daemon's own journal for that same request
+ * read `no answer appeared on kimi within 60000ms. This site requires sign-in…`,
+ * and the SAME fault on `POST /v1/chat/completions` answered **502
+ * `ui2api_driver_error`** with the named verdict. The cause was known, named and
+ * correct — and `/prompt` erased it into an anonymous 500, which is this repo's
+ * own rule inverted: an anonymous `internal_error` tells an integrator nothing
+ * and sends them hunting a server fault when the truth is a login-gated site.
+ *
+ * THE TYPE IS THE FIX, not a message convention. A caller mistake, a pool
+ * refusal and a driver refusal are three different things, and a handler that
+ * cannot tell them apart can only answer all three the same way. `instanceof`
+ * is what lets `src/prompt/http.ts` answer this one as itself (502
+ * `ui2api_driver_error`, the code `/v1` already emits) while a fault that is
+ * genuinely unknown keeps the anonymous 500. Subclassing `Error` is deliberate:
+ * every existing `catch` that narrows on `Error` — `poolRefusal(msg)`,
+ * `String(e)`, the `console.error` of the operator's stack — behaves exactly as
+ * before, so this is strictly additive.
+ */
+export class DriverRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DriverRefusal";
+  }
+}
+
 export function isPromptEcho(answer: string, sent: string): boolean {
   const a = answer.trim();
   const p = sent.trim();
@@ -451,7 +485,7 @@ export class ChatDriver {
     }
     const detail =
       checks.length > 0 ? checks.join("; ") : "no reset signal readable (answer region and composer both unreadable after the click)";
-    throw new Error(
+    throw new DriverRefusal(
       `newChat reset not verified on ${this.profile.id}: after clicking "${this.profile.newChat}" — ${detail}; ` +
         `refusing to compose into a non-reset page (stale-echo guard, GOAL 46)`
     );
@@ -562,11 +596,11 @@ export class ChatDriver {
     if (!composer && !this.profile.urlTemplate) {
       if (!(await this.pageAlive())) {
         // page died mid-read — retried on a fresh browser, not reported as rot
-        throw new Error("page died reading the composer — Target page, context or browser has been closed");
+        throw new DriverRefusal("page died reading the composer — Target page, context or browser has been closed");
       }
       let title = "", url = "";
       try { title = await this.page!.title(); url = await this.page!.url(); } catch { /* page gone */ }
-      throw new Error(
+      throw new DriverRefusal(
         `no composer found on ${this.profile.id} (${this.profile.url}) — the site UI may have changed. ` +
           `Tune ${this.profile.id} in src/profile/profile.ts or ship a JSON override (--profile FILE). ` +
           `Page title: ${title}, url: ${url}`
@@ -678,7 +712,7 @@ export class ChatDriver {
       // context as fact, which is the class this gate exists to kill. Refuse
       // with the evidence, exactly as the stale-echo and answer-echo guards
       // below refuse: never a partial answer, never a fabrication.
-      throw new Error(
+      throw new DriverRefusal(
         `answer-not-an-answer on ${this.profile.id}: the readback settled on a region this profile ` +
           `declares NON-answer and no answer-shaped text ever appeared, so the request is refused ` +
           `rather than answered with a status line (read ${JSON.stringify(observed.nonAnswer?.selector)}, ` +
@@ -692,7 +726,7 @@ export class ChatDriver {
       // pre-ask baseline — the previous answer stayed mounted the whole time
       // and no new element grew. Refuse loudly instead of returning prompt
       // A's text as prompt B's answer (the GOAL-45 fidelity class).
-      throw new Error(
+      throw new DriverRefusal(
         `no fresh answer appeared on ${this.profile.id} within ${opts.timeoutMs ?? this.profile.captureMs}ms — ` +
           `the region never changed from the per-ask baseline (previous answer still mounted; stale-echo guard, GOAL 46). ` +
           (this.profile.newChat
@@ -703,7 +737,7 @@ export class ChatDriver {
     // GOAL 114: refuse a prompt echo BEFORE it can be served as an answer. This
     // is a NAMED refusal, not a silent truncation and not a `stable` success.
     if (isPromptEcho(answer, prompt)) {
-      throw new Error(
+      throw new DriverRefusal(
         `answer-echo on ${this.profile.id}: the answer region returned the sent prompt verbatim — ` +
           `the answer selector matches the USER bubble, so nothing was actually read back ` +
           `(sent ${prompt.trim().length} chars, got back ${answer.length} chars, identical). ` +
@@ -727,7 +761,7 @@ export class ChatDriver {
           ...(await this.readModel().then((m) => (m ? { model: m } : {}))),
         };
       }
-      throw new Error(
+      throw new DriverRefusal(
         `no answer appeared on ${this.profile.id} within ${opts.timeoutMs ?? this.profile.captureMs}ms. ` +
           (this.profile.loginRequired
             ? `This site requires sign-in. ${this.profile.loginHint}.`

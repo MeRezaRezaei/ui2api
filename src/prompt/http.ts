@@ -79,6 +79,8 @@ import { readdirSync } from "node:fs";
 import { listAccounts, slugifyIdentity, loadCapabilities, resolveStoredAccount, assertUsableStoredAccount, vaultRoot } from "../runtime/session-store.js";
 import { validateCapabilityReportShape } from "../runtime/capability-probe.js";
 import { consumerAccountRefusal, consumerPoolRefusal, INVALID_JSON_MESSAGE } from "./consumer-surface.js";
+import { redactInternalError } from "./error-redaction.js";
+import { DriverRefusal } from "./driver.js";
 import { GeminiCapabilities } from "../capabilities/gemini.js";
 import { KimiCapabilities } from "../capabilities/kimi.js";
 import { HunyuanCapabilities } from "../capabilities/hunyuan.js";
@@ -1753,6 +1755,41 @@ export async function startPromptd(opts: PromptdOptions): Promise<PromptdServer>
       const refusal = poolRefusal(msg);
       if (refusal) {
         return send(res, 503, { error: { code: refusal.code, message: consumerPoolRefusal(refusal.code) } });
+      }
+      // A NAMED driver refusal must reach the caller AS ITSELF. This arm did
+      // not exist, and the erasure it fixes was measured live on the deployed
+      // daemon: `POST /prompt {"site":"kimi"}` answered 500
+      // `{"code":"internal_error","message":"internal error"}` after 63.7s while
+      // the daemon's OWN journal for that same request read `no answer appeared
+      // on kimi within 60000ms. This site requires sign-in…` — and the SAME
+      // fault on `POST /v1/chat/completions` answered 502 `ui2api_driver_error`
+      // with the named verdict. So the cause was known, named and correct, and
+      // `/prompt` threw it away: an anonymous `internal_error` tells an
+      // integrator nothing and sends them hunting a server fault when the truth
+      // is a login-gated site. That is this repo's own rule inverted — no
+      // fabricated results, and every failure gets a NAMED verdict.
+      //
+      // THE IDIOM IS CLASSIFY-THEN-PROJECT, and it is the one the security gate
+      // in `test/no-internal-error-echo.test.ts` is written to recognise. A
+      // previous lane put the caught value straight into the body here and that
+      // gate went RED — correctly, because the raw message can carry an
+      // absolute path, a page title or a Playwright diagnostic. So the error is
+      // CLASSIFIED here (`instanceof DriverRefusal`, the type the driver itself
+      // throws) and PROJECTED by `redactInternalError`, the one seam that owns
+      // the consumer wording: the /v1 route's identical answer, byte for byte,
+      // from the same raw fault. No third spelling of the code is invented — it
+      // is the code `/v1` already emits.
+      //
+      // WHY IT DOES NOT SWALLOW EVERY FAULT: this arm fires ONLY on a
+      // `DriverRefusal`, so a fault with no known cause still falls through to
+      // the anonymous 500 below, and a caller mistake still reaches its 4xx.
+      if (e instanceof DriverRefusal) {
+        return send(res, 502, {
+          error: {
+            code: "ui2api_driver_error",
+            message: redactInternalError(e, { site: requestIdentity(req, url).site ?? undefined }),
+          },
+        });
       }
       // 400 for request-shape/identity errors the caller can correct: unknown
       // site, installed-but-not-chat (GOAL 32 two-step idFrom), unknown account.
