@@ -9,7 +9,7 @@
 | send-readiness-experiment | L2 | EXECUTE (experiment) | parent opencode session | VERIFIED-ALREADY-LANDED: no new test written (test/consent-wall-poll.test.ts, GOAL 161, covers this slice); mutation runs M1-M4 measured in /tmp/codeg-acp/438074-c81c438b/mut; Tencent verdict DECLINE | 2026-10-04T18:08:28+02:00 | done (no src/test edits; findings only) |
 | `open_code` | L1 | GOAL pool.ts worker.busy-too-early | orchestrator (main chat) | src/prompt/pool.ts release-path fix + 1 new test | 2026-10-04T18:09:53+02:00 | running |
 | `plugin-wigolo-honest-success` | L1 | GOAL (src/plugin/wigolo-context.ts invented success) | orchestrator | src/plugin/wigolo-context.ts + 1 new test | 2026-10-04T16:09:52Z | running |
-| `l1-timeout-discipline-gate` | L1 | goal (gate-cannot-fire) | orchestrator | test/test-timeout-discipline.test.ts scanner window+anchor fix | 2026-10-04T18:10:28+02:00 | running |
+| `l1-timeout-discipline-gate` | L1 | goal (gate-cannot-fire) | orchestrator | test/test-timeout-discipline.test.ts scanner window+anchor fix | 2026-10-04T18:10:28+02:00 | DONE 9e937a7 — 18 tests / 17 pass / 1 fail is another lane's unbounded spawnSync (648aae8), not this file |
 | `L1-sweep-probe-overlap` | L1 | execute | codeg-orchestrator | src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json | 2026-10-04T16:22:05Z | running |
 | `reuse-audit-l2` | L2 | VERIFY (audit report) | orchestrator | reuse+freshness audit report (Q1-Q5, <=500w) | 2026-10-04T18:22:18+02:00 | done (report delivered in-chat) |
 | `readpath-callers` | L2 | read-only audit slice C: awaitAnswer read-path callers | L0-orchestrator | none (read-only sub-report) | 2026-10-04T18:27:39+02:00 | running |
