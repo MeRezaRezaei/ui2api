@@ -477,7 +477,7 @@ this sentence cannot drift again.
 | `UI2API_CHROME_NO_SANDBOX` | **TRUST** run Chrome without its sandbox | off | `src/runtime/browser.ts:487` |
 | `UI2API_CHROME_PATH` | explicit Chrome/Chromium executable path; 9 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:26` |
 | `UI2API_CHROME_PROFILE_PATH` | alias of `UI2API_USER_DATA_DIR`; 5 read sites, this is the launch seam's resolver | — | `src/runtime/browser.ts:35` |
-| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:519` |
+| `UI2API_CHROME_STDERR` | surface Chrome stderr | off | `src/runtime/browser.ts:541` |
 | `UI2API_DATA_DIR` | the sessions/vault dir; 30 read sites, this is the driver's `resolveDataDir()` | — | `src/prompt/driver.ts:989` |
 | `UI2API_DATA_DIR_OVERRIDE` | override the data/sessions dir (read after `UI2API_DATA_DIR` at every `resolveDataDir()`) | — | `src/prompt/driver.ts:989` |
 | `UI2API_DEBUG` | debug logging; 5 read sites across the driver/daemon/pool | off | `src/prompt/driver.ts:495` |

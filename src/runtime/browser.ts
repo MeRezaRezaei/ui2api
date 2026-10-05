@@ -514,28 +514,20 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
     detached: true,
   });
   child.on("error", () => {});
-  // Forward the browser's own stderr when asked — the crash CHECK line ("Check
-  // failed: ...", "[FATAL:...]") is the only way to see WHY a page kills it.
-  if (process.env.UI2API_CHROME_STDERR === "1") {
-    child.stderr?.on("data", (d: Buffer) => process.stderr.write(`[chrome] ${d.toString()}`));
-  }
-  const endpoint = `http://127.0.0.1:${port}`;
-
-  // Wait for the debug endpoint to answer (bounded); then attach.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) break;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 200));
-    if (child.exitCode !== null) throw new Error(`chrome exited early (code ${child.exitCode})`);
-  }
-
-  const browser = await connectWithTimeout(endpoint);
   // The CDP connection does not own the spawned process: kill it on detach.
+  //
+  // REGISTERED HERE, IMMEDIATELY AFTER THE SPAWN — deliberately NOT further
+  // down. It used to be defined after `await connectWithTimeout(...)`, so every
+  // throw between here and there propagated with a REAL google-chrome still
+  // running, and that orphan held the chrome owner's ProcessSingleton lock: one
+  // failed attach made every later `chrome start` on the box fail with
+  // `Failed to create ... ProcessSingleton` until a human ran pkill by hand.
+  // The daemon is idempotent-and-ADOPTING precisely so a leftover Chrome is
+  // never fatal, so leaking one defeats a property this repo advertises.
+  //
+  // A cleanup registered AFTER the statement that can throw is skipped by
+  // exactly that statement. The try/catch below is what makes "a process
+  // exists" and "a process can be torn down" the same instant.
   const killGroup = () => {
     try {
       process.kill(-(child.pid as number), "SIGKILL");
@@ -543,20 +535,48 @@ export async function spawnChromeAndConnect(overrides: LaunchOpts = {}): Promise
       try { child.kill("SIGKILL"); } catch { /* gone */ }
     }
   };
-  browser.on("disconnected", killGroup);
-  // Minimize a headful window so the user's screen stays clean (best effort).
-  if (!headless) {
-    try {
-      const ctxs = browser.contexts();
-      for (const ctx of ctxs) {
-        const pages = ctx.pages();
-        for (const p of pages) {
-          try { await p.evaluate(() => { try { window.moveTo(-10000, -10000); } catch {} }); } catch { /* ignore */ }
-        }
+  try {
+    // Forward the browser's own stderr when asked — the crash CHECK line ("Check
+    // failed: ...", "[FATAL:...]") is the only way to see WHY a page kills it.
+    if (process.env.UI2API_CHROME_STDERR === "1") {
+      child.stderr?.on("data", (d: Buffer) => process.stderr.write(`[chrome] ${d.toString()}`));
+    }
+    const endpoint = `http://127.0.0.1:${port}`;
+
+    // Wait for the debug endpoint to answer (bounded); then attach.
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) break;
+      } catch {
+        // not up yet
       }
-    } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 200));
+      if (child.exitCode !== null) throw new Error(`chrome exited early (code ${child.exitCode})`);
+    }
+
+    const browser = await connectWithTimeout(endpoint);
+    browser.on("disconnected", killGroup);
+    // Minimize a headful window so the user's screen stays clean (best effort).
+    if (!headless) {
+      try {
+        const ctxs = browser.contexts();
+        for (const ctx of ctxs) {
+          const pages = ctx.pages();
+          for (const p of pages) {
+            try { await p.evaluate(() => { try { window.moveTo(-10000, -10000); } catch {} }); } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    return browser;
+  } catch (e) {
+    // Once a process exists, EVERY failure tears it down before propagating.
+    // Never a fabricated success and never a silent leak: kill, then rethrow.
+    killGroup();
+    throw e;
   }
-  return browser;
 }
 
 // --- M7: cookie session capture for cookie-gated sites ---

@@ -352,6 +352,151 @@ test("the seam is where the posture is decided, and nothing else decides it", ()
   }
 });
 
+/**
+ * THE ORPHAN KILL — a failed launch must leave NO chrome behind.
+ *
+ * `spawnChromeAndConnect()` is the one place in this repo that spawns a Chrome
+ * it owns. Its CDP attach does not own the child, so the child is killed on
+ * `disconnected`. That is only a cleanup while the launch SUCCEEDS: measured
+ * source order before this fix was `spawn` -> stderr -> poll loop -> `await
+ * connectWithTimeout()` (which throws on any failed/overshot attach) -> and
+ * THEN the kill. So every one of those throws propagated with a REAL
+ * `google-chrome` still running.
+ *
+ * The consequence is not a slow test, it is a bricked box: the orphan holds
+ * the ProcessSingleton lock on the chrome owner's profile, so every later
+ * `ui2api chrome start` fails with `Failed to create ... ProcessSingleton` until
+ * a human runs `pkill` by hand. `chrome-daemon.ts` is deliberately idempotent
+ * AND adopting so a leftover Chrome is never fatal — leaking one defeats a
+ * property this repo advertises in AGENTS.md and docs/GIT_WIRING.md.
+ *
+ * This asserts the property STRUCTURALLY, on the CODE view (comments and string
+ * bodies blanked, so a comment quoting the old bad order can neither satisfy
+ * nor break it) rather than on prose or on a live browser: nothing is spawned,
+ * nothing is killed, and no Chrome this repo did not start is ever touched.
+ */
+test("THE ORPHAN KILL — the spawned process is killable at the instant it exists, so no later throw can leak it", () => {
+  const seamRaw = readFileSync(SEAM, "utf8");
+  const seamCode = blankCommentsAndStrings(seamRaw);
+  // The ORDER assertions run on the strings-blanked view, so a comment or a
+  // string literal quoting the old bad order can neither satisfy nor break them.
+  // The `disconnected` wiring check NEEDS its string literal, so it runs on the
+  // keepStrings view — there the SHAPE (`x.on("disconnected", killGroup)`) is the
+  // discriminator, not the absence of prose. Both views preserve every
+  // character position, so one body extraction serves both.
+  const seamKept = blankCommentsAndStrings(seamRaw, { keepStrings: true });
+
+  // Brace-match the ONE function that owns a spawned child. Comments/strings are
+  // already blanked, so braces inside them cannot skew the depth count.
+  const declAt = seamCode.indexOf("function spawnChromeAndConnect(");
+  assert.ok(declAt > 0, "spawnChromeAndConnect() must exist in the seam — it is the only place that owns a spawned Chrome");
+  // Skip the PARAMETER list to find the body brace: a naive `indexOf("{")` lands
+  // on the `= {}` DEFAULT PARAMETER and brace-matches an empty body, which would
+  // make every assertion below vacuously pass.
+  let parens = 0;
+  let paramEnd = -1;
+  for (let i = seamCode.indexOf("(", declAt); i < seamCode.length; i++) {
+    const ch = seamCode[i];
+    if (ch === "(") parens++;
+    else if (ch === ")") {
+      parens--;
+      if (parens === 0) {
+        paramEnd = i;
+        break;
+      }
+    }
+  }
+  assert.ok(paramEnd > declAt, "could not find the seam-spawn function's parameter list");
+  const bodyStart = seamCode.indexOf("{", paramEnd);
+  assert.ok(bodyStart > paramEnd, "could not find the seam-spawn function's body");
+  let depth = 0;
+  let bodyEnd = -1;
+  for (let i = bodyStart; i < seamCode.length; i++) {
+    const ch = seamCode[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        bodyEnd = i;
+        break;
+      }
+    }
+  }
+  assert.ok(bodyEnd > bodyStart, "could not brace-match the seam-spawn function's body");
+  const body = seamCode.slice(bodyStart, bodyEnd);
+  const bodyKept = seamKept.slice(bodyStart, bodyEnd);
+  const at = (needle: string) => body.indexOf(needle);
+  const allAt = (needle: string) => {
+    const out: number[] = [];
+    for (let i = body.indexOf(needle); i !== -1; i = body.indexOf(needle, i + needle.length)) out.push(i);
+    return out;
+  };
+
+  const spawnAt = at("spawn(exec, args");
+  const killDefAt = at("const killGroup");
+  assert.ok(spawnAt >= 0, "no `spawn(exec, args` in the seam-spawn function — if this fails the SCANNER is broken, not the code");
+  assert.ok(killDefAt >= 0, "no `const killGroup` — the function spawns a process it owns and never learned how to kill it");
+
+  // (1) The kill must be DEFINED AFTER the spawn (it needs `child`) and BEFORE
+  //     every throw that follows the spawn. This is the pinned property: the old
+  //     order put the definition after `connectWithTimeout`, whose throw is the
+  //     common case (a failed CDP attach).
+  assert.ok(
+    killDefAt > spawnAt,
+    `killGroup must be defined AFTER the spawn (spawn@${spawnAt} < killGroup@${killDefAt}) — it closes over \`child\`, ` +
+      `so it cannot exist before it`,
+  );
+  const throws = allAt("throw ");
+  assert.ok(throws.length > 0, "the function has no throw at all — the orphan-kill property is vacuous here; re-derive the assertion");
+  const lateThrows = throws.filter((i) => i > spawnAt);
+  assert.ok(
+    lateThrows.length > 0,
+    "no throw after the spawn — then there is nothing to leak and this test proves nothing; re-derive it",
+  );
+  const firstLateThrow = Math.min(...lateThrows);
+  assert.ok(
+    killDefAt < firstLateThrow,
+    `killGroup is defined at @${killDefAt} but a throw sits at @${firstLateThrow} — LATER. ` +
+      `A cleanup registered after the statement that can throw is skipped by exactly that statement, so this ` +
+      `restores the leaked Chrome that holds the owner's ProcessSingleton lock (every later \`chrome start\` then ` +
+      `fails with \`Failed to create ... ProcessSingleton\` until a human runs pkill).`,
+  );
+
+  // (2) Defining it early is not ENOUGH — it must actually be invoked on the
+  //     failure path. Pin the catch: it kills, and it re-throws (never swallows,
+  //     which would turn a failed launch into a silent hang or a fake success).
+  const catchAt = at("} catch (e) {");
+  assert.ok(catchAt > firstLateThrow, `no catch AFTER the first post-spawn throw (@${firstLateThrow}) — the kill would never run`);
+  const catchBody = body.slice(catchAt);
+  assert.ok(
+    catchBody.indexOf("killGroup()") !== -1,
+    "the post-spawn catch does not call killGroup() — the child is still leaked on every failure after the throw",
+  );
+  assert.ok(
+    /catch\s*\(\s*e\s*\)\s*\{[^}]*throw\s+/.test(catchBody),
+    "the post-spawn catch does not RE-THROW — a launch failure would be swallowed into a fake success",
+  );
+
+  // (3) The detach-time kill must survive the fix. A teardown that fires only on
+  //     a FAILED launch would abandon every SUCCESSFUL launch's process on
+  //     detach — the leak traded for a bigger leak.
+  assert.ok(
+    /on\(\s*"disconnected"\s*,\s*killGroup\s*\)/.test(bodyKept),
+    "killGroup is no longer wired to the browser's `disconnected` — a successful launch's Chrome would survive its own detach",
+  );
+
+  // (4) Sanity: the kill must be idempotent/harmless when the child is already
+  //     gone (a throw AFTER chrome exited early), i.e. the group kill falls back
+  //     to child.kill() and swallows. Otherwise the catch itself throws and
+  //     REPLACES the honest launch error with a confusing ESRCH.
+  assert.ok(
+    /const killGroup = \(\) => \{[\s\S]*?process\.kill\([\s\S]*?\} catch \{[\s\S]*?child\.kill\(/.test(
+      body.replace(/\s+/g, " "),
+    ),
+    "killGroup no longer falls back to child.kill() when the process-group kill fails — the catch itself would throw",
+  );
+});
+
 test("headless-degraded stays a NAMED state — a headed request with no display is never silently headless", () => {
   // The rule the brief makes non-negotiable: `UI2API_HEADED` without a display is
   // headless-degraded and must be REPORTED, never a quiet fallback. This asserts
