@@ -242,9 +242,33 @@ export const UNMATCHED_SELECTOR_PATTERNS: readonly RegExp[] = [
   /selectors? could never match/i,
 ];
 
-/** The server's own phrase for "the composer selector found nothing on a page
- *  that did load". */
-export const NO_COMPOSER_PATTERN = /no composer found/i;
+/** GONE, and its removal is the point of this entry rather than a tidy-up.
+ *
+ * This used to be `export const NO_COMPOSER_PATTERN = /no composer found/i` —
+ * the one matcher on this file that named the composer condition, and it keyed
+ * on the DRIVER'S OWN INTERNAL SENTENCE (`src/prompt/driver.ts:603`). MEASURED,
+ * twice over, that sentence never reaches a client: `redactInternalError`
+ * (`src/prompt/error-redaction.ts:182`) rewrites it into "`<site>` did not
+ * present a usable prompt input on its chat page this time …", which does not
+ * contain the phrase, and the shipped record agrees — the ONE composer-refusal
+ * row in `capabilities/roundtrip.json` (deepseek, HTTP 502) carries
+ * `"observedPage": null` and its message is the redacted sentence, not this one.
+ *
+ * So the class it fed was unreachable from every measurement the harness can
+ * take: the sentence was internal, so the branch could only ever be reached by a
+ * hand-constructed input. That is the defect this round has been closing all
+ * session — a rule that cannot fire — and it sat in the CLASSIFIER, where a rule
+ * that cannot fire is a promise no gate is keeping. The branch now keys on
+ * `composerRefusalIn()`, which is DERIVED from the owner's own projection by
+ * calling it (see `composerRefusalMatcher`), so a reword of the emitter moves the
+ * matcher instead of deleting the class behind a green suite.
+ *
+ * A HAND-TYPED replacement over the consumer sentence's PROSE ("usable prompt
+ * input", "sign-in or consent wall") would NOT have been an equivalent fix: those
+ * words belong to `error-redaction.ts`, which is free to rewrite them, and the
+ * fallback and no-answer projections share the same `RETRY` tail and the same
+ * "the site may be …" shape, so a fragment would have pulled other refusals in
+ * behind it. */
 
 /** The server's own phrase for "this site needs a signed-in session". */
 export const SIGN_IN_MESSAGE_PATTERN = /requires sign-in|sign in once|requires login|not logged in|unauthenticated/i;
@@ -682,28 +706,55 @@ export function classifyOutcome(o: Outcome): Classification {
     return { cls: "SIGN-OUT", reason: `the server's own message names a sign-in requirement: ${o.message.slice(0, 120)}` };
   }
 
-  if (NO_COMPOSER_PATTERN.test(o.message)) {
-    if (!page) {
-      return { cls: "UNCLASSIFIED", reason: "the server reported no composer and no page title/url, so the condition cannot be told from a sign-out — record observedPage or widen a class on purpose" };
+  // A PAGE LOADED, and the service's own message is its named composer refusal.
+  //
+  // WHY THE MATCHER IS `composerRefusalIn` AND NOT A PHRASE, restated where the
+  // decision is made rather than only where it was explained: the raw internal
+  // sentence this branch used to match is rewritten by `redactInternalError`
+  // before any client sees it (see the `NO_COMPOSER_PATTERN` removal note above),
+  // so a matcher on it was a rule that could not fire from a real measurement.
+  // `composerRefusalIn` is the SAME derivation the page-less twin below uses — the
+  // owner's own projection, called rather than typed — so the two members differ
+  // ONLY in what evidence they require (a page, or its absence) and never in which
+  // sentence they read. That is what makes them twins rather than two rules.
+  //
+  // It requires the 5xx because that is the shape a driver refusal arrives in
+  // (MEASURED: 502, `code=ui2api_driver_error`), and the page is REQUIRED because
+  // claiming a cause needs it: the page-keyed rules above have already cleared
+  // this page of a challenge and of a sign-in surface, and `SIGN_IN_MESSAGE_PATTERN`
+  // has already cleared the message of a sign-in ASSERTION. So a page that got
+  // here did load, was neither a wall nor a login, and presented no composer.
+  const composerRefusal = composerRefusalIn(o.message);
+  if (composerRefusal && o.httpStatus >= 500 && o.httpStatus < 600 && page) {
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `the service reported its named composer refusal on a LOADED page at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — a measurement of the queue, not of the composer` };
     }
-    return { cls: "COMPOSER-DRIFT", reason: `HTTP ${o.httpStatus}, the page LOADED (title: ${page.title} | url: ${page.url}) and is neither a sign-in surface nor a challenge, but the composer selector found nothing — action is a profile/selector retune, not a login` };
+    return {
+      cls: "COMPOSER-DRIFT",
+      reason:
+        `HTTP ${o.httpStatus} at an IDLE pool, the page LOADED (title: ${page.title} | url: ${page.url}) and is ` +
+        `neither a challenge nor a sign-in surface nor a sign-in assertion, and the service's own message is its named ` +
+        `composer refusal ("${composerRefusal}") — the page presented no usable prompt input while the session itself ` +
+        `was demonstrably fine. This is the ONE condition that licenses a cause: the action is a profile/selector retune ` +
+        `against a capture, NOT a login and NOT a retry.`,
+    };
   }
 
-  // THE PAGE NEVER PRESENTED A USABLE PROMPT INPUT, and no page was reported.
+  // THE PAGE NEVER PRESENTED A USABLE PROMPT INPUT, and NO PAGE was reported.
   //
-  // WHERE IT SITS, and why after COMPOSER-DRIFT: that class asserts the page
-  // LOADED and was neither a sign-in surface nor a challenge — a claim only an
-  // `observedPage` can support — so this branch is the page-less twin and
-  // REQUIRES the absence of a page. Putting it before would let it swallow rows
-  // the page-keyed rules above own, and a class that fires whether or not the
-  // discriminating evidence exists is a class that cannot be held to either
-  // reading.
+  // WHERE IT SITS, and why it is the twin rather than the twin's predecessor: the
+  // branch above claims a cause and therefore needs the page that supports it,
+  // while this one has none — so a refusal that arrives with a page is already
+  // classified above and this branch sees only the page-LESS case. The `!page`
+  // clause is therefore NOT a defensive guard against a row that "should" have
+  // been attributed: by construction nothing reaches here with a page, because the
+  // COMPOSER-DRIFT branch is checked FIRST and claims it.
   //
   // WHY IT IS ITS OWN MEMBER AND NOT A WIDENING OF COMPOSER-DRIFT: the service's
   // own sentence LISTS two candidate causes — the site changed its layout, or it
   // is showing a sign-in or consent wall — and asserts NEITHER. `COMPOSER-DRIFT`
   // licenses "retune the selectors"; this row's fields cannot license that, and
- // filing it there would assert a layout change nobody observed, while filing it
+  // filing it there would assert a layout change nobody observed, while filing it
   // as SIGN-OUT would assert a credential problem nobody observed. It is the
   // page-less twin of `UNATTRIBUTED-NO-ANSWER` and carries the same rule: the
   // condition is established, the CAUSE is not, and no cause may be assumed.
@@ -714,11 +765,7 @@ export function classifyOutcome(o: Outcome): Classification {
   // busy pool the row measures the queue. Neither clause is decoration — a 2xx
   // carrying this sentence, or the same sentence at a busy pool, is refused as
   // UNCLASSIFIED rather than filed under a named diagnosis.
-  const composerRefusal = composerRefusalIn(o.message);
   if (composerRefusal && o.httpStatus >= 500 && o.httpStatus < 600) {
-    if (o.page) {
-      return { cls: "UNCLASSIFIED", reason: `HTTP ${o.httpStatus} carries the service's own composer refusal AND reports a page (title: ${o.page.title} | url: ${o.page.url}) — with a page in hand the condition can be attributed (challenge, sign-in surface, or a page that loaded without a composer), so this class declines it rather than claiming no cause` };
-    }
     if (!idle(o.poolAtRequest)) {
       return { cls: "UNCLASSIFIED", reason: `the service reported its named composer refusal at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — a measurement of the queue, not of the composer` };
     }

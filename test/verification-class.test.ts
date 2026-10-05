@@ -34,7 +34,19 @@ import { NO_ANSWER_REFUSAL_RE, redactInternalError, renderNoAnswerRefusal, RETRY
 const IDLE = { busy: 0, total: 4, queued: 0 };
 const BUSY = { busy: 3, total: 4, queued: 2 };
 
-const NO_COMPOSER = (site: string) => `no composer found on ${site} - the site UI may have changed. Tune ${site} in src/profile/profile.ts or ship a JSON override (--profile FILE).`;
+/**
+ * A composer refusal, AS THE WIRE CARRIES IT.
+ *
+ * This used to be a hand-typed copy of the DRIVER'S OWN INTERNAL sentence
+ * (`no composer found on <site> - the site UI may have changed. …`). That
+ * sentence never reaches a client — `redactInternalError` rewrites it — so every
+ * case below was pinned against text no measurement can ever supply, which is
+ * exactly how `COMPOSER-DRIFT` sat in the classifier as a rule that could not
+ * fire. The helper now projects the driver's own throw through the OWNER's own
+ * projection (`wireComposerRefusal`, below), so these cases are stated in the
+ * words the daemon actually hands a client.
+ */
+const NO_COMPOSER = (site: string): string => wireComposerRefusal(site);
 
 // ── the three anti-bot rows ──────────────────────────────────────────────────
 
@@ -195,9 +207,20 @@ test("a measured response the rule cannot honestly file is UNCLASSIFIED, never a
   assert.notEqual(c.cls, "UNMEASURED");
 });
 
-test("'no composer found' with NO reported page is UNCLASSIFIED — the condition cannot be told from a sign-out", () => {
+test("'no composer found' with NO reported page is the PAGE-LESS twin, never a class that claims a cause", () => {
+  // This case used to assert UNCLASSIFIED, and it passed for the wrong reason: it
+  // fed the DRIVER'S INTERNAL sentence, which the old `/no composer found/i`
+  // matcher matched — but no wire row carries that sentence, so the case was
+  // pinning a state no measurement can be in. Fed the SENTENCE THE WIRE ACTUALLY
+  // CARRIES, the page-less row is `UNATTRIBUTED-NO-COMPOSER` — a real class,
+  // reached by a real measurement, which asserts the CONDITION and refuses to
+  // assert the CAUSE. That is the honest answer, and it is deliberately not
+  // COMPOSER-DRIFT: with no page, a sign-in surface and an anti-bot wall were
+  // never ruled out, so "retune the selectors" would be a fabrication.
   const c = classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("mystery"), poolAtRequest: IDLE });
-  assert.equal(c.cls, "UNCLASSIFIED");
+  assert.equal(c.cls, "UNATTRIBUTED-NO-COMPOSER", `the page-less composer refusal lost its class: ${c.cls}: ${c.reason}`);
+  assert.notEqual(c.cls, "COMPOSER-DRIFT", "a row with NO page must never claim the retune — the page is the whole evidence for a cause");
+  assert.match(c.reason, /NO CAUSE IS ESTABLISHED/);
 });
 
 test("no response at an IDLE pool is UNCLASSIFIED, not contention and not a class", () => {
@@ -343,9 +366,19 @@ test("both new classes are distinct from COMPOSER-DRIFT — a composer that foun
   assert.notEqual(drift.cls, "NON-ANSWER-READ", "a missing composer is not a read that served a non-answer");
   assert.notEqual(drift.cls, "ANSWER-UNREADABLE", "a missing composer is not a zero-node answer-selector match");
   // The separating observation: COMPOSER-DRIFT requires the server to have
-  // REPORTED a page and named a missing composer; the new two do not, and
-  // v0's status is a 2xx where every COMPOSER-DRIFT row is a 502.
-  assert.equal(classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("x"), poolAtRequest: IDLE }).cls, "UNCLASSIFIED");
+  // REPORTED a page and named a missing composer. The SAME sentence with NO page
+  // is the page-LESS twin, which is a different class precisely because it
+  // cannot license the retune — so "distinct" here means the page, not the words.
+  const pageLess = classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("x"), poolAtRequest: IDLE });
+  assert.equal(pageLess.cls, "UNATTRIBUTED-NO-COMPOSER", `the page-less twin lost its class: ${pageLess.cls}`);
+  assert.notEqual(pageLess.cls, "COMPOSER-DRIFT", "no page, no cause: the two must not collapse into one");
+  // …and at a BUSY pool even the page-less twin is refused, so the pair cannot be
+  // told apart by anything weaker than the evidence each one names.
+  assert.equal(
+    classifyOutcome({ httpStatus: 502, message: NO_COMPOSER("x"), poolAtRequest: BUSY }).cls,
+    "UNCLASSIFIED",
+    "a composer refusal at a busy pool is a measurement of the queue in BOTH twins",
+  );
 });
 
 // ── the anti-vacuity half: the widening must not become an escape hatch ──────
@@ -974,22 +1007,92 @@ test("FALSIFIER (c): the composer sentence at a 2xx, or with no status behind it
   assert.equal(answered.cls, "ANSWERS");
 });
 
-test("the class is unreachable at a BUSY pool, and declines a row that DOES report a page", () => {
+test("the class is unreachable at a BUSY pool, and a row that DOES report a page is the WITH-PAGE twin instead", () => {
   const wire = wireComposerRefusal("deepseek");
   const busy = classifyOutcome({ httpStatus: 502, message: wire, poolAtRequest: BUSY });
   assert.equal(busy.cls, "UNCLASSIFIED", `a busy pool bought a named diagnosis: ${busy.cls}`);
   assert.match(busy.reason, /NON-idle pool/);
-  // With a page in hand the condition CAN be attributed, so the page-less class
-  // must decline rather than claim no cause — otherwise the page-keyed rules
-  // above would lose rows to a class that knows less than they do.
+  // THE WITH-A-PAGE ROW IS NOW `COMPOSER-DRIFT`, and this is the change of mind
+  // this case records. It used to be UNCLASSIFIED, declining on the grounds that
+  // "with a page in hand the condition can be attributed" — which was true and
+  // was the actual defect: the condition could be attributed, and the class that
+  // exists to carry an attributed composer failure had a matcher (the driver's
+  // internal sentence) that no wire row could ever satisfy. So the page-less
+  // branch was the ONLY branch the wire could reach, and the with-a-page case was
+  // UNCLASSIFIED for a reason that named a class nothing could file.
+  //
+  // The page here has already been CLEARED of a challenge and of a sign-in
+  // surface by the page-keyed rules above (both run first), so attributing it is
+  // not a guess: "loaded, not a wall, not a login, no composer" is precisely what
+  // COMPOSER-DRIFT means, and it is the one member that licenses the retune.
   const withPage = classifyOutcome({
     httpStatus: 502,
     message: wire,
     page: { title: "DeepSeek", url: "https://chat.deepseek.com/" },
     poolAtRequest: IDLE,
   });
-  assert.notEqual(withPage.cls, "UNATTRIBUTED-NO-COMPOSER", `a reported page bought the page-LESS class: ${withPage.cls}`);
-  assert.match(withPage.reason, /declines it rather than claiming no cause/);
+  assert.equal(withPage.cls, "COMPOSER-DRIFT", `a LOADED page with no composer was refused as unattributable: ${withPage.cls}: ${withPage.reason}`);
+  assert.match(withPage.reason, /the page LOADED \(title: DeepSeek \| url: https:\/\/chat\.deepseek\.com\/\)/);
+  assert.match(withPage.reason, /profile\/selector retune/, "the reason must still license the retune, not a login and not a retry");
+
+  // …and the page-LESS member is untouched by any of this: same sentence, no
+  // page, no cause. The two are distinguished ONLY by the presence of the page,
+  // so neither can be reached through the other's evidence.
+  const withoutPage = classifyOutcome({ httpStatus: 502, message: wire, poolAtRequest: IDLE });
+  assert.equal(withoutPage.cls, "UNATTRIBUTED-NO-COMPOSER", `the page-less case was lost: ${withoutPage.cls}`);
+
+  // A page that IS a wall or a login still wins, because those rules run first:
+  // the with-a-page branch must not become a catch-all for "a page was reported".
+  assert.equal(
+    classifyOutcome({ httpStatus: 502, message: wire, page: { title: "Attention Required! | Cloudflare", url: "https://deepseek.com/" }, poolAtRequest: IDLE }).cls,
+    "WALL-CHALLENGE",
+    "a challenge page was swallowed by the composer branch — COMPOSER-DRIFT must stay downstream of the page-keyed rules",
+  );
+  assert.equal(
+    classifyOutcome({ httpStatus: 502, message: wire, page: { title: "Sign in - DeepSeek", url: "https://chat.deepseek.com/login" }, poolAtRequest: IDLE }).cls,
+    "SIGN-OUT",
+    "a sign-in surface was swallowed by the composer branch — COMPOSER-DRIFT must stay downstream of the page-keyed rules",
+  );
+
+  // And a 2xx carrying the same sentence is still refused: a composer refusal
+  // arrives as a 5xx, and a 2xx that names one is a contradiction, not a drift.
+  assert.equal(
+    classifyOutcome({ httpStatus: 200, message: wire, page: { title: "DeepSeek", url: "https://chat.deepseek.com/" }, poolAtRequest: IDLE }).cls,
+    "UNCLASSIFIED",
+    "a 2xx naming a composer refusal bought a 5xx-only diagnosis",
+  );
+});
+
+test("FALSIFIER: the DRIVER'S INTERNAL sentence — the one the old matcher keyed on — is no longer a COMPOSER-DRIFT", () => {
+  // THE ANTI-VACUITY OF THE FIX, stated as its own case. The removed matcher was
+  // `/no composer found/i`, so the raw internal sentence is the input that used
+  // to produce COMPOSER-DRIFT. If someone re-adds a matcher on internal text,
+  // this goes RED; if the derivation silently stops matching the wire sentence,
+  // the cases above go RED. Both halves are pinned, which is the point: a rule
+  // that can only fire on text the wire does not carry is the defect, so its
+  // RETURN is pinned too.
+  const internal = driverComposerRefusal("deepseek", "https://deepseek.example/");
+  assert.match(internal, /no composer found/, "precondition: the driver's own throw really is the internal sentence this case is about");
+
+  const withPage = classifyOutcome({
+    httpStatus: 502,
+    message: internal,
+    page: { title: "DeepSeek", url: "https://chat.deepseek.com/" },
+    poolAtRequest: IDLE,
+  });
+  assert.notEqual(
+    withPage.cls,
+    "COMPOSER-DRIFT",
+    `the internal sentence bought COMPOSER-DRIFT again — a matcher on text the wire does not carry is the defect this round closed; got ${withPage.cls}: ${withPage.reason}`,
+  );
+  // …and it is UNCLASSIFIED rather than mis-filed: the wire never carries it, so
+  // no real row can be in this state, and inventing a class for it would be the
+  // same blind spot one level up.
+  assert.equal(withPage.cls, "UNCLASSIFIED", `the internal sentence must derive UNCLASSIFIED, got ${withPage.cls}: ${withPage.reason}`);
+
+  // The whole point of deriving rather than matching: the wire sentence and the
+  // internal sentence are DIFFERENT strings, and only the first is reachable.
+  assert.notEqual(internal, wireComposerRefusal("deepseek"), "precondition: redaction must actually rewrite the sentence, or this whole case is vacuous");
 });
 
 test("FALSIFIER (a): a HAND-TYPED class on fields that do not support it re-derives to UNCLASSIFIED", () => {
