@@ -103,6 +103,98 @@ fail() { printf '[deploy] FATAL: %s\n' "$*" >&2; exit 1; }
 id -u "$CHROME_USER" >/dev/null 2>&1 || fail "user $CHROME_USER does not exist"
 [[ -f "$REPO_DIR/package.json" ]] || fail "no package.json in $REPO_DIR — bad --repo?"
 
+# --- PREFLIGHT: the ownership boundary, asserted BEFORE anything is written ----
+#
+# THE INCIDENT THIS EXISTS FOR. A lane symlinked `node_modules` into the worktree
+# it deployed from, to avoid a second `npm ci`. rsync's filter language matches a
+# pattern ending in `/` against DIRECTORIES ONLY, and a symlink is not a directory
+# for matching purposes — so `--exclude 'node_modules/'` did not match it. The
+# symlink was transferred instead, `--delete` tore down the destination's real
+# `node_modules` to make room for it, and /opt/ui2api/node_modules ended up
+# replaced by a link into that worktree.
+#
+# IT WAS NOT EVEN LOUD. MEASURED on a scratch destination, the old pattern's
+# rsync EXITS 0: a silent destruction, so `set -e` does not stop the script, and
+# the deploy goes on to `npm ci` (which would install into the worktree) and then
+# to the restart. The run that was actually caught aborted for an unrelated
+# reason. That was luck, not a property of this script, and this section is the
+# part that was never built.
+#
+# WHY A PREFLIGHT AND NOT ONLY A WIDER PATTERN. A wider pattern (the excludes
+# below) fixes the cases somebody already thought of. This asserts the INVARIANT
+# instead: the trees are either shaped the way this script requires, or the
+# deploy refuses to start having written NOTHING. The destroy primitive is never
+# invoked, so no reordering of any step can turn a mistake in a worktree into a
+# damaged install.
+#
+# DEPLOY_OWNED_PATHS is the single list of names the deploy treats as "not mine
+# to sync". The rsync excludes below repeat it inline because three test gates pin
+# those literal strings; the two are kept honest by
+# test/deploy-symlink-node-modules-gate.test.ts, which fails if the preflight
+# list and an exclude list disagree.
+DEPLOY_OWNED_PATHS=(data .git node_modules dist .brain sites .agents .opencode graphify-out)
+
+# Refuse a SYMLINK (or any non-directory) at any owned name, in either tree.
+# Returns 1 and names the link, rather than letting rsync decide what a
+# symlink at an excluded name means.
+assert_no_symlink_at_owned_path() {
+  local root="$1" label="$2" name
+  for name in "${DEPLOY_OWNED_PATHS[@]}"; do
+    if [[ -L "$root/$name" ]]; then
+      loud "PREFLIGHT REFUSED: $label $root/$name is a SYMLINK (-> $(readlink "$root/$name"))"
+      loud "  A symlink is NOT matched by an exclude pattern ending in '/', and rsync --delete"
+      loud "  then treats the destination's real $name as garbage to remove. Deploy from a"
+      loud "  checkout that does not symlink it (a worktree is fine; a link is not)."
+      return 1
+    fi
+    if [[ -e "$root/$name" && ! -d "$root/$name" ]]; then
+      loud "PREFLIGHT REFUSED: $label $root/$name exists but is not a directory"
+      return 1
+    fi
+  done
+  return 0
+}
+
+preflight() {
+  # (a) the SOURCE tree. Checked on every deploy, including a first-ever one:
+  #     there is nothing at the target yet, so the source is the only thing that
+  #     can be wrong.
+  assert_no_symlink_at_owned_path "$REPO_DIR" "the source tree" \
+    || fail "refusing to deploy from $REPO_DIR — reason above; NOTHING was written to $TARGET_DIR or $ROLLBACK_DIR"
+
+  # (b) the DESTINATION, and only when a previous release exists. This half is
+  #     DAMAGE DETECTION. If node_modules is already gone — by the incident above,
+  #     by a manual delete, by anything — the operator must be told at the START,
+  #     not after a green deploy on top of a tree that cannot resolve a
+  #     dependency. On a box with no network, `npm ci` cannot fix it and nothing
+  #     else would say so.
+  if [[ -f "$TARGET_DIR/package.json" ]]; then
+    assert_no_symlink_at_owned_path "$TARGET_DIR" "the installed release's" \
+      || fail "refusing to deploy over $TARGET_DIR — reason above; NOTHING was written"
+    if [[ ! -d "$TARGET_DIR/node_modules" ]]; then
+      fail "PREFLIGHT: $TARGET_DIR/node_modules is not a directory — the installed release cannot resolve a dependency. Restore it (npm ci as $CHROME_USER in $TARGET_DIR) and re-run. Refusing to deploy on top of it."
+    fi
+    local n
+    n="$(find "$TARGET_DIR/node_modules" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+    n="${n// /}"
+    if [[ ! "$n" =~ ^[0-9]+$ || "$n" -eq 0 ]]; then
+      fail "PREFLIGHT: $TARGET_DIR/node_modules is EMPTY or unreadable — the installed release is ALREADY broken, so a green deploy here would be a lie. Restore it (npm ci as $CHROME_USER in $TARGET_DIR) and re-run."
+    fi
+    say "preflight: $TARGET_DIR/node_modules holds $n entries (a real release: not a link, not empty)"
+  else
+    say "preflight: nothing installed at $TARGET_DIR yet — this is a first deploy and the install dir will be created"
+  fi
+
+  # (c) the vault, before the sync rather than only after it. The post-rsync
+  #     assertion still exists and still fires; this one means a tree that
+  #     already carries a vault is never written to at all.
+  if [[ -e "$TARGET_DIR/data" ]]; then
+    fail "PREFLIGHT: $TARGET_DIR/data exists — a deploy must never create or replace the vault (found BEFORE any sync)"
+  fi
+  say "preflight: source shape OK (no symlink at any of: ${DEPLOY_OWNED_PATHS[*]})"
+}
+preflight
+
 # --- the build identity stamp -------------------------------------------------
 # WHY THIS IS HERE. `npm run build` writes `dist/runtime/build-info.json` from
 # `git rev-parse HEAD`, so the daemon can name the build that is answering
@@ -194,11 +286,29 @@ if [[ -f "$TARGET_DIR/package.json" ]]; then
   say "preserving the current release: $TARGET_DIR -> $ROLLBACK_DIR (the rollback point)"
   rm -rf "$ROLLBACK_TMP"
   mkdir -p "$ROLLBACK_TMP"
+  # THE EXCLUDE PATTERNS, and why none of them ends in `/` except the two the
+  # test gates pin. rsync matches a pattern ending in `/` against directories
+  # only, so `node_modules/` does not match a SYMLINK named node_modules — the
+  # incident above. A pattern with no trailing slash matches every file type,
+  # which is what "the deploy does not own this name" has to mean. The `data/`
+  # and `/data` forms are kept alongside the bare `data` because
+  # test/prod-deploy-rollback.test.ts and test/prod-e2e-deploy-proof.test.ts pin
+  # those two literal strings; they are redundant, not load-bearing.
+  #
+  # `--delete` IS still wanted: a file removed from the repo must not survive in
+  # the install dir, and stale sources are exactly the "half-written file
+  # executed mid-commit" class this script exists to end. What makes it safe is
+  # that rsync does NOT delete excluded files in the destination — so a correctly
+  # matched exclude is already a deletion barrier, and `--delete-excluded`, which
+  # would invert that, is banned (asserted by the gate). `--delete-delay` is
+  # deliberately NOT used: it moves deletions to the end of the transfer, which
+  # cannot help a wrong exclude and would let a known-bad transfer complete
+  # before the damage lands.
   if ! rsync -a --delete \
-      --exclude 'data/' --exclude '/data' \
-      --exclude '.git/' --exclude 'node_modules/' --exclude 'dist/' \
-      --exclude '.brain/' --exclude 'sites/' --exclude '.agents/' --exclude '.opencode/' \
-      --exclude 'graphify-out/' \
+      --exclude 'data/' --exclude '/data' --exclude 'data' \
+      --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
+      --exclude '.brain' --exclude 'sites' --exclude '.agents' --exclude '.opencode' \
+      --exclude 'graphify-out' \
       --timeout="$RSYNC_TIMEOUT" \
       "$TARGET_DIR/" "$ROLLBACK_TMP/"; then
     rm -rf "$ROLLBACK_TMP"
@@ -404,6 +514,14 @@ rollback() {
     return 1
   }
   mkdir -p "$TARGET_DIR"
+  # WHY THIS ONE CARRIES NO `node_modules` EXCLUDE, while every other rsync in
+  # this file does. Its destination is not a populated install: the target was
+  # moved ASIDE on the line above and this `mkdir -p` created an EMPTY one, so
+  # `--delete` has nothing to delete and a symlink in the rollback point has
+  # nothing to destroy. The rollback point is itself a bare source tree — the
+  # preserve rsync excluded `node_modules/` — and the rebuild below runs its own
+  # `npm ci`. So the safety here is structural (an empty destination), not a
+  # pattern, and that is the honest reason rather than an oversight.
   if ! rsync -a --delete --exclude 'data/' --exclude '/data' --timeout="$RSYNC_TIMEOUT" \
       "$ROLLBACK_DIR/" "$TARGET_DIR/"; then
     loud "ROLLBACK FAILED: could not copy the previous release back. The broken tree is at ${TARGET_DIR}.broken and the rollback point is at $ROLLBACK_DIR — restore by hand."
@@ -475,13 +593,20 @@ rollback() {
 # slash, and the .gitignore'd path. Getting this wrong would ship a developer's
 # captured credentials into an install dir, so the exclusion is asserted below
 # rather than trusted.
+#
+# THE OTHER EXCLUDES CARRY NO TRAILING SLASH, on purpose — see the note on the
+# preserve rsync above. A trailing slash matches a directory and nothing else,
+# which is how a symlinked `node_modules` in a worktree reached `--delete` and
+# tore down the destination's real one. preflight() (above) has already refused
+# that tree outright, so the two defences are independent: the preflight is the
+# invariant, the patterns are the belt.
 say "staging $REPO_DIR -> $TARGET_DIR"
 mkdir -p "$TARGET_DIR"
 rsync -a --delete \
-  --exclude 'data/' --exclude '/data' \
-  --exclude '.git/' --exclude 'node_modules/' --exclude 'dist/' \
-  --exclude '.brain/' --exclude 'sites/' --exclude '.agents/' --exclude '.opencode/' \
-  --exclude 'graphify-out/' \
+  --exclude 'data/' --exclude '/data' --exclude 'data' \
+  --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
+  --exclude '.brain' --exclude 'sites' --exclude '.agents' --exclude '.opencode' \
+  --exclude 'graphify-out' \
   "$REPO_DIR/" "$TARGET_DIR/"
 
 if [[ -e "$TARGET_DIR/data" ]]; then

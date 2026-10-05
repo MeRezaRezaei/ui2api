@@ -274,11 +274,21 @@ function checkDeploy(text: string): Violation[] {
   // rollback point carries no dist/ and no node_modules/, which is exactly why
   // the restore has to build. If a future change starts PRESERVING dist/, the
   // rebuild is still correct but this premise would no longer be the reason.
+  //
+  // THE PATTERN IS NOW TYPE-AGNOSTIC, and that is a TIGHTENING, not a spelling
+  // preference. This pin used to require `--exclude 'node_modules/'` and
+  // `--exclude 'dist/'` literally — which is the exact spelling that let a
+  // symlinked `node_modules` in a worktree reach `--delete` and tear down the
+  // destination's real one (see test/deploy-symlink-node-modules-gate.test.ts).
+  // A pattern with no trailing slash matches every file type, so it is a strict
+  // SUPERSET of what the trailing-slash form matched: everything this gate
+  // cared about is still excluded, and a symlink is now excluded too. The
+  // companion gate is what forbids a trailing-slash-ONLY spelling.
   const preserve = all.find((r) => r.kind === "preserve");
   need(
     "restore-preserve-excludes-build-outputs",
-    "the PRESERVE rsync no longer excludes node_modules/ and dist/ — either the rollback point is no longer a bare source tree (so the restore's rebuild premise changed), or the rollback point carries machine-specific build output",
-    !!preserve && /--exclude 'node_modules\//.test(preserve.text) && /--exclude 'dist\//.test(preserve.text)
+    "the PRESERVE rsync no longer excludes node_modules and dist — either the rollback point is no longer a bare source tree (so the restore's rebuild premise changed), or the rollback point carries machine-specific build output",
+    !!preserve && /--exclude 'node_modules'/.test(preserve.text) && /--exclude 'dist'/.test(preserve.text)
   );
   const distAt = code.indexOf('[[ ! -f "$TARGET_DIR/dist/cli.js" ]]');
   need(
@@ -574,11 +584,15 @@ const MUTATIONS: Mutation[] = [
     caught: ["rsync-preserve-excludes-vault"],
   },
   {
-    id: "the rollback point stops excluding dist/ and node_modules/ (the restore's premise)",
-    prove: (m) => !rsyncText(m, "preserve", "p").includes("--exclude 'node_modules/'") && rsyncText(m, "stage", "p").includes("--exclude 'node_modules/'"),
+    id: "the rollback point stops excluding dist and node_modules (the restore's premise)",
+    // The anchor follows the type-agnostic spelling the script now uses. Its
+    // `prove` asserts the mutation really landed on the preserve rsync and left
+    // the stage rsync alone, so a stale anchor fails loudly instead of silently
+    // mutating nothing.
+    prove: (m) => !rsyncText(m, "preserve", "p").includes("--exclude 'node_modules'") && rsyncText(m, "stage", "p").includes("--exclude 'node_modules'"),
     mutate: (t) => {
       const body = rsyncText(t, "preserve", "preserve build outputs kept");
-      return t.replace(body, body.replace("--exclude 'node_modules/' --exclude 'dist/' ", ""));
+      return t.replace(body, body.replace("--exclude 'node_modules' --exclude 'dist' ", ""));
     },
     caught: ["restore-preserve-excludes-build-outputs"],
   },
