@@ -1,7 +1,20 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { measureEmitted, parseDocTable, contractGaps, shapeMessageCodes, measureShapeFallback } from "./helpers/error-contract-measure.js";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/** Every `.ts` file under `dir`, at ANY depth. Deliberately recursive — see the
+ *  sweep that uses it, whose depth-1 form was the measured gap. */
+function walkTs(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) out.push(...walkTs(p));
+    else if (p.endsWith(".ts")) out.push(p);
+  }
+  return out.sort();
+}
+import { measureEmitted, parseDocTable, contractGaps, shapeMessageCodes, measureShapeFallback, codeExpressionValues } from "./helpers/error-contract-measure.js";
 import { DriverRefusal } from "../src/prompt/driver.js";
 import { HttpClientError } from "../src/prompt/http.js";
 import { redactInternalError, NO_ANSWER_REFUSAL_RE } from "../src/prompt/error-redaction.js";
@@ -521,10 +534,41 @@ d("a code behind a LOOKUP TABLE is as measurable as one behind a literal", () =>
 d("the error-contract table has ONE parser, and no test file holds a copy", () => {
   t("no test file carries its own copy of the error-contract table parser", () => {
     const helper = readFileSync("test/helpers/error-contract-measure.ts", "utf8");
-    const files = readdirSync("test")
-      .filter((f) => f.endsWith(".ts"))
-      .map((f) => `test/${f}`);
+    // RECURSIVE, and the depth is the point of this entry. This sweep used to be
+    // `readdirSync("test").filter(.ts)` — NON-recursive — so it covered `test/*.ts`
+    // at depth 1 and stopped. MEASURED at that depth: 192 of the 200 `.ts` files
+    // under `test/` were swept, and the 8 it skipped were every file in
+    // `test/helpers/` plus `test/fixtures/` — INCLUDING the shared owner itself,
+    // `test/helpers/error-contract-measure.ts`.
+    //
+    // That is precisely the wrong place for the gap. `test/helpers/` is where a
+    // second copy would most plausibly hide: it is the directory whose whole
+    // purpose is holding shared test machinery, so a new helper that wanted to
+    // "just parse the table itself" would land there, sit next to the owner, and
+    // be invisible to a depth-1 sweep — while the owner it was meant to be
+    // checking against is in that very directory. A sweep that stops at depth 1
+    // while claiming to find all duplicates is a bounded gap wearing a complete
+    // claim, which is the class of thing this gate exists to catch.
+    const files = walkTs("test");
     assert.ok(files.length > 20, `precondition: the sweep really found the test tree, found ${files.length} files`);
+
+    // …and the depth is pinned rather than trusted, so a future edit that reverts
+    // this to a flat `readdirSync` cannot quietly restore the gap. The count is
+    // measured, not hand-typed: at depth 1 it was 192 and the whole tree is 200,
+    // so any number at or below the flat count means the recursion is gone.
+    const flat = readdirSync("test").filter((f) => f.endsWith(".ts")).length;
+    assert.ok(
+      files.length > flat,
+      `the sweep must recurse: it found ${files.length} files but a depth-1 readdir finds ${flat} — the ${flat}-file form is the gap this entry closed (test/helpers/ and test/fixtures/ are exactly where a copy would hide)`,
+    );
+    // The two directories the flat form skipped are named, so the assertion above
+    // cannot be satisfied by recursing into some harmless third directory.
+    for (const must of ["test/helpers/error-contract-measure.ts", "test/fixtures/sample-plugin.ts"]) {
+      assert.ok(
+        files.includes(must),
+        `the sweep must reach ${must} — a depth-limited sweep cannot claim to find all duplicates`,
+      );
+    }
 
     // THE PRECISE PIN, and precision is load-bearing here. It must name the
     // DEFECT, not a family resemblance: a sweep for "any regex plus any
@@ -611,5 +655,95 @@ d("the error-contract table has ONE parser, and no test file holds a copy", () =
       declared.has("ui2api_driver_error"),
       "the declared set must contain ui2api_driver_error — this is the row the hand-copied [a-z_]+ parser could not read",
     );
+  });
+});
+
+/**
+ * A CODE ASSEMBLED AT RUNTIME IS A NAMED FAILURE, NOT A SILENT GAP.
+ *
+ * WHAT THIS CLOSES. `measureEmitted()` harvests codes with four regexes, and every
+ * one of them reads a STRING LITERAL out of the source. A code built at runtime —
+ * `code: "ui2api_" + kind`, a template with a hole, `code: classify(e)` — is
+ * therefore invisible to all four, and the bidirectional contract check would
+ * neither report it nor fail: a code the daemon can emit, unknown to the contract,
+ * passing every gate green. That is the same blindness as the `SHAPE_MESSAGES`
+ * indirection, which was MEASURED invisible once already and fixed by hand for one
+ * known site; the general case had no guard at all.
+ *
+ * IT IS NOT IRREDUCIBLE, which is the finding that matters: `typescript` is already
+ * a declared devDependency (`^5.6.0`) and is already imported by five files in
+ * `test/` for exactly this kind of syntactic walk, so the guard needs no new
+ * dependency and no invented mechanism. It parses, and it THROWS BY NAME — the
+ * loud bound is kept and widened, never traded for a silent skip.
+ *
+ * The pins are BEHAVIOURAL and hermetic: they run the resolver over a SYNTHETIC
+ * source, so they prove what the resolver does without editing `src/` (which four
+ * other lanes share) and without a browser. An anti-vacuity run of the same two
+ * shapes through the real `src/prompt/http.ts` — planted, measured, reverted —
+ * turned this gate RED both times, with the two distinct messages quoted in the
+ * helper's own comment.
+ */
+d("a runtime-assembled code is a NAMED failure, not a silent gap in the contract", () => {
+  t("the resolver folds what it can, and reports the rest as unknown rather than guessing", () => {
+    const positions = codeExpressionValues("synthetic.ts", `
+      const shapeCode = table.find(m => m.re.test(s))?.code ?? "fallback";
+      send(res, 500, { error: { code: "plain_literal" } });
+      send(res, 500, { error: { code: "ui2api_" + "driver_error" } });
+      send(res, 500, { error: { code: \`ui2api_\${kind}\` } });
+      send(res, 500, { error: { code: classify(e) } });
+      send(res, 500, { error: { code: shapeCode } });
+    `);
+    const byExpr = new Map(positions.map((p) => [p.expr, p]));
+    assert.equal(byExpr.get('"plain_literal"')?.value, "plain_literal", "a literal folds to itself");
+    assert.equal(byExpr.get('"plain_literal"')?.literal, true, "a literal must be reported as a literal, or the caller cannot scope itself to the runtime case");
+
+    // THE FALSIFIER OF THE FIRST DRAFT, kept as a pin because it is the rule that
+    // makes this sound: `+` must CONCATENATE both folded operands. The repo's
+    // existing folder (`anchoredPrefix`) lets the literal LEFT operand win, which
+    // is right for a path PREFIX and wrong for a CODE — it would have reported
+    // `ui2api_` for `"ui2api_" + "driver_error"`, inventing a code that does not
+    // exist and letting a real one through unmeasured. Measured: that version
+    // stayed SILENT on the planted shape.
+    assert.equal(
+      byExpr.get('"ui2api_" + "driver_error"')?.value,
+      "ui2api_driver_error",
+      "a `+` of two foldable operands must CONCATENATE — dropping an operand invents a code",
+    );
+
+    // A template with a hole, and a call: both UNKNOWN, never a guess.
+    assert.equal(byExpr.get("`ui2api_${kind}`")?.value, null, "an interpolated template cannot be folded — unknown, not a guess");
+    assert.equal(byExpr.get("classify(e)")?.value, null, "a call expression cannot be folded — unknown, not a guess");
+    // The identifier resolves to a BINDING, which is a table lookup, so it is
+    // unknown too — and that is precisely the SHAPE_MESSAGES case the exemption
+    // in `measureEmitted` accounts for by hand.
+    assert.equal(byExpr.get("shapeCode")?.value, null, "an identifier bound to a lookup is unknown here; `measureEmitted` is what accounts for it");
+  });
+
+  t("EVERY runtime-assembled code position in the real daemon is accounted for — and a new one is a named failure", () => {
+    // The healthy-tree half. This is the assertion that fires 7 times across the
+    // file, because `measureEmitted()` is the entry point every contract check
+    // goes through — so a runtime-assembled code anywhere in `http.ts`/`openai.ts`
+    // stops the whole gate rather than one case of it.
+    const http = readFileSync("src/prompt/http.ts", "utf8");
+    const openai = readFileSync("src/prompt/openai.ts", "utf8");
+    const runtime = [...codeExpressionValues("src/prompt/http.ts", http), ...codeExpressionValues("src/prompt/openai.ts", openai)]
+      .filter((p) => !p.literal)
+      .map((p) => p.expr);
+
+    // The exemptions are NAMED, not implied: these three are the indirection sites
+    // the literal harvesters cannot read and cannot be taught to read, and each is
+    // accounted for by a different harvester (`typedClientErrorCodes`,
+    // `poolRefusalCodes`, `shapeMessageCodes`). Pinning the set is what makes an
+    // UNEXPECTED fourth shape a gate failure instead of a silently accepted one —
+    // and it is pinned by SHAPE, not by line number, so a reflow cannot rot it.
+    assert.deepEqual(
+      [...new Set(runtime)].sort(),
+      ["e.code", "refusal.code", "shapeCode"],
+      `the runtime-assembled code positions changed: ${JSON.stringify([...new Set(runtime)].sort())} — a new one must be folded to a literal or taught to the harvest on purpose, never inherited from an existing exemption`,
+    );
+
+    // …and the accounting is LIVE, not asserted: each exemption holds only while
+    // its harvester still finds something, so emptying one kills its own exemption.
+    assert.ok(measureEmitted().size > 0, "precondition: the measured vocabulary is non-empty, so the exemptions above are holding on real harvests");
   });
 });
