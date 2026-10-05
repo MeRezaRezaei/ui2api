@@ -1,61 +1,143 @@
-| goal183-unverified-ship-gate | L1 | EXECUTE (gate authoring) | L0 ui2api orchestrator | test/credential-leak-gate.test.ts - GOAL-183 unverified-ship gate | 2026-10-04T15:55:50Z | done (commit be281a4): 33 tests, 32 pass 0 fail, tsc clean; gate reds on 4/120 real commits |
-| `ui2api-latency-readback-L1` | L1 | EXECUTE (answer-readback slice) | main-chat | `src/runtime/dom-primitives.ts` + 1 new readback-overhead test | 2026-10-04T17:56:38+02:00 | running |
-| pool-latency-lane | L1 | execute | L0-orchestrator | src/prompt/pool.ts acquire/page-open latency slice | 2026-10-04T17:57:14+02:00 | running |
-| readback-measure | L2 | EXECUTE (measurement) | parent opencode session | /tmp/codeg-acp/2052-1d5445e2/readback-measure/ harness + <=350w latency report | 2026-10-04T15:57:15Z | running |
-| readpath-overhead-audit | L2 | read-only inventory + candidate ranking | parent-session-0 (codeg restart) | read-only awaitAnswerFromReads overhead inventory + candidate ranking | 2026-10-04T15:57:16Z | running |
-| L1-latency-launch | L1 | latency | root-orchestrator | verdict+gate for browser.ts/session-store.ts launch-attach-inject slice | 2026-10-04T17:58:14+02:00 | running (resumed after codeg restart; L2-measure done, L2-reuse-audit pending) |
-| agent-driver-latency-ledger | L2 | execute | codeg (session orchestrator) | test/driver-latency-ledger.test.ts | 2026-10-04T18:03:53+02:00 | running |
-| send-readiness-experiment | L2 | EXECUTE (experiment) | parent opencode session | test/driver-send-readiness.test.ts + mutation report + unapplied driver.ts polling diff + Tencent readiness verdict | 2026-10-04T18:04:15+02:00 | running |
-| send-readiness-experiment | L2 | EXECUTE (experiment) | parent opencode session | VERIFIED-ALREADY-LANDED: no new test written (test/consent-wall-poll.test.ts, GOAL 161, covers this slice); mutation runs M1-M4 measured in /tmp/codeg-acp/438074-c81c438b/mut; Tencent verdict DECLINE | 2026-10-04T18:08:28+02:00 | done (no src/test edits; findings only) |
-| `open_code` | L1 | GOAL pool.ts worker.busy-too-early | orchestrator (main chat) | src/prompt/pool.ts release-path fix + 1 new test | 2026-10-04T18:09:53+02:00 | running |
-| `plugin-wigolo-honest-success` | L1 | GOAL (src/plugin/wigolo-context.ts invented success) | orchestrator | src/plugin/wigolo-context.ts + 1 new test | 2026-10-04T16:09:52Z | running |
-| `l1-timeout-discipline-gate` | L1 | goal (gate-cannot-fire) | orchestrator | test/test-timeout-discipline.test.ts scanner window+anchor fix | 2026-10-04T18:10:28+02:00 | DONE 9e937a7 — 18 tests / 17 pass / 1 fail is another lane's unbounded spawnSync (648aae8), not this file |
-| `L1-sweep-probe-overlap` | L1 | execute | codeg-orchestrator | src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json | 2026-10-04T16:22:05Z | running |
-| `reuse-audit-l2` | L2 | VERIFY (audit report) | orchestrator | reuse+freshness audit report (Q1-Q5, <=500w) | 2026-10-04T18:22:18+02:00 | done (report delivered in-chat) |
-| `readpath-callers` | L2 | read-only audit slice C: awaitAnswer read-path callers | L0-orchestrator | none (read-only sub-report) | 2026-10-04T18:27:39+02:00 | running |
-| `lane-browser-launch` | L1 | execute | codeg-orchestrator | src/runtime/browser.ts + src/runtime/session-store.ts latency slice | 2026-10-04T18:33:50+02:00 | done — DECLINE committed 2e62cf7 (.brain/decisions/L1-latency-launch-2026-10-04.md); re-measured independently, agrees |
-| `readback-headroom` | L1 | execute (readback-overhead measurement) | parent-orchestrator | `src/runtime/dom-primitives.ts` + ONE new test file | 2026-10-04T18:40:21+02:00 | running |
-| `consent-wall-poll` | L1 | execute | orchestrator (L0) | `src/prompt/driver.ts` + `test/consent-wall-poll.test.ts` | 2026-10-04T16:40:43Z | running |
-| `pool-acquire-measure` | L1 | measurement (re-run after STOP) | ORCH-L0 | src/prompt/pool.ts + 1 new test | 2026-10-04T16:40:45Z | running |
-| `consent-wall-poll` | L1 | execute | orchestrator (L0) | `src/prompt/driver.ts` + `test/consent-wall-poll.test.ts` | 2026-10-04T16:40:43Z | done — commits b85dddf, 9d4e972; 15/15 own tests, tsc + typecheck clean |
-| `cli-input-validation-seam` | L2 | execute (GOAL 215 validation seam in src/cli.ts) | L0-orchestrator | `src/cli.ts` (unknown-flag refusal / malformed-numeric refusal / needs-companion refusal / inert-stays-legal) | 2026-10-04T18:50:30+02:00 | running |
-| `cli-validation-wiring` | L2 | execute (wiring the 3 GOAL-215 refusals into the dispatch seam) | L0-orchestrator | `src/cli.ts` (unknownFlagRefusal + numericFlagRefusal + needsCompanionRefusal wired at main(); KNOWN_FLAGS `--help` residue fix) | 2026-10-04T16:55:38Z | running — RESUMED after codeg restart; wirings already committed in e6ca28d; mid-VERIFICATION (cases 1+2 passed by hand, case 3 --xhost-all + non-regression + suites outstanding) |
-| cli-input-validation-test-l2 | L2 | EXECUTE | L0 | test/cli-input-validation.test.ts (mutation-proven pins for unknownFlagRefusal / numericFlagRefusal / needsCompanionRefusal) | 2026-10-04T18:59:14+02:00 | running (RESUMED after codeg restart; 31 tests were green pre-crash, index was cleared by the restart, re-staging) |
-| `cli-validation-wiring` | L2 | execute — CLOSING OUT | L0-orchestrator | `src/cli.ts` (3 refusals wired at main(); `--help` KNOWN_FLAGS fix) | 2026-10-04T17:04:12Z | done — work COMMITTED in e6ca28d; verified: 3/3 refusals exit 1 by hand, 40/40 flags legal, 50/50 named tests green, tsc+typecheck+check:verbatim clean. NOTE: another lane has UNCOMMITTED behavioural edits on top (PARSED_FLAG_COUNT in the msg, nearestKnownFlag distance 3->2) — re-verified green against that tree; not mine, not committed by me |
-| `cli-input-validation-seam` | L2 | execute (GOAL 215 validation seam in src/cli.ts) | L0-orchestrator | `src/cli.ts` (unknown-flag / malformed-numeric / needs-companion refusals; inert-stays-legal) | 2026-10-04T18:50:30+02:00 | done — 4 seams already COMMITTED in e6ca28d; reverted an uncommitted `--skill`-removal hunk that broke the pinned floor 11/15 -> 15/15; tsc clean; 50/50 across 5 test files; whitespace-only delta of my own; NOTE concurrent editor in the same file (PARSED_FLAG_COUNT, levenshtein 3->2, `--pool-min 0` comment) |
-| `skills-refusal-truth-numeric` | L1 | EXECUTE (Task 2, acp-and-claim-truth plan) | L0 orchestrator | test/skills-refusal-truth.test.ts + skills/ui2api-operate/SKILL.md | 2026-10-04T19:07:01+02:00 (RESUMED run) | running |
-| `skills-refusal-truth-numeric` | L1 | EXECUTE (Task 2, acp-and-claim-truth plan) | L0 orchestrator | test/skills-refusal-truth.test.ts + skills/ui2api-operate/SKILL.md | 2026-10-04T19:07:01+02:00 (RESUMED run) | DONE -- work was COMMITTED by the orchestrator at fan-in (4f65a88 gate+skill; e957ca9 closed the 13th comment-fragment seam). Independently re-verified on resume: seam count 12 = 11 baseline + 1 numeric (malformed value for, derivedFrom=NUMERIC_FLAGS); MUTATION-PROVED the gate bites (anchor removed from skill -> RED naming --port); skills-refusal-truth 8/8 + skills-truth 18/18 = 26/26; install-skills --project refreshed 16 dirs into 4 targets, cmp IDENTICAL x16; tsc --noEmit and tsc -p tsconfig.test.json --noEmit clean; data/ and /opt/ui2api untouched; no stray listeners. NOTE: uncommitted src/cli.ts + src/plugin/wigolo-context.ts + staged test/cli-input-validation.test.ts belong to OTHER lanes, not mine. |
-| l1-goal209-registry-gate-split | L1 | EXECUTE (resume) | L0 | test/registry-doc-truth.test.ts + test/fixtures/registry-world.json | 2026-10-04T19:14:57+02:00 | running — committed in ffdee54; re-running falsification D + full gate sweep |
-| `l1-goal209-registry-gate-split` | L1 | EXECUTE (resume) | L0 | test/registry-doc-truth.test.ts + test/fixtures/registry-world.json | 2026-10-04T19:14:57+02:00 | DONE — committed ffdee54 (+9c235c1). Re-verified on resume: snapshot REAL (measured 2026-10-04 via this repo own fetchRegistryIndex + repo API; 33 entries, 4 reviewed, 7198B, sha256 ae84ad95, private:false, branch master). Falsified with syscall-level harnesses, each proven armed: no-egress+knob-off = 0 socket attempts, 35/0; no-egress+knob-ON (the 1350 condition) = 37/0 + "VERDICT registry-unreachable"; blackhole:443+knob-ON = 37/0 + registry-unreachable in 23s (< 120s file timeout); real network = 37/0 + "VERDICT registry-agrees". Corrupting snapshot entries 33->31 turns the lane RED offline (5 fails). Gates: registry-doc-truth 37/35/0/2skipped; gate-wiring 52/52; assertions-are-counted 9/9; doc-numbers-truth 17/17; host-independence-gate 9/9; registry-contract-hub-truth 7/7; registry-publish-contract-truth 9/9; install 10/9/0/1skipped. tsc --noEmit EXIT=0; tsc -p tsconfig.test.json --noEmit EXIT=0. data/, /opt/ui2api, systemd untouched. NOTE: src/cli.ts, src/plugin/wigolo-context.ts, test/cli-input-validation.test.ts in git status belong to OTHER lanes. |
-| `open_code ACTIVE-WAVE#1-guard` | L1 | EXECUTE (goal: session-store/prompt browser launch guard) | codeg orchestrator | test/session-store.test.ts + test/prompt.test.ts + test/helpers/browser-launchability.ts | 2026-10-04T17:25:11Z | running |
-| verify-commit-map-lane | L1 | EXECUTE (goal: ACTIVE-WAVE #5 commit-map consumer) | orchestrator (L0) | scripts/ci/verify-commit-map.sh + test/commit-map-consumer.test.ts + docs/RECONSTRUCTION-RUNBOOK.md CHECK-3 correction | 2026-10-04T17:25:40Z | running |
-| hub-publish-host-gate (GOAL 238) | L1 | execute/verify | orchestrator | src/cli.ts cmdHubPublish host segment gate + test/hub-publish-host-gate.test.ts | '2026-10-04T17:25:53Z' | running |
-| `l1-profile-ingest-shape-guard` | L1 | GOAL (profile-ingest optional-chaining guards absence not wrong type) | orchestrator (main chat) | src/runtime/profile-ingest.ts + test/profile-ingest.test.ts | 2026-10-04T19:31:54+02:00 | done — commits d7f1d3c + f300686; mutation EXIT=1 / restored EXIT=0; 13/13 own + 32/32 neighbours; tsc src EXIT=0; no partial write from this class (add-all per-item try/catch) |
-| pool-latency-lane-resume2 | L1 | execute | L0-orchestrator | src/prompt/pool.ts acquire/page-open latency slice (resumed) | 2026-10-04T21:58:51+02:00 | running |
-| L1-latency-launch | L1 | latency | root-orchestrator | verdict+gate for browser.ts/session-store.ts launch-attach-inject slice | 2026-10-04T21:59:58+02:00 | running (re-registered after restart; MEASURE done, reuse-audit child re-dispatched) |
-| `readback-audit-L2` | L2 | audit | ui2api-latency-readback-L1 | read-only: overhead inventory + ranked candidates | 2026-10-04T22:00:14+02:00 | running |
-| `readback-measure-L2` | L2 | measure | ui2api-latency-readback-L1 | /tmp harness: readback overhead split | 2026-10-04T22:00:14+02:00 | running |
-| `ui2api-poolA-bench` | L2 | execution/verify | codeg-parent-poolA-profile | poolA-acquire-profile-report | 2026-10-04T20:00:51Z | running |
-| L2-C-style-audit | L2 | read-only style+freshness audit | L1-latency-launch | mutation house style + freshness-gate assessment | 2026-10-04T22:01:06+02:00 | running |
-| `l2-style-audit` | L2 | VERIFY (mutation-gate house style + freshness gate) | codeg parent (pool/driver attach-mode lane) | read-only report: mutation-gate house style, readback-freshness gate, awaitAnswer baseline, injection-verdict + owner-guard contracts | 2026-10-04T22:01:15+02:00 | running |
-| L2-C-style-audit | L2 | read-only audit | L1-latency-launch | DONE: mutation house style + FOUND defeatable freshness baseline | 2026-10-04T22:04:35+02:00 | completed |
-| `ui2api-poolA-bench` | L2 | execution/verify | codeg-parent-poolA-profile | /tmp/poolA/report.md (bench.mts, report.md) | 2026-10-04T20:07:28Z | done — awaiting parent MERGE/FIRE decision |
-| `cli-input-validation-seam-l2-redispatch-2` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 validation seam (unknown-flag / malformed-numeric / needs-companion refusals) | 2026-10-04T20:11:55Z | running |
-| `codex-l1-wigolo-redaction` | L1 | execute | codeg-l0 | src/prompt/error-redaction.ts + test/error-redaction.test.ts | 2026-10-05T06:59:40+02:00 | running |
-| `cli-input-validation-seam-l2-redispatch-3` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 validation seam — finish verification (5 test files + check:verbatim + commit) | 2026-10-05T05:03:03Z | running |
-| `acp-body-cap-goal236-l1` | L1 | EXECUTE (goal 236) | codeg-l0 | src/agent/acp.ts + test/acp-body-cap.test.ts (ACP request-body byte cap / 413 payload_too_large) | 2026-10-05T07:10:00Z | running |
-| `araprat-refusal-fold` | L1 | EXECUTE (goal: docs/ACTIVE-WAVE.md open item #3) | orchestrator | src/capabilities/araprat.ts + test/mutating-capability-postcondition.test.ts | 2026-10-05T07:11:39+02:00 | running |
-| `opencode-goal238-publish-anchor` | L1 | execute (GOAL 238: hub publish host anchor) | opencode-L0-orchestrator | src/cli.ts cmdHubPublish guard + test/install-host-containment.test.ts gate | 2026-10-05T07:14:04+02:00 | running |
-| `error-redaction-owner-L1` | L1 | execute (finish dead lane, ACTIVE-WAVE OPEN ITEM #2) — DUPLICATE of `no-answer-matcher-derivation-l1` below, which already owns this goal | orchestrator | src/prompt/error-redaction.ts, src/prompt/verification-class.ts, test/error-redaction.test.ts, test/verification-class.test.ts | 2026-10-05T07:14:29+02:00 | superseded — all four items landed in commit 4feeb2f; re-verified on resume 105/105 pass, 0 fail (3 src tsc + test tsc clean for this region). Did NOT commit the foreign GOAL-197 WIGOLO block another lane appended to test/error-redaction.test.ts after my commit — it calls an undefined `termPatternFor` and is broken |
-| verify-commit-map-lane(RESUME) | L1 | EXECUTE (ACTIVE-WAVE #5: commit-map CONSUMER — extend committed file-shape checker with repo-grounded mode + add test + correct runbook CHECK 3) | orchestrator (L0) | scripts/ci/verify-commit-map.sh, test/commit-map-consumer.test.ts, docs/RECONSTRUCTION-RUNBOOK.md | 2026-10-05T05:46:45Z | running (resumed; prior commit 92f129f kept, extending) |
-| hub-publish-host-gate (GOAL 238) | L1 | EXECUTE/VERIFY (goal 238) | orchestrator | src/cli.ts cmdHubPublish host gate + test/hub-publish-host-gate.test.ts | '2026-10-05T05:46:54Z' | running |
-| `cli-input-validation-seam-l2-redispatch-4` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 seam — verification (5 test files, check:verbatim, commit) | 2026-10-05T06:01:36Z | running |
-| `L1-sweep-probe-overlap` | L1 | execute | codeg-orchestrator | src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json | 2026-10-04T16:22:05Z | DONE 8/8 own gate, 91/91 pool battery, src+test tsc clean, mutation red captured; UNCOMMITTED by design (sibling lanes hold staged files: src/cli.ts, docs/agent-registry.md) |
-| `cli-input-validation-seam-l2-redispatch-5` | L2 | EXECUTE | L0 | src/cli.ts GOAL-215 seam — commit staged work | 2026-10-05T06:23:08Z | running |
-| L2-A-wire-latency | L2 | measure | L1-latency-launch | /tmp/l2a-measure wire/HTTP split (task b9890655-766b-4321-8d39-eb2e27436096) | 2026-10-05T10:18:01+02:00 | running |
-| L2-B-pool-reuse | L2 | analysis | L1-latency-launch | /tmp/l2b-pool reuse+freshness audit (task b965a09b-a971-4ce7-87eb-74a1c5c34b5c) | 2026-10-05T10:18:01+02:00 | running |
-| L2-C-browser-attach | L2 | analysis | L1-latency-launch | /tmp/l2c-browser launch/attach cost (task 4ac6030a-e721-45df-a678-6f1a0647fab6) | 2026-10-05T10:18:01+02:00 | running |
-| L1-latency-baseline | L1 | latency (baseline verdict, 3 L2 slices) | root-orchestrator | .brain/decisions/L1-latency-baseline-2026-10-05.md + test/wire-layer-overhead-truth.test.ts (96b32bc) | 2026-10-05T10:30:00+02:00 | done — 21.07s gemini COLD ok:true; ours ~10% (2.0s of it the stableMs floor), theirs ~90%; wire 35ms DECLINED+gate 5/5 green, tsc EXIT=0, test typecheck EXIT=0; pool/browser NO HEADROOM by design; L2-B copilot probe FAILED 500@60.86s (no composer, 4x15s firstVisible) = UNVERIFIED |
-| `no-answer-matcher-derivation-l1` | L1 | EXECUTE (goal: docs/ACTIVE-WAVE.md open item #2 — derive the no-answer MATCHER from its EMITTER) | orchestrator | src/prompt/error-redaction.ts + src/prompt/verification-class.ts + test/error-redaction.test.ts + test/verification-class.test.ts — commit 4feeb2f; mutation-proven both directions | 2026-10-05T07:12:00+02:00 | done (verified on resume: 63/63 + 42/42 green; mutation A fires both files; mutation B fires both exclusivity gates) |
-| `open_code ACTIVE-WAVE#1-guard` | L1 | EXECUTE (done) | codeg orchestrator | test/session-store.test.ts + test/prompt.test.ts | 2026-10-04T17:25:11Z | DONE — committed ba0af59. Both files now guard their browser work with `guardBrowser` from test/helpers/browser-launchability.ts (the wigolo-engine seam), seam `"ui2api-ladder"` = `launchBrowser()`, the same call ChatDriver makes (src/prompt/driver.ts:294). Guarded: session-store x2 (storageReplayScript, capture-then-inject) + prompt x4 (3 ChatDriver + 1 promptd POST /prompt). Deliberately NOT guarded: the 2 auth/posture gates, which never launch anything. CANNOT SKIP — and that is asserted, not claimed: the in-file control feeds the guard playwright's own absent-artifact text and asserts `t.skip` was never called, the body never ran, and the classification appears in `t.diagnostic`. Measured both directions on the real seam: healthy EXIT=0 with 15/15 pass 0 fail 0 skipped; UI2API_ATTACH_PORT=39221 (no chrome owner -> launchBrowser refuses) EXIT=1 with 6 fail / 9 pass / 0 skipped — RED, never green. tsc -p tsconfig.test.json --noEmit EXIT=0. |
-| `open_code` | L1 | GOAL pool.ts worker.busy-too-early | orchestrator (main chat) | DONE: src/prompt/pool.ts release fix 2eaf900 + test/pool-release-busy-window.test.ts 5544246 (mutant exit 1 / fixed exit 0; unregistered new test) | 2026-10-05T07:40:00+02:00 | done |
+# Agent registry — an append-only ledger of lane runs
+This file is a **historical ledger, not a status page.** Every row below was
+appended by one lane when it registered and flipped to `done` when it finished.
+Each row records what that one lane measured **on the run named in its own
+`started` column**, so every count inside a row — a case tally, a pass ratio, a
+falsifier tally — is that row's own dated observation and **not a current
+total**. The suite moves after every commit, so a bare tally here is stale the
+moment it is written; that is why each row carries its run's timestamp instead
+of claiming to describe the repo as it stands.
+**Where the live number comes from:** a suite total is a runtime-only fact and
+nothing in this file can re-derive one — the per-file totals are generated by
+loops inside the test files, so a loop that stops early keeps its file green
+while a retyped number lies. Get the truth from a run (`npm run test:unit`
+prints the real totals; `npx tsc --noEmit` and the individual
+`node --import tsx --test test/<file>.test.ts` runs print the rest), never from
+a row here.
+**Why the rows are never rewritten:** this file is the crash-resume record. After
+a restart it is what tells the next orchestrator which lanes existed, what each
+was assigned, and what it already proved. Append a row; never re-sort, re-word or
+delete one. A row that disagrees with a later row is not a defect to repair — it
+is the history, and the later row is the correction.
+
+- **goal183-unverified-ship-gate** · L1 · EXECUTE (gate authoring) · parent L0 ui2api orchestrator · started 2026-10-04T15:55:50Z · artifact test/credential-leak-gate.test.ts - GOAL-183 unverified-ship gate — done (commit be281a4): 33 tests, 32 pass 0 fail, tsc clean; gate reds on 4/120 real commits
+
+- **`ui2api-latency-readback-L1`** · L1 · EXECUTE (answer-readback slice) · parent main-chat · started 2026-10-04T17:56:38+02:00 · artifact `src/runtime/dom-primitives.ts` + 1 new readback-overhead test — running
+
+- **pool-latency-lane** · L1 · execute · parent L0-orchestrator · started 2026-10-04T17:57:14+02:00 · artifact src/prompt/pool.ts acquire/page-open latency slice — running
+
+- **readback-measure** · L2 · EXECUTE (measurement) · parent parent opencode session · started 2026-10-04T15:57:15Z · artifact /tmp/codeg-acp/2052-1d5445e2/readback-measure/ harness + <=350w latency report — running
+
+- **readpath-overhead-audit** · L2 · read-only inventory + candidate ranking · parent parent-session-0 (codeg restart) · started 2026-10-04T15:57:16Z · artifact read-only awaitAnswerFromReads overhead inventory + candidate ranking — running
+
+- **L1-latency-launch** · L1 · latency · parent root-orchestrator · started 2026-10-04T17:58:14+02:00 · artifact verdict+gate for browser.ts/session-store.ts launch-attach-inject slice — running (resumed after codeg restart; L2-measure done, L2-reuse-audit pending)
+
+- **agent-driver-latency-ledger** · L2 · execute · parent codeg (session orchestrator) · started 2026-10-04T18:03:53+02:00 · artifact test/driver-latency-ledger.test.ts — running
+
+- **send-readiness-experiment** · L2 · EXECUTE (experiment) · parent parent opencode session · started 2026-10-04T18:04:15+02:00 · artifact test/driver-send-readiness.test.ts + mutation report + unapplied driver.ts polling diff + Tencent readiness verdict — running
+
+- **send-readiness-experiment** · L2 · EXECUTE (experiment) · parent parent opencode session · started 2026-10-04T18:08:28+02:00 · artifact VERIFIED-ALREADY-LANDED: no new test written (test/consent-wall-poll.test.ts, GOAL 161, covers this slice); mutation runs M1-M4 measured in /tmp/codeg-acp/438074-c81c438b/mut; Tencent verdict DECLINE — done (no src/test edits; findings only)
+
+- **`open_code`** · L1 · GOAL pool.ts worker.busy-too-early · parent orchestrator (main chat) · started 2026-10-04T18:09:53+02:00 · artifact src/prompt/pool.ts release-path fix + 1 new test — running
+
+- **`plugin-wigolo-honest-success`** · L1 · GOAL (src/plugin/wigolo-context.ts invented success) · parent orchestrator · started 2026-10-04T16:09:52Z · artifact src/plugin/wigolo-context.ts + 1 new test — running
+
+- **`l1-timeout-discipline-gate`** · L1 · goal (gate-cannot-fire) · parent orchestrator · started 2026-10-04T18:10:28+02:00 · artifact test/test-timeout-discipline.test.ts scanner window+anchor fix — DONE 9e937a7 — 18 tests / 17 pass / 1 fail is another lane's unbounded spawnSync (648aae8), not this file
+
+- **`L1-sweep-probe-overlap`** · L1 · execute · parent codeg-orchestrator · started 2026-10-04T16:22:05Z · artifact src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json — running
+
+- **`reuse-audit-l2`** · L2 · VERIFY (audit report) · parent orchestrator · started 2026-10-04T18:22:18+02:00 · artifact reuse+freshness audit report (Q1-Q5, <=500w) — done (report delivered in-chat)
+
+- **`readpath-callers`** · L2 · read-only audit slice C: awaitAnswer read-path callers · parent L0-orchestrator · started 2026-10-04T18:27:39+02:00 · artifact none (read-only sub-report) — running
+
+- **`lane-browser-launch`** · L1 · execute · parent codeg-orchestrator · started 2026-10-04T18:33:50+02:00 · artifact src/runtime/browser.ts + src/runtime/session-store.ts latency slice — done — DECLINE committed 2e62cf7 (.brain/decisions/L1-latency-launch-2026-10-04.md); re-measured independently, agrees
+
+- **`readback-headroom`** · L1 · execute (readback-overhead measurement) · parent parent-orchestrator · started 2026-10-04T18:40:21+02:00 · artifact `src/runtime/dom-primitives.ts` + ONE new test file — running
+
+- **`consent-wall-poll`** · L1 · execute · parent orchestrator (L0) · started 2026-10-04T16:40:43Z · artifact `src/prompt/driver.ts` + `test/consent-wall-poll.test.ts` — running
+
+- **`pool-acquire-measure`** · L1 · measurement (re-run after STOP) · parent ORCH-L0 · started 2026-10-04T16:40:45Z · artifact src/prompt/pool.ts + 1 new test — running
+
+- **`consent-wall-poll`** · L1 · execute · parent orchestrator (L0) · started 2026-10-04T16:40:43Z · artifact `src/prompt/driver.ts` + `test/consent-wall-poll.test.ts` — done — commits b85dddf, 9d4e972; 15/15 own tests, tsc + typecheck clean
+
+- **`cli-input-validation-seam`** · L2 · execute (GOAL 215 validation seam in src/cli.ts) · parent L0-orchestrator · started 2026-10-04T18:50:30+02:00 · artifact `src/cli.ts` (unknown-flag refusal / malformed-numeric refusal / needs-companion refusal / inert-stays-legal) — running
+
+- **`cli-validation-wiring`** · L2 · execute (wiring the 3 GOAL-215 refusals into the dispatch seam) · parent L0-orchestrator · started 2026-10-04T16:55:38Z · artifact `src/cli.ts` (unknownFlagRefusal + numericFlagRefusal + needsCompanionRefusal wired at main(); KNOWN_FLAGS `--help` residue fix) — running — RESUMED after codeg restart; wirings already committed in e6ca28d; mid-VERIFICATION (cases 1+2 passed by hand, case 3 --xhost-all + non-regression + suites outstanding)
+
+- **cli-input-validation-test-l2** · L2 · EXECUTE · parent L0 · started 2026-10-04T18:59:14+02:00 · artifact test/cli-input-validation.test.ts (mutation-proven pins for unknownFlagRefusal / numericFlagRefusal / needsCompanionRefusal) — running (RESUMED after codeg restart; 31 tests were green pre-crash, index was cleared by the restart, re-staging)
+
+- **`cli-validation-wiring`** · L2 · execute — CLOSING OUT · parent L0-orchestrator · started 2026-10-04T17:04:12Z · artifact `src/cli.ts` (3 refusals wired at main(); `--help` KNOWN_FLAGS fix) — done — work COMMITTED in e6ca28d; verified: 3/3 refusals exit 1 by hand, 40/40 flags legal, 50/50 named tests green, tsc+typecheck+check:verbatim clean. NOTE: another lane has UNCOMMITTED behavioural edits on top (PARSED_FLAG_COUNT in the msg, nearestKnownFlag distance 3->2) — re-verified green against that tree; not mine, not committed by me
+
+- **`cli-input-validation-seam`** · L2 · execute (GOAL 215 validation seam in src/cli.ts) · parent L0-orchestrator · started 2026-10-04T18:50:30+02:00 · artifact `src/cli.ts` (unknown-flag / malformed-numeric / needs-companion refusals; inert-stays-legal) — done — 4 seams already COMMITTED in e6ca28d; reverted an uncommitted `--skill`-removal hunk that broke the pinned floor 11/15 -> 15/15; tsc clean; 50/50 across 5 test files; whitespace-only delta of my own; NOTE concurrent editor in the same file (PARSED_FLAG_COUNT, levenshtein 3->2, `--pool-min 0` comment)
+
+- **`skills-refusal-truth-numeric`** · L1 · EXECUTE (Task 2, acp-and-claim-truth plan) · parent L0 orchestrator · started 2026-10-04T19:07:01+02:00 (RESUMED run) · artifact test/skills-refusal-truth.test.ts + skills/ui2api-operate/SKILL.md — running
+
+- **`skills-refusal-truth-numeric`** · L1 · EXECUTE (Task 2, acp-and-claim-truth plan) · parent L0 orchestrator · started 2026-10-04T19:07:01+02:00 (RESUMED run) · artifact test/skills-refusal-truth.test.ts + skills/ui2api-operate/SKILL.md — DONE -- work was COMMITTED by the orchestrator at fan-in (4f65a88 gate+skill; e957ca9 closed the 13th comment-fragment seam). Independently re-verified on resume: seam count 12 = 11 baseline + 1 numeric (malformed value for, derivedFrom=NUMERIC_FLAGS); MUTATION-PROVED the gate bites (anchor removed from skill -> RED naming --port); skills-refusal-truth 8/8 + skills-truth 18/18 = 26/26; install-skills --project refreshed 16 dirs into 4 targets, cmp IDENTICAL x16; tsc --noEmit and tsc -p tsconfig.test.json --noEmit clean; data/ and /opt/ui2api untouched; no stray listeners. NOTE: uncommitted src/cli.ts + src/plugin/wigolo-context.ts + staged test/cli-input-validation.test.ts belong to OTHER lanes, not mine.
+
+- **l1-goal209-registry-gate-split** · L1 · EXECUTE (resume) · parent L0 · started 2026-10-04T19:14:57+02:00 · artifact test/registry-doc-truth.test.ts + test/fixtures/registry-world.json — running — committed in ffdee54; re-running falsification D + full gate sweep
+
+- **`l1-goal209-registry-gate-split`** · L1 · EXECUTE (resume) · parent L0 · started 2026-10-04T19:14:57+02:00 · artifact test/registry-doc-truth.test.ts + test/fixtures/registry-world.json — DONE — committed ffdee54 (+9c235c1). Re-verified on resume: snapshot REAL (measured 2026-10-04 via this repo own fetchRegistryIndex + repo API; 33 entries, 4 reviewed, 7198B, sha256 ae84ad95, private:false, branch master). Falsified with syscall-level harnesses, each proven armed: no-egress+knob-off = 0 socket attempts, 35/0; no-egress+knob-ON (the 1350 condition) = 37/0 + "VERDICT registry-unreachable"; blackhole:443+knob-ON = 37/0 + registry-unreachable in 23s (< 120s file timeout); real network = 37/0 + "VERDICT registry-agrees". Corrupting snapshot entries 33->31 turns the lane RED offline (5 fails). Gates: registry-doc-truth 37/35/0/2skipped; gate-wiring 52/52; assertions-are-counted 9/9; doc-numbers-truth 17/17; host-independence-gate 9/9; registry-contract-hub-truth 7/7; registry-publish-contract-truth 9/9; install 10/9/0/1skipped. tsc --noEmit EXIT=0; tsc -p tsconfig.test.json --noEmit EXIT=0. data/, /opt/ui2api, systemd untouched. NOTE: src/cli.ts, src/plugin/wigolo-context.ts, test/cli-input-validation.test.ts in git status belong to OTHER lanes.
+
+- **`open_code ACTIVE-WAVE#1-guard`** · L1 · EXECUTE (goal: session-store/prompt browser launch guard) · parent codeg orchestrator · started 2026-10-04T17:25:11Z · artifact test/session-store.test.ts + test/prompt.test.ts + test/helpers/browser-launchability.ts — running
+
+- **verify-commit-map-lane** · L1 · EXECUTE (goal: ACTIVE-WAVE #5 commit-map consumer) · parent orchestrator (L0) · started 2026-10-04T17:25:40Z · artifact scripts/ci/verify-commit-map.sh + test/commit-map-consumer.test.ts + docs/RECONSTRUCTION-RUNBOOK.md CHECK-3 correction — running
+
+- **hub-publish-host-gate (GOAL 238)** · L1 · execute/verify · parent orchestrator · started 2026-10-04T17:25:53Z · artifact src/cli.ts cmdHubPublish host segment gate + test/hub-publish-host-gate.test.ts — running
+
+- **`l1-profile-ingest-shape-guard`** · L1 · GOAL (profile-ingest optional-chaining guards absence not wrong type) · parent orchestrator (main chat) · started 2026-10-04T19:31:54+02:00 · artifact src/runtime/profile-ingest.ts + test/profile-ingest.test.ts — done — commits d7f1d3c + f300686; mutation EXIT=1 / restored EXIT=0; 13/13 own + 32/32 neighbours; tsc src EXIT=0; no partial write from this class (add-all per-item try/catch)
+
+- **pool-latency-lane-resume2** · L1 · execute · parent L0-orchestrator · started 2026-10-04T21:58:51+02:00 · artifact src/prompt/pool.ts acquire/page-open latency slice (resumed) — running
+
+- **L1-latency-launch** · L1 · latency · parent root-orchestrator · started 2026-10-04T21:59:58+02:00 · artifact verdict+gate for browser.ts/session-store.ts launch-attach-inject slice — running (re-registered after restart; MEASURE done, reuse-audit child re-dispatched)
+
+- **`readback-audit-L2`** · L2 · audit · parent ui2api-latency-readback-L1 · started 2026-10-04T22:00:14+02:00 · artifact read-only: overhead inventory + ranked candidates — running
+
+- **`readback-measure-L2`** · L2 · measure · parent ui2api-latency-readback-L1 · started 2026-10-04T22:00:14+02:00 · artifact /tmp harness: readback overhead split — running
+
+- **`ui2api-poolA-bench`** · L2 · execution/verify · parent codeg-parent-poolA-profile · started 2026-10-04T20:00:51Z · artifact poolA-acquire-profile-report — running
+
+- **L2-C-style-audit** · L2 · read-only style+freshness audit · parent L1-latency-launch · started 2026-10-04T22:01:06+02:00 · artifact mutation house style + freshness-gate assessment — running
+
+- **`l2-style-audit`** · L2 · VERIFY (mutation-gate house style + freshness gate) · parent codeg parent (pool/driver attach-mode lane) · started 2026-10-04T22:01:15+02:00 · artifact read-only report: mutation-gate house style, readback-freshness gate, awaitAnswer baseline, injection-verdict + owner-guard contracts — running
+
+- **L2-C-style-audit** · L2 · read-only audit · parent L1-latency-launch · started 2026-10-04T22:04:35+02:00 · artifact DONE: mutation house style + FOUND defeatable freshness baseline — completed
+
+- **`ui2api-poolA-bench`** · L2 · execution/verify · parent codeg-parent-poolA-profile · started 2026-10-04T20:07:28Z · artifact /tmp/poolA/report.md (bench.mts, report.md) — done — awaiting parent MERGE/FIRE decision
+
+- **`cli-input-validation-seam-l2-redispatch-2`** · L2 · EXECUTE · parent L0 · started 2026-10-04T20:11:55Z · artifact src/cli.ts GOAL-215 validation seam (unknown-flag / malformed-numeric / needs-companion refusals) — running
+
+- **`codex-l1-wigolo-redaction`** · L1 · execute · parent codeg-l0 · started 2026-10-05T06:59:40+02:00 · artifact src/prompt/error-redaction.ts + test/error-redaction.test.ts — running
+
+- **`cli-input-validation-seam-l2-redispatch-3`** · L2 · EXECUTE · parent L0 · started 2026-10-05T05:03:03Z · artifact src/cli.ts GOAL-215 validation seam — finish verification (5 test files + check:verbatim + commit) — running
+
+- **`acp-body-cap-goal236-l1`** · L1 · EXECUTE (goal 236) · parent codeg-l0 · started 2026-10-05T07:10:00Z · artifact src/agent/acp.ts + test/acp-body-cap.test.ts (ACP request-body byte cap / 413 payload_too_large) — running
+
+- **`araprat-refusal-fold`** · L1 · EXECUTE (goal: docs/ACTIVE-WAVE.md open item #3) · parent orchestrator · started 2026-10-05T07:11:39+02:00 · artifact src/capabilities/araprat.ts + test/mutating-capability-postcondition.test.ts — running
+
+- **`opencode-goal238-publish-anchor`** · L1 · execute (GOAL 238: hub publish host anchor) · parent opencode-L0-orchestrator · started 2026-10-05T07:14:04+02:00 · artifact src/cli.ts cmdHubPublish guard + test/install-host-containment.test.ts gate — running
+
+- **`error-redaction-owner-L1`** · L1 · execute (finish dead lane, ACTIVE-WAVE OPEN ITEM #2) — DUPLICATE of `no-answer-matcher-derivation-l1` below, which already owns this goal · parent orchestrator · started 2026-10-05T07:14:29+02:00 · artifact src/prompt/error-redaction.ts, src/prompt/verification-class.ts, test/error-redaction.test.ts, test/verification-class.test.ts — superseded — all four items landed in commit 4feeb2f; re-verified on resume 105/105 pass, 0 fail (3 src tsc + test tsc clean for this region). Did NOT commit the foreign GOAL-197 WIGOLO block another lane appended to test/error-redaction.test.ts after my commit — it calls an undefined `termPatternFor` and is broken
+
+- **verify-commit-map-lane(RESUME)** · L1 · EXECUTE (ACTIVE-WAVE #5: commit-map CONSUMER — extend committed file-shape checker with repo-grounded mode + add test + correct runbook CHECK 3) · parent orchestrator (L0) · started 2026-10-05T05:46:45Z · artifact scripts/ci/verify-commit-map.sh, test/commit-map-consumer.test.ts, docs/RECONSTRUCTION-RUNBOOK.md — running (resumed; prior commit 92f129f kept, extending)
+
+- **hub-publish-host-gate (GOAL 238)** · L1 · EXECUTE/VERIFY (goal 238) · parent orchestrator · started 2026-10-05T05:46:54Z · artifact src/cli.ts cmdHubPublish host gate + test/hub-publish-host-gate.test.ts — running
+
+- **`cli-input-validation-seam-l2-redispatch-4`** · L2 · EXECUTE · parent L0 · started 2026-10-05T06:01:36Z · artifact src/cli.ts GOAL-215 seam — verification (5 test files, check:verbatim, commit) — running
+
+- **`L1-sweep-probe-overlap`** · L1 · execute · parent codeg-orchestrator · started 2026-10-04T16:22:05Z · artifact src/prompt/pool.ts + test/pool-sweep-probe-concurrency.test.ts + package.json — DONE 8/8 own gate, 91/91 pool battery, src+test tsc clean, mutation red captured; UNCOMMITTED by design (sibling lanes hold staged files: src/cli.ts, docs/agent-registry.md)
+
+- **`cli-input-validation-seam-l2-redispatch-5`** · L2 · EXECUTE · parent L0 · started 2026-10-05T06:23:08Z · artifact src/cli.ts GOAL-215 seam — commit staged work — running
+
+- **L2-A-wire-latency** · L2 · measure · parent L1-latency-launch · started 2026-10-05T10:18:01+02:00 · artifact /tmp/l2a-measure wire/HTTP split (task b9890655-766b-4321-8d39-eb2e27436096) — running
+
+- **L2-B-pool-reuse** · L2 · analysis · parent L1-latency-launch · started 2026-10-05T10:18:01+02:00 · artifact /tmp/l2b-pool reuse+freshness audit (task b965a09b-a971-4ce7-87eb-74a1c5c34b5c) — running
+
+- **L2-C-browser-attach** · L2 · analysis · parent L1-latency-launch · started 2026-10-05T10:18:01+02:00 · artifact /tmp/l2c-browser launch/attach cost (task 4ac6030a-e721-45df-a678-6f1a0647fab6) — running
+
+- **L1-latency-baseline** · L1 · latency (baseline verdict, 3 L2 slices) · parent root-orchestrator · started 2026-10-05T10:30:00+02:00 · artifact .brain/decisions/L1-latency-baseline-2026-10-05.md + test/wire-layer-overhead-truth.test.ts (commit 96b32bc) — done — 21.07s gemini COLD ok:true; ours ~10% (2.0s of it the stableMs floor), theirs ~90%; wire 35ms DECLINED+gate 5/5 green, tsc EXIT=0, test typecheck EXIT=0; pool/browser NO HEADROOM by design; L2-B copilot probe FAILED 500@60.86s (no composer, 4x15s firstVisible) = UNVERIFIED
+
+- **`no-answer-matcher-derivation-l1`** · L1 · EXECUTE (goal: docs/ACTIVE-WAVE.md open item #2 — derive the no-answer MATCHER from its EMITTER) · parent orchestrator · started 2026-10-05T07:12:00+02:00 · artifact src/prompt/error-redaction.ts + src/prompt/verification-class.ts + test/error-redaction.test.ts + test/verification-class.test.ts — commit 4feeb2f; mutation-proven both directions — done (verified on resume: 63/63 + 42/42 green; mutation A fires both files; mutation B fires both exclusivity gates)
+
+- **`open_code ACTIVE-WAVE#1-guard`** · L1 · EXECUTE (done) · parent codeg orchestrator · started 2026-10-04T17:25:11Z · artifact test/session-store.test.ts + test/prompt.test.ts — DONE — committed ba0af59. Both files now guard their browser work with `guardBrowser` from test/helpers/browser-launchability.ts (the wigolo-engine seam), seam `"ui2api-ladder"` = `launchBrowser()`, the same call ChatDriver makes (src/prompt/driver.ts:294). Guarded: session-store x2 (storageReplayScript, capture-then-inject) + prompt x4 (3 ChatDriver + 1 promptd POST /prompt). Deliberately NOT guarded: the 2 auth/posture gates, which never launch anything. CANNOT SKIP — and that is asserted, not claimed: the in-file control feeds the guard playwright's own absent-artifact text and asserts `t.skip` was never called, the body never ran, and the classification appears in `t.diagnostic`. Measured both directions on the real seam: healthy EXIT=0 with 15/15 pass 0 fail 0 skipped; UI2API_ATTACH_PORT=39221 (no chrome owner -> launchBrowser refuses) EXIT=1 with 6 fail / 9 pass / 0 skipped — RED, never green. tsc -p tsconfig.test.json --noEmit EXIT=0.
+
+- **`open_code`** · L1 · GOAL pool.ts worker.busy-too-early · parent orchestrator (main chat) · started 2026-10-05T07:40:00+02:00 · artifact DONE: src/prompt/pool.ts release fix 2eaf900 + test/pool-release-busy-window.test.ts (commit 5544246) (mutant exit 1 / fixed exit 0; unregistered new test) — done
