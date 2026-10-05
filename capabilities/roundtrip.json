@@ -4,7 +4,7 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T13:51:16.992Z",
+  "generatedAt": "2026-10-05T14:28:34.439Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
@@ -14,52 +14,58 @@
     {
       "site": "duckduckgo",
       "capability": "chat",
-      "class": "UNMEASURED",
-      "sourceClass": "ANSWERS",
-      "provenance": "imported",
-      "method": "imported-from-prose",
-      "measuredAt": "2026-09-30T16:34:20.733Z",
+      "class": "ANSWERS",
+      "provenance": "harness",
+      "method": "POST /prompt (nonce probe, pool sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T14:22:11.869Z",
       "httpStatus": 200,
-      "answerChars": 49,
-      "answerSha256_16": "72014242f650c4ef",
-      "probeNonceMatched": null,
-      "doneReason": null,
-      "elapsedMs": null,
-      "observedPage": null,
+      "answerChars": 77,
+      "answerSha256_16": "9c68375b1490794f",
+      "probeNonceMatched": true,
+      "doneReason": "stable",
+      "elapsedMs": 4581,
+      "observedPage": {
+        "title": "Pong response",
+        "url": "https://duck.ai/chat"
+      },
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 3,
+        "queued": 0
+      },
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": null,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200 with real model output",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "observedPage is the title and url the DAEMON reported after driving the site; only the constant nonce probe was ever sent to the site, so no private text can ride in it"
+    },
+    {
+      "site": "gemini",
+      "capability": "chat",
+      "class": "ANSWERS",
+      "provenance": "harness",
+      "method": "POST /prompt (nonce probe, pool sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T14:28:34.438Z",
+      "httpStatus": 200,
+      "answerChars": 50,
+      "answerSha256_16": "9d391e8350e0ac80",
+      "probeNonceMatched": true,
+      "doneReason": "stable",
+      "elapsedMs": 19609,
+      "observedPage": {
+        "title": "Exact String Echo Test - Google Gemini",
+        "url": "https://gemini.google.com/app/148718f9c5ad6a92"
+      },
       "poolAtRequest": {
         "busy": 0,
         "total": 4,
         "queued": 0
       },
-      "daemonCommit": "5168940cf57bdbc679412c5fdb123fa67f5a27c5",
-      "evidence": "THE CONTROL, re-probed for GOAL 165 and bracketing the sweep. POST /v1/chat/completions {model:duckduckgo, prompt [REDACTED 24 chars sha256/16 0fb5aed1b51b28b0]} -> HTTP 200 in 11365ms at pool busy 0 / total 1 / queued 0 (IDLE), answer text [REDACTED 49 chars sha256/16 72014242f650c4ef]. Probed LAST at 2026-09-30T16:34:20.733Z -> HTTP 200 in 9299ms at pool busy 0 / total 4 / queued 0 (IDLE), the SAME real answer [REDACTED 42 chars sha256/16 2121b7bb3002ed85]. Both ends ran on deployed build 5168940, which is what makes the two rows between them attributable: the service was demonstrably alive and answering before and after them. This row was genuinely re-measured on the new build, so its per-row daemonCommit moves to 5168940.",
-      "prereq": "none - a real signed-in duck.ai session is in the vault and it answers",
-      "notes": "CONVERTED 2026-10-05 from capabilities/model-verification.json (schema ui2api/model-verification/1). That record carries NO nonce, NO answerText field and NO doneReason: the 2026-09-30 sweep sent the FIXED literal \"Reply with exactly: PONG\", so the served text cannot be attributed to THIS request rather than to a stale echo left on the page by an earlier prompt. probeNonceMatched therefore stays null and this row does NOT count as MEASURED: it is the provenance of a real HTTP 200 carrying real answer text, not a machine-verified round trip. It backs nothing."
-    },
-    {
-      "site": "gemini",
-      "capability": "chat",
-      "class": "UNMEASURED",
-      "sourceClass": "ANSWERS",
-      "provenance": "imported",
-      "method": "imported-from-prose",
-      "measuredAt": "2026-09-29T23:07:00Z",
-      "httpStatus": 200,
-      "answerChars": 16,
-      "answerSha256_16": "a95f65183f67c801",
-      "probeNonceMatched": null,
-      "doneReason": null,
-      "elapsedMs": null,
-      "observedPage": null,
-      "poolAtRequest": {
-        "busy": 0,
-        "total": 2,
-        "queued": 0
-      },
-      "daemonCommit": "bdee4ac2ea0c2fc205e334b9683c35ea6d0f8838",
-      "evidence": "POST /v1/chat/completions {model:gemini} -> HTTP 200 in 24204ms at pool 0/2 idle, queued 0, real answer text [REDACTED 16 chars sha256/16 a95f65183f67c801]. Reproduces the 2026-09-29 sweep's only ANSWERS row (200 / 28940ms), so gemini is the one model whose ANSWERS class survived the deploy unchanged.",
-      "prereq": "none - a real signed-in gemini.google.com session is in the vault and it answers",
-      "notes": "CONVERTED 2026-10-05 from capabilities/model-verification.json (schema ui2api/model-verification/1). That record carries NO nonce, NO answerText field and NO doneReason: the 2026-09-30 sweep sent the FIXED literal \"Reply with exactly: PONG\", so the served text cannot be attributed to THIS request rather than to a stale echo left on the page by an earlier prompt. probeNonceMatched therefore stays null and this row does NOT count as MEASURED: it is the provenance of a real HTTP 200 carrying real answer text, not a machine-verified round trip. It backs nothing."
+      "daemonCommit": "999632ebb701302c8e9665a937e9d917542a04dd",
+      "resultShape": null,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200 with real model output",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "observedPage is the title and url the DAEMON reported after driving the site; only the constant nonce probe was ever sent to the site, so no private text can ride in it"
     }
   ],
   "knownGaps": {
@@ -67,8 +73,6 @@
     "sites": [
       "araprat",
       "deepseek",
-      "duckduckgo",
-      "gemini",
       "kimi",
       "tencent-aistudio",
       "youtube"

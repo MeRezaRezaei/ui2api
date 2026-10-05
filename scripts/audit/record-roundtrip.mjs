@@ -560,6 +560,54 @@ record.rows = (record.rows || []).filter((r) => !(r.site === site && r.capabilit
 record.rows.push(row);
 record.generatedAt = new Date().toISOString();
 
+// ── the gap list is MAINTAINED HERE, not typed by a human ───────────────────
+// `knownGaps.sites` names the sites that publish a round-trip claim with no
+// MEASURED row behind it, and the gate asserts that named set EQUALS the gap it
+// derives (test/round-trip-record-truth.test.ts, "in both directions") — so a
+// gap appearing AND a gap being quietly closed are both build failures.
+//
+// That equality is only maintainable if MEASURING is what closes a gap. It was
+// not: the list was hand-maintained, so the first real measurement of gemini
+// and duckduckgo turned the gate RED with `named: [7 sites] / derived: [5
+// sites]` — a correct gate reporting that closing a gap was a manual step
+// nobody had done. So the write seam that measures now recomputes the list from
+// the rows it just wrote.
+//
+// The MEASURED predicate below is the SAME one the read seam applies
+// (src/prompt/registry.ts `measuredRoundTripFor`) and the same one the gate
+// derives from, restated here rather than imported, because this file runs
+// standalone against a deployed daemon and importing the resolver would drag
+// the whole registry into the measurement path. It is deliberately the strict
+// conjunction: provenance=harness AND a MATCHED nonce AND ANSWERS AND a 2xx AND
+// answerChars>0 AND doneReason=stable AND inside the staleness window. A row
+// missing any of those leaves its site in the gap, which is the honest
+// direction to fail in.
+const windowDays = Number(record.stalenessWindowDays) || 30;
+const isMeasuredRow = (r) => {
+  if (!r || typeof r !== "object") return false;
+  if (r.provenance !== "harness" || r.probeNonceMatched !== true || r.class !== "ANSWERS") return false;
+  const st = Number(r.httpStatus);
+  if (!(st >= 200 && st < 300)) return false;
+  if (!(Number(r.answerChars) > 0)) return false;
+  if (r.doneReason !== "stable") return false;
+  if (typeof r.measuredAt !== "string") return false;
+  const age = (Date.now() - Date.parse(r.measuredAt)) / 86_400_000;
+  return Number.isFinite(age) && age >= 0 && age <= windowDays;
+};
+const measuredSiteIds = new Set(record.rows.filter(isMeasuredRow).map((r) => r.site));
+
+if (record.knownGaps && Array.isArray(record.knownGaps.sites)) {
+  const before = record.knownGaps.sites.length;
+  record.knownGaps.sites = record.knownGaps.sites.filter((id) => !measuredSiteIds.has(id));
+  const closed = before - record.knownGaps.sites.length;
+  if (closed > 0) {
+    console.error(
+      `record-roundtrip: closed ${closed} gap(s) by measuring — the list is recomputed from the rows, ` +
+        `never typed. Remaining gaps: ${record.knownGaps.sites.length ? record.knownGaps.sites.join(", ") : "(none)"}`,
+    );
+  }
+}
+
 const tmp = `${path}.tmp-${process.pid}`;
 writeFileSync(tmp, JSON.stringify(record, null, 2) + "\n", { mode: 0o644 });
 renameSync(tmp, path); // atomic on the same filesystem: never a half-written record
