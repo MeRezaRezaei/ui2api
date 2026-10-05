@@ -28,11 +28,13 @@ export function derivePeanutsKey(): Buffer {
 export function deriveKeysFromLocalState(localStatePath: string): { cbc?: Buffer; gcm?: Buffer } {
   try {
     if (!existsSync(localStatePath)) return {};
-    const ls = JSON.parse(readFileSync(localStatePath, "utf8")) as {
-      os_crypt?: { encrypted_key?: string };
-    };
-    const b64 = ls.os_crypt?.encrypted_key;
-    if (!b64) return {};
+    const ls = JSON.parse(readFileSync(localStatePath, "utf8")) as unknown;
+    const b64 = untrustedRecord(untrustedRecord(ls)?.os_crypt)?.encrypted_key;
+    // A wrong-TYPE `encrypted_key` is unreadable key material, not a fatal error:
+    // return the same honest `{}` the missing-key and DPAPI cases return, so the
+    // caller falls back to the peanuts key instead of throwing out of
+    // `Buffer.from(nonString, "base64")`.
+    if (typeof b64 !== "string" || !b64) return {};
     let raw = Buffer.from(b64, "base64");
     if (raw.subarray(0, 5).toString() === "DPAPI") return {}; // Windows: undecryptable here
     if (raw.subarray(0, 3).toString() === "v10") raw = raw.subarray(3);
@@ -231,34 +233,59 @@ function readJsonIfExists(p: string): unknown {
   }
 }
 
-export function detectProfileIdentity(profileDir: string): ProfileIdentity {
-  const prefs = readJsonIfExists(join(profileDir, "Default", "Preferences")) as
-    | { account_info?: unknown }
-    | null;
-  const localState = readJsonIfExists(join(profileDir, "Local State")) as
-    | { profile?: { info_cache?: Record<string, { name?: string; user_name?: string }> } }
-    | null;
+// Every `Local State` / `Preferences` field is UNTRUSTED: these are files a
+// browser wrote, and a corrupt or non-Chrome-writer profile can put a scalar,
+// an array or a number where an object or an array of objects belongs. Optional
+// chaining only proves the key is PRESENT, so `?.` alone turns a wrong type into
+// either a thrown `x.find is not a function` / `s.trim is not a function` or a
+// silently WRONG value that lands in the vault as an account slug. This is the
+// read seam: it narrows to a plain object by TYPE, and nothing else in this file
+// reads a profile field without it.
+function untrustedRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
 
-  // Guard `account_info` by TYPE, not by absence. Optional chaining only proves
-  // the key is present, and MEASURED on a real profile (2026-10-05) Chrome wrote a
-  // SCALAR there (a string, not the documented array), so `prefs?.account_info?.find`
-  // threw `account_info.find is not a function`. Both callers
-  // (profile-scan.ts importSiteSnapshot, xhost-capture.ts
+// An identity LEAF must be a non-empty string. A number/object/array leaf (e.g.
+// `info_cache.Default.name = 42`) used to flow straight into
+// `ProfileIdentity.email`/`name`/`best`, and both callers pass `best` to
+// `slugifyIdentity`, which calls `.trim()` on it — so a wrong-typed leaf threw
+// AFTER the temp copy and BEFORE the vault write, the same partial-write abort
+// the scalar-`account_info` class caused. Unreadable identity text is simply
+// absent identity: the caller's existing `<user>-default` fallback applies.
+function identityString(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+export function detectProfileIdentity(profileDir: string): ProfileIdentity {
+  const prefs = untrustedRecord(readJsonIfExists(join(profileDir, "Default", "Preferences")));
+  const localState = untrustedRecord(readJsonIfExists(join(profileDir, "Local State")));
+
+  // Guard EVERY untrusted read by TYPE, not by absence. Optional chaining only
+  // proves the key is present, and MEASURED on a real profile (2026-10-05) Chrome
+  // wrote a SCALAR `account_info` (a string, not the documented array), so
+  // `prefs?.account_info?.find` threw `account_info.find is not a function`. Both
+  // callers (profile-scan.ts importSiteSnapshot, xhost-capture.ts
   // captureProfileFromLiveChrome) sit AFTER the temp copy and BEFORE the vault
   // write, so the throw aborted `profile add-all` mid-loop with earlier accounts
   // already written — a partial write. A wrong-typed prefs field is UNREADABLE
   // identity data, not a fatal error: fall through to the Local State display
   // name, and let the caller apply its `<user>-default` fallback.
   const accountInfo = prefs?.account_info;
-  const accounts: Array<{ email?: string }> = Array.isArray(accountInfo)
-    ? (accountInfo as Array<{ email?: string }>)
+  const accounts: Array<Record<string, unknown>> = Array.isArray(accountInfo)
+    ? (accountInfo.filter((a) => untrustedRecord(a) !== null) as Array<Record<string, unknown>>)
     : [];
-  const email = accounts.find((a) => a && a.email)?.email;
+  const email = identityString(accounts.find((a) => identityString(a.email))?.email);
   // The "Default" profile's entry in Local State profile.info_cache has the
-  // display name; other entries are named profiles (Person 1, ...).
-  const cache = localState?.profile?.info_cache ?? {};
-  const defaultMeta = cache["Default"] ?? Object.values(cache)[0];
-  const name = defaultMeta?.name || defaultMeta?.user_name;
+  // display name; other entries are named profiles (Person 1, ...). The cache is
+  // a KEYED map, so an array here is a wrong shape too — `Object.values` on an
+  // array would return its ELEMENTS and silently attribute a named profile's
+  // name to "Default", i.e. a wrong identity in the vault rather than a crash.
+  const cache = untrustedRecord(untrustedRecord(localState?.profile)?.info_cache);
+  const defaultMeta =
+    untrustedRecord(cache?.["Default"]) ?? untrustedRecord(Object.values(cache ?? {})[0]);
+  const name = identityString(defaultMeta?.name) ?? identityString(defaultMeta?.user_name);
 
   return {
     email,

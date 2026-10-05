@@ -269,6 +269,147 @@ test("detectProfileIdentity survives a scalar account_info (type guard, not abse
   }
 });
 
+// The sibling guard covered the CONTAINER (`account_info` must be an array) but
+// not the LEAF. MEASURED (2026-10-05, this lane): a wrong-typed leaf inside an
+// otherwise-correct shape — `info_cache.Default.name = 42`, or
+// `account_info[0].email = 42` — flowed straight through `email`/`name`/`best`
+// as a NUMBER or an OBJECT, and both callers hand `best` to
+// `slugifyIdentity(best)`, which calls `.trim()` on it. So the throw landed
+// AFTER the temp copy and BEFORE the vault write: the same partial-write abort
+// as the scalar-`account_info` class, one read over. An unreadable leaf must
+// degrade to the honest fallback (the other source, then `<user>-default`),
+// never fork a non-string identity into the vault.
+test("detectProfileIdentity type-guards every identity LEAF, not just the container", () => {
+  const dir = mkdtempSync(join(tmpdir(), "u2a-ingest-leaf-"));
+  try {
+    const profile = join(dir, "profile");
+    mkdirSync(join(profile, "Default"), { recursive: true });
+    const prefsPath = join(profile, "Default", "Preferences");
+    const lsPath = join(profile, "Local State");
+    const GOOD_LS = { profile: { info_cache: { Default: { name: "LocStateName" } } } };
+
+    // `info_cache.Default.name` wrong-typed -> the email is still usable, and a
+    // wrong-typed leaf must not shadow a VALID email further up.
+    for (const bad of [42, { a: 1 }, ["x"], true, "", "   "]) {
+      writeFileSync(
+        lsPath,
+        JSON.stringify({ profile: { info_cache: { Default: { name: bad } } } })
+      );
+      writeFileSync(prefsPath, JSON.stringify({ account_info: [{ email: "real@example.com" }] }));
+      const id = detectProfileIdentity(profile);
+      assert.equal(id.best, "real@example.com", `Default.name=${JSON.stringify(bad)}`);
+      assert.equal(id.name, undefined, `Default.name=${JSON.stringify(bad)} leaked a non-string name`);
+    }
+    // Same for `user_name`, the other leaf of the Local State entry.
+    writeFileSync(
+      lsPath,
+      JSON.stringify({ profile: { info_cache: { Default: { user_name: 42 } } } })
+    );
+    writeFileSync(prefsPath, JSON.stringify({ account_info: [{ email: "real@example.com" }] }));
+    assert.equal(detectProfileIdentity(profile).name, undefined, "user_name=42 leaked");
+
+    // `account_info[i].email` wrong-typed -> falls through to the Local State
+    // display name (the sibling's documented degradation), never a number.
+    for (const bad of [42, { a: 1 }, ["x"], true]) {
+      writeFileSync(lsPath, JSON.stringify(GOOD_LS));
+      writeFileSync(prefsPath, JSON.stringify({ account_info: [{ email: bad }] }));
+      const id = detectProfileIdentity(profile);
+      assert.equal(id.email, undefined, `email=${JSON.stringify(bad)} leaked a non-string email`);
+      assert.equal(id.best, "LocStateName", `email=${JSON.stringify(bad)} did not fall through`);
+      assert.equal(typeof id.best, "string", `email=${JSON.stringify(bad)} forked a non-string best`);
+    }
+    // An all-non-string account list must NOT stop at the first bad entry: the
+    // guard skips it and a later valid email is still found.
+    writeFileSync(lsPath, JSON.stringify(GOOD_LS));
+    writeFileSync(
+      prefsPath,
+      JSON.stringify({ account_info: [{ email: 42 }, { email: "later@example.com" }] })
+    );
+    assert.equal(detectProfileIdentity(profile).email, "later@example.com");
+
+    // `info_cache` is a KEYED MAP: an array is a wrong shape too. Unguarded,
+    // `Object.values(array)[0]` returned an ELEMENT and attributed a named
+    // profile's name to "Default" — a plausible-but-WRONG vault slug. It must
+    // now read as no cache at all.
+    for (const bad of [[{ name: "Person 2" }], ["Alice"], "Some Person", 42, true]) {
+      writeFileSync(lsPath, JSON.stringify({ profile: { info_cache: bad } }));
+      writeFileSync(prefsPath, JSON.stringify({}));
+      const id = detectProfileIdentity(profile);
+      assert.equal(id.best, "", `info_cache=${JSON.stringify(bad)} invented an identity`);
+    }
+    // `profile` itself wrong-typed -> no cache, no crash.
+    for (const bad of ["nope", 5, null, [1, 2]]) {
+      writeFileSync(lsPath, JSON.stringify({ profile: bad }));
+      writeFileSync(prefsPath, JSON.stringify({}));
+      assert.equal(detectProfileIdentity(profile).best, "", `profile=${JSON.stringify(bad)}`);
+    }
+    // The whole Preferences / Local State file wrong-typed (not an object).
+    for (const bad of [42, "x", [1], null]) {
+      writeFileSync(prefsPath, JSON.stringify(bad));
+      writeFileSync(lsPath, JSON.stringify(bad));
+      assert.equal(detectProfileIdentity(profile).best, "", `file=${JSON.stringify(bad)}`);
+    }
+    // `os_crypt.encrypted_key` wrong-typed: `Buffer.from(nonString, "base64")`
+    // throws for a number/object/boolean, and silently ACCEPTS a byte ARRAY as
+    // raw bytes — so a wrong-typed array FORGED a 16-byte `cbc` key (measured:
+    // array-of-16-numbers -> `cbc` returned, so every cookie decrypted with a
+    // garbage key instead of falling back to peanuts). Must return `{}`.
+    for (const bad of [42, { a: 1 }, ["k"], true]) {
+      writeFileSync(lsPath, JSON.stringify({ os_crypt: bad }));
+      const keys = deriveKeysFromLocalState(lsPath);
+      assert.ok(!keys.cbc && !keys.gcm, `encrypted_key=${JSON.stringify(bad)} -> peanuts fallback`);
+    }
+    for (const bad of [
+      Array.from({ length: 16 }, (_, i) => (i * 7) % 256),
+      [118, 49, 48, ...Array.from({ length: 16 }, (_, i) => (i * 7) % 256)],
+    ]) {
+      writeFileSync(lsPath, JSON.stringify({ os_crypt: { encrypted_key: bad } }));
+      const keys = deriveKeysFromLocalState(lsPath);
+      assert.ok(
+        !keys.cbc && !keys.gcm,
+        `encrypted_key=byte-array(${bad.length}) forged ${keys.cbc?.toString("hex") ?? keys.gcm?.toString("hex")}`
+      );
+    }
+    // And a real base64 key still works — the guard must not swallow it. Build
+    // it the way Chrome does (decode to bytes that literally start "v10"), so
+    // the prefix-strip path is the one under test rather than a coincidence of
+    // the base64 alphabet.
+    writeFileSync(
+      lsPath,
+      JSON.stringify({
+        os_crypt: { encrypted_key: Buffer.concat([Buffer.from("v10"), Buffer.alloc(32, 7)]).toString("base64") },
+      })
+    );
+    assert.ok(deriveKeysFromLocalState(lsPath).gcm, "a real 32-byte base64 key is still read");
+    writeFileSync(
+      lsPath,
+      JSON.stringify({
+        os_crypt: { encrypted_key: Buffer.concat([Buffer.from("v10"), Buffer.alloc(16, 7)]).toString("base64") },
+      })
+    );
+    assert.ok(deriveKeysFromLocalState(lsPath).cbc, "a real 16-byte base64 key is still read");
+    // The documented shapes all still work — the guards must not swallow them.
+    writeFileSync(
+      prefsPath,
+      JSON.stringify({ account_info: [{ email: "array@example.com" }] })
+    );
+    writeFileSync(lsPath, JSON.stringify(GOOD_LS));
+    const good = detectProfileIdentity(profile);
+    assert.equal(good.email, "array@example.com");
+    assert.equal(good.name, "LocStateName");
+    assert.equal(good.best, "array@example.com");
+    // Named-profile fallback: no "Default" key -> the first cache VALUE, by TYPE.
+    writeFileSync(prefsPath, JSON.stringify({}));
+    writeFileSync(
+      lsPath,
+      JSON.stringify({ profile: { info_cache: { "Profile 1": { user_name: "Work" } } } })
+    );
+    assert.equal(detectProfileIdentity(profile).name, "Work");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("deriveKeysFromLocalState tolerates the missing-key Linux case", () => {
   const dir = mkdtempSync(join(tmpdir(), "u2a-ingest3-"));
   try {
