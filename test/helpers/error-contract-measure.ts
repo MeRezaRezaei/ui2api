@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+// The one declared parser, already used by five files in `test/` for exactly
+// this kind of syntactic walk. See `codeExpressionValues` for why a
+// runtime-built code cannot be read by a regex and why no new dependency is
+// needed to see it.
+import ts from "typescript";
 
 /**
  * GOAL 91 / GOAL 104 — the daemon's NAMED error codes, MEASURED from source.
@@ -165,6 +170,71 @@ export function measureShapeFallback(): string | null {
   return /\\?\\?\s*"([A-Za-z0-9_-]+)"/.exec(decl)?.[1] ?? null;
 }
 
+/**
+ * EVERY `code:` POSITION IN http.ts / openai.ts, with the value this resolver can
+ * statically fold it to — or `null` when it cannot. Unlike
+ * a resolver-only check (which reports only what it could NOT read), this
+ * returns EVERY code position, because the two failures are different and both
+ * matter:
+ *
+ *   - a position that folds to `null`  -> the harvest is blind and cannot say what
+ *     the daemon may emit;
+ *   - a position that folds to a string -> the harvest may STILL be blind, because
+ *     being able to resolve a value is not the same as having MEASURED it.
+ *
+ * That second failure is the one a resolver alone re-creates, and it was found by
+ * the anti-vacuity rather than by reading: planting `code: "ui2api_" +
+ * "driver_error"` made a fold return a string, so a check that only asked "can you
+ * resolve it?" stayed silent — while `measureEmitted()` still had no idea that
+ * code came from that position, because the four literal harvesters never read it.
+ * A guard that asks only "is this resolvable?" therefore measures nothing. So the
+ * caller requires every folded value to be PRESENT IN THE MEASURED VOCABULARY,
+ * which is the property that actually matters: a code the daemon can emit is
+ * either in the contract or a named failure.
+ */
+export function codeExpressionValues(file: string, src: string): { expr: string; text: string; value: string | null; line: number; literal: boolean }[] {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const bindings = new Map<string, ts.Expression>();
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st)) {
+      for (const d of st.declarationList.declarations) {
+        if (ts.isIdentifier(d.name) && d.initializer) bindings.set(d.name.text, d.initializer);
+      }
+    }
+  }
+  const fold = (node: ts.Expression, depth = 0): string | null => {
+    if (depth > 4) return null;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const l = fold(node.left, depth + 1);
+      const r = fold(node.right, depth + 1);
+      return l === null || r === null ? null : l + r;
+    }
+    if (ts.isParenthesizedExpression(node)) return fold(node.expression, depth + 1);
+    if (ts.isIdentifier(node)) {
+      const init = bindings.get(node.text);
+      return init ? fold(init, depth + 1) : null;
+    }
+    return null;
+  };
+  const out: { expr: string; text: string; value: string | null; line: number; literal: boolean }[] = [];
+  const walk = (node: ts.Node): void => {
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === "code") {
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      out.push({
+        expr: node.initializer.getText(sf).replace(/\s+/g, " ").slice(0, 80),
+        text: node.initializer.getText(sf),
+        value: fold(node.initializer),
+        line: line + 1,
+        literal: ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer),
+      });
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(sf);
+  return out;
+}
+
 /** Everything the daemon actually emits, measured. */
 export function measureEmitted(): Emitted {
   const http = readFileSync("src/prompt/http.ts", "utf8");
@@ -177,6 +247,95 @@ export function measureEmitted(): Emitted {
   for (const m of shapeMessageCodes(http).entries()) out.set(m[0], m[1]);
   // the last-resort net's named generic 500
   if (/code:\s*"internal_error"/.test(http)) out.set("internal_error", 500);
+  // THE LOUD HALF of the runtime-built-code guard, and it is last so it reports
+  // only what the four literal harvesters above did NOT already account for.
+  //
+  // THE RULE, and it is stricter than "is this resolvable": EVERY `code:` position
+  // must land in the measured vocabulary `out`. Two distinct failures, both named:
+  // a position that folds to nothing (the harvest cannot say what may be emitted),
+  // and a position that folds to a string the harvest never recorded (it CAN say,
+  // and did not). The second is the one a resolver-only guard misses, and it was
+  // found by the anti-vacuity rather than by reading — see `codeExpressionValues`.
+  //
+  // Each EXEMPTION is conditional on its accounting harvester having found
+  // something, and pins the NUMBER of sites it covers, so the list is an audit
+  // rather than a mute: delete `poolRefusal` and its own exemption dies, and a
+  // FOURTH `code: e.code` somewhere new fails the count instead of inheriting the
+  // first site's accounting.
+  const intoTyped: Emitted = new Map();
+  typedClientErrorCodes(http, intoTyped);
+  const intoPool: Emitted = new Map();
+  poolRefusalCodes(http, intoPool);
+  const typedCount = intoTyped.size;
+  const poolCount = intoPool.size;
+  const shapeCount = shapeMessageCodes(http).size;
+  const EXEMPT: { expr: string; sites: number; why: string; holds: boolean }[] = [
+    {
+      // `code: e.code` guarded by `e instanceof HttpClientError` (twice: the
+      // inner catch and the outer net). The codes are not literals here — they are
+      // whatever the typed CONSTRUCTOR was given, which `typedClientErrorCodes`
+      // reads off every `new HttpClientError(<status>, "<code>")`.
+      expr: "e.code",
+      sites: 2,
+      why: `the HttpClientError arm; accounted by typedClientErrorCodes, which found ${typedCount} code(s)`,
+      holds: typedCount > 0,
+    },
+    {
+      // `code: refusal.code`, from the daemon's own `poolRefusal(msg)` labeller —
+      // accounted by `poolRefusalCodes`, which reads the `{ code: "…" }` each of
+      // its returns builds.
+      expr: "refusal.code",
+      sites: 1,
+      why: `the pool-refusal arm; accounted by poolRefusalCodes, which found ${poolCount} code(s)`,
+      holds: poolCount >= 3,
+    },
+    {
+      // `code: shapeCode`, read out of the SHAPE_MESSAGES table — accounted by
+      // `shapeMessageCodes` above, whose five throws exist precisely because this
+      // indirection was measured invisible once already.
+      expr: "shapeCode",
+      sites: 1,
+      why: `the request-shape arm; accounted by shapeMessageCodes, which found ${shapeCount} code(s)`,
+      holds: shapeCount > 0,
+    },
+  ];
+  const live = EXEMPT.filter((a) => a.holds);
+  const blind: string[] = [];
+  for (const [file, src] of [["src/prompt/http.ts", http], ["src/prompt/openai.ts", openai]] as const) {
+    const positions = codeExpressionValues(file, src);
+    for (const p of positions) {
+      const rule = live.find((a) => a.expr === p.expr);
+      if (rule) {
+        const seen = positions.filter((q) => q.expr === p.expr).length;
+        if (seen !== rule.sites) {
+          blind.push(`${file}: \`code: ${p.expr}\` now appears at ${seen} site(s) but the exemption accounts for ${rule.sites} — a new site is NOT covered by the old accounting (${rule.why})`);
+        }
+        continue;
+      }
+      // A LITERAL `code:` is out of scope here, and the reason is measured rather
+      // than assumed: this walk sees 13 literal `code:` fields the vocabulary does
+      // not hold — the `FAULT_CAUSE_CLASSES` diagnostic tokens (http.ts:801-809,
+      // a log/`/status` classifier, not a wire envelope), the `block.error` /
+      // `vault.error` fields of the `/requirements` and doctor reports
+      // (http.ts:545, :1788), none of which is a client-facing error envelope.
+      // Demanding they be in the contract would be a false positive on thirteen
+      // real sites, and a gate that cries wolf on the healthy tree is a gate a
+      // reader stops reading. The residual is specifically the code the four
+      // LITERAL harvesters cannot read, so the walk reports exactly the positions
+      // that are NOT plain literals — which is where the exemptions above sit.
+      if (p.literal) continue;
+      if (p.value === null) {
+        blind.push(`${file}:${p.line}: \`code: ${p.expr}\` resolves to NOTHING statically — no literal harvester can read it, so no gate knows the daemon may emit it`);
+      } else if (!out.has(p.value)) {
+        blind.push(`${file}:${p.line}: \`code: ${p.expr}\` folds to "${p.value}", which is NOT in the measured vocabulary — resolvable is not MEASURED, and a code the daemon can emit must be in the contract or be a named failure`);
+      }
+    }
+  }
+  if (blind.length) {
+    throw new Error(
+      `a code position in the daemon's wire envelopes is not accounted for by the harvest: ${JSON.stringify(blind, null, 1)} — fold it to a string literal the harvesters read, or teach the harvest this shape on purpose; it must never be skipped quietly`,
+    );
+  }
   return out;
 }
 
