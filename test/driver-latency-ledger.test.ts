@@ -433,3 +433,123 @@ d("REAL PROFILE TIMING (read from the shipped profiles)", () => {
     );
   });
 });
+
+/* ---------------------------------------------------------------------------
+ * THE ANSWER-SETTLE WINDOW — not a fixed wait, and not the dom-primitives
+ * defaults: the driver hands awaitAnswer the PROFILE's stableMs, so the 1800
+ * default applies only to a profile that sets none.
+ * ------------------------------------------------------------------------- */
+
+d("THE ANSWER WINDOW: a stability detector, not a sleep", () => {
+  t("the driver passes the PROFILE's stableMs, so the 1800 default is not what runs", () => {
+    assert.match(
+      DRIVER_CODE,
+      /stableMs: opts\.stableMs \?\? this\.profile\.stableMs/,
+      "awaitAnswer must receive the profile's stableMs — the 1800 default is a fallback, not the shipped value"
+    );
+    assert.match(DOM_SRC, /stableMs = 1800/, "dom-primitives keeps 1800 as its own default");
+    for (const id of ["gemini", "tencent-aistudio"]) {
+      const p = (BUILTIN_PROFILES as Record<string, Packaged>)[id];
+      assert.notEqual(p.stableMs, 1800, `${id} must not sit on the 1800 default`);
+    }
+    assert.equal(BUILTIN_PROFILES.gemini.stableMs, 2000, "gemini stableMs moved");
+    assert.equal(BUILTIN_PROFILES["tencent-aistudio"].stableMs, 2500, "tencent stableMs moved");
+  });
+
+  t("pollMs is never passed by the driver, so the 400 default DOES apply", () => {
+    assert.match(DOM_SRC, /pollMs = 400/, "dom-primitives pollMs default");
+    const call = DRIVER_CODE.slice(DRIVER_CODE.indexOf("this.dom.awaitAnswer("), 400);
+    assert.ok(
+      !call.includes("pollMs"),
+      "the driver does not pass pollMs — the 400ms default is what actually polls"
+    );
+  });
+
+  t("the settle window is measured from the LAST GROWTH and the tail sleep aims at it", () => {
+    // Honest framing, and the reason this is not ledger padding: the read ends
+    // as soon as the fresh text has been unchanged for stableMs. The re-poll is
+    // a `setTimeout`, not a `waitForTimeout`, which is exactly why the answer
+    // loop contributes NOTHING to the page-wait ledger above.
+    assert.match(
+      DOM_SRC,
+      /if \(!stable\) \{[\s\S]{0,2400}await new Promise\(\(r\) => setTimeout\(r, sleepMs\)\)/,
+      "the answer loop re-polls on a real timer, not on a page wait"
+    );
+    assert.ok(
+      !/awaitAnswerFromReads[\s\S]{0,2500}waitForTimeout/.test(DOM_SRC),
+      "the answer loop must never pay a page wait — it polls on its own timer"
+    );
+    // The tail sleep is CLAMPED to the stability deadline, so the overshoot
+    // above stableMs is bounded by one poll tick, not a flat extra sleep.
+    assert.match(
+      DOM_SRC,
+      /const sleepMs = Math\.max\(tailFloorMs, Math\.min\(pollMs, untilStableCheck\)\)/,
+      "the tail sleep must stay clamped to the stability deadline"
+    );
+    assert.match(
+      DOM_SRC,
+      /state\.madeProgress \? state\.lastChange \+ stableMs - Date\.now\(\) : pollMs/,
+      "the tail sleep aims at lastChange + stableMs once progress exists"
+    );
+    assert.equal(
+      (DOM_SRC.match(/setTimeout\(r, sleepMs\)/g) ?? []).length,
+      1,
+      "exactly one sleep site in the answer loop"
+    );
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * THE THREE CLAIMS THIS LEDGER EXISTS TO REFUTE. Each is asserted FALSE
+ * against the shipped source, so the refutation cannot rot into prose.
+ * ------------------------------------------------------------------------- */
+
+d("REFUTED CLAIMS (asserted false against the shipped source)", () => {
+  t("'settleMs 900 is a flat 900ms wait before composing' — FALSE", () => {
+    // The settle sits AFTER the prompt was dispatched, inside the observed-wall
+    // branch; the pre-compose wait it is confused with is a different, profile-
+    // scoped field. Neither is unconditional.
+    const wallIdx = DRIVER_CODE.indexOf("if (!this.profile.urlTemplate && this.profile.consentWall?.accept)");
+    const settleIdx = DRIVER_CODE.indexOf("waitForTimeout(wall.settleMs ?? 900)");
+    const preComposeIdx = DRIVER_CODE.indexOf("this.profile.preComposeDelayMs) {");
+    assert.ok(wallIdx > 0 && settleIdx > wallIdx, "the settle lives inside the consent-wall branch");
+    assert.ok(preComposeIdx > 0, "the pre-compose dwell is a separate, profile-scoped field");
+    const block = DRIVER_CODE.slice(settleIdx - 400, settleIdx + 200);
+    assert.ok(
+      !block.includes("this.dom.type("),
+      "the wall block never re-composes — it acknowledges and re-sends"
+    );
+    assert.ok(
+      DRIVER_CODE.indexOf('this.dom.press(composer, ["Enter"])') < wallIdx ||
+        DRIVER_CODE.indexOf("await this.dom.click(sendSel)") < wallIdx,
+      "the prompt is dispatched BEFORE any wall wait — the settle is not a pre-compose delay"
+    );
+  });
+
+  t("'awaitAnswer called with stableMs=1800, pollMs=400' — HALF FALSE, pinned as written", () => {
+    const idx = DRIVER_CODE.indexOf("this.dom.awaitAnswer(");
+    assert.ok(idx > 0, `the awaitAnswer call site must exist in driver.ts (indexOf returned ${idx})`);
+    const call = DRIVER_CODE.slice(idx, idx + 600);
+    assert.ok(!call.includes("stableMs: 1800"), "the driver does not hardcode 1800");
+    assert.ok(
+      call.includes("stableMs: opts.stableMs ?? this.profile.stableMs"),
+      `the profile's stableMs is what runs; the 1800 default is only a fallback — slice was ${JSON.stringify(call.slice(0, 200))}`
+    );
+    assert.ok(!call.includes("pollMs"), "pollMs is omitted, so the 400 default is what polls");
+  });
+
+  t("'a fresh readback baseline per prompt' — the baseline IS per-ask, and its fallback is honest", () => {
+    // Stated precisely, because the loose version of this claim is false: the
+    // baseline is read per ask, but an UNREADABLE region is not treated as an
+    // empty baseline — awaitAnswer then snapshots at entry instead.
+    const idx = DRIVER_CODE.indexOf("baseline = await this.dom.readAnswerRegion(");
+    assert.ok(idx > 0, "a per-ask baseline read must exist");
+    const block = DRIVER_CODE.slice(idx - 400, idx + 400);
+    assert.match(block, /catch \{\s*baseline = undefined/, "an unreadable baseline degrades honestly, never to a fake empty one");
+    assert.match(
+      DRIVER_CODE,
+      /await this\.dom\.awaitAnswer\(\s*answerSel,[\s\S]{0,400}baseline\s*\)/,
+      "the baseline is handed to awaitAnswer as its own third argument"
+    );
+  });
+});
