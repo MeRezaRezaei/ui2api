@@ -147,7 +147,36 @@ release:
 #   exactly that for hours.
 #
 # ---------------------------------------------------------------------------
-# 8. THE CURRENT BLOCKER, recorded because it is NOT a sanitiser problem.
+# 8. THE NAMING RULE — WHICH REPO IS WHICH, SO THE AGENT CANNOT MISREAD IT.
+#
+#   github.com/MeRezaRezaei/ui2api        PUBLIC   the SANITISED artifact
+#   github.com/MeRezaRezaei/ui2api-full   PRIVATE  the FULL history
+#
+#   The private repo is the one that carries EVERYTHING: every commit, every
+#   original hash, `.brain` intact. It is the durability record, and it is the
+#   reason deleting the self-hosted GitLab VPS costs nothing.
+#
+#   The public repo carries NONE of the brain — not at the tip, not in any of
+#   its 533 commits — and is safe to be seen by anyone. It is a DERIVATIVE.
+#
+#   `-full` means full-history and it is the PRIVATE one. `ui2api` (no suffix)
+#   means the published, brain-free one. The suffix is the privacy marker: if a
+#   repo's name ends in `-full`, assume it holds the corpus and treat it as
+#   private-IP.
+#
+#   MEASURED after the repair, 2026-10-05:
+#     public  ui2api        533 commits, .brain at tip 0, brain-touching 0
+#     private ui2api-full   716 commits, .brain at tip 32
+#     shared ancestor      4678b75 — the two halves still join, so the full
+#                          repo can be reconstructed from the public one
+#
+#   ⚠ A PUBLIC REPO'S HISTORY CANNOT BE UN-PUBLISHED. If `.brain` is ever found
+#   in the public repo again, the ONLY fixes are: delete the repo and recreate
+#   it from a sanitised export, or rotate whatever leaked. There is no third
+#   option and no partial one — a force-push does not reach forks or clones.
+#   That asymmetry is why the sanitiser gate is fail-closed.
+#
+# 9. THE CURRENT BLOCKER, recorded because it is NOT a sanitiser problem.
 # ---------------------------------------------------------------------------
 # The public copy has not been republished because `public_mirror` never RAN.
 # Its `needs: ["verify"]` was unmet: `verify` fails on an unrelated
@@ -156,8 +185,14 @@ release:
 # registered route). Pipeline 1552 shows public_mirror `skipped`, verify
 # `failed`.
 #
-# So the corpus is exposed for a reason that has nothing to do with the corpus:
-# an unrelated red gate is holding the publisher hostage. That coupling is a
-# defect. `public_mirror` sanitises and verifies INDEPENDENTLY of the project's
-# test suite — a doc-truth failure is not evidence that the sanitiser is unsafe,
-# and it must never be able to block publication of a privacy fix.
+# So the corpus was exposed for a reason that had nothing to do with the corpus:
+# an unrelated red gate was holding the publisher hostage.
+#
+# ✅ RESOLVED 2026-10-05. `public_mirror` no longer `needs: ["verify"]`, and
+# pipeline 1572 (sha 69d4931) is the first in this project's history where
+# `public_mirror` ran at all: `success` while `verify` was still running. The
+# public repo is now 533 commits with zero brain material.
+#
+# The rule that came out of it, and it generalises: a gate must never be able to
+# block the fix for the problem it is protecting. A doc-truth failure is not
+# evidence that a sanitiser is unsafe.

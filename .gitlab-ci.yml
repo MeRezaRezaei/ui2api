@@ -362,16 +362,28 @@ github_release:
 
 # --------------------------------------------------------------- mirrors ----
 #
-# THE OPERATOR'S TWO ARTIFACTS, and the reason there are two:
+# THE OPERATOR'S TWO ARTIFACTS, and the reason there are two.
 #
-#   ui2api-full  PRIVATE. The complete history, .brain and all, every original
-#                commit hash intact. This is the durability record — the whole
-#                point is that deleting the self-hosted GitLab VPS must cost
-#                nothing.
-#   ui2api       PUBLIC.  The same project with any kind of brain removed from
-#                its HISTORY. A public repository's history cannot be
-#                unpublished, only rewritten, with forks outrunning the rewrite,
-#                so the strip has to be right the FIRST time.
+# ⚠ READ THIS BEFORE CHANGING EITHER VARIABLE. `-full` is the PRIVACY MARKER:
+# a repo named `*-full` holds the FULL history and is PRIVATE-IP. A repo with no
+# suffix is the PUBLISHED, brain-free derivative and is safe to be seen.
+#
+#   $GITHUB_FULL_REPO = MeRezaRezaei/ui2api-full
+#     PRIVATE. The complete history, .brain and all, every original commit hash
+#     intact. THE DURABILITY RECORD — the whole point is that deleting the
+#     self-hosted GitLab VPS must cost nothing. Never point a public repo here.
+#
+#   $GITHUB_REPO = MeRezaRezaei/ui2api
+#     PUBLIC. The same project with any kind of brain removed from its HISTORY.
+#     A public repository's history cannot be unpublished, only rewritten, with
+#     forks outrunning the rewrite, so the strip has to be right the FIRST time.
+#     If brain material is ever found here, the only fixes are DELETE AND
+#     RECREATE from a sanitised export, or rotate what leaked. There is no third
+#     option, and a force-push does not reach forks or clones.
+#
+# MEASURED after the 2026-10-05 repair: public 533 commits / 0 brain material,
+# private 716 commits / 32 brain files, shared ancestor 4678b75 so the full repo
+# is still reconstructible from the public one.
 #
 # BOTH ARE BUILT BY make-public-repo.sh, which produces the two halves and
 # verifies them before anything is pushed. The script exits non-zero unless every
@@ -647,6 +659,45 @@ public_mirror:
       [ -n "$PSPEC" ] || { echo "MIRROR-FAIL: public-sanitized has no branches"; exit 1; }
       timeout -k 10 1200 git -C "$PUB" push origin --force $PSPEC \
         || { echo "MIRROR-FAIL: public-sanitized push refused"; exit 1; }
+
+      # ---- POST-PUSH PROOF, READ BACK FROM GITHUB ITSELF ------------------
+      # A push that succeeds is a push that was ACCEPTED, not a push that was
+      # CORRECT. Everything above verifies the local export; nothing verified
+      # what actually landed on the remote.
+      #
+      # That gap is not theoretical. MEASURED 2026-10-05: the public repo held
+      # 803 commits and 219 brain-touching commits — a straight mirror of GitLab
+      # that no sanitiser had ever replaced — while every local check reported
+      # clean, because public_mirror had never once run (it was skipped behind
+      # an unrelated red test). The evidence that would have caught it existed
+      # and was simply not being looked at.
+      #
+      # So: ask GitHub, not the sandbox. A public repo's history cannot be
+      # un-published, so this is the last moment at which "we thought it was
+      # clean" can still be corrected by deleting and recreating.
+      echo "== VERIFYING THE PUBLISHED REPO FROM GITHUB (not from the sandbox)"
+      V=$(mktemp -d)
+      trap 'rm -rf "$V"' EXIT
+      # askpass is still exported above, so the clone authenticates without the
+      # token ever appearing in argv (visible in /proc) or in a URL.
+      if timeout 600 git -c credential.helper= clone -q --mirror \
+           "https://github.com/$GITHUB_REPO.git" "$V/probe" 2>/dev/null; then
+        PBRAIN=$(timeout 120 git -C "$V/probe" log --all --oneline -- ".brain" 2>/dev/null | wc -l | tr -d ' ')
+        PTIP=$(timeout 60 git -C "$V/probe" ls-tree -r --name-only HEAD 2>/dev/null | grep -c '^\.brain/' || echo 0)
+        echo "   published: brain-touching commits=$PBRAIN, .brain at tip=$PTIP"
+        if [ "${PBRAIN:-1}" != "0" ] || [ "${PTIP:-1}" != "0" ]; then
+          echo "MIRROR-FAIL: the PUBLISHED repo carries brain material ($PBRAIN commits, $PTIP files at tip)."
+          echo "            A public repo's history cannot be un-published. The only fixes are"
+          echo "            DELETE AND RECREATE the public repo from a clean export, or rotate"
+          echo "            whatever leaked. This needs the operator — it is not a re-run."
+          exit 1
+        fi
+        echo "MIRROR-OK: public repo verified brain-free on GitHub itself"
+      else
+        echo "MIRROR-WARN: could not clone the published repo back to verify it."
+        echo "            The push reported success, but it is UNVERIFIED. Treat the public"
+        echo "            repo as unproven rather than clean until a later run confirms it."
+      fi
       rm -f "$GIT_ASKPASS"
       echo "MIRROR-OK: private-full -> $GITHUB_FULL_REPO ; public-sanitized -> $GITHUB_REPO"
   artifacts:
