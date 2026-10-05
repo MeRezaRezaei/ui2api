@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { siteIdFromModel, messagesToPrompt, handleOpenAIRoutes } from "../src/prompt/openai.js";
+import { INVALID_JSON_MESSAGE } from "../src/prompt/consumer-surface.js";
 import type { ChatSiteProfile } from "../src/profile/profile.js";
 
 const fakeProfile = {
@@ -242,6 +243,103 @@ test("POST /v1/chat/completions with empty messages -> 400", async () => {
   } finally {
     server.close();
   }
+});
+
+// ─── GOAL 145's defect class, on the /v1 reader ──────────────────────────────
+//
+// THE DEFECT. The daemon's `/prompt` reader has refused a non-object body with
+// a NAMED 400 `invalid_json` since GOAL 145 (`readJson`,
+// src/prompt/http.ts:738). THIS path did not: `readJsonBody` in openai.ts
+// resolved whatever parsed, so a body of literal `null` reached
+// `Boolean(body.stream)` at the very next line and threw a TypeError, which the
+// last-resort net answered as a 500. One daemon, one caller mistake, two answers
+// — and the wrong one blamed the server for a typo.
+
+test("POST /v1/chat/completions with a non-object body is a named 400, never a 500", async () => {
+  const { server, port } = await startTestServer(stubPool("x"));
+  try {
+    for (const raw of ["null", "[1,2]", '"hi"', "42", "true"]) {
+      const res = await probeV1(port, "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: raw,
+      });
+      assert.equal(res.status, 400, `body \`${raw}\` must be a named 400, never a 500`);
+      const body = (await res.json()) as { error: { message: string; type: string; code?: string } };
+      assert.equal(body.error.type, "invalid_request_error", "OpenAI clients parse this shape");
+      assert.equal(body.error.message, INVALID_JSON_MESSAGE, "one condition, one owned sentence");
+      // and a body that is not JSON AT ALL is the same named refusal
+      const broken = await probeV1(port, "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      });
+      assert.equal(broken.status, 400, "a body that is not JSON is the same caller mistake");
+      assert.equal(((await broken.json()) as { error: { message: string } }).error.message, INVALID_JSON_MESSAGE);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("the 400 body is client-safe: no stack, no internal detail", async () => {
+  const { server, port } = await startTestServer(stubPool("x"));
+  try {
+    const res = await probeV1(port, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+    const text = await res.text();
+    for (const leak of [/\.ts:\d+/, /\bat \w+ \(/, /node:internal/, /readJsonBody/, /openai\.ts/, /Cannot read properties/]) {
+      assert.ok(!leak.test(text), `the refusal leaked an internal detail: ${leak} in ${text}`);
+    }
+    assert.ok(!/\n\s{2,}\S/.test(text), "a stack frame reached the client");
+  } finally {
+    server.close();
+  }
+});
+
+test("a valid object body is still served — the gate refuses only non-objects", async () => {
+  const { server, port } = await startTestServer(stubPool("still answering"));
+  try {
+    const res = await probeV1(port, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "deepseek", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(res.status, 200, "the gate must not touch a well-formed body");
+    assert.equal(((await res.json()) as { choices: Array<{ message: { content: string } }> }).choices[0].message.content, "still answering");
+  } finally {
+    server.close();
+  }
+});
+
+test("negative: the OLD reader accepted `null`, and the next line threw — the 500 in one assertion", () => {
+  // The pre-fix reader, verbatim in shape: `resolve(raw ? JSON.parse(raw) : {})`.
+  const oldRead = (raw: string): unknown => {
+    try {
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  };
+  assert.equal(oldRead("null"), null, "precondition: the old rule resolved a null body");
+  // and the handler's very next read is what turned it into a server fault
+  assert.throws(
+    () => Boolean((oldRead("null") as { stream?: unknown }).stream),
+    TypeError,
+    "precondition: `Boolean(body.stream)` on that body is a TypeError, i.e. the 500",
+  );
+});
+
+test("the gate is IN the reader, so no caller can skip it", () => {
+  const src = readFileSync(new URL("../src/prompt/openai.ts", import.meta.url), "utf8");
+  const reader = src.slice(src.indexOf("function readJsonBody"));
+  assert.match(reader, /parsed === null \|\| typeof parsed !== "object" \|\| Array\.isArray\(parsed\)/, "the object gate must live in the reader itself");
+  assert.match(reader, /reject\(new Error\(INVALID_JSON_MESSAGE\)\)/, "the refusal must use the OWNED sentence");
+  // the empty-body default survives: a body-less POST is still the {} it always was
+  assert.match(reader, /raw \? JSON\.parse\(raw\) : \{\}/, "an empty body stays the {} default");
 });
 
 // ─── GOAL 81: the /v1/* surface must NEVER hang — every unmatched path 404s ──

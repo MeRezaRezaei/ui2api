@@ -926,11 +926,17 @@ export async function handleOpenAIRoutes(
   if (req.method === "POST" && url === "/v1/chat/completions") {
     let body: Record<string, unknown>;
     try {
-      body = (await readJsonBody(req)) as Record<string, unknown>;
+      body = await readJsonBody(req);
     } catch {
       // The SAME sentence the thrower used (INVALID_JSON_MESSAGE, owned by
       // consumer-surface.ts). This used to re-type the words, which made one
       // caller mistake answerable in two ways on one daemon — see the owner.
+      // The message stays client-safe: no internal text, no stack, nothing to
+      // redact. The envelope carries NO `code`, and that is the surface's
+      // DECLARED shape rather than an oversight — `test/openai-full-contract-
+      // truth.test.ts` pins "400 invalid JSON body" in its `CODE_EXEMPT` list.
+      // Naming a code here would fix that gate's row and it is the honest next
+      // step, but it is a contract change to a list this fix may not edit.
       return openAiError2(res, 400, INVALID_JSON_MESSAGE);
     }
     const stream = Boolean(body.stream);
@@ -1378,7 +1384,12 @@ function openAiError2(res: ServerResponse, status: number, message: string, code
   sendJson(res, status, { error: { message, type: "invalid_request_error", code, param: null } });
 }
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
+/**
+ * The `/v1` body reader. Its return type is `Record<string, unknown>` — NOT
+ * `unknown` behind a cast at the call site — because the gate below is what
+ * makes that type true, and the cast is what let the gate's absence go unseen.
+ */
+function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", (c) => {
@@ -1387,9 +1398,34 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on("end", () => {
       try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) {
-        reject(e);
+        const parsed = raw ? JSON.parse(raw) : {};
+        // THE OBJECT GATE the daemon's own reader has had since GOAL 145
+        // (`readJson`, src/prompt/http.ts:738). `null`, an array, a string and
+        // a number all parse fine, and this reader used to hand them straight
+        // to a handler that reads `body.stream` / `body.model` — a TypeError
+        // escaping to the last-resort net and surfacing as a 500, i.e. the same
+        // caller mistake answerable as a server fault on one daemon and as a
+        // named 400 on the other. A caller mistake is a 4xx with a NAMED code.
+        //
+        // The refusal is the SAME `invalid_json` 400 the daemon answers, worded
+        // with the SINGLE owned sentence (`INVALID_JSON_MESSAGE`,
+        // consumer-surface.ts) that the caller of this reader already answers
+        // with — so this condition stays answerable ONE way, not two.
+        // (`http.ts` words its non-object case more finely at its own line; that
+        // sentence is typed inline there, so re-typing it here would author a
+        // second copy of one refusal — the drift the owner exists to prevent.
+        // Hoisting it into `consumer-surface.ts` is the honest next step, and it
+        // is not this fix's business.)
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          reject(new Error(INVALID_JSON_MESSAGE));
+          return;
+        }
+        resolve(parsed as Record<string, unknown>);
+      } catch {
+        // A body that is not JSON AT ALL is the same caller mistake as one that
+        // is JSON but not an object (GOAL 145, http.ts:748). The `reject` above
+        // does not throw, so this `catch` cannot re-wrap it.
+        reject(new Error(INVALID_JSON_MESSAGE));
       }
     });
     req.on("error", reject);
