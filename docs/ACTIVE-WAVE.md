@@ -420,33 +420,78 @@ no such word is invisible to it — the count rule needs the measurement framing
 claim at all. That is the correct trade (otherwise every number in a doc becomes a candidate) but
 it means the rule is a *claim* detector, not a *count* detector.
 
+### ROUND N+194h — the deepest claim in the repo is finally MEASURED, not asserted (2026-10-05)
+
+The top-ranked open item for the whole session: **every `verified` status in this repo rested on a
+hand-typed receipt.** A read-only design lane, then three execution lanes, closed it.
+
+**The design lane found the hole is deeper than "evidence is prose":** *nothing writes
+`capabilities/model-verification.json` at all.* `scripts/audit/measure-models.mjs:101` only
+`console.log`s its result and `source.harness` names a `/tmp` script — so **all 22 rows are
+hand-transcribed**, and the two `ANSWERS` rows carry no `answerText` even though the reader prefers
+it (`test/model-verification-consistent.test.ts:255`) and falls back to a regex over prose.
+
+**What shipped, and the corrections the lanes made to their own briefs:**
+- `d3fecdd` — `capabilities/roundtrip.json` (`ui2api/roundtrip/1`), a harness, and a three-way
+  CLAIMED/PUBLISHED/MEASURED gate. It corrected the design **twice**: the named read seam
+  (`honestPackageStatus`) could never fire, because all 7 receipted packages declare `"active"`,
+  not `"verified"` — so the gate was enforced at `packageStatusOf` instead; **and** carrying the
+  imported `ANSWERS` class forward was itself the hand-typed lie, since in this vocabulary
+  `ANSWERS` means a **matched per-measurement nonce** while the 2026-09-30 sweep sent a fixed
+  literal `PONG`. Shipped as `class:"UNMEASURED"` + `sourceClass:"ANSWERS"` — the downgrade visible
+  rather than silent.
+- `b477be4`/`7ff48f4` — **I found a live measurement bug at the orchestrator level.** The harness
+  posted `{model, prompt}` to `/v1/chat/completions`, which requires `messages`, so its HTTP 400
+  was **its own malformed request** — and it duly recorded `gemini` as "did not answer" while
+  gemini answered perfectly. A measurement tool that manufactures a false negative about a real
+  site is the worst possible failure here. Fixed, and the taxonomy gained the bucket it was
+  missing: **a daemon fault is not a site verdict**, so a 4xx before any browser work and a 500
+  from the daemon itself are both *reported* rather than filed against the site.
+- `4cc0df0` — the classifier had **no member for "a capability surface returned data"**: every
+  member keyed on a chat answer, so **no capability row could ever be measured**, for 26 of 33
+  packages, no matter how long the harness ran. Eighth instance of this exact class in two rounds.
+  Added `RETURNS-DATA`, derived from `capabilityOk` + 2xx + a **runner-declared `count` that agrees
+  with machine-counted `rows`** — so it cannot be hand-typed.
+
+**The measurements are real.** Against the live daemon: `gemini` answered a per-measurement nonce
+(`probeNonceMatched:true`, `doneReason:"stable"`, 50 chars, 19.2s), `duckduckgo` likewise, and
+`araprat`'s three surfaces returned **29 search rows, 30 trending videos, 11 related records** — all
+machine-counted, none typed. The empty case is decided explicitly: `rows: []` is a *successful
+measurement of nothing*, filed `UNCLASSIFIED` and written nowhere, because admitting it would let
+the gate be satisfied by a surface returning nothing forever.
+
+**Where it stands, honestly:** CLAIMED 7 / PUBLISHED 7 / **MEASURED 3** (araprat, duckduckgo,
+gemini). The gate is registered in `test:unit` (`c598ffa`) and is **RED on four** — deepseek, kimi,
+tencent-aistudio, youtube — and **all four are one reproducible daemon fault**: HTTP 500
+`internal_error` after ~60s at an idle pool, because the daemon on `:9797` runs code from before
+roughly twenty commits. `AGENTS.md` names that exact lost-direction symptom and its remedy. That
+is the next lane, not a closed item.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
 order, all re-confirmed still real:
 
-1. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
+1. **The four unmeasured sites** (deepseek, kimi, tencent-aistudio, youtube) — one stale-daemon
+   fault, being worked; see round N+194h.
+2. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
    (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
    half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
    reporting it, not fixing it, and not committing it.
-2. **Round-trip evidence is prose.** `site-status-truth` now proves claim == receipt, but nothing
-   machine-checks that a prompt actually returned an answer — a receipt asserts a round trip
-   happened, it does not measure one. Closing that needs a per-package measured round-trip log,
-   which is a new artefact rather than a test-file change.
-3. `/health` and `/status` publish internal text under named labels (`vault-root-unresolvable`,
-   `vault-unreadable`, `host-unreadable`, `health-vault-probe-threw`, `boot warm THREW`) —
-   inventoried and pinned by `9042b25` rather than excluded, because they are honest diagnostics and
-   not a raw error echo. Worth a deliberate decision rather than an accident.
+3. `docs/AGENT_INTEGRATION.md:55` still says the classifier has **nine** members; it has ten, and
+   the new one has no row in that table. Unpinned doc, found by `4cc0df0` and left as out of scope.
 4. `src/prompt/pool.ts` — two consequences of `restartBrowser()`, both found by the lane that
    closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
    unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
    and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
-5. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
+5. `model-verification.json` carries `SIGN-OUT` rows for deepseek, kimi, tencent-aistudio
+   (2026-09-29/30) that **disagree with their verified receipts**. Importing them would demote
+   three more sites — out of scope, and a real honesty question nobody has answered yet.
+6. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: four test files no script
    names (`hub-publish-host-gate`, `plugin-wigolo-fabricated-success`, `pool-sweep-probe-concurrency`,
-   `readback-overhead-gate`) are **UNTRACKED**, and `pool-sweep-probe-concurrency` is named but not
-   tracked. Registering an untracked file is the *opposite* direction of the rule and the gate
-   correctly refuses it, so this red clears when that workstream commits its files, and not before.
-   **Not mine to force.**
+   `readback-overhead-gate`) are **UNTRACKED**. Registering an untracked file is the *opposite*
+   direction of the rule and the gate correctly refuses it, so this red clears when that workstream
+   commits its files, and not before. **Not mine to force.**
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
