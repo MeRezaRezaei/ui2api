@@ -1,7 +1,15 @@
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  mkdirSync,
+  chmodSync,
+} from "node:fs";
 import { createServer } from "node:net";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { resolveChromeOwner, isUidTheChromeOwner, type ChromeOwner } from "./chrome-owner.js";
 import { resolvedHeadless, CHROME_SYSTEM_PATHS, CHROME_CHROMIUM_PATHS } from "./browser.js";
 
@@ -107,10 +115,144 @@ export function readDaemonState(dataDir: string): ChromeDaemonState | null {
   }
 }
 
-function writeDaemonState(dataDir: string, st: ChromeDaemonState): void {
+/**
+ * Is this pid a live process?
+ *
+ * TWO GUARDS, both load-bearing.
+ * 1. `pid <= 0` is refused BEFORE the `kill(pid, 0)` probe. `process.kill(-1, 0)`
+ *    addresses EVERY process the caller may signal, and pid 0 is the caller's own
+ *    process group — so probing those two values is not a liveness check, it is
+ *    a signal broadcast. `child.pid` is `undefined` when the spawn failed to
+ *    produce a pid, and the old code wrote `pid: child.pid ?? -1` straight into
+ *    the state file. A record carrying -1 is a record `stop` would feed to
+ *    `process.kill(-1, "SIGTERM")`.
+ * 2. `EPERM` means the process EXISTS but belongs to another user — which is
+ *    exactly the chrome owner's case when we run as the operator. That is ALIVE,
+ *    not a failure, so only ESRCH counts as dead.
+ */
+export function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
+
+/**
+ * Write the state file ATOMICALLY: a temp file in the SAME directory, then
+ * `rename`.
+ *
+ * WHY THIS IS NOT COSMETIC. `writeFileSync(p, ...)` is `open(O_TRUNC)` followed
+ * by `write`. The truncation is its OWN syscall, so between the two a concurrent
+ * reader — `readDaemonState` is called by `chromeDaemonStatus`, which every
+ * request and every `chrome start` runs — can observe a ZERO-LENGTH or
+ * SHORT-BIT state file. `JSON.parse("")` throws, `readDaemonState` swallows it
+ * and answers `null`, so a perfectly healthy daemon reads as "no daemon
+ * recorded" and the next `chrome start` spawns a SECOND Chrome, which Chrome
+ * itself refuses with `Failed to create ... ProcessSingleton`. The reader cannot
+ * tell a torn read from a missing file: the shape of the damage is that the
+ * truth and the absence look the same.
+ *
+ * `rename(2)` within one filesystem is atomic — a reader sees the whole old file
+ * or the whole new one, never a prefix. Hence the temp file MUST be in the same
+ * directory (same mount); a temp file under `/tmp` would make the rename a
+ * cross-device copy, which is not atomic at all.
+ *
+ * The `0600` is set EXPLICITLY on the temp file rather than relying on the
+ * `mode` option alone: `mode` only applies when the file is CREATED and is
+ * still filtered through the process umask, so a wide umask can leave the file
+ * group/world-readable, and the state file names the chrome owner's home
+ * directory and pid. chmod after write, then rename — and rename carries the
+ * temp inode's mode onto the final name.
+ */
+export function writeDaemonStateAtomic(dataDir: string, st: ChromeDaemonState): void {
   const p = statePath(dataDir);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, JSON.stringify(st, null, 2), { mode: 0o600 });
+  const dir = dirname(p);
+  mkdirSync(dir, { recursive: true });
+  // Per-process, per-call temp name: two concurrent writers must not share one
+  // temp file, or they would tear EACH OTHER's payload before the rename.
+  const tmp = resolve(dir, `.${basename(p)}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  try {
+    writeFileSync(tmp, JSON.stringify(st, null, 2), { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, p);
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* nothing to clean up */
+    }
+    throw e;
+  }
+}
+
+/**
+ * Record a daemon we SPAWNED — but only when the record is provably true.
+ *
+ * This is the seam that closes the dead-pid record, and it exists as a named
+ * export so the property can be tested without launching a browser.
+ *
+ * THE DEFECT IT CLOSES. `startChromeDaemon` resolved status, spawned, and wrote
+ * the record assuming success. Two processes racing `chrome start` both read "no
+ * daemon"; both spawned; Chrome let only one win the profile's ProcessSingleton
+ * and the loser's child exited immediately. If the loser's port-wait then saw
+ * the WINNER's port live, the loser wrote ITS OWN dead child pid as
+ * `origin:"spawned"`. `chrome stop` then signalled a pid that no longer existed,
+ * killed nothing, and — because the daemon's own rule is "never kill a Chrome we
+ * did not start" — had no other legal move: the live Chrome was unstoppable, it
+ * held the ProcessSingleton lock, and every later `chrome start` was refused
+ * until a manual `pkill`.
+ *
+ * So a record asserting `origin:"spawned"` is a CLAIM OF OWNERSHIP, and
+ * ownership is what authorises a kill. It is therefore written only after
+ *   (a) the pid we spawned is alive, and
+ *   (b) the state on disk is still the state we observed BEFORE spawning
+ *       (compare-and-swap — the other half of the same race, where the loser's
+ *       write CLOBBERS the winner's record and makes the live daemon untracked).
+ * A refused write leaves the winner's record untouched.
+ *
+ * `pidAlive` is injectable purely so a test can present a pid that is not
+ * alive; production passes `isPidAlive`.
+ */
+export function recordSpawnedDaemon(opts: {
+  dataDir: string;
+  state: ChromeDaemonState;
+  /** the state observed before the spawn; null when there was none */
+  prior: ChromeDaemonState | null;
+  pidAlive?: (pid: number) => boolean;
+}): { recorded: boolean; note: string } {
+  const alive = opts.pidAlive ?? isPidAlive;
+  if (!alive(opts.state.pid)) {
+    return {
+      recorded: false,
+      note:
+        `not recording pid ${opts.state.pid} as our spawned daemon: that process is not alive, so the record ` +
+        `would claim ownership of a browser we cannot stop (chrome stop would signal a dead pid and kill nothing).`,
+    };
+  }
+  // Compare-and-swap: re-read AFTER the spawn. If anything wrote meanwhile, that
+  // writer observed the daemon before ours existed and its record is the live
+  // one; overwriting it here is what makes a running Chrome untracked.
+  const current = readDaemonState(opts.dataDir);
+  const prior = opts.prior;
+  if (!sameDaemonState(current, prior)) {
+    return {
+      recorded: false,
+      note: current
+        ? `another chrome start recorded a daemon first (pid ${current.pid}, origin ${current.origin ?? "unknown"}) — not overwriting it`
+        : `another chrome start changed the daemon state file first — not overwriting it`,
+    };
+  }
+  writeDaemonStateAtomic(opts.dataDir, opts.state);
+  return { recorded: true, note: `recorded spawned daemon pid ${opts.state.pid} on port ${opts.state.port}` };
+}
+
+/** Structural equality over the fields that identify a daemon (timestamps differ between two observations of the SAME daemon only if it was rewritten, which is exactly the case we want to catch). */
+function sameDaemonState(a: ChromeDaemonState | null, b: ChromeDaemonState | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.port === b.port && a.pid === b.pid && a.user === b.user && a.profile === b.profile && a.startedAt === b.startedAt && a.origin === b.origin;
 }
 
 function clearDaemonState(dataDir: string): void {
@@ -153,7 +295,7 @@ export async function chromeDaemonStatus(
           origin: "adopted",
         };
         try {
-          writeDaemonState(dataDir, adopted);
+          writeDaemonStateAtomic(dataDir, adopted);
         } catch {
           /* the owner may not be able to write; discovery still works */
         }
@@ -332,8 +474,37 @@ export async function startChromeDaemon(opts: {
   // wait briefly for the port to come up so the caller gets a real answer
   for (let i = 0; i < 20; i++) {
     if (await isPortLive(port)) {
-      writeDaemonState(opts.dataDir, state);
-      return { started: true, state, note: `chrome daemon started on 127.0.0.1:${port} (user ${owner.user}, pid ${state.pid})` };
+      // The port is live — but on a CHROME we may not own. Under a concurrent
+      // `chrome start`, the loser of the ProcessSingleton race waits on the
+      // winner's port; recording our own (exited) child pid here is what used to
+      // produce a dead-pid `origin:"spawned"` record and leave the live Chrome
+      // unstoppable. So the record is gated on the pid actually existing AND on
+      // the pre-spawn state still being what we saw.
+      const rec = recordSpawnedDaemon({ dataDir: opts.dataDir, state, prior: before.state });
+      if (rec.recorded) {
+        return { started: true, state, note: `chrome daemon started on 127.0.0.1:${port} (user ${owner.user}, pid ${state.pid})` };
+      }
+      clearDaemonState(opts.dataDir);
+      const found = owner.profile ? findOwnerChrome(owner.profile) : null;
+      if (found && found.pid !== state.pid) {
+        const live: ChromeDaemonState = {
+          port: found.port,
+          pid: found.pid,
+          user: owner.user,
+          profile: owner.profile,
+          startedAt: new Date().toISOString(),
+          origin: "adopted",
+        };
+        writeDaemonStateAtomic(opts.dataDir, live);
+        return {
+          started: false,
+          state: live,
+          note:
+            `port 127.0.0.1:${port} is live but our spawned child (pid ${state.pid}) is not ours to claim — ` +
+            `recording the Chrome actually holding the profile as ADOPTED (pid ${found.pid}). ${rec.note}`,
+        };
+      }
+      return { started: false, state: null, note: rec.note };
     }
     await new Promise((r) => setTimeout(r, 250));
   }
