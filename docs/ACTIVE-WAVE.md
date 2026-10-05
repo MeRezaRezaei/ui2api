@@ -376,6 +376,17 @@ order, all re-confirmed still real:
    closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
    unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
    and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
+4. **Round-trip evidence is prose.** `site-status-truth` now proves claim == receipt, but nothing
+   machine-checks that a prompt actually returned an answer — a receipt asserts a round trip
+   happened, it does not measure one. Closing that needs a per-package measured round-trip log,
+   which is a new artefact rather than a test-file change.
+5. **`/health` and `/status` publish internal text under named labels** (`vault-root-unresolvable`,
+   `vault-unreadable`, `host-unreadable`, `health-vault-probe-threw`, `boot warm THREW`) —
+   inventoried and pinned by `9042b25` rather than excluded, because they are honest diagnostics and
+   not a raw error echo. Worth a deliberate decision rather than an accident.
+6. **`README.md` carries 42 rows for 34 real ids**, so 8 ids appear twice with different wording
+   (e.g. `duckduckgo` is both `**VERIFIED**` and `✅ grounded (package)`). "The published claim" is
+   therefore currently a set over duplicate rows — a doc-shape rot `536960a` had to tolerate.
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
@@ -386,20 +397,25 @@ The `pool.ts:1008` double-request race was closed by the **other** workstream in
 (GOAL 239) while this lane was blocked on the same file — which is exactly why the ledger
 records the block rather than an open item that would have been closed underneath it.
 
-### The audit's remaining findings, ranked, still open
+### ROUND N+194e — all three remaining audit findings closed (2026-10-05)
 
-The gate sweep's other three falsified instances are real and unfixed, worst first:
+Three lanes, one finding each, every falsifier run against the ORIGINAL code first so the
+improvement is visible. The common shape: **each of these gates was green while unable to fail.**
 
-1. `test/capability-untested-critical-path.test.ts:300` — `servesWallAsSuccess` windows ±700 chars
-   around **the first** `answer: r.answer` only. Two falsifiers ran: a guarded `listConversations`
-   vouches for an unguarded `chat` arm 200 chars away, and guarding the first arm leaves a second
-   unguarded. **The same shape `test-timeout-discipline` just closed, one file over.**
-2. `test/no-internal-error-echo.test.ts` — "**ZERO** handlers echo a raw `e.message`" matches ONE
-   verbatim spelling; against four equally-leaking variants (renamed catch var, template literal,
-   helper call, reordered fields) it matched **0/4**.
-3. `test/site-status-truth.test.ts` — checks only `claimed.has(id)`, never the reverse, so a site
-   that claims verified without a round-trip is invisible; the hand-typed 7 equals the derived set
-   today and nothing enforces that.
+| lane | closed at | what it proved |
+| --- | --- | --- |
+| `l1-wall-arm-all-arms` | `bd750b8` | `servesWallAsSuccess` windows ±700 chars around **the first** `answer: r.answer`. Now `matchAll`s every arm and attributes each to its **enclosing declaration** via `enclosingDeclaration`, searching that declaration's body **before** the arm — directionally true, because a branch after the `return` cannot guard it. Both falsifiers went OLD-green → NEW-red. **The real corpus is still GREEN, measured not assumed**: 10 files carry an arm, each exactly one, old-vs-new verdicts **identical, 0 divergences** — so nothing real was being missed. Two cleanup assertions were added so the rule cannot pass by reporting everything. |
+| `l1-error-echo-all-spellings` | `9042b25` | The gate matched **one verbatim spelling** of a raw `e.message` echo and hit **0/4** equally-leaking variants. It is now a real `ts.createSourceFile` **taint walk**: every `catch` binding opens a taint source, local `const`s propagate it to a fixpoint, and every `send(res, status, body)` sink is checked for a tainted value — spelling stopped being the criterion. A mapped verdict is excused only when a guard that **branches on the error** proves it. All four leaks detected; the NAMED sanitised verdict still legal; real corpus GREEN with 0 findings, **mutation-proven** by injecting a leak into the real `http.ts`. The lane then found **five defects in its own detector** (a *sanitising* call read as a leak; `err.code`/`err.status` called leaks when they are the published contract; an unguarded value came out "mapped" — the purest leak passed) and fixed each at the source. |
+| `l1-site-status-reverse` | `536960a` | Only `claimed.has(id)` was checked, never the reverse, and the count **7** was a hand-typed literal. Now bidirectional against the package's own `metadata.json` receipt — the same `isCompleteVerifiedRecord` predicate `registry.ts:242` applies, **re-derived independently** so the resolver is cross-checked rather than trusted. The hole was exactly the reverse direction: a NEW site given a valid receipt while the shipped table claims nothing was **GREEN 3/3**. Reconciliation is honest: **7 published = 7 recorded, equal today**, nothing suppressed. |
+
+**The pattern across all three, stated once:** a gate whose corpus is hand-typed goes stale in the
+direction nobody checks. Four separate instances in two rounds, and **not one of them was a wrong
+assertion** — every one was an assertion that could not observe the thing it claimed to observe.
+Round N+194e's three lanes each deleted a literal and replaced it with a derivation, and two of
+them **disagreed with the brief or with an earlier audit's own numbers** (`restartBrowser`'s fix
+was made narrower than the audit suggested; `output-truth`'s "69 unclassified" was corrected to 110
+skipped / 3 genuinely fakeable). That correction is the strongest evidence in this file that the
+lanes reasoned from the code rather than from the brief.
 
 The next wave hunts NEW friction rather than re-reading this list — which is the failure
 mode this file exists to prevent.
