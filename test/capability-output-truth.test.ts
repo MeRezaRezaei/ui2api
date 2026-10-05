@@ -40,6 +40,19 @@ import { readFileSync, readdirSync } from "node:fs";
  *    `UNPROVEN_READ_OK` with a reason each; a NEW one fails this file loudly,
  *    and a FIXED one fails too, so the list cannot rot into a permanent
  *    excuse. Every entry is itself proven real, so the list cannot be padded.
+ * 0. NO CAPABILITY CAN BE SILENTLY UNCLASSIFIED. The scope of this gate used to
+ *    be a hand-typed 20-entry `READ_TAILS` set, and every capability whose tail
+ *    was not in it was `continue`d away in silence. Measured on this repo that
+ *    skipped 110 of 161 declared capabilities, including real readbacks
+ *    (`notion_qna`, `chatglm_conversation_crud`, `tencent_aistudio_translations`)
+ *    — and a silent `continue` in a gate is the worst default there is, because
+ *    it converts "I do not know about this" into "everything is fine". A
+ *    capability the gate cannot classify must be a NAMED RED, never a skip.
+ *    The scope is therefore DERIVED from each capability's own deciding code
+ *    (`verdictClassOf`), which is total over the declared corpus, and
+ *    `every declared capability is classified` asserts the classes sum to the
+ *    corpus with no unknown left over. `DECLARED_READ_TAILS` survives only as a
+ *    cross-check against that derivation, never as the filter.
  * 2. A capability whose docs claim `verified` has its OUTPUT SHAPE pinned
  *    here. Wiring is already covered by `capability-dispatch.test.ts` and
  *    proves nothing whatsoever about the answer.
@@ -57,15 +70,30 @@ const RUNNER_DIR = "src/capabilities";
 const MANIFEST_DIR = "capabilities";
 
 /**
- * Verb tails whose verdict is a READBACK OF PAGE CONTENT rather than a state
- * flip. A read is exactly where "the page said nothing" is indistinguishable
- * from "the read failed" unless the runner checks.
+ * Tails the DOCS/manifests have historically used for reads. This set is NO
+ * LONGER THE SCOPE of this gate — it used to be, and every tail outside it was
+ * silently skipped, which is how 110 of 161 declared capabilities escaped
+ * coverage while the gate stayed green. It is retained as a CROSS-CHECK: a tail
+ * declared here must actually reach a readback in code, and a capability the
+ * code classifies as a readback must not depend on this list at all. The
+ * authoritative classification is `verdictClassOf`, derived from the runner.
  */
-const READ_TAILS = new Set([
+const DECLARED_READ_TAILS = new Set([
   "conversations", "history", "search", "list", "models", "trending", "detail",
   "picker", "threads", "inbox", "transcript", "switch", "reasoner", "mode",
   "web-search", "search-images", "voice", "entra", "credits", "settings",
 ]);
+
+/**
+ * Interactions that FLIP the site's state. A capability that only performs one
+ * of these and reads nothing back cannot report a fabricated ANSWER — the
+ * sibling gate `mutating-capability-postcondition.test.ts` owns that class.
+ * This mirrors that gate's `ACTION_CALLS` so the two agree on the boundary.
+ */
+const STATE_FLIP_CALLS = [
+  /\.click\(/, /setInputFiles\(/, /pressSequentially\(/, /\.press\(/,
+  /\.fill\(/, /selectOption\(/,
+];
 
 /**
  * Any interaction with the page whose result can be empty — direct
@@ -181,11 +209,60 @@ interface ReadCapability {
   readsPage: boolean;
   guarded: boolean;
   honestRefusal: boolean;
+  /** Where its deciding code lands. Never `unknown` — see `verdictClassOf`. */
+  verdictClass: VerdictClass;
+  /** True when the capability's tail appears in `DECLARED_READ_TAILS`. */
+  declaredReadTail: boolean;
 }
 
-/** Every READ capability declared by a manifest that has a runner. */
-function discoverReadCapabilities(): ReadCapability[] {
-  const out: ReadCapability[] = [];
+/**
+ * How a capability's own deciding code produces its verdict.
+ *
+ * These five classes are EXHAUSTIVE over the declared corpus, and that is the
+ * point: there is deliberately no `unknown`, because an unclassifiable
+ * capability would have to be a silent skip, which is the exact defect this
+ * file exists to kill. A capability that reaches no class here is a real signal
+ * that the analysis broke, and the classification test says so by name.
+ *
+ *  - `readback`    its verdict is (or could be) built from a PAGE READ. This
+ *                  gate's subject: an empty read is indistinguishable from a
+ *                  failed one. Covers both pure reads and mutations that
+ *                  read the page back, because the empty-read hazard is the
+ *                  same in both.
+ *  - `state-flip`  it drives the page (click/type/press) and reads nothing back.
+ *                  Owned by `mutating-capability-postcondition.test.ts`.
+ *  - `delegating`  it reaches `ok: true` without touching the page in its own
+ *                  deciding region — a pure hand-off (a ChatDriver call).
+ *  - `refusal`     it cannot report success at all (a named `ok: false`, a
+ *                  login-gated short-circuit). It cannot fabricate a value.
+ *  - `undispatched` the manifest declares it but this runner has no `case` for
+ *                  it. `capability-dispatch.test.ts` owns that gap; it is
+ *                  named rather than skipped so the count cannot hide.
+ */
+type VerdictClass = "readback" | "state-flip" | "delegating" | "refusal" | "undispatched";
+
+function flipsState(region: string): boolean {
+  return STATE_FLIP_CALLS.some((p) => p.test(region));
+}
+
+/** Total, tail-free classification of a capability from its deciding code. */
+function verdictClassOf(region: string, reachesOkTrue: boolean, readsPage: boolean): VerdictClass {
+  if (readsPage) return "readback";
+  if (flipsState(region)) return "state-flip";
+  if (reachesOkTrue) return "delegating";
+  return "refusal";
+}
+
+/**
+ * Every declared capability that has a runner, CLASSIFIED — never filtered.
+ *
+ * The old version dropped every capability whose tail was not in a hand-typed
+ * set, silently. This one returns all of them, each with the class its own
+ * code earns, so the caller can assert both coverage and the absence of a
+ * silent skip.
+ */
+function discoverAllCapabilities(): Array<ReadCapability & { dispatched: boolean }> {
+  const out: Array<ReadCapability & { dispatched: boolean }> = [];
   for (const pkg of readdirSync(MANIFEST_DIR)) {
     const raw = readIfPresent(`${MANIFEST_DIR}/${pkg}/manifest.json`);
     if (!raw) continue;
@@ -201,24 +278,33 @@ function discoverReadCapabilities(): ReadCapability[] {
     const src = stripComments(runnerSrc);
     for (const c of manifest.capabilities ?? []) {
       if (typeof c.id !== "string") continue;
-      const tail = c.id.split("_").pop() ?? "";
-      if (!READ_TAILS.has(tail)) continue;
       const region = decidingRegion(src, c.id);
-      if (!region) continue; // not dispatched at all — capability-dispatch owns that
       const reachesOkTrue = /ok\s*:\s*true/.test(region);
+      const reads = readsPage(region);
       out.push({
         id: c.id,
         site: pkg,
-        runner: `${RUNNER_DIR}/${pkg}.ts`,
+        runner: runnerPath,
         region,
         reachesOkTrue,
-        readsPage: readsPage(region),
+        readsPage: reads,
         guarded: guardedAgainstEmpty(region),
         honestRefusal: /loginGated/.test(region) && !reachesOkTrue,
+        verdictClass: region ? verdictClassOf(region, reachesOkTrue, reads) : "undispatched",
+        declaredReadTail: DECLARED_READ_TAILS.has(c.id.split("_").pop() ?? ""),
+        dispatched: region.length > 0,
       });
     }
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * The readback surface this gate judges: every capability whose verdict is (or
+ * could be) derived from a page read, regardless of its tail.
+ */
+function discoverReadCapabilities(): ReadCapability[] {
+  return discoverAllCapabilities().filter((c) => c.verdictClass === "readback");
 }
 
 /**
@@ -230,13 +316,18 @@ function discoverReadCapabilities(): ReadCapability[] {
  * A capability that never reaches ok:true cannot fake a success, by definition.
  */
 function isUnprovenReadOk(c: ReadCapability): boolean {
-  return c.reachesOkTrue && c.readsPage && !c.guarded && !c.honestRefusal;
+  return c.verdictClass === "readback" && c.reachesOkTrue && c.readsPage && !c.guarded && !c.honestRefusal;
 }
 
 /**
  * The surface assertion, factored out so its own anti-vacuity is testable: an
  * EMPTY discovery must not satisfy it. A gate that passes on an empty world
  * proves nothing.
+ *
+ * `>= 15` is a floor, deliberately not a target: it only has to exclude an empty
+ * or near-empty world. The REAL coverage requirement is not a count at all —
+ * it is `every declared capability is classified`, which asserts that nothing
+ * was skipped to reach any number.
  */
 function surfaceIsReal(reads: ReadCapability[]): boolean {
   return reads.length >= 15 && reads.some((c) => c.reachesOkTrue);
@@ -304,6 +395,172 @@ const DOC_VERIFIED_OUTPUT_SHAPE: Array<{ id: string; mustCarry: string[]; eviden
   },
 ];
 
+describe("capability output truth: no declared capability is silently unclassified", () => {
+  test("every declared capability lands in exactly one derived class — none is skipped", () => {
+    const all = discoverAllCapabilities();
+    assert.ok(all.length > 100, `precondition: the corpus must be real; discovered only ${all.length} capabilities`);
+
+    // No capability may fall outside the classification. `verdictClass` is typed
+    // as a closed union and always assigned, so this is really an assertion
+    // that the DISCOVERY is total: nothing was dropped between the manifest and
+    // the class list.
+    const counted = new Map<string, number>();
+    for (const c of all) counted.set(c.verdictClass, (counted.get(c.verdictClass) ?? 0) + 1);
+    const classified = [...counted.values()].reduce((a, b) => a + b, 0);
+    assert.equal(
+      classified,
+      all.length,
+      `every discovered capability must carry a verdict class; ${all.length - classified} fell through unclassified — ` +
+        `a capability this gate cannot classify is a silent skip, which is the defect this file exists to kill`,
+    );
+
+    // And the classifier must genuinely SPLIT the corpus. Asserted as "the classes
+    // are populated and no single class absorbs everything", because that is
+    // the property that distinguishes a real classification from a relabelled
+    // filter. `state-flip` is deliberately NOT required to be non-empty:
+    // measured on this repo it is 0, because every capability that flips state
+    // (click/type/press) also READS THE PAGE BACK, which puts it in
+    // `readback` first — correctly, since the empty-read hazard this gate
+    // polices is exactly what applies to such a capability. A pure
+    // flip-with-no-read would land there, and it is still classified, not
+    // skipped.
+    for (const cls of ["readback", "delegating", "refusal"] as const) {
+      assert.ok(
+        (counted.get(cls) ?? 0) > 0,
+        `the classifier collapsed: no capability was classified "${cls}". A classifier that puts everything in one ` +
+          `bucket is indistinguishable from the tail-list filter it replaced`,
+      );
+    }
+    const biggest = Math.max(...counted.values());
+    assert.ok(
+      biggest < all.length,
+      `the classifier collapsed: one class holds ${biggest} of ${all.length} capabilities, which is what a ` +
+        `single-bucket "is it in the list" filter looks like`,
+    );
+
+    // `undispatched` is EXPECTED and real (gemini/kimi route through the
+    // ChatDriver path, so this runner has no `case` for them). It is asserted
+    // as SAFE-RATHER-SKIPPED: an undispatched capability has no deciding code,
+    // so it must not be credited with a verdict, and it must not be able to
+    // slip into the readback surface where the guards would judge it.
+    const undispatched = all.filter((c) => c.verdictClass === "undispatched");
+    for (const c of undispatched) {
+      assert.equal(
+        c.region, "",
+        `${c.id}: classified undispatched but a deciding region was found — the classifier and the extraction ` +
+          `disagree, so this capability is in an unexamined state`,
+      );
+      assert.ok(
+        !c.reachesOkTrue && !c.readsPage,
+        `${c.id}: classified undispatched yet reported as reading a page — it must never be able to fabricate`,
+      );
+    }
+    assert.ok(
+      all.length === classified,
+      "precondition: the per-class walk above must have seen every discovered capability",
+    );
+  });
+
+  test("the readback surface is DERIVED from code, and never narrower than the old tail filter", () => {
+    const all = discoverAllCapabilities();
+    const derived = all.filter((c) => c.verdictClass === "readback");
+
+    // Reproduce the OLD scope exactly: a tail-listed capability with a dispatch
+    // region. Note the comparison is against the old scope's PAGE-READING
+    // members, not its raw size — the tail list is a naming convention, so a
+    // tail-listed capability the code shows to be a pure refusal was always in
+    // the old set and must not be counted as coverage lost.
+    const oldScope = all.filter((c) => c.declaredReadTail && c.dispatched);
+    const oldScopeReading = oldScope.filter((c) => c.readsPage);
+
+    assert.ok(
+      derived.length >= oldScopeReading.length,
+      `the derived readback surface (${derived.length}) shrank below the old gate's page-reading scope ` +
+        `(${oldScopeReading.length}); derivation may widen coverage, never narrow it`,
+    );
+
+    // No capability the old gate could judge may have dropped out of scope.
+    const lost = oldScopeReading.filter((c) => !derived.includes(c));
+    assert.deepEqual(
+      lost.map((c) => c.id),
+      [],
+      "these capabilities were judged by the old tail filter and are no longer in the derived readback scope",
+    );
+
+    // And the derivation must actually WIDEN — this is the regression the audit
+    // found: the old gate skipped every tail it did not list, in silence.
+    const newlyCovered = derived.filter((c) => !oldScope.includes(c));
+    assert.ok(
+      newlyCovered.length > 0,
+      "the derived classification finds NO readback the old tail list missed — the derivation is not actually " +
+        "reading the code, it is reproducing the old list",
+    );
+
+    // Every newly-covered capability must be guarded, or it is a REAL new
+    // finding this gate now raises instead of hiding. This is asserted rather
+    // than assumed, so a regression cannot hide behind the widening.
+    for (const c of newlyCovered) {
+      assert.ok(
+        !isUnprovenReadOk(c),
+        `${c.id}: newly in scope (tail "${c.id.split("_").pop()}" was never in the hand-typed read list) AND its ` +
+          `verdict is an unguarded ok:true off a page read — a fabricated answer this gate can now SEE. Declare it ` +
+          `in UNPROVEN_READ_OK with a reason, or add the guard that refuses an empty read`,
+      );
+    }
+
+    // The old set is kept honest as a cross-check: a tail declared a read must
+    // not be a capability whose code plainly cannot read. Those are named here
+    // instead of being silently trusted.
+    const drifted = oldScope.filter(
+      (c) => c.verdictClass === "state-flip" || c.verdictClass === "delegating",
+    );
+    for (const c of drifted) {
+      assert.ok(
+        !isUnprovenReadOk(c),
+        `${c.id}: DECLARED_READ_TAILS implies a read, but its deciding code is "${c.verdictClass}" — update the set ` +
+          `to match the code rather than leaving a stale name to imply coverage that does not exist`,
+      );
+    }
+  });
+
+  test("MUTATION: an unknown-tail capability is CLASSIFIED, not skipped (the silent-continue killer)", () => {
+    // The falsifier, run against the classifier itself. `qna` is a real tail in
+    // this repo that the old READ_TAILS never contained. Build the OLD filter
+    // and the NEW classifier side by side and show they disagree.
+    const fakeRegion = `
+      const rows = await page.evaluate(() => Array.from(document.querySelectorAll(".r")).map(r => r.textContent));
+      return { capability, ok: true, data: { count: rows.length, rows } };
+    `;
+    const synthetic = {
+      id: "notion_qna", site: "notion", runner: "(fixture)", region: fakeRegion,
+      reachesOkTrue: true, readsPage: true, guarded: false, honestRefusal: false,
+      verdictClass: verdictClassOf(fakeRegion, true, true) as VerdictClass,
+      declaredReadTail: DECLARED_READ_TAILS.has("qna"),
+      dispatched: true,
+    };
+
+    // OLD behaviour, reproduced exactly: the tail filter decides the scope.
+    const oldGateCovers = DECLARED_READ_TAILS.has("qna");
+    assert.equal(
+      oldGateCovers, false,
+      "precondition: this falsifier depends on `qna` NOT being in the old hand-typed list",
+    );
+    assert.equal(synthetic.declaredReadTail, false, "precondition: the capability is invisible to the old filter");
+
+    // NEW behaviour: the code decides, so the same capability IS in scope...
+    assert.equal(
+      synthetic.verdictClass, "readback",
+      "the derived classifier must classify a page-reading capability as a readback regardless of its tail",
+    );
+    // ...and it is FAKEABLE, so the output-truth assertion above will name it.
+    assert.ok(
+      isUnprovenReadOk(synthetic),
+      "a fabricated ok:true with no readback must be reported fake-able even though its tail is unclassified — " +
+        "this is the red the old gate could never raise",
+    );
+  });
+});
+
 describe("capability output truth: a read may not report success on nothing", () => {
   test("discovery is real — the gate sees a substantial read surface (anti-vacuity)", () => {
     const reads = discoverReadCapabilities();
@@ -359,6 +616,7 @@ describe("capability output truth: a read may not report success on nothing", ()
     const base: ReadCapability = {
       id: "fake_site_list_conversations", site: "fake", runner: "(mutation fixture)", region: "",
       reachesOkTrue: true, readsPage: true, guarded: false, honestRefusal: false,
+      verdictClass: "readback", declaredReadTail: true,
     };
     const fabricated: ReadCapability = {
       ...base,
@@ -415,6 +673,8 @@ describe("capability output truth: a read may not report success on nothing", ()
         readsPage: readsPage(neutered),
         guarded: guardedAgainstEmpty(neutered),
         honestRefusal: false,
+        verdictClass: verdictClassOf(neutered, /ok\s*:\s*true/.test(neutered), readsPage(neutered)),
+        declaredReadTail: DECLARED_READ_TAILS.has("search"),
       }),
       "a guarded read, once its guard is deleted, MUST become fake-able — this is the red the gate exists to raise",
     );
@@ -423,7 +683,7 @@ describe("capability output truth: a read may not report success on nothing", ()
   test("MUTATION: an EMPTY capability list does not satisfy the surface assertion", () => {
     assert.ok(!surfaceIsReal([]), "an empty discovery must FAIL the surface assertion, not pass it");
     assert.ok(
-      !surfaceIsReal([{ id: "x", site: "x", runner: "x", region: "", reachesOkTrue: false, readsPage: false, guarded: false, honestRefusal: true }]),
+      !surfaceIsReal([{ id: "x", site: "x", runner: "x", region: "", reachesOkTrue: false, readsPage: false, guarded: false, honestRefusal: true, verdictClass: "readback", declaredReadTail: true }]),
       "a world where nothing can report ok:true must also fail — there would be nothing to protect",
     );
     assert.ok(surfaceIsReal(discoverReadCapabilities()), "and the real world must satisfy it");
