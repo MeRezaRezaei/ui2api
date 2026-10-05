@@ -14,8 +14,12 @@ import {
   composerRefusalIn,
   composerRefusalMatcher,
   classifyOutcome,
+  CONTROL_ABSENT_PATTERNS,
   classPrecondition,
+  controlAbsentIn,
   emptyCapabilityResult,
+  falsifiesClaim,
+  argumentScopedClasses,
   loginMarkerIn,
   noAnswerRefusalIn,
   nonAnswerTextIn,
@@ -25,6 +29,10 @@ import {
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { NO_ANSWER_REFUSAL_RE, redactInternalError, renderNoAnswerRefusal, RETRY } from "../src/prompt/error-redaction.js";
+// The RUNNER's own exported refusal clause — imported, never retyped. See the
+// case block at the foot of this file for why a copy would be the defect.
+import { NO_TRANSCRIPT_CONTROL_REFUSAL } from "../src/capabilities/youtube.js";
+import { controlAbsentClauses } from "../src/prompt/verification-class.js";
 
 // The classifier is pure, so every pin below is hermetic: no browser, no
 // network, no clock. The inputs are the values the DEPLOYED service actually
@@ -778,16 +786,37 @@ test("RETURNS-DATA declares a machine-checkable precondition, stricter than ANSW
   );
 });
 
-test("the vocabulary grew by exactly ONE member, and no existing class changed meaning", () => {
+test("the vocabulary grew by exactly ONE member (RETURNS-DATA), and no existing class changed meaning", () => {
   // ANSWERS is still the ONLY class a chat answer can derive, and it is still
   // gated on the same three things.
   const answers = classifyOutcome({ httpStatus: 200, answerText: "PONG", message: "", poolAtRequest: IDLE });
   assert.equal(answers.cls, "ANSWERS");
   assert.equal(classifyOutcome({ httpStatus: 200, answerText: "   ", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "whitespace is not an answer");
   assert.equal(classifyOutcome({ httpStatus: 500, answerText: "PONG", message: "", poolAtRequest: IDLE }).cls, "UNCLASSIFIED", "a 5xx is never ANSWERS");
-  assert.equal(VERIFICATION_CLASSES.length, 11, `the closed set is ${VERIFICATION_CLASSES.length}: ${VERIFICATION_CLASSES.join(", ")}`);
+  // DERIVED, never remembered: the count is a fact about the closed set above,
+  // and a stale one is worse than none — it would let a member be added or
+  // dropped while every pin in this file stayed green.
+  assert.equal(VERIFICATION_CLASSES.length, 12, `the closed set is ${VERIFICATION_CLASSES.length}: ${VERIFICATION_CLASSES.join(", ")}`);
   assert.ok(VERIFICATION_CLASSES.includes("RETURNS-DATA"));
   assert.ok(VERIFICATION_CLASSES.includes("UNATTRIBUTED-NO-COMPOSER"));
+  // Every member is spelled out, so a rename cannot slip through the length pin.
+  assert.deepEqual(
+    [...VERIFICATION_CLASSES].sort(),
+    [
+      "ANSWER-UNREADABLE",
+      "ANSWERS",
+      "COMPOSER-DRIFT",
+      "CONTENDED-TIMEOUT",
+      "NON-ANSWER-READ",
+      "RETURNS-DATA",
+      "SIGN-OUT",
+      "UNATTRIBUTED-NO-ANSWER",
+      "UNATTRIBUTED-NO-COMPOSER",
+      "UNATTRIBUTED-NO-TRANSCRIPT",
+      "UNMEASURED",
+      "WALL-CHALLENGE",
+    ],
+  );
   assert.deepEqual(Object.keys(CLASS_PRECONDITIONS).sort(), [...VERIFICATION_CLASSES].sort());
 });
 
@@ -1130,4 +1159,150 @@ test("UNATTRIBUTED-NO-COMPOSER declares a machine-checkable precondition, and it
   // remedies: one may claim a layout change, this one may not.
   assert.notEqual(VERIFICATION_CLASSES.indexOf("COMPOSER-DRIFT"), VERIFICATION_CLASSES.indexOf("UNATTRIBUTED-NO-COMPOSER"));
   assert.notEqual(classPrecondition("COMPOSER-DRIFT").requiredFields.includes("observedPage"), false);
+});
+
+// ── UNATTRIBUTED-NO-TRANSCRIPT: a control the target page does not offer ─────
+//
+// The cases below are stated in the RUNNER's own words, imported from the module
+// that emits them — never typed here. `/capability` answers `send(res,
+// result.ok ? 200 : 502, result)` with the runner's object verbatim, so this
+// sentence is the exact text a client sees, and a hand-typed copy here would be
+// a second copy of a sentence `src/capabilities/youtube.ts` owns: a reword there
+// would leave this matcher matching nothing while every gate stayed green.
+
+test("UNATTRIBUTED-NO-TRANSCRIPT: the real youtube_transcript refusal is a NAMED class, not UNCLASSIFIED", () => {
+  // MEASURED live on the daemon (ca7d62c): HTTP 502 in ~3.4s with this exact
+  // message, on two different videos. Before the member existed this derived
+  // UNCLASSIFIED and `record-roundtrip.mjs` REFUSED the row — a real measurement,
+  // thrown away.
+  const c = classifyOutcome({ httpStatus: 502, message: NO_TRANSCRIPT_CONTROL_REFUSAL, poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNATTRIBUTED-NO-TRANSCRIPT", `expected the named class, got ${c.cls}: ${c.reason}`);
+  assert.match(c.reason, /LISTS its candidate causes/, "the reason must say the refusal asserts no cause");
+  assert.match(c.reason, /asserts NEITHER/);
+});
+
+test("FALSIFIER (a): a HAND-TYPED class on fields that do not support it re-derives to UNCLASSIFIED", () => {
+  // The exact laundering this class must not permit: a row that merely NAMES the
+  // class, with no refusal sentence in its own evidence, re-derives to nothing.
+  const claimed = classifyOutcome({
+    httpStatus: 502,
+    message: "class derived by classifyOutcome() via src/prompt/verification-class.ts: this row says UNATTRIBUTED-NO-TRANSCRIPT",
+    poolAtRequest: IDLE,
+  });
+  assert.equal(claimed.cls, "UNCLASSIFIED", `a hand-typed class survived re-derivation: ${claimed.cls}`);
+});
+
+test("FALSIFIER (b): a DIFFERENT 502 code never derives UNATTRIBUTED-NO-TRANSCRIPT", () => {
+  // The refusal clauses are not generic 5xx prose. A driver refusal, the
+  // no-answer refusal, a sign-in assertion and an anonymous message must each
+  // keep the class they already had.
+  for (const [what, message, expected] of [
+    ["the page-less composer refusal", NO_COMPOSER("deepseek"), "UNATTRIBUTED-NO-COMPOSER"],
+    ["the named no-answer refusal", renderNoAnswerRefusal("kimi", "60000"), "UNATTRIBUTED-NO-ANSWER"],
+    ["a sign-in assertion", "no answer appeared on kimi within 60000ms. This site requires sign-in.", "SIGN-OUT"],
+    ["an anonymous message", "something else went wrong upstream", "UNCLASSIFIED"],
+  ] as const) {
+    const c = classifyOutcome({ httpStatus: 502, message, poolAtRequest: IDLE });
+    assert.equal(c.cls, expected, `${what} derived ${c.cls}, not ${expected}`);
+    assert.notEqual(c.cls, "UNATTRIBUTED-NO-TRANSCRIPT", `${what} wrongly derived the transcript class`);
+  }
+});
+
+test("FALSIFIER: the same refusal at a BUSY pool is UNCLASSIFIED — a measurement of the queue", () => {
+  const c = classifyOutcome({ httpStatus: 502, message: NO_TRANSCRIPT_CONTROL_REFUSAL, poolAtRequest: BUSY });
+  assert.equal(c.cls, "UNCLASSIFIED", `a busy-pool row derived ${c.cls}`);
+  assert.match(c.reason, /measurement of the queue/);
+});
+
+test("FALSIFIER: the same refusal on a 2xx is UNCLASSIFIED — a runner refusal arrives in a 5xx", () => {
+  const c = classifyOutcome({ httpStatus: 200, message: NO_TRANSCRIPT_CONTROL_REFUSAL, poolAtRequest: IDLE });
+  assert.equal(c.cls, "UNCLASSIFIED", `a 2xx carrying the refusal derived ${c.cls}`);
+});
+
+test("ONE class, not two: the refusal names BOTH causes and asserts NEITHER, and no field separates them", () => {
+  // THE DECISION, pinned so it cannot be quietly reversed by widening. "the site
+  // has no captions" and "this repo's selector has gone stale" are completely
+  // different findings, and the file deliberately refuses to tell them apart:
+  // the runner emits ONE sentence listing both and asserting neither, and
+  // MEASURED both candidates produced the byte-identical sentence — a
+  // 12-year-old tutorial video (E5p4TgCNd1I) and a mainstream channel's video
+  // (vr0EqEj0-zo, from this repo's own live youtube_search results) alike. A
+  // two-member split would be a guess wearing a class's clothes. The honest
+  // widening is in the OWNER: `src/capabilities/youtube.ts` would have to check
+  // for a caption track and refuse with a DIFFERENT named sentence per case.
+  const c = classifyOutcome({ httpStatus: 502, message: NO_TRANSCRIPT_CONTROL_REFUSAL, poolAtRequest: IDLE });
+  assert.ok(c.reason.includes("this repo's selector has gone stale"), "the reason must name both candidates");
+  assert.ok(c.reason.includes("byte-identical sentence"), "the reason must record that the response does not separate them");
+  assert.ok(c.reason.includes("ONE class and not two"), "the reason must state the one-class decision where a reader will meet it");
+  // And the vocabulary offers exactly one member for it: two would be the split.
+  const members = VERIFICATION_CLASSES.filter((v) => /TRANSCRIPT/.test(v));
+  assert.deepEqual([...members], ["UNATTRIBUTED-NO-TRANSCRIPT"], "the vocabulary must not carry a second, indistinguishable member");
+});
+
+test("UNATTRIBUTED-NO-TRANSCRIPT declares a machine-checkable precondition", () => {
+  const p = classPrecondition("UNATTRIBUTED-NO-TRANSCRIPT");
+  assert.deepEqual([...p.requiredFields].sort(), ["evidence", "measuredAt", "method"]);
+  assert.ok(p.requiresPoolState);
+  assert.ok(p.requiresIdlePool, "at a busy pool the same refusal is a measurement of the queue");
+  assert.ok(
+    !p.requiredFields.includes("observedPage"),
+    "requiring observedPage would make the class unreachable — /capability answers the runner's result, never a page observation",
+  );
+});
+
+test("the matcher is DERIVED from the runner that emits it, never typed here", () => {
+  // The pattern's SOURCE must be the runner's own exported clause, character for
+  // character. If someone pastes the sentence into this file instead of importing
+  // it, the two diverge the moment the owner rewords — and the class silently
+  // stops matching. So: rebuild the escaped source and compare it to the
+  // imported clause's own escape.
+  const imported = controlAbsentClauses()[0];
+  assert.equal(typeof imported, "string");
+  const escaped = imported.replace(/[\\^$*+?()[\]{}|]/g, "\\$&");
+  assert.ok(CONTROL_ABSENT_PATTERNS.some((re) => re.source === escaped), "the matcher must be built from the runner's own exported clause, not a typed copy");
+  // And it must be an actual match against the runner's own refusal.
+  assert.equal(controlAbsentIn(imported), imported, "the runner's own refusal must match the derived clause");
+  // A sentence that merely resembles it is not a match: the clause is required.
+  assert.equal(controlAbsentIn("the transcript button was not found"), null);
+});
+
+test("THE OWNER still owns the words: youtube.ts refuses with the exported clause, not a private copy", () => {
+  // A source-level pin, because a derivation whose input lives in another file
+  // cannot be proven from here. If the runner stops USING the export, the export
+  // rots into a second copy and the matcher follows a sentence nothing emits.
+  const src = readFileSync(resolve("src/capabilities/youtube.ts"), "utf8");
+  const defAt = src.indexOf("export const NO_TRANSCRIPT_CONTROL_REFUSAL");
+  assert.ok(defAt > 0, "the runner must EXPORT its refusal clause — an unexported clause cannot be derived from");
+  const usesAfter = (src.slice(defAt).match(/NO_TRANSCRIPT_CONTROL_REFUSAL/g) ?? []).length;
+  assert.ok(usesAfter >= 2, `the export must be USED by the refusal, not merely declared: ${usesAfter} mention(s) at/after its definition`);
+  assert.ok(/error:\s*NO_TRANSCRIPT_CONTROL_REFUSAL/.test(src), "the runner's refusal must read the export, not a literal");
+  assert.ok(!/error:\s*"no-transcript-button/.test(src), "the runner must not carry a private copy of its own refusal sentence");
+});
+
+test("a scoped non-delivery QUALIFIES a published claim; every other named failure still CONTRADICTS one", () => {
+  // THE DECISION ON THE CLAIM, pinned. A `verified` claim is a claim about the
+  // SURFACE; this row is about ONE `videoId`, and the refusal names two causes
+  // while choosing neither. Demoting on it would assert a surface-wide failure
+  // from a target-scoped observation. But it must not PROMOTE either: `UNMEASURED`
+  // and an unknown string are non-falsifying too, and the difference is that they
+  // assert nothing at all.
+  assert.equal(falsifiesClaim("UNATTRIBUTED-NO-TRANSCRIPT"), false, "a scoped non-delivery must not demote");
+  assert.deepEqual([...argumentScopedClasses()], ["UNATTRIBUTED-NO-TRANSCRIPT"], "the exception must be enumerable, not a boolean");
+  for (const cls of ["UNATTRIBUTED-NO-COMPOSER", "UNATTRIBUTED-NO-ANSWER", "COMPOSER-DRIFT", "SIGN-OUT", "WALL-CHALLENGE", "ANSWER-UNREADABLE", "NON-ANSWER-READ"]) {
+    assert.equal(falsifiesClaim(cls), true, `${cls} must still contradict a published claim`);
+  }
+  assert.equal(falsifiesClaim("UNMEASURED"), false, "UNMEASURED asserts nothing, so it cannot falsify");
+  assert.equal(falsifiesClaim("NOT-A-CLASS"), false, "a string outside the closed set is not a class at all");
+  // Membership is derived from the closed set, so a member added later is
+  // contradicting BY DEFAULT rather than by omission. `UNMEASURED` is the one
+  // other non-falsifying member, and for a DIFFERENT and stronger reason: it
+  // asserts nothing at all, so it cannot falsify anything, whereas a scoped
+  // non-delivery asserts a real refusal. The two are deliberately NOT the same
+  // set — collapsing them would let "nothing was established" borrow the excuse
+  // that is only sound for "something was established about one argument".
+  assert.deepEqual(
+    VERIFICATION_CLASSES.filter((c) => !falsifiesClaim(c)).sort(),
+    ["UNATTRIBUTED-NO-TRANSCRIPT", "UNMEASURED"],
+    "the non-falsifying set must be exactly the scoped class plus the asserts-nothing one",
+  );
 });

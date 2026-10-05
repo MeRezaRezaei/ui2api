@@ -63,6 +63,15 @@
 // here is a dependency on the owner, never a second copy of the words. The same
 // shape as `CONCEPT_TERMS` / `consumerAccountRefusal` in `./consumer-surface.ts`.
 import { NO_ANSWER_REFUSAL_RE, RETRY, redactInternalError } from "./error-redaction.js";
+// A capability runner hands its `result` to `/capability` VERBATIM, so ITS
+// refusal sentences reach a client unrewritten and this file has to match the
+// exact text those runners emit. Each clause is therefore IMPORTED from the
+// module that owns it rather than typed here — the same rule the composer
+// matcher below follows by CALLING its owner. A second copy of a runner's
+// sentence is the defect this import exists to prevent: the runner is free to
+// reword it, and a reword must MOVE the matcher rather than silently delete the
+// class behind a green suite.
+import { NO_TRANSCRIPT_CONTROL_REFUSAL } from "../capabilities/youtube.js";
 
 export const VERIFICATION_CLASSES = [
   "ANSWERS",
@@ -95,6 +104,19 @@ export const VERIFICATION_CLASSES = [
   // a sign-in surface nor a challenge — a claim this row's fields cannot make)
   // and NOT SIGN-OUT (nothing observed a sign-in surface).
   "UNATTRIBUTED-NO-COMPOSER",
+  // The page never offered the UI CONTROL a capability needs to read its target
+  // — measured on `youtube_transcript`, whose site shows no "Show transcript"
+  // toggle for the requested video. It is its own member because that refusal
+  // names its CONDITION and LISTS two candidate causes (this video has no
+  // captions / this repo's selector has gone stale) while asserting NEITHER,
+  // and no page or composer is involved at all: filing it as COMPOSER-DRIFT
+  // would assert a layout change nobody observed, and UNATTRIBUTED-NO-COMPOSER
+  // is about a prompt input that has nothing to do with a transcript toggle.
+  // MEASURED: before this member existed, the real HTTP 502 from
+  // `youtube_transcript` derived UNCLASSIFIED, so `record-roundtrip.mjs`
+  // REFUSED to write the row and the record lost a real measurement — the same
+  // class of loss the composer member above closed one round earlier.
+  "UNATTRIBUTED-NO-TRANSCRIPT",
   "UNMEASURED",
 ] as const;
 
@@ -388,6 +410,48 @@ export function composerRefusalIn(message: string): string | null {
   if (!m) return null;
   const hit = m.re.exec(message);
   return hit ? hit[0] : null;
+}
+
+// ── THE CONTROL-ABSENT REFUSALS, AND THE MATCHER THAT FINDS THEM ─────────────
+//
+// THE SAME PROBLEM AS THE COMPOSER REFUSAL, ON THE OTHER WIRE. A driver refusal
+// is rewritten by `redactInternalError`, which is why its matcher has to be
+// derived by CALLING the owner. A capability runner's refusal is the other way
+// round: `src/prompt/http.ts` answers `send(res, result.ok ? 200 : 502, result)`
+// with the runner's own object, so the sentence a client sees is the sentence
+// the runner typed. Either way the words belong to the EMITTER, so the matcher
+// comes from the emitter and this file holds none of them.
+//
+// WHY A LIST AND NOT ONE MORE HAND-ROLLED BRANCH: the condition is general —
+// "the page never offered the control this capability reads its target with" —
+// and each site names it in its own words. So the table below is the reviewable
+// vocabulary of clauses (the same convention every other marker table in this
+// file follows: finite, hand-added, never inferred), while every ELEMENT is
+// imported from the runner that emits it. Adding the next runner's clause is a
+// one-line addition here and an export there; no matcher is ever re-typed.
+const CONTROL_ABSENT_CLAUSES: readonly string[] = [NO_TRANSCRIPT_CONTROL_REFUSAL];
+
+/** The clause rendered as a pattern. Escaped with the SAME character set the
+ *  composer matcher above uses, because `classifyOutcome` quotes the MATCHED
+ *  SPAN and the record-truth gate re-derives every row from that quoted
+ *  evidence — an escaping mismatch here would break re-derivation silently. */
+export const CONTROL_ABSENT_PATTERNS: readonly RegExp[] = CONTROL_ABSENT_CLAUSES.filter((c) => c.trim()).map((c) => new RegExp(literalPattern(c)));
+
+/** The clause table itself, exported so a gate can re-derive every pattern from
+ *  the owner rather than trusting the compiled ones. */
+export function controlAbsentClauses(): readonly string[] {
+  return [...CONTROL_ABSENT_CLAUSES];
+}
+
+/** A runner's own control-absent refusal, as a MATCHED SPAN of the service's
+ *  message. The span — not the pattern source — so the reason quotes the
+ *  measurement's own words and re-derivation finds it again. */
+export function controlAbsentIn(message: string): string | null {
+  for (const re of CONTROL_ABSENT_PATTERNS) {
+    const hit = re.exec(message);
+    if (hit) return hit[0];
+  }
+  return null;
 }
 
 /** The service's OWN wording for the no-answer timeout it reports.
@@ -782,6 +846,53 @@ export function classifyOutcome(o: Outcome): Classification {
     };
   }
 
+  // THE PAGE NEVER OFFERED THE CONTROL THIS CAPABILITY READS ITS TARGET WITH.
+  //
+  // WHERE IT SITS: immediately after its `UNATTRIBUTED-` siblings, because it is
+  // the same SHAPE of knowledge — the service named the condition and listed its
+  // candidate causes without asserting one — arriving from a different wire. It
+  // must not be folded into them, because it shares none of their evidence: there
+  // is no composer, no page, and no answer involved, only a capability that could
+  // not reach the control its own UI path depends on.
+  //
+  // IT REQUIRES A 5xx because that is the shape a capability refusal arrives in
+  // (MEASURED: `/capability` answers `result.ok ? 200 : 502`, and the runner's own
+  // `ok:false` is what makes it a 502) and an IDLE pool, for the reason every
+  // other refusal branch here requires one: at a busy pool the row is a
+  // measurement of the queue.
+  //
+  // WHY IT IS ONE MEMBER AND NOT TWO — "the site has no captions" and "our
+  // selector has gone stale". They are the SAME condition as far as the
+  // measurement can see, and splitting them would mean inventing the distinction:
+  // the runner's own refusal states both candidates in one sentence and asserts
+  // NEITHER, and MEASURED both of them produced the byte-identical refusal — a
+  // 12-year-old tutorial video and a mainstream channel's video alike, so the
+  // response carries nothing that separates them. A two-member split here would
+  // be a guess dressed as a class. The honest widening is in the OWNER, not in
+  // the classifier: `src/capabilities/youtube.ts` would have to check whether the
+  // page exposes a caption track and refuse with a DIFFERENT, named sentence for
+  // each case; until it does, one member that names both candidates and asserts
+  // neither is the only derivable answer.
+  const controlAbsent = controlAbsentIn(o.message);
+  if (controlAbsent && o.httpStatus >= 500 && o.httpStatus < 600) {
+    if (!idle(o.poolAtRequest)) {
+      return { cls: "UNCLASSIFIED", reason: `the service reported its named control-absent refusal at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}, queued=${String(o.poolAtRequest?.queued)}) — a measurement of the queue, not of the surface` };
+    }
+    return {
+      cls: "UNATTRIBUTED-NO-TRANSCRIPT",
+      reason:
+        `HTTP ${o.httpStatus} at an IDLE pool and the service's own message is its named control-absent refusal ("${controlAbsent}") — ` +
+        `the page never offered the UI control this capability reads its target with. The sentence LISTS its candidate causes ` +
+        `(the target has no captions, or this repo's selector has gone stale) and asserts NEITHER, so NO CAUSE IS ESTABLISHED here ` +
+        `and none may be assumed: this is not "the video has no captions", not "the selectors are stale", and not "log in". ` +
+        `MEASURED, both candidates are live and the refusal does not separate them — a 12-year-old tutorial video and a mainstream ` +
+        `channel's video returned the byte-identical sentence — which is why this is ONE class and not two. What IS established is ` +
+        `that the round trip was PERFORMED and the surface did not deliver for THIS ARGUMENT; it is recorded and inspectable, and ` +
+        `because the argument is part of the measurement, it QUALIFIES a published claim rather than falsifying it — see ` +
+        `\`falsifiesClaim\`, which is the classifier's own answer and what the read seam imports.`,
+    };
+  }
+
   if (unmatchedSelectorIn(o.message)) {
     if (!idle(o.poolAtRequest)) {
       return { cls: "UNCLASSIFIED", reason: `the service reports the answer selector matched nothing at a NON-idle pool (busy=${String(o.poolAtRequest?.busy)}) — a measurement of the queue, not of the selector` };
@@ -915,6 +1026,22 @@ export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> =
   // gate re-derives the class from these fields, so a row that claims a cause it
   // cannot support fails on re-derivation rather than on a name check.
   "UNATTRIBUTED-NO-COMPOSER": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
+  // UNATTRIBUTED-NO-TRANSCRIPT asserts that a control-absent refusal was
+  // REPORTED, so the minimum that means anything is the same three every other
+  // measured row requires: a dated measurement, the method that took it, and an
+  // evidence string carrying the runner's own sentence — an evidence string
+  // without it proves no refusal happened, and the class must not be reachable by
+  // a row that merely names the capability. `observedPage` is NOT required and
+  // that is not a weakening: `/capability` answers the RUNNER's result and never
+  // the driver's page observation, so demanding one would make the class
+  // unreachable rather than stricter.
+  //
+  // It does NOT require `capabilityOk` either, even though this class only ever
+  // arrives on a capability surface: `ok:false` is what the refusal IS, and
+  // pinning it would make the class unfalsifiable by a row that quietly claimed
+  // the runner succeeded. The idle pool is REQUIRED for the reason it is required
+  // everywhere else: at a busy pool the row is a measurement of the queue.
+  "UNATTRIBUTED-NO-TRANSCRIPT": { requiredFields: ["measuredAt", "method", "evidence"], requiresPoolState: true, requiresIdlePool: true },
   // UNMEASURED keeps its strict meaning: never reached. RULE 5 lets it be bare
   // precisely because it asserts nothing, and RULE 9 forbids it from carrying a
   // measured status.
@@ -922,6 +1049,58 @@ export const CLASS_PRECONDITIONS: Record<VerificationClass, ClassPrecondition> =
 };
 
 export const classPrecondition = (c: VerificationClass): ClassPrecondition => CLASS_PRECONDITIONS[c];
+
+// ── WHAT A NAMED FAILURE DOES TO A PUBLISHED CLAIM ───────────────────────────
+//
+// A CLASS IS NOT ONLY A DIAGNOSIS; IT IS ALSO A CLAIM ABOUT WHAT THE ROW MAY
+// DEMOTE. Two absences and one qualification are three different facts, and this
+// module now owns the distinction between the last two.
+//
+// THE PROBLEM, stated from the record. `youtube_transcript` measures a real
+// HTTP 502 whose runner-owned refusal names the control it could not find and
+// lists TWO candidate causes — this video has no captions, or this repo's
+// selector has gone stale — asserting NEITHER. The measurement is therefore
+// about ONE CALL and ONE ARGUMENT (`videoId`), and it says nothing about the
+// next video. Filing that as a contradiction of a published `verified` claim
+// would assert a surface-wide failure from a single target-scoped observation,
+// which is precisely the overreach the `UNATTRIBUTED-` prefix exists to prevent
+// one rung up: those members exist so that "the condition is established, the
+// CAUSE is not" is visible instead of being guessed at in either direction.
+//
+// IT IS ALSO NOT THE FIRST TIME THE FILE MET THIS SHAPE, and the earlier
+// decision is the precedent: `emptyCapabilityResult` records "a SUCCESSFUL
+// MEASUREMENT OF NOTHING" and deliberately refuses to let an empty result set
+// become `RETURNS-DATA`, because a claim that a capability PRODUCES results is
+// not falsified by a query that legitimately matched none. A control the target
+// page does not offer is the same fact about the same argument, from the other
+// direction. So the honest answer is neither "contradicted" nor "unmeasured":
+// the row is written, the refusal is quotable, and it QUALIFIES.
+//
+// THE DIRECTION IS STILL ONE-WAY. A qualifying row never PROMOTES anything: it
+// earns no `verified` claim and `measuredRoundTripFor` still refuses to call the
+// site measured. It only declines to DEMOTE. Every other named failure in the
+// closed set — including both `UNATTRIBUTED-` chat twins, whose refusals are
+// about the surface and not about an argument — continues to contradict.
+//
+// Membership is DERIVED from the closed set rather than restated as an open
+// list, so a member added later cannot be silently unreadable here: the
+// complement is computed, and a class that nobody scoped is contradicting by
+// default rather than by omission.
+const ARGUMENT_SCOPED_CLASSES: ReadonlySet<VerificationClass> = new Set<VerificationClass>(["UNATTRIBUTED-NO-TRANSCRIPT"]);
+
+/** Does a measured row of this class FALSIFY a published claim, or merely
+ *  QUALIFY it? True (the default) means the row's non-delivery is a statement
+ *  about the surface; false means it is scoped to the argument the harness
+ *  supplied and must not demote a claim made about the surface in general. */
+export function falsifiesClaim(cls: string): boolean {
+  if (cls === "UNMEASURED") return false;
+  if (!VERIFICATION_CLASSES.includes(cls as VerificationClass)) return false;
+  return !ARGUMENT_SCOPED_CLASSES.has(cls as VerificationClass);
+}
+
+/** The classes whose non-delivery is scoped to the call's argument. Exported so
+ *  a reader can enumerate the exception instead of trusting a boolean. */
+export const argumentScopedClasses = (): readonly VerificationClass[] => VERIFICATION_CLASSES.filter((c) => ARGUMENT_SCOPED_CLASSES.has(c));
 
 /** A measured HTTP status quoted in the evidence of an UNMEASURED row. The row
  *  says "nothing was established" while simultaneously quoting a status code

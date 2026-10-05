@@ -114,6 +114,31 @@ const SCAFFOLD_NOTE =
   "scaffold-dom-unverified: selectors are unverified candidates (no live round-trip performed); " +
   "re-tune against a real browser on first capture";
 
+// ── THE CONTROL-ABSENT REFUSAL, EXPOSED AS THE MATCHER'S OWN SOURCE ──────────
+//
+// WHY THIS IS AN EXPORT AND NOT AN INLINE LITERAL (measured, 2026-10-05): the
+// daemon hands `result` from a capability runner to `/capability` VERBATIM —
+// `send(res, result.ok ? 200 : 502, result)` at src/prompt/http.ts — so this
+// sentence, unlike a driver refusal, is NOT rewritten by `redactInternalError`
+// on its way to a client. It is therefore the exact text the verification
+// classifier has to match, and typing that text into the classifier would be a
+// second copy of a sentence this module owns, with no edge to the owner: a
+// reword here would leave the classifier matching nothing while every gate
+// stayed green. The precedent is the composer refusal, which the classifier
+// derives by CALLING the owner rather than typing it
+// (src/prompt/verification-class.ts `composerRefusalMatcher`).
+//
+// WHAT IT ASSERTS, unchanged: the page offered no transcript control. It
+// LISTS its two candidate causes — the video has no captions, or this repo's
+// selector has gone stale — and asserts NEITHER, exactly like the composer
+// refusal. MEASURED both ways on a live daemon, and the second candidate is not
+// hypothetical: a 12-year-old tutorial video AND a mainstream channel's video
+// (JayzTwoCents, from this repo's own live youtube_search results) returned the
+// IDENTICAL refusal, so the sentence does not discriminate between its own
+// causes and nothing downstream may pretend it does.
+export const NO_TRANSCRIPT_CONTROL_REFUSAL =
+  "no-transcript-button: 'Show transcript' not offered on this page (video without captions, or selector rot)";
+
 // GOAL 88: what youtube_upload may hand the upload input. YouTube's own input
 // takes video/*, so the gate holds to the signature-verified video containers
 // (mp4/mov/webm/mkv/avi). An image or document here would be refused by name.
@@ -349,8 +374,7 @@ export class YouTubeCapabilities {
           ok: false,
           method: "dom.transcript-panel",
           data: { videoId },
-          error:
-            "no-transcript-button: 'Show transcript' not offered on this page (video without captions, or selector rot)",
+          error: NO_TRANSCRIPT_CONTROL_REFUSAL,
           scaffold: SCAFFOLD_NOTE,
         };
       }

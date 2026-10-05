@@ -9,8 +9,10 @@ import {
   findPackageDir,
   readRoundTripRecord,
   measuredRoundTripFor,
+  roundTripProbeAdvice,
 } from "../src/prompt/registry.js";
-import { classifyOutcome, VERIFICATION_CLASSES, type VerificationClass } from "../src/prompt/verification-class.js";
+import { classifyOutcome, composerRefusalMatcher, controlAbsentClauses, VERIFICATION_CLASSES, type VerificationClass } from "../src/prompt/verification-class.js";
+import { NO_ANSWER_REFUSAL_CLAUSE } from "../src/prompt/error-redaction.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE ROUND-TRIP RECORD-TRUTH GATE
@@ -126,15 +128,33 @@ const measuredIds = (): string[] => universe().filter((id) => measuredRoundTripF
 /** A readable, one-line-per-site report of all three sides, so a red run names
  *  the divergence instead of just saying the sets differ.
  *
- *  THE FOURTH READING, and why the MEASURED cell is not a yes/no. `measuredRoundTripFor`
- *  distinguishes THREE states, because a refused measurement is not evidence of
- *  absence: a site whose freshest row is an honest NAMED FAILURE was asked and
- *  did not work, which is a different fact from never having been asked, and a
- *  report that printed both as `MEASURED no` would be the understatement this
- *  lane exists to remove. MEASURED, before this gate could say it: `kimi` and
- *  `tencent-aistudio` carried `UNATTRIBUTED-NO-ANSWER` rows and `deepseek` an
- *  `UNATTRIBUTED-NO-COMPOSER` one, and every one of them printed as plain
- *  `MEASURED no` — indistinguishable from a site with no row at all. */
+ *  THE MEASURED CELL HAS FOUR READINGS, not two, because three different facts
+ *  were being printed as one. `measuredRoundTripFor` distinguishes them, and a
+ *  report that collapsed any pair of them would be the understatement this lane
+ *  exists to remove:
+ *
+ *    MEASURED yes                            — a round trip WORKED and is recorded.
+ *    MEASURED no — CONTRADICTED by <class>   — a round trip was PERFORMED and the
+ *                                               surface DID NOT WORK. Asking and
+ *                                               failing is not never asking.
+ *    MEASURED no — QUALIFIED by <class>      — a round trip was performed, the
+ *                                               argument it was given did not
+ *                                               deliver, and the refusal names its
+ *                                               candidates without choosing one. It
+ *                                               is not evidence about the surface,
+ *                                               so it must not demote — and it is
+ *                                               not an absence either, so it must
+ *                                               not print as bare `no`.
+ *    MEASURED no                             — nothing was established.
+ *
+ *  MEASURED, before this gate could say it: `kimi` and `tencent-aistudio` carried
+ *  `UNATTRIBUTED-NO-ANSWER` rows and `deepseek` an `UNATTRIBUTED-NO-COMPOSER` one,
+ *  and every one of them printed as plain `MEASURED no` — indistinguishable from a
+ *  site with no row at all. The third reading arrived with
+ *  `UNATTRIBUTED-NO-TRANSCRIPT`: `youtube_transcript` performs a real round trip,
+ *  is refused by the site's own page for ONE video, and would have been filed as
+ *  a surface failure had the vocabulary not distinguished a scoped non-delivery
+ *  from a real one. */
 function threeWayReport(): string[] {
   const claimed = new Set(claimedIds());
   const published = new Set(publishedIds());
@@ -147,7 +167,9 @@ function threeWayReport(): string[] {
         ? "yes"
         : verdict.contradicted
           ? `no — CONTRADICTED by ${String(verdict.failureClass)}`
-          : "no ";
+          : verdict.qualified
+            ? `no — QUALIFIED by ${String(verdict.qualifiedClass)}`
+            : "no ";
       const sides = [
         `CLAIMED ${claimed.has(id) ? "yes" : "no "}`,
         `PUBLISHED ${published.has(id) ? "yes" : "no "}`,
@@ -155,6 +177,66 @@ function threeWayReport(): string[] {
       ].join(" | ");
       return `  ${id.padEnd(20)} ${sides}`;
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE REMEDIATION ADVICE — a gate you can ACT on
+//
+// THE DEFECT THIS KILLS. The gap message used to close itself with ONE hardcoded
+// line, for every site:
+//
+//     Close it by running `node scripts/audit/record-roundtrip.mjs --site youtube
+//     --capability chat`
+//
+// MEASURED: `youtube` has NO chat. Its manifest declares no chat capability and
+// says so in prose ("No chat composer exists; no chat capability is registered"),
+// its `builtinProfile` is "none", its `profile.json` carries `composer:[]`
+// `answer:[]`, and it is absent from `GET /sites`. So `--capability chat` is a
+// capability the package does not declare — the daemon answers HTTP 400
+// `unknown capability "chat" for "youtube"` — and the invocation also omitted the
+// `--import tsx` loader the harness documents as REQUIRED in a source checkout.
+// A remediation message is the one part of a gate a reader ACTS on, so an
+// unexecutable one fails a reader who followed it correctly, and the failure
+// reads as the tool being broken. That is the "a checker that cannot express
+// what the code does" class in its most actionable form.
+//
+// DERIVED, NOT TEMPLATED. `roundTripProbeAdvice` (src/prompt/registry.ts) reads the
+// package's manifest, filters it through the SAME `validManifestCapability` the
+// registry serves, and takes each capability's arguments from the SAME declared
+// `inputSchema` contract (`declaredCapabilityInputSchema`) — never the regex
+// guess. Chat-ness comes from `defaultChatSurface()`, the exact gate promptd's
+// `/v1` allow-list is built from. So the advice cannot name a capability the site
+// lacks, cannot omit one it has, and cannot invent an argument shape.
+//
+// WHY IT NEVER EXECUTES ANYTHING. Formatting a string from a manifest is the whole
+// scope: no browser, no daemon connection, no harness run. A gate that measured
+// its own advice would need a live session it can never have in CI.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function remediationFor(id: string): string {
+  const advice = roundTripProbeAdvice(id);
+  if (advice.note !== null) return `${advice.note} Never edit the record by hand.`;
+  const lines = advice.commands.map((c) => `  ${c}`).join("\n");
+  const shape = advice.chat
+    ? `\`${id}\` IS on the daemon's chat surface (GET /sites), so probe it as chat FIRST — that is the only shape that derives class ANSWERS — and then each capability it declares:`
+    : `\`${id}\` has NO chat surface (it is absent from GET /sites), so it cannot be probed as chat at all; probe the ${advice.capabilities.length} capabilit${advice.capabilities.length === 1 ? "y" : "ies"} its own manifest declares:`;
+  return (
+    `Close it against a live daemon by running ONE of these — never by editing the record by hand. ` +
+    `${shape}\n${lines}\n` +
+    `Replace each \`<…>\` placeholder with a real argument value (they come from the manifest's own declared ` +
+    `required args — a gate may not invent the query or the id a live probe needs).`
+  );
+}
+
+/** The advice as the reader sees it, for a site — the same string the gap
+ *  message embeds, so the assertion below reads what is actually printed. */
+const adviceText = (id: string): string => remediationFor(id);
+
+/** Every `--capability X` the advice names, in order. */
+function adviceCapabilities(advice: ReturnType<typeof roundTripProbeAdvice>): string[] {
+  return advice.commands
+    .map((c) => /--capability (\S+)/.exec(c)?.[1])
+    .filter((x): x is string => typeof x === "string");
 }
 
 test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, and every measured row backs a published claim", () => {
@@ -168,7 +250,11 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
     const remedy = v.contradicted
       ? `A round trip WAS measured for \`${id}\` and it FAILED (${String(v.failureClass)}), which CONTRADICTS the published claim rather than qualifying it — ` +
         `re-measure only after the named condition is addressed; re-running the same probe reproduces the same honest failure.`
-      : `Close it by running \`node scripts/audit/record-roundtrip.mjs --site ${id} --capability chat\` against a live daemon — never by editing the record by hand.`;
+      : v.qualified
+        ? `A round trip WAS measured for \`${id}\`, the argument it was given did not deliver (${String(v.qualifiedClass)}), and the refusal names its ` +
+          `candidate causes without choosing one — so this is NOT a surface failure and re-running the SAME probe reproduces it. Close it by probing ` +
+          `an argument the surface can serve, or by addressing what the class's own evidence names.`
+        : remediationFor(id);
     gaps.push(
       `\`${id}\` holds a complete verified receipt AND publishes a live round-trip claim in capabilities/README.md, ` +
         `but capabilities/roundtrip.json carries no MEASURED row: ${v.reason}. ${remedy}`,
@@ -181,6 +267,47 @@ test("THREE-WAY: every published round-trip claim is backed by a MEASURED row, a
       threeWayReport().join("\n") +
       `\n\nEach gap above is a REAL, currently-published claim the record cannot back.`,
   );
+});
+
+test("THREE-WAY: an ARGUMENT-SCOPED non-delivery is QUALIFIED — never CONTRADICTED, and never MEASURED either", () => {
+  // THE DIRECTION OF THE THIRD READING. A `verified` claim is a claim about the
+  // SURFACE; a refusal scoped to one argument the harness supplied is a claim
+  // about that argument. MEASURED, the case: `youtube_transcript` performs a real
+  // round trip and the site's page offers no transcript control for THAT video —
+  // a condition whose own sentence lists two candidate causes (no captions /
+  // stale selectors) and chooses neither.
+  //
+  // So all three properties are asserted here, and the middle one is the teeth:
+  // it must NOT become a contradiction, because that would assert a surface-wide
+  // failure from a target-scoped observation, and it must NOT become MEASURED,
+  // because that would promote a surface nothing has shown working. The two
+  // halves together are what make "qualifies" a real third answer instead of a
+  // softer synonym for "unmeasured".
+  const verdicts = universe().map((id) => ({ id, v: measuredRoundTripFor(id) }));
+  const qualifying = verdicts.filter((x) => x.v.qualified);
+  // Not a pass by default: a record carrying no qualifying row cannot exercise
+  // this branch, so say so rather than let a green run prove nothing about it.
+  if (qualifying.length === 0) {
+    assert.ok(
+      rows.some((r) => r.class === "UNATTRIBUTED-NO-TRANSCRIPT"),
+      "capabilities/roundtrip.json carries no UNATTRIBUTED-NO-TRANSCRIPT row — the QUALIFIED branch below is unexercised, so a green run here would prove nothing about it",
+    );
+    return;
+  }
+  assert.deepEqual(
+    qualifying.filter((x) => x.v.contradicted || x.v.measured).map((x) => x.id),
+    [],
+    `a site whose round trip only QUALIFIED was also reported as contradicted or measured:\n${threeWayReport().join("\n")}`,
+  );
+  for (const { id, v } of qualifying) {
+    assert.equal(typeof v.qualifiedClass, "string", `${id}: a qualifying verdict must NAME the class that qualified it`);
+    assert.ok(
+      v.reason.includes(String(v.qualifiedClass)),
+      `${id}: the reason must quote the class so a reader does not have to re-derive it`,
+    );
+    assert.match(v.reason, /does NOT CONTRADICT/, `${id}: the reason must state the direction it decided`);
+    assert.match(v.reason, /does NOT PROMOTE/, `${id}: the reason must state that it did not promote either`);
+  }
 });
 
 test("THREE-WAY: a site whose round trip was MEASURED and FAILED is never published as verified", () => {
@@ -490,6 +617,68 @@ test("RECORD: no class outside the shipped vocabulary (a typo in a class is a li
   );
 });
 
+/**
+ * THE SCANNED PROSE, with the SERVICE'S OWN REFUSAL VOCABULARY removed first.
+ *
+ * WHY, and why this is a narrowing of the scan rather than a loosening of the
+ * property. The property is that the published record carries no PROMPT text, no
+ * ANSWER text, no account and no cookie — none of which a refusal clause is. The
+ * scan implements it as "any single-quoted span of 4+ characters inside prose is
+ * a quote of something the service returned", which is the right blunt instrument
+ * for every prose field, and `classifyOutcome` deliberately writes the service's
+ * own refusal SENTENCE into `evidence` so the row can be re-derived (see
+ * `rederive` above: it feeds `row.evidence` back as the message). Those two
+ * requirements collided here, and the collision is real rather than hypothetical:
+ *
+ *   MEASURED. `youtube_transcript`'s runner-owned refusal names the control it
+ *   could not find and quotes the site's own button label to do it —
+ *   `no-transcript-button: 'Show transcript' not offered on this page (video
+ *   without captions, or selector rot)` — so the youtube row's evidence carries a
+ *   16-character single-quoted span and this gate, correctly by its own rule,
+ *   reported a PRIVACY violation on a row holding no served content whatsoever.
+ *
+ * THE FIX IS TO EXCLUDE THE VOCABULARY, NOT THE PROPERTY, and the vocabulary is
+ * not a hand-written list of strings: it is the same set of clauses the
+ * classifier itself derives from the modules that EMIT them, read out of the
+ * classifier rather than retyped here. Removing them before the scan means the
+ * quoted marks inside a refusal clause are treated as what they are — part of a
+ * sentence the repo owns and publishes in its own source — while every other
+ * quoted span in the same field is scanned exactly as before.
+ *
+ * IT KEEPS ITS TEETH, and the case that gives them is the reason this is not a
+ * deletion: an answer is never inside a refusal clause, so a genuine quoted
+ * answer, a prompt, or an account in the same field still trips the scan. That is
+ * asserted below, so a future widening of this exemption is visible.
+ */
+function withoutRefusalVocabulary(prose: string): string {
+  const vocabulary = [
+    composerRefusalMatcher()?.clause,
+    ...controlAbsentClauses(),
+    NO_ANSWER_REFUSAL_CLAUSE,
+  ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  let out = prose;
+  for (const clause of vocabulary) out = out.split(clause).join(" ");
+  return out;
+}
+
+test("PRIVACY: excluding the service's own refusal vocabulary does NOT weaken the scan", () => {
+  // The exemption removes a DERIVED refusal clause and nothing else, so a real
+  // quoted span in the same field still fires, and a quoted span that merely sits
+  // beside a clause still fires. If this ever passes because the scan was
+  // disabled rather than narrowed, the exemption has become a hole.
+  const offender = (prose: string): boolean => /(?<![A-Za-z0-9_])'([^']{4,})'(?![A-Za-z0-9_])/.test(withoutRefusalVocabulary(prose));
+  const clause = controlAbsentClauses()[0];
+  assert.equal(typeof clause, "string", "precondition: the classifier must derive at least one refusal clause, or this case is vacuous");
+  // The quoted marks INSIDE a refusal clause are vocabulary, not served content.
+  assert.equal(offender(`the service's own refusal ("${clause}") is what the row quotes`), false);
+  // A real quoted answer anywhere in the field still trips it.
+  assert.equal(offender(`the service's own refusal ("${clause}") came back with the answer 'my bank code is 4417'`), true);
+  // …including one that merely ADJACENT to a clause, with no clause present.
+  assert.equal(offender(`the service answered 'Exploring ideas...'`), true);
+  // And an apostrophe pair inside ordinary words is still not a quote.
+  assert.equal(offender("the runner's own verdict ok=true and the runner's declared count"), false);
+});
+
 test("PRIVACY: the published record carries no prompt text, no answer text, no account, and no cookie", () => {
   const offenders: string[] = [];
   for (const row of rows) {
@@ -526,7 +715,7 @@ test("PRIVACY: the published record carries no prompt text, no answer text, no a
       // quote (which is what this gate exists to catch) still matches. Fixing it
       // the other way — deleting the check because it fired — would have left
       // the load-bearing property unguarded for the wrong reason.
-      for (const m of prose.matchAll(/(?<![A-Za-z0-9_])'([^']{4,})'(?![A-Za-z0-9_])/g)) {
+      for (const m of withoutRefusalVocabulary(prose).matchAll(/(?<![A-Za-z0-9_])'([^']{4,})'(?![A-Za-z0-9_])/g)) {
         offenders.push(`\`${String(row.site)}\` quotes ${m[0]} in its ${proseField} prose`);
       }
       if (/\bPONG-[0-9a-f]{8,}/i.test(prose)) offenders.push(`\`${String(row.site)}\` carries a literal probe nonce in ${proseField}`);

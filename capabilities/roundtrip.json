@@ -4,7 +4,7 @@
   "gate": "test/round-trip-record-truth.test.ts",
   "readSeam": "src/prompt/registry.ts (roundTripMeasurement, consulted by packageStatusOf)",
   "writeSeam": "scripts/audit/record-roundtrip.mjs",
-  "generatedAt": "2026-10-05T20:56:13.336Z",
+  "generatedAt": "2026-10-05T21:53:42.401Z",
   "stalenessWindowDays": 30,
   "nonceProbe": "Reply with exactly: PONG-<32 hex chars generated per measurement>",
   "privacyRule": "This file is published in the sanitized public mirror, so it carries NO prompt text, NO answer text, NO account identity, NO cookie and NO vault path — only lengths and truncated digests. That property is load-bearing: .brain/ is stripped by scripts/ci/make-public-repo.sh:471 and data/ is stripped at :562, so a measurement kept only in either place is not reviewable by anyone reading the repo. Keep it that way.",
@@ -359,6 +359,50 @@
       },
       "capabilityOk": true,
       "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 200, the runner's own verdict ok=true, and the returned payload is a well-formed object (6 top-level keys) whose collection at data.results holds 10 record(s), with the runner's declared count=10 agreeing with the counted rows. This is a CLAIM ABOUT THE SURFACE'S OUTPUT SHAPE, not its content and not a chat answer: a capability returns JSON, so no nonce applies, and this class says exactly one thing — the site returned real data over the wire.",
+      "prereq": "none beyond a live vault session for the site",
+      "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
+    },
+    {
+      "site": "youtube",
+      "capability": "youtube_transcript",
+      "class": "UNATTRIBUTED-NO-TRANSCRIPT",
+      "provenance": "harness",
+      "method": "POST /capability/youtube {capability,args} (NO nonce — a capability returns JSON; freshness rests on the runner's own ok verdict, the counted rows and the idle pool, and pool was sampled from GET /status before the request)",
+      "measuredAt": "2026-10-05T21:53:42.401Z",
+      "httpStatus": 502,
+      "answerChars": 0,
+      "answerSha256_16": "e3b0c44298fc1c14",
+      "probeNonceMatched": null,
+      "doneReason": null,
+      "elapsedMs": 3222,
+      "observedPage": null,
+      "poolAtRequest": {
+        "busy": 0,
+        "total": 0,
+        "queued": 0
+      },
+      "daemonCommit": "ca7d62cdc189bf9406b7f5e4bc9ef5d029ed5245",
+      "resultShape": {
+        "topLevelKeys": [
+          "capability",
+          "data",
+          "error",
+          "method",
+          "ok",
+          "scaffold"
+        ],
+        "rowsPath": null,
+        "count": null,
+        "rows": null,
+        "recordPath": "data",
+        "recordKeys": [
+          "videoId"
+        ],
+        "nonEmptyValues": 1,
+        "declaredZeroCount": false
+      },
+      "capabilityOk": false,
+      "evidence": "class derived by classifyOutcome() via src/prompt/verification-class.ts: HTTP 502 at an IDLE pool and the service's own message is its named control-absent refusal (\"no-transcript-button: 'Show transcript' not offered on this page (video without captions, or selector rot)\") — the page never offered the UI control this capability reads its target with. The sentence LISTS its candidate causes (the target has no captions, or this repo's selector has gone stale) and asserts NEITHER, so NO CAUSE IS ESTABLISHED here and none may be assumed: this is not \"the video has no captions\", not \"the selectors are stale\", and not \"log in\". MEASURED, both candidates are live and the refusal does not separate them — a 12-year-old tutorial video and a mainstream channel's video returned the byte-identical sentence — which is why this is ONE class and not two. What IS established is that the round trip was PERFORMED and the surface did not deliver for THIS ARGUMENT; it is recorded and inspectable, and because the argument is part of the measurement, it QUALIFIES a published claim rather than falsifying it — see `falsifiesClaim`, which is the classifier's own answer and what the read seam imports.",
       "prereq": "none beyond a live vault session for the site",
       "notes": "capability surface: this row is machine-checkable in SHAPE only (HTTP status, the runner's own ok verdict, and resultShape) — a capability returns JSON, so no nonce proves anything and probeNonceMatched is null for exactly that reason. RETURNS-DATA claims the surface returned DATA over the wire, not what the data says"
     }

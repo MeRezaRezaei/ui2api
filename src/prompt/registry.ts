@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { resolvePackagedProfile, listProfiles, isDriveableChatProfile, type ChatSiteProfile } from "../profile/profile.js";
 import { listAccounts, verifyStoredAccount, withAccountVerdict, type StoredAccount } from "../runtime/session-store.js";
 import { consumerAccountsSummary, consumerProse, consumerVerifiedRecord, type ConsumerAccountsSummary } from "./consumer-surface.js";
-import { VERIFICATION_CLASSES, capabilityDataEvidence } from "./verification-class.js";
+import { VERIFICATION_CLASSES, capabilityDataEvidence, falsifiesClaim } from "./verification-class.js";
 
 export interface RegistryToolInputSchema {
   type: "object";
@@ -438,6 +438,31 @@ export interface RoundTripVerdict {
   contradicted: boolean;
   /** The DERIVED failure class behind a `contradicted` verdict, else null. */
   failureClass: string | null;
+  /**
+   * A round trip that was PERFORMED, delivered nothing, and did NOT falsify a
+   * published claim — the third reading, and the reason this type has three
+   * negatives' worth of vocabulary instead of two.
+   *
+   * MEASURED, the case: `youtube_transcript` answers HTTP 502 with the runner's
+   * own `no-transcript-button:` refusal on a page that offers no transcript
+   * control for the requested video. That sentence LISTS its two candidate causes
+   * (this video has no captions, or this repo's selector has gone stale) and
+   * asserts NEITHER, so the row establishes a non-delivery for ONE ARGUMENT and
+   * nothing about the surface. Filing it as `contradicted` would assert a
+   * surface-wide failure from a single target-scoped observation; filing it as
+   * "no row at all" would throw away a real measurement. It is neither.
+   *
+   * WHICH ROWS LAND HERE is not a second opinion about the class: it is the
+   * class's own answer, derived by importing `falsifiesClaim` from the
+   * classifier rather than restated here, so the writer and this reader cannot
+   * disagree about which failures demote.
+   *
+   * IT STILL NEVER PROMOTES. A qualifying row earns no `verified` claim —
+   * `measured` stays false — it only declines to DEMOTE.
+   */
+  qualified: boolean;
+  /** The DERIVED class behind a `qualified` verdict, else null. */
+  qualifiedClass: string | null;
   reason: string;
 }
 
@@ -450,10 +475,10 @@ const ROUNDTRIP_SUCCESS_CLASSES: ReadonlySet<string> = new Set(["ANSWERS", "RETU
 
 export function measuredRoundTripFor(siteId: string, now: number = Date.now()): RoundTripVerdict {
   const rec = readRoundTripRecord();
-  if (rec.refusal) return { measured: false, contradicted: false, failureClass: null, reason: rec.refusal };
+  if (rec.refusal) return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: rec.refusal };
   const mine = rec.rows.filter((r) => typeof r.site === "string" && r.site === siteId);
   if (mine.length === 0) {
-    return { measured: false, contradicted: false, failureClass: null, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
+    return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
   }
   const settled = mine.filter((r) => {
     if (r.provenance !== "harness") return false;
@@ -494,6 +519,8 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
       measured: true,
       contradicted: false,
       failureClass: null,
+      qualified: false,
+      qualifiedClass: null,
       reason:
         first.class === "RETURNS-DATA" && shape
           ? `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" — the capability ${String(first.capability)} returned ${shape.rows} record(s) at ${shape.rowsPath} (runner ok=true, declared count ${shape.count} = counted rows, HTTP ${first.httpStatus}, inside the ${rec.stalenessWindowDays}-day window)`
@@ -506,14 +533,23 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
   // re-derived from the row's own machine fields by
   // test/round-trip-record-truth.test.ts, so a hand-typed class cannot buy this
   // state any more than it can buy `measured`.
-  const failed = mine.filter((r) => {
+  //
+  // `falsifiesClaim` is IMPORTED, not restated: which named failures demote is
+  // the CLASSIFIER's answer about its own members, and a second copy of that
+  // rule here is how the writer and this reader end up disagreeing about whether
+  // a recorded refusal is a surface failure or a scoped one.
+  const inWindow = (r: (typeof mine)[number]): boolean => {
     if (r.provenance !== "harness") return false;
-    const cls = typeof r.class === "string" ? r.class : "";
-    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
-    if (cls === "UNMEASURED" || ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
     if (typeof r.measuredAt !== "string") return false;
     const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
     return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
+  };
+  const failed = mine.filter((r) => {
+    const cls = typeof r.class === "string" ? r.class : "";
+    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
+    if (ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
+    if (!falsifiesClaim(cls)) return false;
+    return inWindow(r);
   });
   if (failed.length > 0) {
     const newest = failed.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
@@ -521,6 +557,8 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
       measured: false,
       contradicted: true,
       failureClass: typeof newest.class === "string" ? newest.class : null,
+      qualified: false,
+      qualifiedClass: null,
       reason:
         `MEASURED AND FAILED — capabilities/roundtrip.json carries ${failed.length} row(s) for "${siteId}" whose DERIVED class is a named FAILURE, ` +
         `the newest being ${String(newest.capability)} class=${String(newest.class)} httpStatus=${String(newest.httpStatus)} ` +
@@ -531,6 +569,43 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
     };
   }
 
+  // A MEASURED ROUND TRIP THAT DELIVERED NOTHING FOR ONE ARGUMENT — the third
+  // reading, and the one that must NOT be reported as either of the two above.
+  // Reached only after the contradicting branch declined, so a site with a real
+  // surface-wide failure never hides an argument-scoped one behind it.
+  //
+  // WHY IT IS ITS OWN VERDICT RATHER THAN "no row": the row exists, the round
+  // trip was performed, and the refusal is quotable from it. Reporting it as
+  // unmeasured throws away real evidence; reporting it as CONTRADICTED asserts a
+  // surface-wide failure from an observation scoped to one `videoId`. What the
+  // read seam may say about a claim is "this argument did not deliver", and it
+  // still may not say "this surface works" — hence `measured` stays false.
+  const qualifying = mine.filter((r) => {
+    const cls = typeof r.class === "string" ? r.class : "";
+    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
+    if (ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
+    if (falsifiesClaim(cls)) return false;
+    return inWindow(r);
+  });
+  if (qualifying.length > 0) {
+    const newest = qualifying.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
+    return {
+      measured: false,
+      contradicted: false,
+      failureClass: null,
+      qualified: true,
+      qualifiedClass: typeof newest.class === "string" ? newest.class : null,
+      reason:
+        `MEASURED, DID NOT DELIVER, AND QUALIFIES — capabilities/roundtrip.json carries ${qualifying.length} row(s) for "${siteId}" whose ` +
+        `DERIVED class is an ARGUMENT-SCOPED non-delivery, the newest being ${String(newest.capability)} class=${String(newest.class)} ` +
+        `httpStatus=${String(newest.httpStatus)} measuredAt=${String(newest.measuredAt)} (inside the ${rec.stalenessWindowDays}-day window). ` +
+        `The round trip was PERFORMED and the surface delivered nothing for the argument this row was given; the row is kept because the ` +
+        `refusal is quotable and inspectable. It does NOT CONTRADICT a published \`verified\` claim, because a claim is about the surface ` +
+        `and this observation is about one argument — and it establishes NO cause: read the class's own evidence for the candidates the ` +
+        `service refused to choose between. It also does NOT PROMOTE: this site is still not measured, so it earns no verified claim.`,
+    };
+  }
+
   const why = mine
     .map((r) =>
       r.provenance !== "harness"
@@ -538,7 +613,7 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
         : `${String(r.capability)}: probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)} capabilityOk=${String(r.capabilityOk)}`,
     )
     .join("; ");
-  return { measured: false, contradicted: false, failureClass: null, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
+  return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
 }
 
 /**
@@ -763,6 +838,156 @@ export function capabilityInputSchema(
 /** Resolve the daemon's data dir the same way promptd/pool do (env → "data"). */
 export function resolveDataDir(): string {
   return process.env.UI2API_DATA_DIR || process.env.UI2API_DATA_DIR_OVERRIDE || "data";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE REMEDIATION-ADVICE DERIVATION — what a human is TOLD to run
+//
+// WHAT THIS IS. Every gate in this repo may report a gap, and the gap message is
+// the ONE part of a gate anybody acts on. A gate whose advice cannot be executed
+// fails the reader even when the finding is correct: following it correctly still
+// fails, and the failure looks like the tool being broken rather than the advice
+// being wrong.
+//
+// MEASURED (2026-10-05). `test/round-trip-record-truth.test.ts` closed its gaps
+// with ONE hardcoded line:
+//
+//     Close it by running `node scripts/audit/record-roundtrip.mjs --site youtube
+//     --capability chat`
+//
+// and `youtube` HAS NO CHAT. Its manifest says "No chat composer exists; no chat
+// capability is registered", `builtinProfile` is "none", it declares SEVEN
+// capabilities and not one of them is chat, its `profile.json` carries
+// `composer:[] answer:[]`, and it is ABSENT from `GET /sites`. So the command the
+// gate printed was unrunnable twice over: `--capability chat` is not a capability
+// the site declares (the daemon answers HTTP 400 `unknown_capability "chat" for
+// "youtube"`), and the invocation omits the `--import tsx` loader the harness
+// documents as REQUIRED in a source checkout (`record-roundtrip.mjs:118`). The
+// lane that found it REFUSED to run the command, which is the correct call — and
+// it is why this is a defect and not a curiosity.
+//
+// WHY IT LIVES HERE AND NOT IN THE GATE. Every input is a fact this module
+// already owns and no gate re-derives: which ids the daemon can address as CHAT
+// (`defaultChatSurface()` — the same gate promptd's `/v1` allow-list is built
+// from), which capabilities a package DECLARES (`validManifestCapability` over the
+// same manifest `buildRegistryPackages()` reads), and what arguments each one
+// requires (`declaredCapabilityInputSchema` — the DECLARED contract, never the
+// regex guess `capabilityInputSchema` falls back to). A gate that re-read the
+// manifest to format a sentence would be a second reader of the same data, and
+// this file's own history is the argument against that: `capabilityInputSchema`
+// already GUESSED wrong once (advertising `new_chat` while every runner reads
+// `newChat`) purely because a second implementation existed.
+//
+// WHAT IT DOES NOT DO. It reads a manifest and formats a string. It NEVER launches
+// a browser, never opens a daemon connection, and never runs the harness — a gate
+// that executed its own advice would measure nothing and prove nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The harness invocation, matched to its REAL CLI contract: `--site`,
+ *  `--capability`, `--args`, `--dry-run` (record-roundtrip.mjs:118-122). The
+ *  `--import tsx` loader is in the prefix because the harness documents it as
+ *  REQUIRED — there is no `dist/` in a source checkout, so without it the script
+ *  cannot import the shipped classifier and refuses with exit 2. */
+const PROBE_HARNESS = "node --import tsx scripts/audit/record-roundtrip.mjs";
+
+/** A placeholder value for a REQUIRED arg, derived from its DECLARED type. A
+ *  string arg becomes a visible `<name>` placeholder rather than a fabricated
+ *  value: a gate may not invent the query or the videoId a real probe needs, and
+ *  a placeholder that reads as a placeholder is an instruction, not a claim. */
+function probeArgValue(declared: RegistryToolInputSchema, key: string): unknown {
+  switch (declared.properties[key]?.type) {
+    case "number":
+    case "integer":
+      return 0;
+    case "boolean":
+      return false;
+    case "array":
+      return [];
+    case "object":
+      return {};
+    default:
+      // The placeholder is a JS VALUE, encoded once by the caller's
+      // JSON.stringify — encoding it here too produced `"\"<query>\""`, a
+      // doubly-quoted string a runner would take literally.
+      return `<${key}>`;
+  }
+}
+
+export interface RoundTripProbeAdvice {
+  siteId: string;
+  /** "chat" when the daemon can address this id on POST /prompt, "capability"
+   *  when it declares capability surfaces only, "none" when it declares neither. */
+  shape: "chat" | "capability" | "none";
+  /** True iff `defaultChatSurface()` carries the id — the same truth `/v1/models`
+   *  and `/sites` serve. A capability-only package is NEVER `true` here, which is
+   *  what makes `--capability chat` unprintable for it. */
+  chat: boolean;
+  /** The declared capability ids the advice names, in manifest order. The
+   *  synthetic `chat` sentinel is NOT one of them. */
+  capabilities: string[];
+  /** Copy-pasteable commands: the chat probe first when the site has a chat
+   *  surface, then one per declared capability. */
+  commands: string[];
+  /** An honest sentence when there is nothing to run. Never an empty command. */
+  note: string | null;
+}
+
+/**
+ * The executable remediation for `siteId`, DERIVED from the package rather than
+ * from a template. Pure: manifest reads only, no browser, no daemon, no harness.
+ */
+export function roundTripProbeAdvice(siteId: string): RoundTripProbeAdvice {
+  const chat = defaultChatSurface().some((e) => e.id === siteId);
+  const pkgDir = findPackageDir(siteId);
+  let caps: (ManifestCapability & { id: string })[] = [];
+  if (pkgDir) {
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(pkgDir, "manifest.json"), "utf8")) as Manifest;
+      caps = (Array.isArray(manifest.capabilities) ? manifest.capabilities : []).filter(validManifestCapability);
+    } catch {
+      caps = [];
+    }
+  }
+
+  const commands: string[] = [];
+  if (chat) {
+    // The chat sentinel is the harness's DEFAULT `--capability`, and it is the
+    // only shape that can derive class ANSWERS: it posts to /prompt, so the
+    // per-measurement nonce probe runs and `probeNonceMatched` is meaningful.
+    // A `<site>_chat` capability row is measured over /capability instead, which
+    // returns JSON with no nonce — RETURNS-DATA at best. So a chat site is told
+    // to probe as chat FIRST, and its declared capabilities after it.
+    commands.push(`${PROBE_HARNESS} --site ${siteId} --capability chat`);
+  }
+  for (const c of caps) {
+    const declared = declaredCapabilityInputSchema(c);
+    const required = declared?.required ?? [];
+    // `anyOf` ("at least one of") picks the FIRST branch: it is the first
+    // satisfying alternative the package itself declared, so the command is
+    // correct by construction and the alternatives are reported alongside it.
+    const anyOfBranch = declared?.anyOf?.[0]?.required ?? [];
+    const keys = required.length > 0 ? required : anyOfBranch;
+    const args = keys.length > 0 && declared
+      ? ` --args '${JSON.stringify(Object.fromEntries(keys.map((k) => [k, probeArgValue(declared, k)])))}'`
+      : "";
+    commands.push(`${PROBE_HARNESS} --site ${siteId} --capability ${c.id}${args}`);
+  }
+
+  const shape: RoundTripProbeAdvice["shape"] = commands.length === 0 ? "none" : chat ? "chat" : "capability";
+  return {
+    siteId,
+    shape,
+    chat,
+    capabilities: caps.map((c) => c.id),
+    commands,
+    note:
+      commands.length === 0
+        ? `\`${siteId}\` declares NO capability in its installed manifest and is NOT on the daemon's chat surface ` +
+          `(GET /sites), so there is nothing this gate can tell you to run: a probe needs a surface to probe. ` +
+          `Either the package's manifest under capabilities/${siteId}/ is missing its capabilities array, or the ` +
+          `published claim names a surface this build cannot serve — resolve that before re-running anything.`
+        : null,
+  };
 }
 
 /**
