@@ -340,29 +340,66 @@ Commit `d52a8c4` names those two, by reading `git ls-files` rather than `readdir
 name an untracked file. Gate re-run by me: the two shipped-file failures are gone; the residual red is
 entirely the foreign untracked set, which is not mine to register.
 
+### ROUND N+194d — the "gate that certifies nothing" hunt, and one lane that corrected its own brief (2026-10-05)
+
+Two read-only audit lanes ran in parallel (one on the `restartBrowser` leak, one sweeping every
+gate for the **certifies-a-private-copy** class that round N+194 had just closed twice). The audit
+found **5 real instances with executed falsifiers**, not reasoned ones — and then one of the
+repair lanes **disagreed with the audit's own number**, which is the more useful result.
+
+| lane | closed at | what it proved |
+| --- | --- | --- |
+| `l1-restart-worker-teardown` | `bb2dc7e` | `restartBrowser()` closes only the **idle** dropped drivers — **not the busy ones**, because a busy one self-cleans via its own `release()` and closing it would be a *new* worse defect. It also **disproved the audit's suggested fix** by verifying from `driver.ts:960-978` that in attach mode `close()` reaches only `this.page` (the shared context is never touched; `ownsBrowser` is false whenever the pool passes a browser), then made its own patch narrower than the brief. |
+| `l1-readiness-gate-measured` | `9e43cea` | `production-readiness-gate` criterion **3.3** was a grep for the *identifier* `typedClientErrorCodes` standing in for "the error contract is measured" — emptying that function's body left readiness **green**. Now it runs the real measurement, extracted to `test/helpers/error-contract-measure.ts` so both gates share one implementation (importing a `.test.ts` under `node --test` re-registers its tests — a hazard already recorded at `test-timeout-discipline.test.ts:245-250`). **3.2** matched `--test-timeout=\d+`, which cannot tell a working bound from `999999999` **or** from `1`; the window is now **derived** from `test-timeout-discipline`'s own assertions. **3.5** was literally `() => true` and is now **relabelled** — it pins the CI hand-off instead of pretending to have run `tsc`, and the comment says so explicitly. |
+| `l1-output-truth-read-tails` | `38a89e4` | `capability-output-truth`'s `READ_TAILS` silently `continue`d past every unrecognised tail — the worst possible default in a gate, converting "I do not know" into "all fine". The classifier is now **total by construction** (`readback/state-flip/delegating/refusal/undispatched`, no `unknown` member), asserted to sum to the corpus. **It refuted the audit's "69 unclassified": the real figure is 110 skipped, of which only 3 can genuinely fabricate `ok:true` off a page read** (`duckduckgo_chat`, `duckduckgo_file_upload`, `duckduckgo_reasoning`). Suite ends honestly GREEN — the readback surface grew 15→25 and all 10 newly-covered are asserted, and the derived fakeable set independently reproduces the pre-existing 5, which is real cross-check evidence rather than a coincidence. |
+
+Also fixed directly by me at fan-in: `ff9bd19` — `test/chrome-daemon-reuse.test.ts:237` had an
+**unbounded `spawnSync`**, a *committed* real `test-timeout-discipline` failure. The gate that was
+rebuilt two rounds earlier caught it on its first honest run, which is the clearest evidence yet
+that the rebuilt gate bites.
+
 ## OPEN — none that I can prove are still open
 
-**Everything this file tracked is closed, each with its closing evidence above**, and round
-N+194 closed five more. The remaining round N+193 residue is either fixed or **blocked on
-another workstream**, and this file will not record a blocked item as open — it records the
-block. Unfixed, in rank order, all re-confirmed still real at N+194:
+**Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
+order, all re-confirmed still real:
 
-1. `src/prompt/pool.ts:945` — `restartBrowser()` sets `this.workers = []` with no
-   `driver.close()`, so in attach mode (the documented production posture) contexts stay open in
-   the operator's own Chrome forever and untracked by `/status`, and `drainWorker` hands an
-   **untracked** page to a waiter, so live pages exceed `max`.
-2. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
+1. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors
    (`Cannot find name 'termPatternFor'`) and 3 test failures from a concurrent lane's
    half-finished edit. It makes `tsc -p tsconfig.test.json` exit 2 for the whole tree; I am
    reporting it, not fixing it, and not committing it.
+2. `gate-wiring` GOAL 145 / R4 — still red, and **entirely foreign**: three test files no script
+   names (`hub-publish-host-gate`, `plugin-wigolo-fabricated-success`, `readback-overhead-gate`)
+   are all **UNTRACKED**, and `pool-sweep-probe-concurrency` is named but not tracked. Registering
+   an untracked file is the *opposite* direction of the rule and the gate correctly refuses it, so
+   this red clears when that workstream commits its files, and not before. **Not mine to force.**
+3. `src/prompt/pool.ts` — two consequences of `restartBrowser()`, both found by the lane that
+   closed the leak and left alone as adjacent goals: a **wedged** busy dropped worker is
+   unreachable by `reclaimWedgedWorkers` (`:1183` filters `this.workers`) so it never self-cleans;
+   and `/status` still reports worker count only, so even a bounded orphan is undetectable there.
 
 **Items that were on this list and are now closed**, each at the commit named above:
 `browser.ts:537` orphan kill → `c812df5`; `chrome-daemon.ts:258/335` TOCTOU + non-atomic write →
 `648aae8`; `profile-ingest.ts` `info_cache` type guard → `f300686`; `openai.ts` 400-vs-413 body cap
-→ `f55c32c`; the knob-table and gate-wiring shipped-file gaps → `850cf55` / `d52a8c4`.
+→ `f55c32c`; `pool.ts:945` dropped-worker teardown → `bb2dc7e`; the shipped-file registration gap →
+`d52a8c4`; the repo's own unbounded `spawnSync` → `ff9bd19`.
 The `pool.ts:1008` double-request race was closed by the **other** workstream in `5544246`
 (GOAL 239) while this lane was blocked on the same file — which is exactly why the ledger
 records the block rather than an open item that would have been closed underneath it.
+
+### The audit's remaining findings, ranked, still open
+
+The gate sweep's other three falsified instances are real and unfixed, worst first:
+
+1. `test/capability-untested-critical-path.test.ts:300` — `servesWallAsSuccess` windows ±700 chars
+   around **the first** `answer: r.answer` only. Two falsifiers ran: a guarded `listConversations`
+   vouches for an unguarded `chat` arm 200 chars away, and guarding the first arm leaves a second
+   unguarded. **The same shape `test-timeout-discipline` just closed, one file over.**
+2. `test/no-internal-error-echo.test.ts` — "**ZERO** handlers echo a raw `e.message`" matches ONE
+   verbatim spelling; against four equally-leaking variants (renamed catch var, template literal,
+   helper call, reordered fields) it matched **0/4**.
+3. `test/site-status-truth.test.ts` — checks only `claimed.has(id)`, never the reverse, so a site
+   that claims verified without a round-trip is invisible; the hand-typed 7 equals the derived set
+   today and nothing enforces that.
 
 The next wave hunts NEW friction rather than re-reading this list — which is the failure
 mode this file exists to prevent.
