@@ -1,7 +1,7 @@
 import { test as t, describe as d } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { measureEmitted, parseDocTable, contractGaps } from "./helpers/error-contract-measure.js";
+import { readFileSync, readdirSync } from "node:fs";
+import { measureEmitted, parseDocTable, contractGaps, shapeMessageCodes, measureShapeFallback } from "./helpers/error-contract-measure.js";
 import { DriverRefusal } from "../src/prompt/driver.js";
 import { HttpClientError } from "../src/prompt/http.js";
 import { redactInternalError, NO_ANSWER_REFUSAL_RE } from "../src/prompt/error-redaction.js";
@@ -299,13 +299,28 @@ d("the error-code SCANNER can express a code the daemon really serves", () => {
     const cls = declared[1]!;
     // …and no pattern may smuggle a private one back in: every code-literal
     // capture in the file must interpolate the shared class.
+    //
+    // PRECISE ABOUT WHAT IS PINNED, and this is a TIGHTENING rather than a
+    // loosening. The first form of this pin demanded that EVERY `new RegExp` in
+    // the file interpolate CODE_CLASS, which is wrong for a pattern that captures
+    // no code at all — the request-shape status resolver captures a `\d{3}`, not
+    // a code, and forcing CODE_CLASS into it would be nonsense. So the pin is
+    // stated as the property it actually means: a character-class capture must be
+    // EITHER the shared class OR a status (`\d{3}`) — nothing else. A new harvest
+    // that captures a code with a class of its own is still RED, and so is one
+    // that captures a class we have never sanctioned.
+    const CODE_CAPTURE = /\(\[([^\]]+)\]\+\)/g;
+    const STATUS_CAPTURE = /\(\\d\{3\}\)/;
     const inline = [...helper.matchAll(/new RegExp\(`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1]!);
     assert.ok(inline.length >= 4, `precondition: the envelope, typed-constructor, poolRefusal and doc-table harvests all go through new RegExp, found ${inline.length}`);
-    for (const prefix of inline) {
-      assert.ok(
-        prefix.includes("[${CODE_CLASS}]"),
-        `a harvest pattern hard-codes its own character class instead of the shared CODE_CLASS (${prefix}) — a second copy is the measured defect waiting to happen`,
-      );
+    for (const pattern of inline) {
+      for (const [, cls] of pattern.matchAll(CODE_CAPTURE)) {
+        const sanctioned = cls === "${CODE_CLASS}" || STATUS_CAPTURE.test(cls);
+        assert.ok(
+          sanctioned,
+          `a harvest pattern captures a code with an unsanctioned character class (${cls}) instead of the shared CODE_CLASS — a second copy is the measured defect waiting to happen (pattern: ${pattern})`,
+        );
+      }
     }
     const literals = helper.match(/"\[([^\]]+)\]\+"/g) ?? [];
     assert.deepEqual(literals, [], `no harvest pattern may carry an inline code class, found ${JSON.stringify(literals)}`);
@@ -378,5 +393,223 @@ d("the error-code SCANNER can express a code the daemon really serves", () => {
     // And the shipped doc names it, with that status — the bidirectional check.
     assert.equal(parseDocTable(readFileSync("README.md", "utf8")).get("ui2api_driver_error"), 502, "the doc table must carry ui2api_driver_error at 502");
     assert.deepEqual(contractGaps(emitted, parseDocTable(readFileSync("README.md", "utf8"))), [], "doc and source must agree on every code, including the one that was invisible");
+  });
+});
+
+/**
+ * THE SECOND INSTANCE OF THE SAME CLASS, ONE LAYER IN: a code that reaches the
+ * wire THROUGH A VARIABLE.
+ *
+ * MEASURED DEFECT, not a style nit. Every harvest pattern in the helper looks
+ * for a literal. `src/prompt/http.ts` answers a caller mistake as
+ * `send(res, isRequestShape ? 400 : 500, shapeCode ? { error: { code: shapeCode,
+ * …` where `shapeCode` is read out of a `SHAPE_MESSAGES` LOOKUP TABLE — so the
+ * literal exists exactly once, in the table, and the literal-return patterns
+ * are structurally blind to it. Measured before the fix: the served vocabulary
+ * was 17 and `unknown_site` and `not_chat` were absent from it, while BOTH are
+ * reachable over loopback against the real daemon (`POST /prompt` with an
+ * unserved site answers 400 `unknown_site`; with an installed capability-only
+ * package it answers 400 `not_chat`, not `unknown_site`).
+ *
+ * A charset fix could never have closed this. The charset was already right; the
+ * code was simply not spelled where the scanner looked.
+ */
+d("a code behind a LOOKUP TABLE is as measurable as one behind a literal", () => {
+  const http = readFileSync("src/prompt/http.ts", "utf8");
+
+  t("the resolver is REAL: it reads the table and derives the status, or it REFUSES", () => {
+    // The harvest is not a hard-coded list dressed as a measurement — it reads
+    // the source's own table and its own send site, and it THROWS rather than
+    // quietly measuring nothing when either moves. A harvest that silently
+    // returned empty is the exact failure mode being fixed, so the refusal is
+    // the load-bearing half of this fix and is pinned below.
+    assert.match(
+      readFileSync("test/helpers/error-contract-measure.ts", "utf8"),
+      /function shapeMessageCodes[\s\S]*?throw new Error/,
+      "the request-shape resolver must FAIL LOUD when it cannot read the shape — a silent empty harvest re-blinds the gate invisibly",
+    );
+
+    // And it measured what it was asked to: both codes, at the status the send
+    // site itself carries.
+    const emitted = measureEmitted();
+    for (const code of ["unknown_site", "not_chat"]) {
+      assert.equal(
+        emitted.get(code),
+        400,
+        `${code} reaches the wire through \`code: shapeCode\`, so the resolver must measure it — it is missing from the vocabulary ${JSON.stringify([...emitted.entries()])}`,
+      );
+    }
+
+    // The status is DERIVED, not typed. Proved by mutating the send site in a
+    // COPY of the source and re-measuring with the REAL resolver: flip the
+    // shape branch from 400 to 418 and the measurement must follow. If 400 were
+    // hard-coded anywhere in the resolver, this would still answer 400 and the
+    // whole "derived" claim would be prose.
+    const mutated = http.replace(
+      /send\(\s*(?:res|w)\s*,\s*isRequestShape\s*\?\s*\d{3}\s*:\s*\d{3}\s*,\s*shapeCode/,
+      "send(res, isRequestShape ? 418 : 500, shapeCode",
+    );
+    assert.notEqual(mutated, http, "precondition: the send site really was mutated — the shape moved, so the derivation proof is no longer testing what it claims");
+    const derived = shapeMessageCodes(mutated);
+    assert.deepEqual(
+      [...new Set(derived.values())],
+      [418],
+      `the resolver must read the status off the send site — it answered ${JSON.stringify([...derived.entries()])} on a send site that now says 418`,
+    );
+    assert.deepEqual(
+      [...derived.keys()].sort(),
+      [...new Set(measureEmitted().keys())].filter((k) => k === "unknown_site" || k === "not_chat" || k === "no_stored_account" || k === "unknown_capability").sort(),
+      "the mutated send site must measure the SAME codes at the new status — only the status is supposed to move",
+    );
+    // And the mutation is reversible to exactly the shipped measurement.
+    assert.deepEqual([...shapeMessageCodes(http).entries()].sort(), [...measureEmitted().entries()].filter(([c]) => ["unknown_site","not_chat","no_stored_account","unknown_capability"].includes(c)).sort());
+  });
+
+  t("the vocabulary really grew: both codes are measured AND documented, and neither fits the old charset", () => {
+    const emitted = measureEmitted();
+    const documented = parseDocTable(readFileSync("README.md", "utf8"));
+    // Observable: the fix moved the number, and the two that appeared are named.
+    for (const code of ["unknown_site", "not_chat"]) {
+      assert.ok(emitted.has(code), `${code} must be in the measured vocabulary`);
+      assert.ok(documented.has(code), `${code} must have a README table row — it is served, and the bidirectional check treats an undocumented served code as a gap`);
+    }
+    assert.deepEqual(contractGaps(emitted, documented), [], "doc and source must agree on every code, including the two behind the lookup table");
+  });
+
+  t("the `?? \"…\"` FALLBACK is named rather than silently counted as served", () => {
+    // `shapeCode` resolves to `SHAPE_MESSAGES.find(...)?.code ?? "<fallback>"`,
+    // and the fallback is UNREACHABLE: `isRequestShape` is computed with
+    // `.some()` over the same table and the same string that `.find()` then
+    // reads, so if the guard is true the find cannot miss. It is deliberately
+    // NOT in the emitted vocabulary — a code the daemon can never send does not
+    // belong in the consumer contract — and it is returned by name so it is
+    // visible rather than silently dropped.
+    const fallback = measureShapeFallback();
+    assert.equal(fallback, "bad_request", "the request-shape fallback must be readable by name");
+    const emitted = measureEmitted();
+    assert.equal(
+      emitted.has(fallback!),
+      false,
+      `the unreachable fallback ${fallback} must NOT be measured as served — documenting a code that can never arrive would be a lie in the contract table`,
+    );
+    assert.equal(
+      parseDocTable(readFileSync("README.md", "utf8")).has(fallback!),
+      false,
+      `the README must not document ${fallback} — it is unreachable, so a row for it promises a class the daemon cannot deliver`,
+    );
+  });
+});
+
+/**
+ * THE HAND-COPIED PARSER, DELETED — and kept deleted.
+ *
+ * MEASURED DEFECT (instance 11 of this class). `test/pool-refusal-truth.test.ts`
+ * held its OWN copy of the README-table parser, and its character class was
+ * `[a-z_]+` — the same blind class just repaired in the shared helper, and left
+ * unrepaired in the copy. Two implementations of one rule, one fixed and one
+ * not, so the repair could drift back the moment either file was edited. Worse,
+ * that copy decided which codes the REACHABILITY gate iterated: the shipped
+ * table's `502 ui2api_driver_error` row (the `2` sits inside `ui2api`) was
+ * simply not in the set, so a row the README promised was never tested. The
+ * table is a contract and the daemon ships `ui2api_driver_error`; the copy made
+ * the gate blind to exactly the code a previous lane had just added.
+ *
+ * WHY A PIN AND NOT A COMMENT. A hand-copied parser is a defect that only shows
+ * up when someone edits one file, so the prevention has to be a gate: no file in
+ * `test/` may parse the error-contract table with a character class of its own.
+ */
+d("the error-contract table has ONE parser, and no test file holds a copy", () => {
+  t("no test file carries its own copy of the error-contract table parser", () => {
+    const helper = readFileSync("test/helpers/error-contract-measure.ts", "utf8");
+    const files = readdirSync("test")
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => `test/${f}`);
+    assert.ok(files.length > 20, `precondition: the sweep really found the test tree, found ${files.length} files`);
+
+    // THE PRECISE PIN, and precision is load-bearing here. It must name the
+    // DEFECT, not a family resemblance: a sweep for "any regex plus any
+    // lowercase character class" flagged 22 unrelated files (every test with a
+    // `[a-z]`-shaped regex in it) and made the pin unsatisfiable — worse than no
+    // pin, because it trains a reader to ignore it. So the two halves must
+    // appear in the SAME regex literal: a doc-row shape (`| 404 | `code` |`)
+    // AND a hand-written lowercase code class. That conjunction is the
+    // hand-copied table parser and nothing else.
+    //
+    // The doc-row marker is the error-contract table's ACTUAL shape: a 3-digit
+    // STATUS cell followed by a backticked code cell — `| 404 | `code` |`. The
+    // status cell is what makes it specific, and the `\\?` matters: in a
+    // regex LITERAL in source, `\d{3}` is five characters (backslash, d, brace,
+    // 3, brace), so a marker written without the optional backslash cannot see
+    // the very row it names. MEASURED while building this pin — that omission
+    // made the sweep silently match NOTHING, which is the worst possible
+    // failure for a gate whose whole purpose is to catch a silent miss.
+    // A form that ignored the status cell instead flagged
+    // `round-trip-record-truth.test.ts` and `site-status-truth.test.ts`, which
+    // parse a DIFFERENT table (the capability inventory, whose rows have no
+    // status cell) — two files that are not this defect.
+    const DOC_ROW = /\\?d\{3\}[^\n]{0,24}`/;
+    const HAND_CLASS = /\[[^\]]*[a-z][^\]]*\]\+/;
+    const reimplemented = files.filter((f) => {
+      // Comments are excluded for the reason spelled out below: the fix's own
+      // prose names the class it removed, so a comment-blind pin could never be
+      // satisfied by an honest account of the defect. CODE only.
+      const src = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      for (const m of src.matchAll(/\/((?:[^/\\\n]|\\.)+)\/[gimsuy]*/g)) {
+        const body = m[1]!;
+        if (DOC_ROW.test(body) && HAND_CLASS.test(body)) return true;
+      }
+      return false;
+    });
+    assert.deepEqual(
+      reimplemented,
+      [],
+      `these files re-parse the error-contract table with a character class of their own: ${JSON.stringify(reimplemented)} — one parser, one class; import parseDocTable instead`,
+    );
+
+    // And the positive control: the shared parser IS the one that reads it, and
+    // it reads every row the shipped README actually declares. A pin that passes
+    // because the sweep found nothing would be a green lie, so the count is
+    // asserted against the real table.
+    const rows = parseDocTable(readFileSync("README.md", "utf8"));
+    assert.ok(rows.size >= 19, `precondition: the shared parser really reads the shipped table, found ${rows.size} rows: ${JSON.stringify([...rows.keys()])}`);
+    assert.ok(
+      rows.has("unknown_site") && rows.has("not_chat") && rows.has("ui2api_driver_error"),
+      `the shared parser must read the rows the old [a-z_]+ copy could not — found ${JSON.stringify([...rows.keys()])}`,
+    );
+    assert.ok(helper.includes("export function parseDocTable"), "precondition: the helper is the exported owner of the table parse");
+  });
+
+  t("pool-refusal-truth CONSUMES the shared parser — its declared set is the shared one", async () => {
+    // The positive half: the file that used to carry the copy now imports the
+    // shared one, so the reachability gate iterates exactly the codes the
+    // shared character class can express.
+    const src = readFileSync("test/pool-refusal-truth.test.ts", "utf8");
+    assert.match(
+      src,
+      /import\s*\{[^}]*parseDocTable[^}]*\}\s*from\s*"\.\/helpers\/error-contract-measure\.js"/,
+      "pool-refusal-truth must import parseDocTable from the shared helper — a hand-copied table parser is the measured defect this pin exists to prevent",
+    );
+    assert.match(
+      src,
+      /function declaredContract\(\)[\s\S]{0,400}return parseDocTable\(/,
+      "declaredContract() must BE the shared parser, not a wrapper around its own regex",
+    );
+    // No doc-table regex survives anywhere in the file's CODE. Comments are
+    // excluded deliberately and for a reason: the fix's own prose NAMES the
+    // class it removed (`[a-z_]+`), so a comment-blind pin would be
+    // unsatisfiable by an honest account of the defect. Code only — a comment is
+    // not an implementation.
+    const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.ok(
+      !/matchAll\(\s*\/\^\\\?\|/.test(codeOnly) && !/\[[^\]]*[a-z][^\]]*\]\+/.test(codeOnly),
+      "pool-refusal-truth must not carry a doc-table regex or a private code class in CODE — the copy is deleted, not re-spelled",
+    );
+    // And the observable consequence: the gate now iterates the code the old
+    // copy could not see, so the promised 502 is actually tested.
+    const declared = parseDocTable(readFileSync("README.md", "utf8"));
+    assert.ok(
+      declared.has("ui2api_driver_error"),
+      "the declared set must contain ui2api_driver_error — this is the row the hand-copied [a-z_]+ parser could not read",
+    );
   });
 });

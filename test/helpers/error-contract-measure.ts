@@ -92,6 +92,79 @@ function poolRefusalCodes(src: string, into: Emitted): void {
   for (const m of body.matchAll(new RegExp(`return \\{ code: "([${CODE_CLASS}]+)" \\}`, "g"))) into.set(m[1]!, status);
 }
 
+/**
+ * GOAL (this lane) — the REQUEST-SHAPE codes, which reach the wire THROUGH A
+ * VARIABLE. Every harvest above looks for a literal; `http.ts` answers a
+ * caller mistake as `send(res, isRequestShape ? 400 : 500, shapeCode ? { error:
+ * { code: shapeCode, … } } : …)`, where `shapeCode` is read out of a LOOKUP
+ * TABLE. So the literal exists exactly once, in the table's own rows, and the
+ * literal-return patterns above are structurally blind to it: the harvest
+ * looked for `code: "…"` immediately inside an `error: {` envelope, and this
+ * route never spells a code inside its envelope.
+ *
+ * MEASURED, not read: with only the four harvests above, the served vocabulary
+ * was 17 codes and `unknown_site` and `not_chat` were absent from it — while
+ * BOTH are reachable over loopback against the real daemon (POST /prompt with
+ * a site the daemon does not serve answers 400 `unknown_site`; POST /prompt
+ * with an installed capability-only package answers 400 `not_chat`). A gate that
+ * cannot see those codes is measuring a vocabulary someone typed, which is the
+ * same defect as the character-class one, one layer in.
+ *
+ * WHY THIS IS A RESOLUTION AND NOT AN AST. The status is genuinely derived: the
+ * guard name is read out of the `shapeCode` declaration itself, and the status
+ * is the TRUTHY branch of that same guard at the send that consumes `shapeCode`.
+ * Change the shape to `500` and the measurement follows; change the guard name
+ * and the two must still agree or this REFUSES. Every failure here THROWS with
+ * the shape it could not read — a moved table can never silently re-blind this
+ * harvest, which is the whole failure mode being fixed.
+ */
+export function shapeMessageCodes(src: string): Emitted {
+  const into: Emitted = new Map();
+  const start = src.indexOf("const SHAPE_MESSAGES");
+  if (start < 0) throw new Error(`no SHAPE_MESSAGES table in http.ts — the request-shape codes moved, and measureEmitted() must be taught the new shape rather than quietly stop seeing them`);
+  // The table runs to the next declaration, not to a literal `];` — it ends
+  // `] as const;`, so a `"];"` boundary silently yields an EMPTY slice. That is
+  // not hypothetical: it is exactly what the first cut of this function did, and
+  // the no-literal guard below is what turned that into a named failure instead
+  // of a harvest that quietly measured nothing.
+  const end = src.indexOf("const isRequestShape", start);
+  if (end < 0) throw new Error("could not find the end of the SHAPE_MESSAGES table (the isRequestShape declaration that follows it)");
+  const table = src.slice(start, end);
+  const rows = [...table.matchAll(new RegExp(`code:\\s*"([${CODE_CLASS}]+)"`, "g"))];
+  if (!rows.length) throw new Error("the SHAPE_MESSAGES table carries no code literal — the request-shape route would answer a nameless 400");
+
+  // The guard: `const shapeCode = <guard> ? … : null`, read from the source so
+  // the send below is resolved against the variable's OWN condition.
+  const guard = /const\s+(\w+)\s*=\s*([A-Za-z_$][\w$]*)\s*\?/.exec(src.slice(src.indexOf("const shapeCode")))?.[2];
+  if (!guard) throw new Error("could not read the condition that makes shapeCode non-null — the request-shape resolution cannot be derived");
+  // The send that consumes it: `send(res, <guard> ? <NNN> : <NNN>, shapeCode`.
+  const send = new RegExp(`send\\(\\s*(?:res|w)\\s*,\\s*${guard}\\s*\\?\\s*(\\d{3})\\s*:\\s*(\\d{3})\\s*,\\s*shapeCode`).exec(src);
+  if (!send) throw new Error(`no send() consumes shapeCode under the guard \`${guard}\` — the request-shape codes have no status to measure`);
+  const status = Number(send[1]);
+  for (const m of rows) into.set(m[1]!, status);
+  return into;
+}
+
+/**
+ * The `?? "…"` FALLBACK inside the same resolution, and it is deliberately NOT
+ * part of the emitted vocabulary: `isRequestShape` is computed as
+ * `SHAPE_MESSAGES.some(m => m.re.test(e.message))` and the code is then read
+ * with `.find()` over the SAME table and the SAME string (`msg` is
+ * `e.message` whenever `e instanceof Error`, which the guard requires). So if
+ * the guard is true, `.find()` cannot miss, and the fallback is UNREACHABLE.
+ *
+ * It is returned rather than dropped so it is VISIBLE and NAMED: a code the
+ * source names but can never send is a thing a reader needs told, not a thing
+ * to add to the consumer contract as though it arrived.
+ */
+export function measureShapeFallback(): string | null {
+  const http = readFileSync("src/prompt/http.ts", "utf8");
+  const start = http.indexOf("const shapeCode");
+  if (start < 0) return null;
+  const decl = http.slice(start, http.indexOf(";", start));
+  return /\\?\\?\s*"([A-Za-z0-9_-]+)"/.exec(decl)?.[1] ?? null;
+}
+
 /** Everything the daemon actually emits, measured. */
 export function measureEmitted(): Emitted {
   const http = readFileSync("src/prompt/http.ts", "utf8");
@@ -101,6 +174,7 @@ export function measureEmitted(): Emitted {
   envelopeCodes(openai, out);
   poolRefusalCodes(http, out);
   typedClientErrorCodes(http, out);
+  for (const m of shapeMessageCodes(http).entries()) out.set(m[0], m[1]);
   // the last-resort net's named generic 500
   if (/code:\s*"internal_error"/.test(http)) out.set("internal_error", 500);
   return out;

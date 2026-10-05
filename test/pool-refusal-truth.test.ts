@@ -7,6 +7,9 @@ import { pathToFileURL } from "node:url";
 import { request as httpRequest } from "node:http";
 
 import { startPromptd, poolRefusal } from "../src/prompt/http.js";
+// ONE table parser, shared with the error-contract gate and the readiness gate.
+// This file used to hold a second, hand-copied one — see `declaredContract`.
+import { parseDocTable } from "./helpers/error-contract-measure.js";
 // The malformed-body sentence is now OWNED by consumer-surface.ts and imported
 // by both emitters (http.ts throws it; openai.ts answers it on /v1). This pin
 // used to hard-code the literal, which made the TEST a second owner of the
@@ -16,6 +19,7 @@ import { startPromptd, poolRefusal } from "../src/prompt/http.js";
 // invalid_json — is what this mutation is about) while the wording itself is
 // pinned once, at the owner.
 import { INVALID_JSON_MESSAGE } from "../src/prompt/consumer-surface.js";
+import { DriverRefusal } from "../src/prompt/driver.js";
 import { ChatPool, POOL_REFUSAL_CODES, type PoolOptions, type PoolRefusalCode, type PoolWorker } from "../src/prompt/pool.js";
 import { BUILTIN_PROFILES } from "../src/profile/profile.js";
 
@@ -74,12 +78,26 @@ process.on("exit", () => rmSync(VAULT, { recursive: true, force: true }));
 
 /* ── the DECLARED set, parsed from the shipped table ───────────────────────── */
 
-/** `{code: status}` as the shipped error-contract table states it. */
+/**
+ * `{code: status}` as the shipped error-contract table states it.
+ *
+ * THE COPY THAT USED TO BE HERE, AND WHY IT IS GONE. This function held its own
+ * copy of the table parser, and that copy's character class was `[a-z_]+` — the
+ * SAME blind class that was just fixed in the shared helper, and left unfixed
+ * here. Two copies of one parser, one repaired and one not: the repair could
+ * drift back the moment either file was edited, and this gate was structurally
+ * unable to see the row `POST /prompt` was changed to answer
+ * (`502 ui2api_driver_error`, whose `2` sits inside `ui2api`), because a
+ * `[a-z_]+` class cannot express it. A hand-copied parser IS the defect; fixing
+ * the copy in place would have left two implementations of the rule and the
+ * drift one edit away.
+ *
+ * So this consumes the ONE parser every other gate uses. There is no second
+ * character class in this file to keep in step, and a code whose shape changes
+ * cannot be visible to one gate and invisible to another.
+ */
 function declaredContract(): Map<string, number> {
-  const doc = readFileSync(join(ROOT, "README.md"), "utf8");
-  const out = new Map<string, number>();
-  for (const m of doc.matchAll(/^\|\s*(\d{3})\s*\|\s*`([a-z_]+)`\s*\|/gm)) out.set(m[2]!, Number(m[1]));
-  return out;
+  return parseDocTable(readFileSync(join(ROOT, "README.md"), "utf8"));
 }
 
 /* ── one real daemon answer, read back off the wire ────────────────────────── */
@@ -124,6 +142,26 @@ function cappedPool(opts: Partial<PoolOptions>, driver: unknown): ChatPool {
   ];
   return pool;
 }
+/**
+ * A pool whose ONE worker is IDLE, so `acquire()` HANDS IT OVER rather than
+ * spawning a replacement. This is the honest way to drive a stub driver.
+ *
+ * MEASURED, and the reason this helper exists: with the worker marked `busy`,
+ * a pool with room to grow SPAWNS a real one instead, the stub is never asked
+ * (`asked === 0`), and the wire answers whatever the real page-open failure is.
+ * So a stub pool must be IDLE — and the stub must count its own calls, so a
+ * probe that "arrived" without the driver ever running cannot pass quietly.
+ */
+function idlePool(opts: Partial<PoolOptions>, driver: unknown, asked: { n: number }): ChatPool {
+  const pool = new ChatPool({ profiles: [], dataDir: VAULT, ...opts } as PoolOptions);
+  (pool as unknown as { workers: PoolWorker[] }).workers = [
+    { profileId: "deepseek", driver, busy: false } as unknown as PoolWorker,
+  ];
+  const wrapped = driver as { ask: (...a: unknown[]) => unknown };
+  const real = wrapped.ask.bind(wrapped);
+  wrapped.ask = (...a: unknown[]) => { asked.n++; return real(...a); };
+  return pool;
+}
 const noPage = { page: undefined, close: async () => {}, ask: async () => ({}) };
 /** A driver whose ask() never settles — the honest way to trip the 504. */
 const hangs = {
@@ -137,6 +175,35 @@ const explodes = {
   close: async () => {},
   ask: async () => { throw new TypeError("Cannot read properties of undefined (reading 'prompt') — /abs/secret/path"); },
 };
+/**
+ * WHICH `DriverRefusal` the stub throws: this file's, by default, or the one
+ * from the daemon-under-test's OWN module graph. `runEveryProbe` sets it for the
+ * mutation daemon, whose `src/` is a COPY and therefore a different class
+ * identity — see `refuses`.
+ */
+let RefusalCtor: typeof DriverRefusal = DriverRefusal;
+const refusalClass = (): typeof DriverRefusal => RefusalCtor;
+
+/**
+ * A driver that throws the TYPED refusal — the honest way to trip the real 502
+ * `ui2api_driver_error`. A NAMED verdict (the site refused to answer) is a
+ * DIFFERENT wire answer from a nameless fault, and this gate drives both:
+ * `explodes` below is the nameless 500, this is the named 502.
+ *
+ * The class is a PARAMETER, and that is load-bearing: the mutation proof below
+ * loads a COPY of `src/` as its own module graph, so a refusal built from THIS
+ * file's `driver.js` is not `instanceof` the copy's `DriverRefusal` and the
+ * copied route answers `internal_error`. Building the refusal from the same
+ * module the daemon under test came from is what keeps the mutation proof
+ * measuring the mutation instead of a module-identity artefact.
+ */
+const refuses = {
+  page: undefined,
+  close: async () => {},
+  ask: async () => { throw new (refusalClass())(NO_ANSWER); },
+};
+/** The driver's own no-answer sentence — the same one the gate at error-contract.test.ts pins. */
+const NO_ANSWER = "no answer appeared on deepseek within 60000ms. This site requires sign-in.";
 
 type Start = (opts: Record<string, unknown>) => Promise<{ port: number; close: () => Promise<void> }>;
 
@@ -198,7 +265,8 @@ type Probe = { expect: string; how: string; got: Wire };
 const OVER_LIMIT = 1_500_000; // comfortably past the documented 1 MB cap
 const UNDER_LIMIT = 900_000;  // comfortably under it — a bound, not a blanket
 
-async function runEveryProbe(start: Start): Promise<Probe[]> {
+async function runEveryProbe(start: Start, opts: { refusal?: typeof DriverRefusal } = {}): Promise<Probe[]> {
+  RefusalCtor = opts.refusal ?? DriverRefusal;
   const probes: Probe[] = [];
   const rec = (expect: string, how: string, got: Wire) => { probes.push({ expect, how, got }); };
 
@@ -234,7 +302,38 @@ async function runEveryProbe(start: Start): Promise<Probe[]> {
     // rows, and this daemon allow-lists it, so the single-id GET reaches the
     // withholding branch with a profile present.
     rec("model_withheld", "GET /v1/models/<a served site the record does not call answering>", await call(port, "GET", "/v1/models/deepseek"));
+
+    // THE THREE CODES THIS GATE COULD NOT SEE UNTIL ITS PARSER STOPPED BEING A
+    // SECOND COPY. Its hand-copied table parser used the class `[a-z_]+`, which
+    // cannot express `ui2api_driver_error` (the `2` sits inside `ui2api`), and
+    // the declared set is what this gate iterates — so the three rows below were
+    // declared by the shipped README and structurally UNREACHABLE as far as this
+    // file was concerned. They were promised and never tested. They are driven
+    // here for real, so the promise is kept rather than merely declared.
+    //
+    // `unknown_site` and `not_chat` are the two request-shape codes that reach
+    // the wire THROUGH A VARIABLE (`code: shapeCode`, read out of the
+    // SHAPE_MESSAGES table), which is why no literal-return scan could ever see
+    // them; `not_chat` needs a site that is INSTALLED but carries no composer —
+    // `gmail` is a capability-only package, so `idFrom` takes its two-step branch
+    // and the answer is `not_chat`, not `unknown_site`. Both are caller mistakes,
+    // so both are decided before any browser work.
+    rec("unknown_site", "POST /prompt with a site this daemon does not serve", await call(port, "POST", "/prompt", { site: "definitely-not-a-site", prompt: "hi" }));
+    rec("not_chat", "POST /prompt with an INSTALLED capability-only package (no composer)", await call(port, "POST", "/prompt", { site: "gmail", prompt: "hi" }));
   });
+
+  // A NAMED driver refusal, not a nameless fault: the real 502 the two routes
+  // now agree on. `explodes` below drives the anonymous 500 — both classes are
+  // delivered, because one is a server fault and the other is a site refusal and
+  // the contract distinguishes them. The stub's own call counter is asserted, so
+  // this cannot "arrive" without the stub driver actually being asked.
+  {
+    const asked = { n: 0 };
+    await withDaemon(start, { pool: idlePool({ max: 4, maxWaiters: 4, waiterTimeoutMs: 60_000 }, refuses, asked) }, async (port) => {
+      rec("ui2api_driver_error", "POST /prompt with a driver that throws a NAMED DriverRefusal", await call(port, "POST", "/prompt", { site: "deepseek", prompt: "hi" }));
+      assert.equal(asked.n, 1, "precondition: the stub driver really was asked — a busy-worker pool spawns a REAL one instead, so this probe would measure a browser failure and call it a driver refusal");
+    });
+  }
 
   // `model_verification_unreadable` can only be produced by a daemon whose
   // measurement record is missing or unparseable — which no probe against the
@@ -472,9 +571,17 @@ test("MUTATION: with the swallowing catch and the socket destroy back, the gate 
       startPromptd: (o: Record<string, unknown>) => Promise<{ port: number; close: () => Promise<void> }>;
     };
     assert.equal(typeof mod.startPromptd, "function", "the mutated daemon must load — a failed import would make this test vacuous");
+    // The copy's OWN DriverRefusal. `instanceof` is a class identity, and this
+    // daemon runs from a COPY of `src/`, so a refusal built from this file's
+    // import would answer `internal_error` and the proof would be measuring a
+    // module artefact instead of the mutation.
+    const copyDriver = (await import(pathToFileURL(join(tmp, "src", "prompt", "driver.js")).href)) as {
+      DriverRefusal: typeof DriverRefusal;
+    };
+    assert.equal(typeof copyDriver.DriverRefusal, "function", "the copied driver module must expose DriverRefusal");
 
     const declared = declaredContract();
-    const probes = await runEveryProbe(mod.startPromptd as Start);
+    const probes = await runEveryProbe(mod.startPromptd as Start, { refusal: copyDriver.DriverRefusal });
     const gaps = reachabilityGaps(declared, probes);
     // The measurement is reported, not just asserted: this number IS the proof,
     // and a reader should be able to see it without re-deriving it.

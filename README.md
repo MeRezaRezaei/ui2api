@@ -416,6 +416,8 @@ it, fails the suite), so it cannot silently rot.
 | 503 | `pool_closed` | the pool is closed (daemon shutting down) | not retryable on this instance; fail over or restart |
 | 400 | `unknown_capability` | the `capability` is not in that site's manifest; the response lists the real ones | read the `available: [...]` list in the message and use one of those ids |
 | 400 | `no_stored_account` | the requested `account` slug/identity is not stored for that host | omit `account` for the default account, or take a valid id from `GET /accounts?site=<host>` — the refusal deliberately does NOT list the other stored identities |
+| 400 | `unknown_site` | the `site` is neither on this daemon's chat surface nor an installed package. `POST /prompt` only | list `GET /sites` for the ids this daemon serves; the message names them |
+| 400 | `not_chat` | the `site` IS an installed capability package but carries no chat composer, so `POST /prompt` cannot drive it. `POST /prompt` only | call it on `POST /capability/<site>` instead — the package is real and fully served there; the message names the chat ids that do work |
 | 404 | `site_not_dispatched` | the site id is not in the daemon's dispatch table (it is not installed, or not routable) | the response carries a `dispatchable: [...]` list — pick one of those |
 | 504 | `request_timeout` | the browser work outlived the daemon's aggregate deadline | raise `UI2API_REQUEST_TIMEOUT_MS`, then retry |
 
