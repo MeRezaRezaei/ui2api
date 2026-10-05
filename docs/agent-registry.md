@@ -1,4 +1,4 @@
-| goal183-unverified-ship-gate | L1 | EXECUTE (gate authoring) | L0 ui2api orchestrator | test/credential-leak-gate.test.ts - GOAL-183 section: range-based behaviour-change-shipped-with-no-test-change gate | 2026-10-04T15:55:50Z | running |
+| goal183-unverified-ship-gate | L1 | EXECUTE (gate authoring) | L0 ui2api orchestrator | test/credential-leak-gate.test.ts - GOAL-183 unverified-ship gate | 2026-10-04T15:55:50Z | done (commit be281a4): 33 tests, 32 pass 0 fail, tsc clean; gate reds on 4/120 real commits |
 | `ui2api-latency-readback-L1` | L1 | EXECUTE (answer-readback slice) | main-chat | `src/runtime/dom-primitives.ts` + 1 new readback-overhead test | 2026-10-04T17:56:38+02:00 | running |
 | pool-latency-lane | L1 | execute | L0-orchestrator | src/prompt/pool.ts acquire/page-open latency slice | 2026-10-04T17:57:14+02:00 | running |
 | readback-measure | L2 | EXECUTE (measurement) | parent opencode session | /tmp/codeg-acp/2052-1d5445e2/readback-measure/ harness + <=350w latency report | 2026-10-04T15:57:15Z | running |
