@@ -182,6 +182,137 @@ function execCalls(src: string, re: RegExp): Array<{ start: number; end: number;
   return out;
 }
 
+// ------------------------------------------------- the SPAWN bound, ANCHORED ---
+//
+// MEASURED DEFECT (fixed here). The previous form was `code.slice(c.end, c.end +
+// 1200)` followed by an UNANCHORED `/\.kill\(/` on that window, which is blind in
+// exactly the class this gate exists for, in two independent ways:
+//
+//   (a) CROSS-CHILD VOUCHING. A fixed window is not a construct boundary, so an
+//       unbounded spawn only ~40 characters before ANOTHER child's `.kill(` was
+//       vouched for by that neighbour's kill. `scanSource` returned `[]` for a
+//       genuinely unbounded spawn and the gate passed.
+//   (b) WINDOW TRUNCATION. A real kill 1400 characters after its spawn fell
+//       outside the 1200-character window, so a correctly-bounded spawn was
+//       reported as unbounded — a false positive that teaches the reader to
+//       ignore this gate.
+//
+// The fix is to judge the construct the spawn actually belongs to, and to
+// attribute the kill to the SAME child:
+//
+//   1. REGION — the innermost balanced `{…}` block containing the call, found by
+//      scanning OUTWARD for a balanced brace pair (never a character count). A
+//      module-scope call with no enclosing block falls back to the rest of the
+//      file. This is the spawn's real extent, so a kill at any distance inside
+//      it is in bounds and a kill outside it is not.
+//   2. ATTRIBUTION — the `.kill(` must be called ON THE CHILD the spawn bound:
+//      `const child = spawn(…)` is discharged by `child.kill(…)` or
+//      `e.child.kill(…)`, and NOT by a sibling variable's kill. A call whose
+//      result is discarded (`spawn(…)` as a bare statement) has no name to
+//      attribute to, so ANY `.kill(` in its construct discharges it.
+//
+// Both halves are pinned by the tests below, on the exact two falsification
+// cases the defect was measured with.
+
+/** The extent of the innermost balanced `{…}` block that actually CONTAINS
+ *  `at`, or `[at, code.length]` when the call is at module scope with no
+ *  enclosing block. Outward-balanced by construction, so a `{` inside the call's
+ *  own arguments (which sits AFTER `at`) cannot shift the search.
+ *
+ *  Containment is verified, not assumed: scanning backwards can land on a brace
+ *  that was already CLOSED before the call — `const c = f(() => {})` followed by
+ *  a module-scope `spawn` is exactly that, and treating the arrow body as the
+ *  spawn's block would hide every kill after it. A candidate that closes before
+ *  `at` is therefore counted as a closing brace and the scan continues outward. */
+function enclosingBlock(code: string, at: number): { start: number; end: number } {
+  let depth = 0;
+  for (let i = at; i >= 0; i--) {
+    const c = code[i];
+    if (c === "}") { depth++; continue; }
+    if (c !== "{") continue;
+    if (depth > 0) { depth--; continue; }
+    let d = 0;
+    for (let j = i; j < code.length; j++) {
+      if (code[j] === "{") d++;
+      else if (code[j] === "}" && --d === 0) {
+        if (j > at) return { start: i, end: j + 1 };
+        break; // this brace closes BEFORE the call — keep scanning outward
+      }
+    }
+    depth++; // treat the already-closed brace as a closer for the next round
+  }
+  return { start: at, end: code.length };
+}
+
+/** The identifier a call result is bound to on the SAME statement, or `""` when
+ *  the result is discarded (`spawn(…)` as a bare statement).
+ *
+ *  Two things make this honest. It is matched on the CODE view, so a `"…"`
+ *  argument can never masquerade as the binding name. And the window is clipped
+ *  to the STATEMENT TAIL — everything after the last `;` `{` `}` before the
+ *  call — because a fixed-width window reaches back over a previous statement
+ *  and binds this spawn to its variable (`const d = exec(…, { signal: ac.signal
+ *  });` was binding a later `spawn` to `signal`, from 80 characters back). */
+function callBinding(code: string, callStart: number): string {
+  let cut = 0;
+  for (const ch of [";", "{", "}"]) {
+    const i = code.lastIndexOf(ch, callStart - 1);
+    if (i > cut) cut = i + 1;
+  }
+  const tail = code.slice(cut, callStart).trim();
+  const m = tail.match(/^(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*(?::[^=]*?)?=$/);
+  return m ? m[1]! : "";
+}
+
+/** A character that can be part of a dotted receiver chain. Written as an
+ *  explicit predicate rather than a character class: a `[^\S\n]` nested inside
+ *  a class parses as a NESTED class under Annex B, which silently widened this
+ *  to "anything non-blank" — so `;` and `\n` passed the walk-back and a
+ *  `.kill(` reached 40 characters back across two statements. */
+function isChainChar(c: string): boolean {
+  if (c === "_" || c === "$" || c === "." || c === "?" || c === ")" || c === "]") return true;
+  const n = c.charCodeAt(0);
+  return (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122);
+}
+
+/** The receiver expression immediately before a `.kill(` at `dot` — the dotted
+ *  chain walked back over chain characters only, so it stops at the first real
+ *  delimiter (`,` `;` newline `{` …). This is what makes attribution structural
+ *  rather than a blind character window. */
+function receiverBefore(region: string, dot: number): string {
+  let i = dot - 1;
+  while (i >= 0 && isChainChar(region[i]!)) i--;
+  return region.slice(i + 1, dot);
+}
+
+/** Is the `spawn` at `c` bounded?
+ *
+ *  ATTRIBUTION is the primary axis, searched over the WHOLE file: `const child =
+ *  spawn(…)` is discharged by a kill on `child` — wherever that kill lives. The
+ *  corpus genuinely needs the whole file: `test/wigolo-engine.test.ts:59` spawns
+ *  inside `startWigoloDaemon()` and kills that very child from a SEPARATE
+ *  `stopDaemon(child)` helper 33 lines later, which a region-scoped rule would
+ *  report as unbounded. A kill is attributed to the child it names, and a
+ *  differently-named sibling's kill is not — that is the defect being fixed, and
+ *  it is what the region cannot express.
+ *
+ *  The enclosing BLOCK is the fallback for a call whose result is DISCARDED
+ *  (`spawn(…)` as a bare statement): there is no name to attribute to, so any
+ *  `.kill(` inside its own construct discharges it and a kill outside it does
+ *  not — which is the construct's real bounds rather than a character count. */
+function spawnIsBounded(code: string, c: { start: number; text: string }): boolean {
+  const binding = callBinding(code, c.start);
+  const re = new RegExp(`\\b${binding.replace(/\$/g, "\\$")}\\b`);
+  for (const m of code.matchAll(/\.kill\s*(?:\?\.)?\s*\(/g)) {
+    if (binding ? re.test(receiverBefore(code, m.index)) : true) {
+      if (binding) return true;
+      const { start, end } = enclosingBlock(code, c.start);
+      if (m.index >= start && m.index < end) return true;
+    }
+  }
+  return false;
+}
+
 /** The unbounded call sites in ONE already-read source. Every caller — the
  *  corpus scan below and every self-test — goes through this one function, so a
  *  self-test that makes it go red is a proof about the real scan and not about a
@@ -197,11 +328,11 @@ export function scanSource(src: string, label: string): string[] {
     if (!/timeout\s*:/.test(c.text)) unbounded.push(`${label} sync-call#${i + 1} (needs timeout)`);
   });
   // ASYNC: `exec`/`execFile` DO accept `timeout` and `signal`. Only `spawn`
-  // has neither, so it alone requires a bounded `.kill(` nearby.
+  // has neither, so it alone requires a bounded `.kill(` — ANCHORED to the child
+  // it judges (see `spawnIsBounded`).
   execCalls(code, ASYNC_FAMILY).forEach((c, i) => {
     if (/\bspawn\(/.test(c.text)) {
-      const after = code.slice(c.end, c.end + 1200);
-      if (!/\.kill\(/.test(after)) unbounded.push(`${label} spawn-call#${i + 1} (needs a bounded .kill())`);
+      if (!spawnIsBounded(code, c)) unbounded.push(`${label} spawn-call#${i + 1} (needs a bounded .kill())`);
       return;
     }
     if (!/timeout\s*:/.test(c.text) && !/signal\s*:/.test(c.text))
@@ -303,6 +434,131 @@ d("GOAL 102: the measuring instrument is itself trustworthy", () => {
       [],
       "a spawn followed by a bounded .kill() is bounded and must stay quiet",
     );
+  });
+
+  // ---- THE TWO FALSIFICATION CASES, pinned as permanent tests -------------
+  //
+  // Both were MEASURED against the previous `code.slice(c.end, c.end + 1200)` +
+  // unanchored `/\.kill\(/` logic, which was blind in exactly the class this
+  // gate exists for. They are pinned here so the gate cannot silently go back
+  // to a character window.
+  d("the spawn bound is ANCHORED to the construct it judges, not a char window", () => {
+    t("FALSIFIER (a): a NEIGHBOUR child's .kill( does NOT vouch for an unbounded spawn", () => {
+      // Under the OLD logic this returned `[]` — the gate PASSED a genuinely
+      // unbounded spawn because a DIFFERENT child's kill sat 40 characters away
+      // inside the 1200-character window.
+      const neighbour = [
+        'import { spawn } from "node:child_process";',
+        "export async function run() {",
+        '  const a = spawn("node", ["a"]);',
+        '  const b = spawn("node", ["b"]);',
+        '  b.kill("SIGKILL");',
+        "  await a;",
+        "}",
+        "",
+      ].join("\n");
+      assert.deepEqual(
+        scanSource(neighbour, "neighbour.ts"),
+        ["neighbour.ts spawn-call#1 (needs a bounded .kill())"],
+        "the never-killed spawn must be named, and ONLY it — `b` is genuinely bounded",
+      );
+      // …and the neighbour alone is still quiet, so the finding is about the
+      // missing bound rather than about a kill existing anywhere in the file.
+      assert.deepEqual(
+        scanSource(
+          ['export async function run() {', '  const b = spawn("node", ["b"]);', '  b.kill("SIGKILL");', "}", ""].join("\n"),
+          "neighbour.ts",
+        ),
+        [],
+        "the killed neighbour must stay quiet",
+      );
+      // A kill reached through a property of the SAME child still counts:
+      // `e.child.kill(…)` is attributed to `e`.
+      assert.deepEqual(
+        scanSource('const e = spawn("node", ["x"]);\ne.child.kill("SIGKILL");\n', "prop.ts"),
+        [],
+        "a kill on a property of the bound child is still a kill of that child",
+      );
+    });
+
+    t("FALSIFIER (b): a real kill FAR past the old 1200-char window is NOT truncated away", () => {
+      // Under the OLD logic this was reported as unbounded — a false positive,
+      // because the kill is real and is 1861 characters past its spawn, past the
+      // 1200-character window. The construct's real bounds must carry it.
+      const far = [
+        'import { spawn } from "node:child_process";',
+        "export async function run() {",
+        '  const only = spawn("node", ["x"]);',
+        '  only.stdout.on("data", (d) => { d.toString(); });',
+        ...Array.from({ length: 40 }, (_, i) => `  filler${i} = ${i} + ${i} * 3; // padding ${i}`),
+        '  setTimeout(() => { try { only.kill("SIGKILL"); } catch {} }, 60_000);',
+        "  await only;",
+        "}",
+        "",
+      ].join("\n");
+      const at = codeView(far).indexOf("spawn");
+      const kill = codeView(far).indexOf("only.kill");
+      assert.ok(kill - at > 1200, `the kill must sit past the old window to be a real test (got ${kill - at})`);
+      assert.deepEqual(
+        scanSource(far, "far.ts"),
+        [],
+        "a real bounded kill must never be truncated away by a character count",
+      );
+      // …and the anti-over-correction half: a DIFFERENT child's kill, however
+      // far, still does not vouch.
+      const farWrong = far.replace('only.kill("SIGKILL")', 'other.kill("SIGKILL")');
+      assert.deepEqual(
+        scanSource(farWrong, "far.ts"),
+        ["far.ts spawn-call#1 (needs a bounded .kill())"],
+        "distance must never substitute for attribution",
+      );
+    });
+
+    t("a DISCARDED spawn is judged by its own block — no name to attribute to", () => {
+      const discarded = [
+        "export async function run() {",
+        '  spawn("node", ["a"]);',
+        "}",
+        "export async function other() {",
+        '  const b = spawn("node", ["b"]);',
+        '  b.kill("SIGKILL");',
+        "}",
+        "",
+      ].join("\n");
+      assert.deepEqual(
+        scanSource(discarded, "discarded.ts"),
+        ["discarded.ts spawn-call#1 (needs a bounded .kill())"],
+        "an unnamed spawn is bounded only by a kill inside its OWN block",
+      );
+      assert.deepEqual(
+        scanSource(discarded.replace('  spawn("node", ["a"]);', '  spawn("node", ["a"]);\n  later.kill("SIGKILL");'), "discarded.ts"),
+        [],
+        "a kill in the same block does discharge an unnamed spawn",
+      );
+    });
+
+    t("the corpus's REAL spawn sites stay bounded under the anchored rule", () => {
+      // The anchored rule must not cost the corpus a single finding it does not
+      // owe: every real spawn in test/ is named and then killed. Measured on
+      // this tree: 6 real spawns across 5 files, all bounded, zero findings.
+      const spawns: Array<{ file: string; child: string }> = [];
+      for (const f of TEST_FILES) {
+        const code = codeView(readFileSync(join(ROOT, f), "utf8"));
+        for (const c of execCalls(code, ASYNC_FAMILY)) {
+          if (!/\bspawn\(/.test(c.text)) continue;
+          spawns.push({ file: f, child: callBinding(code, c.start) });
+        }
+      }
+      assert.ok(spawns.length >= 5, `only ${spawns.length} real spawns found in test/ — the scan is losing code`);
+      for (const s of spawns) {
+        assert.notEqual(s.child, "", `${s.file}: a real spawn with no binding — re-measure this count`);
+      }
+      assert.deepEqual(
+        scanSource(readFileSync(join(ROOT, "test/wigolo-engine.test.ts"), "utf8"), "test/wigolo-engine.test.ts"),
+        [],
+        "the wigolo daemon is spawned in one helper and killed in another — attribution must see that",
+      );
+    });
   });
 });
 
