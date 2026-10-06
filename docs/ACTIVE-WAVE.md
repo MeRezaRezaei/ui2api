@@ -689,6 +689,51 @@ site (kimi) gets `--capability chat` **first**, because that is the only shape t
 function directly and still passed when the hardcoded string was restored to the message. The pins
 now read `remedyFor()`, the single verdict→advice path, and reverting the message REDs 2 pins.
 
+### ROUND N+194n — the limitation is now visible where a reader acts on it (2026-10-06)
+
+**`c9a8397` — the last remaining instance of the round's class, one level up.** The verdict resolver
+`measuredRoundTripFor` (`registry.ts:476`) filtered the record **by site only**, took
+`settled[0]` — the first row passing the success predicate — and returned `measured: true`.
+`youtube_search`'s 10 rows answered, so the 502 `youtube_transcript` row **was never consulted**.
+**A measurement nobody can act on is the same defect as a measurement never taken** — and the
+transcript row had been added to the vocabulary for precisely one round so its honest outcome would
+be recorded, only for the resolver to discard it.
+
+**No fourth verdict was invented.** The three readings are unchanged; the verdict gained two
+*derived* fields and is now a **fold** over a per-capability array: `capabilities[]` (one entry per
+capability the record names, each with its own `reading`/`class`/`reason`) and `limitation
+{capability, class, reading}`, non-null only when a measured site coexists with a *qualifying*
+capability. `measured` stays `true` for youtube, because a claim is about the surface.
+
+**And the question I would have gotten wrong was answered from the owner, not by taste:** whether a
+non-delivery is about the surface is a property of its class, and the classifier already owns that
+answer as `falsifiesClaim` — so it is **imported, never restated**. Restricting demotion to chat rows
+would have restated the collapse one rung down. The `UNATTRIBUTED-NO-TRANSCRIPT` reasoning stays
+coherent because it lives **in the class**, not in the surface kind.
+
+youtube before → `MEASURED yes`. After →
+`MEASURED yes — but LIMITED by youtube_transcript UNATTRIBUTED-NO-TRANSCRIPT`, and on the **consumer
+surface** via `RegistryTool.roundTrip`, looked up by raw id / bare id / `bare_chat` so chat rows are
+not dropped:
+```
+measured: true  contradicted: false
+limitation: {"capability":"youtube_transcript","class":"UNATTRIBUTED-NO-TRANSCRIPT","reading":"qualified", …}
+caps: youtube_search=measured, youtube_transcript=qualified
+```
+The reason text states both halves a reader needs — *"It does NOT CONTRADICT a published `verified`
+claim, because a claim is about the surface and this observation is about one argument"* — and
+*"It also does NOT PROMOTE: this capability is still not measured, so it earns no verified claim."*
+
+**THIRD TIME THIS SESSION a lane caught its own pin being vacuous.** Pin 1 passed against the OLD
+per-site resolver, because *a collapse satisfies every agreement assert* — the very defect satisfies
+its own pin. It was strengthened to require one entry per distinct capability named by the record,
+which is what made it red (4 of 31). Restored byte-identical.
+
+**Reconciliation went in the more-honest direction only.** `AGENTS.md` and `capabilities/README.md`
+both called `youtube_transcript` *"segments LOGIN-GATED"* — **asserting a cause the measurement
+explicitly refuses to attribute.** Both now name `UNATTRIBUTED-NO-TRANSCRIPT`, quote both candidates,
+cite the byte-identical two-video result, and say **not** "log in and it works". No status cell touched.
+
 ## OPEN — none that I can prove are still open
 
 **Everything this file tracked is closed, each with its closing evidence above.** Unfixed, in rank
@@ -696,24 +741,27 @@ order, all re-confirmed still real:
 
 1. **FORK GATE — awaiting the operator, not a fix.** Three sites are published `verified`, were
    genuinely measured, and the measurement **CONTRADICTS** the claim: `kimi` and `tencent-aistudio`
-   (`UNATTRIBUTED-NO-ANSWER`, a sign-in/consent wall) and `deepseek` (`UNATTRIBUTED-NO-COMPOSER`,
-   the site's own UI changed). Those receipts were earned on real round trips and have since stopped
+   (`UNATTRIBUTED-NO-ANSWER`, a sign-in/consent wall) and `deepseek` (`UNATTRIBUTED-NO-COMPOSER`, the
+   site's own UI changed). Those receipts were earned on real round trips and have since stopped
    working. **Recommendation: demote to `unverified-candidate`, keep the CONTRADICTED measurement as
    the receipt** so the claim stays inspectable rather than quietly deleted. The gate may only ever
    demote, never promote. Not making this call unilaterally; **not** relaxing the gate to hide it.
-2. `youtube.ts` **cannot separate its own two causes** — "no captions" from "selector rot". Closing
-   that needs a runner change plus a redeploy, which no lane was permitted to do.
-3. `measuredRoundTripFor` is **per-site**, so a failing capability on an otherwise-working site
-   (`youtube_transcript` on a healthy `youtube_search`) is invisible at site level.
-4. `COMPOSER-DRIFT` **with a page present** is still unreachable — its page-less twin covers the real
-   case.
-5. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors and
-   3 test failures from a concurrent lane's half-finished edit, making
+2. `src/capabilities/youtube.ts` **cannot separate its own two causes** — "no captions" from
+   "selector rot" — so the class stays wide and the docs must keep quoting both candidates. Closing
+   it needs a runner change plus a redeploy.
+3. **Five `youtube` posting capabilities are unmeasured with nothing recording why** — comment, like,
+   subscribe, upload, playlist_add. Deliberately not probed (irreversible), which is honest, but the
+   record currently has no row saying "deliberately not probed", so a reader cannot distinguish
+   "not yet" from "refused on purpose".
+4. `roundTrip` reaches `GET /registry`, but the **`GET /capabilities/<site>` path form was not
+   audited** — the limitation may be invisible on that surface.
+5. `COMPOSER-DRIFT` **with a page present** is still unreachable; its page-less twin covers the real case.
+6. `test/error-redaction.test.ts:1596-1597` — **foreign, in-flight, not mine**: two `tsc` errors and 3
+   test failures from a concurrent lane's half-finished edit, making
    `tsc -p tsconfig.test.json` exit 2 tree-wide. Reported, not touched.
-6. `model-verification.json`'s `SIGN-OUT` rows for those same three sites now visibly **agree** with
-   the three CONTRADICTED verdicts — the strongest evidence yet for recommendation (1).
 7. `docs/AGENT_INTEGRATION.md:55` says the classifier has **nine** members; it has **twelve**. The doc
-   has now been wrong across three growths and remains unpinned.
+   has now been wrong across three growths and remains unpinned — and this round proved the cost of
+   hand-typed counts twice more.
 8. `gate-wiring` GOAL 145 / R4 — still red, **entirely foreign**: four test files no script names are
    UNTRACKED. **Not mine to force.**
 
