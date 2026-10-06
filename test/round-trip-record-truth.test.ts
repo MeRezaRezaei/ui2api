@@ -9,8 +9,10 @@ import {
   findPackageDir,
   readRoundTripRecord,
   measuredRoundTripFor,
+  resolveRoundTripVerdict,
   roundTripProbeAdvice,
   defaultChatSurface,
+  buildRegistryPackages,
 } from "../src/prompt/registry.js";
 import { classifyOutcome, composerRefusalMatcher, controlAbsentClauses, VERIFICATION_CLASSES, type VerificationClass } from "../src/prompt/verification-class.js";
 import { NO_ANSWER_REFUSAL_CLAUSE } from "../src/prompt/error-redaction.js";
@@ -76,6 +78,40 @@ const record = readRoundTripRecord();
 const raw = JSON.parse(readFileSync(RECORD_PATH, "utf8")) as Record<string, unknown>;
 const rows = (Array.isArray(raw.rows) ? raw.rows : []) as Record<string, unknown>[];
 const windowDays = record.stalenessWindowDays;
+
+/**
+ * Resolve a site against an INJECTED record — a byte-identical copy of the
+ * shipped one, or a derived mutation of it.
+ *
+ * WHY NOT WRITE A COPY TO DISK. `capabilities/roundtrip.json` is written ONLY by
+ * the harness (`scripts/audit/record-roundtrip.mjs`); a hand-edited row would be
+ * a fabricated measurement, and swapping one in to run a test then swapping it
+ * back is exactly the shape of accident this repo's gates exist to prevent. So
+ * the copy never touches the file: `resolveRoundTripVerdict` takes the record as
+ * data, the schema/window come from the REAL record so a mutation cannot invent a
+ * longer window, and the rows are the real rows.
+ */
+function resolveWithRecord(rawRecord: Record<string, unknown>, siteId: string) {
+  const parsed = rawRecord as { rows?: unknown; stalenessWindowDays?: unknown };
+  return resolveRoundTripVerdict(
+    {
+      // The refusal/schema are the REAL record's, so a mutation cannot smuggle in
+      // a wider window or a different schema and have its verdict mean something
+      // the shipped resolver would never say.
+      refusal: null,
+      schema: record.schema,
+      stalenessWindowDays:
+        typeof parsed.stalenessWindowDays === "number" && Number.isFinite(parsed.stalenessWindowDays) && parsed.stalenessWindowDays > 0
+          ? parsed.stalenessWindowDays
+          : windowDays,
+      rows: Array.isArray(parsed.rows) ? (parsed.rows as Parameters<typeof resolveRoundTripVerdict>[0]["rows"]) : [],
+    },
+    siteId,
+    // The SAME clock the shipped gate reads with, so an age comparison cannot
+    // differ between the real verdicts and the mutated one.
+    Date.now(),
+  );
+}
 
 // ── the other two sources ───────────────────────────────────────────────────
 function parseStatusRows(doc: string): { id: string; status: string }[] {
@@ -148,6 +184,14 @@ const measuredIds = (): string[] => universe().filter((id) => measuredRoundTripF
  *                                               not print as bare `no`.
  *    MEASURED no                             — nothing was established.
  *
+ *  AND THE `yes` CELL IS NOT BARE. A site whose surface measured while one of
+ *  its capabilities did not is printed `yes — but LIMITED by <cap> <class>`,
+ *  because `measuredRoundTripFor` now resolves PER CAPABILITY and a bare `yes`
+ *  for `youtube` would put `youtube_search`'s 10 rows and `youtube_transcript`'s
+ *  HTTP 502 in the same cell — which is precisely how the failing capability was
+ *  invisible before this lane: the healthy sibling answered first and the
+ *  failing row was never read.
+ *
  *  MEASURED, before this gate could say it: `kimi` and `tencent-aistudio` carried
  *  `UNATTRIBUTED-NO-ANSWER` rows and `deepseek` an `UNATTRIBUTED-NO-COMPOSER` one,
  *  and every one of them printed as plain `MEASURED no` — indistinguishable from a
@@ -165,7 +209,9 @@ function threeWayReport(): string[] {
     .map((id) => {
       const verdict = measuredRoundTripFor(id);
       const measuredCell = verdict.measured
-        ? "yes"
+        ? verdict.limitation === null
+          ? "yes"
+          : `yes — but LIMITED by ${verdict.limitation.capability} ${String(verdict.limitation.class)}`
         : verdict.contradicted
           ? `no — CONTRADICTED by ${String(verdict.failureClass)}`
           : verdict.qualified
@@ -501,6 +547,207 @@ test("THREE-WAY: an ARGUMENT-SCOPED non-delivery is QUALIFIED — never CONTRADI
     assert.match(v.reason, /does NOT CONTRADICT/, `${id}: the reason must state the direction it decided`);
     assert.match(v.reason, /does NOT PROMOTE/, `${id}: the reason must state that it did not promote either`);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PER-CAPABILITY RESOLUTION — the healthy sibling must not average a broken
+// capability away
+//
+// THE GAP. `measuredRoundTripFor` was per-SITE: it filtered the record to the
+// site, took the FIRST settled row it found, and returned `measured: true` — so
+// `youtube_search` (10 real rows read off the site's own results page) answered
+// first and `youtube_transcript`'s HTTP 502 `UNATTRIBUTED-NO-TRANSCRIPT` was
+// never looked at. A `/registry` consumer saw a `verified` package with seven
+// equally-present tools and nothing distinguishing the one that answers from the
+// one that 502s.
+//
+// IT IS THE SAME CLASS AS EVERY OTHER GAP THIS ROUND HAS CLOSED, and that is why
+// it is worth naming rather than filing as a feature: the vocabulary gained
+// `UNATTRIBUTED-NO-TRANSCRIPT` PRECISELY so this honest outcome would be
+// RECORDED — and then the resolver discarded the record. A measurement nobody
+// can act on is the same defect as a measurement never taken.
+//
+// THE THREE READINGS ARE UNCHANGED. This adds a RESOLUTION (per capability) and
+// a fourth state OF A MEASURED SITE (healthy with a named limitation), never a
+// fourth overall verdict: `measured` is still `true` for youtube, because a
+// published claim is about the SURFACE and the surface answered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("PER-CAPABILITY: every measured site resolves EACH capability separately, and a non-delivering one is named with its class", () => {
+  // PIN 1 — THE STRUCTURE. The site verdict must be FOLDED from a per-capability
+  // array rather than computed per-site, which is asserted structurally: the
+  // array must exist, be non-empty for any site with rows, and agree with the
+  // site verdict on every reading. A resolver that kept one row per site would
+  // have no array to agree with.
+  for (const id of universe()) {
+    const v = measuredRoundTripFor(id);
+    const siteRows = rows.filter((r) => r.site === id);
+    if (siteRows.length === 0) {
+      assert.deepEqual(v.capabilities, [], `${id}: no rows in the record means no per-capability readings`);
+    } else {
+      assert.ok(v.capabilities.length > 0, `${id}: the record carries rows but the per-capability resolution is empty`);
+      // ANTI-VACUITY, and the half that matters: agreement between the array and
+      // the verdict is NOT enough, because a resolver that collapsed every row
+      // into ONE synthetic entry ("SITE") satisfies every agreement assert above
+      // while having resolved nothing per capability. MEASURED, that is exactly
+      // what happened when this pin was first written: reverting the resolver to
+      // a per-site key left this test GREEN and reddened only the two pins that
+      // happen to look at youtube. So the array must carry ONE ENTRY PER
+      // DISTINCT CAPABILITY the record names — derived from the record, never
+      // from the resolver, so a collapse cannot reduce the expectation.
+      const declared = [
+        ...new Set(
+          siteRows
+            .map((r) => (typeof r.capability === "string" && r.capability ? r.capability : "(unnamed)"))
+            .filter((c) => siteRows.some((r) => c === (typeof r.capability === "string" && r.capability ? r.capability : "(unnamed)"))),
+        ),
+      ].sort();
+      assert.deepEqual(
+        v.capabilities.map((c) => c.capability).slice().sort(),
+        declared,
+        `${id}: the per-capability resolution does not carry one entry per capability the record names (a per-site collapse would satisfy every other assert in this test and prove nothing)\n  resolved: ${v.capabilities.map((c) => c.capability).join(", ")}`,
+      );
+    }
+    // AGREEMENT, both directions: a capability the fold called `measured` cannot
+    // sit on a site the fold called unmeasured-with-no-success, and a site called
+    // contradicted must have at least one contradicting capability. This is what
+    // makes the array the SOURCE of the verdict rather than a decoration beside it.
+    const at = (reading: string) => v.capabilities.filter((c) => c.reading === reading);
+    assert.equal(
+      v.measured,
+      at("measured").length > 0,
+      `${id}: \`measured\` disagrees with the per-capability array (measured=${String(v.measured)}, measured capabilities=${String(at("measured").length)})\n${threeWayReport().join("\n")}`,
+    );
+    assert.equal(
+      v.contradicted,
+      at("contradicted").length > 0,
+      `${id}: \`contradicted\` disagrees with the per-capability array\n${threeWayReport().join("\n")}`,
+    );
+    assert.equal(
+      v.qualified,
+      !v.measured && !v.contradicted && at("qualified").length > 0,
+      `${id}: \`qualified\` disagrees with the per-capability array\n${threeWayReport().join("\n")}`,
+    );
+    // The limitation is not a fourth verdict: it is a projection of the SAME
+    // array, so it can only exist where a measured capability coexists with a
+    // qualifying one, and it must name a capability that really is in the array.
+    if (v.limitation !== null) {
+      assert.equal(v.measured, true, `${id}: a limitation on a site that is not measured has no claim to qualify`);
+      const named = v.capabilities.find((c) => c.capability === v.limitation!.capability);
+      assert.ok(named !== undefined, `${id}: the limitation names \`${v.limitation.capability}\`, which is not in the per-capability array`);
+      assert.equal(named!.reading, "qualified", `${id}: the limitation names a capability whose reading is \`${named!.reading}\` — only a QUALIFYING capability may be a limitation`);
+      assert.equal(v.limitation!.class, named!.class, `${id}: the limitation's class disagrees with the per-capability reading it names`);
+      assert.ok(v.reason.includes(v.limitation!.capability), `${id}: the reason must NAME the limiting capability, not merely carry it as a field`);
+      assert.ok(v.reason.includes(String(v.limitation!.class)), `${id}: the reason must quote the limitation's class`);
+    }
+    if (v.measured && v.limitation === null) {
+      // The other half of the projection: a site with NO qualifying capability
+      // must carry no limitation. Without this, an always-populated `limitation`
+      // would pass pin 1 vacuously.
+      assert.deepEqual(
+        at("qualified"),
+        [],
+        `${id}: measured with no limitation yet the array carries a qualifying capability`,
+      );
+    }
+  }
+});
+
+test("PER-CAPABILITY: the shipped record's youtube limitation is VISIBLE at the level a reader acts on", () => {
+  // PIN 2 — THE MEASURED CASE. Not a synthetic fixture: the shipped record
+  // carries exactly this pair, so the pin reads the real thing. If a future
+  // re-probe closes the gap, the row stops deriving and this pin goes RED with a
+  // message that says the limitation cleared — which is the point: a limitation
+  // that CANNOT clear is not a measurement.
+  const v = measuredRoundTripFor("youtube");
+  if (v.limitation === null) {
+    assert.ok(
+      !rows.some((r) => r.site === "youtube" && r.class === "UNATTRIBUTED-NO-TRANSCRIPT"),
+      "capabilities/roundtrip.json carries no UNATTRIBUTED-NO-TRANSCRIPT row for youtube — the limitation branch is unexercised, so a green run here would prove nothing about it",
+    );
+    return;
+  }
+  // The claim STANDS: a limitation qualifies, it does not demote, and it never
+  // promotes either. Asserted so this lane cannot be "fixed" by making youtube
+  // unmeasured — which would make the failure invisible in a second way.
+  assert.equal(v.measured, true, "a QUALIFYING capability limitation must not demote a site whose surface measured");
+  assert.equal(v.contradicted, false, "a qualifying capability is not a contradiction");
+  assert.equal(v.qualified, false, "a site that measured is not `qualified` — that reading means the site did NOT measure");
+  assert.equal(v.limitation.capability, "youtube_transcript", "the limitation must name the capability that failed, not the one that worked");
+  assert.equal(v.limitation.class, "UNATTRIBUTED-NO-TRANSCRIPT", "the limitation must carry the DERIVED class a consumer branches on");
+  // …and the healthy sibling is still reported healthy, at ITS own resolution.
+  const search = v.capabilities.find((c) => c.capability === "youtube_search");
+  assert.ok(search !== undefined, "youtube_search's measured reading disappeared from the per-capability array");
+  assert.equal(search!.reading, "measured", "youtube_search measures 10 real rows — collapsing that into anything else would be the defect in reverse");
+  assert.equal(search!.class, "RETURNS-DATA");
+  // The array must not MERGE the two into one entry: that merge IS the bug.
+  assert.equal(v.capabilities.length, 2, `youtube must resolve to exactly its two recorded capabilities, not a merged single reading (got ${v.capabilities.map((c) => c.capability).join(", ")})`);
+});
+
+test("PER-CAPABILITY: a capability-level CONTRADICTION can demote an otherwise-healthy site", () => {
+  // PIN 3 — THE DIRECTION, DECIDED AND PINNED. The task asked for an explicit
+  // decision here, and the decision is YES, for a reason that is not symmetry:
+  // whether a non-delivery is a statement about the SURFACE is a property of its
+  // CLASS, and the classifier already owns that answer (`falsifiesClaim`,
+  // imported by the resolver, never restated). A row whose class says "this
+  // surface did not work" says so whether it came from the chat endpoint or from
+  // `youtube_search`; restricting demotion to chat rows would restate the
+  // per-site collapse one rung down.
+  //
+  // EXERCISED ON A BYTE-IDENTICAL COPY of the shipped record, then restored —
+  // never on the record itself, which is written only by the harness. The copy
+  // is built by DERIVING from the real one (deepseek's own contradicting chat
+  // row is re-pointed at an araprat search capability), so the rows it contains
+  // are rows the classifier actually derived and the pin cannot be satisfied by
+  // inventing a class.
+  const araprat = buildRegistryPackages().find((p) => p.id === "araprat");
+  if (!araprat) {
+    assert.fail("araprat is not in the registry — this pin needs a healthy multi-capability package to contradict");
+  }
+  const deepseekFailure = rows.find((r) => r.site === "deepseek" && r.class === "UNATTRIBUTED-NO-COMPOSER");
+  if (!deepseekFailure) {
+    assert.fail(
+      "the record carries no UNATTRIBUTED-NO-COMPOSER row — the falsifying branch is unexercised, so a green run here would prove nothing about it",
+    );
+  }
+  const healthy = rows.filter((r) => r.site === "araprat" && r.class === "RETURNS-DATA");
+  if (healthy.length === 0) {
+    assert.fail("araprat carries no healthy RETURNS-DATA row — there is nothing healthy to contradict");
+  }
+  const mutated: Record<string, unknown> = JSON.parse(readFileSync(RECORD_PATH, "utf8")) as Record<string, unknown>;
+  (mutated.rows as Record<string, unknown>[]).push({
+    ...deepseekFailure,
+    site: "araprat",
+    // A CAPABILITY id, never `chat` — the whole point is that a capability-level
+    // failure is what demotes.
+    capability: "araprat_trending",
+    evidence: `${String(deepseekFailure.evidence)} [pointer row re-pointed at araprat_trending on a byte-identical copy of the shipped record]`,
+  });
+  const verdict = resolveWithRecord(mutated, "araprat");
+  assert.equal(
+    verdict.contradicted,
+    true,
+    `a capability-level CONTRADICTION did not demote a site whose other capabilities measured — the resolver still lets a healthy sibling answer first:\n  ${JSON.stringify(verdict.capabilities.map((c) => `${c.capability}=${c.reading}`))}`,
+  );
+  assert.equal(verdict.measured, false, "a contradicted site must not also report `measured`");
+  assert.equal(verdict.failureClass, "UNATTRIBUTED-NO-COMPOSER", "the demotion must NAME the derived class that caused it");
+  assert.equal(verdict.limitation, null, "a contradiction is a demotion, not a limitation — reporting both would let one failure read as two mild ones");
+  // The healthy siblings are still resolved, at their own level: demotion is not
+  // erasure. A consumer must still be able to see WHICH capability failed.
+  assert.ok(
+    verdict.capabilities.some((c) => c.reading === "contradicted" && c.capability === "araprat_trending"),
+    `the contradicting capability must be named in the per-capability array: ${JSON.stringify(verdict.capabilities.map((c) => `${c.capability}=${c.reading}`))}`,
+  );
+  assert.ok(
+    verdict.capabilities.filter((c) => c.reading === "measured").length >= 1,
+    "demotion must not erase the capabilities that measured — the resolution is per capability, the verdict is the fold",
+  );
+  // …and the demotion REACHES the published status, which is the point of it.
+  assert.equal(
+    chatSurfaceStatus("araprat"),
+    "verified",
+    "araprat's OWN record is healthy — this assert only holds because the mutated record is not the one on disk; if it fires, the copy leaked",
+  );
 });
 
 test("THREE-WAY: a site whose round trip was MEASURED and FAILED is never published as verified", () => {

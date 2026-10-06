@@ -637,10 +637,20 @@ this sentence cannot drift again.
   `youtube` (www.youtube.com) — capability surface, NOT a chat site.
   `youtube_search` **VERIFIED** (search→`ytd-video-renderer a#video-title`
   read-back, live proof 10 rows; manifest verified-2026-09-20);
-  `youtube_transcript` **UI path verified, segments LOGIN-GATED** — panel
-  expands but the site's own `get_transcript` endpoint answers HTTP 400
-  "Precondition check failed" without SAPISID (needs a logged-in capture;
-  honest partial, never claimed verified). Auth optional-cookie.
+  `youtube_transcript` **UI path verified, segments NOT RETRIEVED — and the
+  failure is MEASURED and UNATTRIBUTED** — panel expands but the site's own
+  `get_transcript` endpoint answers HTTP 400 "Precondition check failed"
+  without SAPISID. **Do NOT read that as "LOGIN-GATED": a live probe
+  (2026-10-05, `capabilities/roundtrip.json`, class
+  `UNATTRIBUTED-NO-TRANSCRIPT`, HTTP 502) received a refusal that LISTS its two
+  candidate causes — this video has no captions, or this repo's selector has gone
+  stale — and chooses NEITHER.** Two different videos returned the byte-identical
+  sentence, so the measurement cannot separate them and no cause may be assumed in
+  either direction; "log in and it works" is exactly the unmeasured guess the
+  class exists to forbid. Honest partial, never claimed verified. The resolver
+  reports this per capability (`capabilities[].reading`), which is why
+  `youtube` reads `measured` WITH a named limitation rather than plain healthy.
+  Auth optional-cookie.
   **2026-09-21: POSTING surface implemented + dispatched** —
   `youtube_comment`/`youtube_like`/`youtube_subscribe`/`youtube_upload`/
   `youtube_playlist_add` on `/capability/youtube` (were "unknown youtube

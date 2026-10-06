@@ -93,6 +93,28 @@ export interface RegistryTool {
    * advertise the second as servable.
    */
   dispatch: "wired" | "declared-only";
+  /**
+   * WHAT THE MEASUREMENT RECORD SAYS ABOUT THIS ONE TOOL — the per-capability
+   * resolution from `capabilities/roundtrip.json`, carried onto the tool the
+   * consumer is about to call.
+   *
+   * WHY IT IS PER TOOL AND NOT ONLY PER PACKAGE. `status` is the package's
+   * claim and a package with one working and one 502-ing capability is honestly
+   * `verified` (the claim is about the surface). But a `/registry` consumer
+   * materialises ONE TOOL PER CAPABILITY and calls them independently, so the
+   * package verdict is the wrong resolution for the decision the consumer is
+   * actually making: measured, `youtube` published `status: "verified"` with
+   * seven equally-present tools and nothing distinguished the search that
+   * returns 10 rows from the transcript that answers HTTP 502. A limitation a
+   * consumer cannot see is the same blindness one layer out.
+   *
+   * ABSENT (`undefined`) when the record says nothing at all about this tool —
+   * which is the honest default, since "never measured" must never render as a
+   * measured state. Present in every other case, including the `unmeasured`
+   * reading, so "a row exists and none of the derived readings apply" is
+   * distinguishable from "no row".
+   */
+  roundTrip?: CapabilityRoundTrip;
 }
 
 export interface RegistryChat {
@@ -463,6 +485,67 @@ export interface RoundTripVerdict {
   qualified: boolean;
   /** The DERIVED class behind a `qualified` verdict, else null. */
   qualifiedClass: string | null;
+  /**
+   * A NAMED CAPABILITY LIMITATION on an otherwise-healthy site: the surface
+   * measured, and one of its capabilities did not deliver. This is NOT a fourth
+   * overall verdict — `measured` is still `true` and the site still earns its
+   * claim, because a claim is about the surface. What it stops is the site
+   * verdict being the ONLY resolution available, which is what made
+   * `youtube` read healthy with no word anywhere about its 502-ing
+   * `youtube_transcript`: the healthy sibling answered first and the failing
+   * row was never looked at.
+   *
+   * `null` whenever the site is not measured (a contradiction already demotes,
+   * and a site with no measured surface has no healthy claim to qualify), and
+   * `null` when every capability measured. Its `class` is the DERIVED class, so
+   * a consumer can branch on the failure's own vocabulary instead of parsing
+   * prose.
+   */
+  limitation: CapabilityLimitation | null;
+  reason: string;
+  /**
+   * THE PER-CAPABILITY RESOLUTION this site verdict is FOLDED from — one entry
+   * per capability the record says something about, each read at its own level.
+   *
+   * WHY IT EXISTS. The site verdict was per-SITE: `youtube_search` returns 10
+   * real rows and `youtube_transcript` answers HTTP 502, and the site-level
+   * answer was simply `measured: true` — the 502 was discarded by a resolver
+   * that never asked the capability question. That is a checker whose
+   * resolution cannot express the thing it is asked to check: the vocabulary
+   * gained `UNATTRIBUTED-NO-TRANSCRIPT` precisely so this honest outcome could
+   * be RECORDED, and then the read seam threw the record away. A measurement
+   * nobody can act on is the same defect as a measurement never taken.
+   *
+   * IT IS THE FOLD, NOT A REPLACEMENT. `measuredRoundTripFor` still returns the
+   * same three readings with the same meanings, and it derives them FROM this
+   * array — one classification, read twice, so the site answer and the
+   * capability answers cannot disagree.
+   */
+  capabilities: CapabilityRoundTrip[];
+}
+
+/** One capability's own reading of the record. */
+export interface CapabilityRoundTrip {
+  /** The record's `capability` value, or `(unnamed)` for a row that carries none. */
+  capability: string;
+  /**
+   * `measured` — this capability's round trip worked.
+   * `contradicted` — it was performed and the DERIVED class falsifies a claim.
+   * `qualified` — it was performed and the non-delivery is argument-scoped.
+   * `unmeasured` — a row exists for it and none of the above derived.
+   */
+  reading: "measured" | "contradicted" | "qualified" | "unmeasured";
+  /** The DERIVED class of the newest in-window row, else null. */
+  class: string | null;
+  reason: string;
+}
+
+/** The named limitation a healthy site carries, quoted for a consumer. */
+export interface CapabilityLimitation {
+  capability: string;
+  /** The DERIVED class — the branch a consumer keys on, not prose. */
+  class: string;
+  reading: "contradicted" | "qualified";
   reason: string;
 }
 
@@ -474,13 +557,51 @@ export interface RoundTripVerdict {
 const ROUNDTRIP_SUCCESS_CLASSES: ReadonlySet<string> = new Set(["ANSWERS", "RETURNS-DATA"]);
 
 export function measuredRoundTripFor(siteId: string, now: number = Date.now()): RoundTripVerdict {
-  const rec = readRoundTripRecord();
-  if (rec.refusal) return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: rec.refusal };
+  return resolveRoundTripVerdict(readRoundTripRecord(), siteId, now);
+}
+
+/**
+ * THE PURE RESOLVER — the whole verdict, over an INJECTED record.
+ *
+ * WHY THE SEAM EXISTS. Every honest statement about this resolver is about what
+ * it does to a set of rows, so it must be askable about a set of rows that is
+ * not the one on disk. Reading the record inside the resolver meant the only way
+ * to ask "what happens when a capability-level contradiction lands on an
+ * otherwise-healthy site?" was to EDIT `capabilities/roundtrip.json` — and that
+ * file is written only by the harness, so the question had no answer that did not
+ * involve hand-editing a measurement. A checker whose shape makes its own
+ * central question unaskable is the defect class, not the fixture.
+ *
+ * The fs read is one line in `measuredRoundTripFor` and everything else is here,
+ * so there is exactly one implementation and no path that can bypass it.
+ */
+export function resolveRoundTripVerdict(rec: RoundTripReading, siteId: string, now: number = Date.now()): RoundTripVerdict {
+  if (rec.refusal) {
+    return {
+      measured: false,
+      contradicted: false,
+      failureClass: null,
+      qualified: false,
+      qualifiedClass: null,
+      limitation: null,
+      capabilities: [],
+      reason: rec.refusal,
+    };
+  }
   const mine = rec.rows.filter((r) => typeof r.site === "string" && r.site === siteId);
   if (mine.length === 0) {
-    return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: `no row in capabilities/roundtrip.json for "${siteId}"` };
+    return {
+      measured: false,
+      contradicted: false,
+      failureClass: null,
+      qualified: false,
+      qualifiedClass: null,
+      limitation: null,
+      capabilities: [],
+      reason: `no row in capabilities/roundtrip.json for "${siteId}"`,
+    };
   }
-  const settled = mine.filter((r) => {
+  const settled = (r: (typeof mine)[number]): boolean => {
     if (r.provenance !== "harness") return false;
     const st = typeof r.httpStatus === "number" ? r.httpStatus : 0;
     if (st < 200 || st >= 300) return false;
@@ -504,16 +625,223 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
       }) !== null;
     }
     return false;
-  });
-  if (settled.length > 0) {
-    const first = settled[0]!;
-    const shape =
-      first.class === "RETURNS-DATA"
-        ? capabilityDataEvidence({
-            httpStatus: Number(first.httpStatus),
-            capabilityOk: first.capabilityOk,
-            resultShape: (first.resultShape ?? null) as { topLevelKeys?: unknown; rowsPath?: unknown; count?: unknown; rows?: unknown } | null,
-          })
+  };
+
+  // A row counts only from HARNESS provenance, inside the staleness window.
+  // `falsifiesClaim` is IMPORTED, not restated: which named failures demote is
+  // the CLASSIFIER's answer about its own members, and a second copy of that
+  // rule here is how the writer and this reader end up disagreeing about whether
+  // a recorded refusal is a surface failure or a scoped one. Both are row-level
+  // and both are capability-blind by DESIGN — see the fold below for why the
+  // scope of a non-delivery is a property of its CLASS and not of which surface
+  // kind it arrived on.
+  const inWindow = (r: (typeof mine)[number]): boolean => {
+    if (r.provenance !== "harness") return false;
+    if (typeof r.measuredAt !== "string") return false;
+    const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
+    return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
+  };
+  const namedFailure = (r: (typeof mine)[number], wantFalsifying: boolean): boolean => {
+    const cls = typeof r.class === "string" ? r.class : "";
+    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
+    if (ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
+    if (falsifiesClaim(cls) !== wantFalsifying) return false;
+    return inWindow(r);
+  };
+  const newestOf = (rows: RoundTripRow[]): RoundTripRow =>
+    rows.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
+
+  // ── THE PER-CAPABILITY CLASSIFICATION ──────────────────────────────────────
+  // Each capability is read at ITS OWN level, first, and the site verdict is
+  // folded from the result.
+  //
+  // THE ORDER INSIDE ONE CAPABILITY IS CONTRADICTION FIRST, and that is not a
+  // cosmetic reshuffle: it is the SAME rule the fold below applies, at the level
+  // it applies. The pre-existing order was settled-then-contradicted, which was
+  // correct only while the whole verdict was per-site — one site, one question.
+  // Per capability it is the "healthy sibling answers first" defect restated one
+  // rung down: a site that probed `araprat_trending` twice, once returning rows
+  // and once answering 502 `UNATTRIBUTED-NO-COMPOSER`, would have reported that
+  // capability as `measured` because a good row existed somewhere in its
+  // history. MEASURED, that is exactly what happened when this pin was first
+  // written: the array said `araprat_trending=measured` while a contradicting
+  // row sat in the same capability's rows, unconsulted.
+  //
+  // WHY ONE LEVEL OF `contradicted` STILL BEATS ANOTHER'S `measured` AT THE
+  // FOLD: a demotion is a statement about the PACKAGE, not about the row that
+  // produced it. So the fold asks the question at package scope and the
+  // classification asks it at capability scope, and neither needs to know what
+  // the other one decided.
+  const byCapability = new Map<string, (typeof mine)[number][]>();
+  for (const r of mine) {
+    const key = typeof r.capability === "string" && r.capability ? r.capability : "(unnamed)";
+    const list = byCapability.get(key);
+    if (list) list.push(r);
+    else byCapability.set(key, [r]);
+  }
+  const capabilities: CapabilityRoundTrip[] = [];
+  for (const key of [...byCapability.keys()].sort()) {
+    const rows = byCapability.get(key)!;
+    // A MEASURED ROUND TRIP THAT DID NOT WORK — the class was DERIVED by the
+    // writer, and test/round-trip-record-truth.test.ts re-derives it from the
+    // row's own machine fields, so a hand-typed class cannot buy this state any
+    // more than it can buy `measured`.
+    //
+    // `falsifiesClaim` is IMPORTED, not restated: which named failures demote is
+    // the CLASSIFIER's answer about its own members, and a second copy of that
+    // rule here is how the writer and this reader end up disagreeing about
+    // whether a recorded refusal is a surface failure or a scoped one.
+    const failed = rows.filter((r) => namedFailure(r, true));
+    if (failed.length > 0) {
+      const top = newestOf(failed);
+      capabilities.push({
+        capability: key,
+        reading: "contradicted",
+        class: typeof top.class === "string" ? top.class : null,
+        reason:
+          `MEASURED AND FAILED — capabilities/roundtrip.json carries ${failed.length} row(s) for "${siteId}/${key}" whose DERIVED class is a named FAILURE, ` +
+          `the newest being ${String(top.capability)} class=${String(top.class)} httpStatus=${String(top.httpStatus)} ` +
+          `answerChars=${String(top.answerChars)} probeNonceMatched=${String(top.probeNonceMatched)} measuredAt=${String(top.measuredAt)} ` +
+          `(inside the ${rec.stalenessWindowDays}-day window). The round trip was PERFORMED and the surface DID NOT WORK, which CONTRADICTS a ` +
+          `published \`verified\` claim rather than qualifying it. It establishes NO cause — read the class's own evidence for what the service ` +
+          `refused to attribute.`,
+      });
+      continue;
+    }
+    const good = rows.filter(settled);
+    if (good.length > 0) {
+      const first = good[0]!;
+      const shape =
+        first.class === "RETURNS-DATA"
+          ? capabilityDataEvidence({
+              httpStatus: Number(first.httpStatus),
+              capabilityOk: first.capabilityOk,
+              resultShape: (first.resultShape ?? null) as { topLevelKeys?: unknown; rowsPath?: unknown; count?: unknown; rows?: unknown } | null,
+            })
+          : null;
+      capabilities.push({
+        capability: key,
+        reading: "measured",
+        class: typeof first.class === "string" ? first.class : null,
+        reason:
+          first.class === "RETURNS-DATA" && shape
+            ? `capabilities/roundtrip.json carries ${good.length} MEASURED row(s) for "${siteId}/${key}" — the capability ${String(first.capability)} returned ${shape.rows} record(s) at ${shape.rowsPath} (runner ok=true, declared count ${shape.count} = counted rows, HTTP ${first.httpStatus}, inside the ${rec.stalenessWindowDays}-day window)`
+            : `capabilities/roundtrip.json carries ${good.length} MEASURED row(s) for "${siteId}/${key}" (nonce matched, ANSWERS, ${first.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
+      });
+      continue;
+    }
+    // A MEASURED ROUND TRIP THAT DELIVERED NOTHING FOR ONE ARGUMENT. Reached
+    // only after the contradicting branch declined, so a capability with a real
+    // surface-wide failure never hides an argument-scoped one behind it.
+    //
+    // WHY IT IS ITS OWN READING RATHER THAN "no row": the row exists, the round
+    // trip was performed, and the refusal is quotable from it. Reporting it as
+    // unmeasured throws away real evidence; reporting it as CONTRADICTED asserts
+    // a surface-wide failure from an observation scoped to one `videoId`. What
+    // the read seam may then say is "this argument did not deliver", and it
+    // still may not say "this capability works".
+    const qualifying = rows.filter((r) => namedFailure(r, false));
+    if (qualifying.length > 0) {
+      const top = newestOf(qualifying);
+      capabilities.push({
+        capability: key,
+        reading: "qualified",
+        class: typeof top.class === "string" ? top.class : null,
+        reason:
+          `MEASURED, DID NOT DELIVER, AND QUALIFIES — capabilities/roundtrip.json carries ${qualifying.length} row(s) for "${siteId}/${key}" whose ` +
+          `DERIVED class is an ARGUMENT-SCOPED non-delivery, the newest being ${String(top.capability)} class=${String(top.class)} ` +
+          `httpStatus=${String(top.httpStatus)} measuredAt=${String(top.measuredAt)} (inside the ${rec.stalenessWindowDays}-day window). The round trip ` +
+          `was PERFORMED and the surface delivered nothing for the argument this row was given; the row is kept because the refusal is quotable ` +
+          `and inspectable. It does NOT CONTRADICT a published \`verified\` claim, because a claim is about the surface and this observation is ` +
+          `about one argument — and it establishes NO cause: read the class's own evidence for the candidates the service refused to choose ` +
+          `between. It also does NOT PROMOTE: this capability is still not measured, so it earns no verified claim.`,
+      });
+      continue;
+    }
+    capabilities.push({
+      capability: key,
+      reading: "unmeasured",
+      class: null,
+      reason: rows
+        .map((r) =>
+          r.provenance !== "harness"
+            ? `provenance=${String(r.provenance)} (imported from prose — backs nothing)`
+            : `${String(r.capability)}: probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)} capabilityOk=${String(r.capabilityOk)}`,
+        )
+        .join("; "),
+    });
+  }
+
+  const at = (reading: CapabilityRoundTrip["reading"]): CapabilityRoundTrip[] =>
+    capabilities.filter((c) => c.reading === reading);
+
+  // ── THE FOLD: the site verdict is DERIVED from the capability readings ─────
+  //
+  // CONTRADICTION DOMINATES, AND THAT IS THE ANSWER TO "can a capability-level
+  // failure contradict a site?". YES — and it must, for a reason that is not
+  // symmetry for its own sake: whether a non-delivery is a statement about the
+  // SURFACE is a property of its CLASS, and the classifier already owns that
+  // answer (`falsifiesClaim`, imported above, never restated). A row whose class
+  // says "this surface did not work" says it whether it came from the chat
+  // endpoint or from `youtube_search`. Restricting demotion to chat rows would
+  // restate the per-site collapse this lane exists to remove, one rung down: the
+  // surface KIND would become the gate, and a package whose only working
+  // capability was a chat one would keep a `verified` claim its own transcript
+  // row had already falsified.
+  //
+  // AND THE OPPOSITE IS NOT FORGOTTEN, it is the whole reason `limitation`
+  // exists. `UNATTRIBUTED-NO-TRANSCRIPT` was deliberately chosen to QUALIFY,
+  // because the refusal was scoped to ONE `videoId` while the claim is about the
+  // surface — and that reasoning is untouched, because it lives in the class
+  // rather than in the surface kind. So the two decisions stay orthogonal:
+  // `falsifiesClaim` decides WHETHER a non-delivery demotes, and the
+  // per-capability array decides WHERE it is reported. A qualifying capability
+  // can therefore never demote the site (it becomes a named limitation), and a
+  // contradicting one always does.
+  //
+  // DEMOTE-ONLY IS UNCHANGED AND ASYMMETRIC. A contradiction or a limitation may
+  // only ever take a claim away; `packageStatusOf` mints `unverified-candidate`
+  // for every negative, and nothing here can raise a package to `verified`.
+  const failedCaps = at("contradicted");
+  if (failedCaps.length > 0) {
+    const top = failedCaps.slice().sort((a, b) => String(b.class).localeCompare(String(a.class)))[0]!;
+    const newestFailure = failedCaps[0]!;
+    return {
+      measured: false,
+      contradicted: true,
+      failureClass: top.class,
+      qualified: false,
+      qualifiedClass: null,
+      limitation: null,
+      capabilities,
+      reason:
+        `MEASURED AND FAILED — capabilities/roundtrip.json carries ${failedCaps.length} capability/capabilities for "${siteId}" whose DERIVED class is a named FAILURE, ` +
+        `the newest being ${newestFailure.capability} class=${String(newestFailure.class)} — ${newestFailure.reason.split(". ")[1] ?? newestFailure.reason} ` +
+        `(inside the ${rec.stalenessWindowDays}-day window). This is NOT the same as never having measured: the round trip was performed and the surface ` +
+        `DID NOT WORK, which CONTRADICTS a published \`verified\` claim rather than qualifying it. It establishes NO cause — read the class's own ` +
+        `evidence for what the service refused to attribute — and it may only ever DEMOTE, never promote.`,
+    };
+  }
+
+  const settledCaps = at("measured");
+  if (settledCaps.length > 0) {
+    // HEALTHY, WITH A NAMED CAPABILITY LIMITATION. The third state of a
+    // measured site, and the one the per-site collapse made unexpressible:
+    // `measured` stays true (the claim is about the surface and the surface
+    // answered), while the capability that did not deliver is named, with the
+    // DERIVED class a consumer branches on. Measured, the case: `youtube`
+    // searched 10 real rows AND `youtube_transcript` answered HTTP 502
+    // `UNATTRIBUTED-NO-TRANSCRIPT`, and the site answer was `measured: true`
+    // with the 502 never read.
+    const limited = at("qualified");
+    const limitation: CapabilityLimitation | null =
+      limited.length > 0
+        ? {
+            capability: limited[0]!.capability,
+            class: String(limited[0]!.class),
+            reading: "qualified",
+            reason: limited[0]!.reason,
+          }
         : null;
     return {
       measured: true,
@@ -521,99 +849,54 @@ export function measuredRoundTripFor(siteId: string, now: number = Date.now()): 
       failureClass: null,
       qualified: false,
       qualifiedClass: null,
+      limitation,
+      capabilities,
       reason:
-        first.class === "RETURNS-DATA" && shape
-          ? `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" — the capability ${String(first.capability)} returned ${shape.rows} record(s) at ${shape.rowsPath} (runner ok=true, declared count ${shape.count} = counted rows, HTTP ${first.httpStatus}, inside the ${rec.stalenessWindowDays}-day window)`
-          : `capabilities/roundtrip.json carries ${settled.length} MEASURED row(s) for "${siteId}" (nonce matched, ANSWERS, ${first.httpStatus}, doneReason=stable, inside the ${rec.stalenessWindowDays}-day window)`,
+        `${settledCaps[0]!.reason}` +
+        (limitation
+          ? ` — but this site is NOT uniformly healthy: ${limited.length} of its capability/capabilities measured a NON-DELIVERY (${limited
+              .map((c) => `${c.capability} class=${String(c.class)}`)
+              .join(", ")}), which QUALIFIES rather than contradicts: a published \`verified\` claim is about the surface and this observation ` +
+              `is about one argument, so the claim stands while the limitation is reported. It is a demote-only signal: it can take a claim away ` +
+              `and can never add one. See \`capabilities\` for the per-capability resolution.`
+          : ` — and every capability the record measures for this site measured OK, so there is no limitation to report.`),
     };
   }
 
-  // A MEASURED ROUND TRIP THAT DID NOT WORK. Read before the generic "none is
-  // MEASURED" fallback, and only from rows the classifier DERIVED — the class is
-  // re-derived from the row's own machine fields by
-  // test/round-trip-record-truth.test.ts, so a hand-typed class cannot buy this
-  // state any more than it can buy `measured`.
-  //
-  // `falsifiesClaim` is IMPORTED, not restated: which named failures demote is
-  // the CLASSIFIER's answer about its own members, and a second copy of that
-  // rule here is how the writer and this reader end up disagreeing about whether
-  // a recorded refusal is a surface failure or a scoped one.
-  const inWindow = (r: (typeof mine)[number]): boolean => {
-    if (r.provenance !== "harness") return false;
-    if (typeof r.measuredAt !== "string") return false;
-    const age = (now - Date.parse(r.measuredAt)) / 86_400_000;
-    return Number.isFinite(age) && age >= 0 && age <= rec.stalenessWindowDays;
-  };
-  const failed = mine.filter((r) => {
-    const cls = typeof r.class === "string" ? r.class : "";
-    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
-    if (ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
-    if (!falsifiesClaim(cls)) return false;
-    return inWindow(r);
-  });
-  if (failed.length > 0) {
-    const newest = failed.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
-    return {
-      measured: false,
-      contradicted: true,
-      failureClass: typeof newest.class === "string" ? newest.class : null,
-      qualified: false,
-      qualifiedClass: null,
-      reason:
-        `MEASURED AND FAILED — capabilities/roundtrip.json carries ${failed.length} row(s) for "${siteId}" whose DERIVED class is a named FAILURE, ` +
-        `the newest being ${String(newest.capability)} class=${String(newest.class)} httpStatus=${String(newest.httpStatus)} ` +
-        `answerChars=${String(newest.answerChars)} probeNonceMatched=${String(newest.probeNonceMatched)} measuredAt=${String(newest.measuredAt)} ` +
-        `(inside the ${rec.stalenessWindowDays}-day window). This is NOT the same as never having measured: the round trip was performed and the surface ` +
-        `DID NOT WORK, which CONTRADICTS a published \`verified\` claim rather than qualifying it. It establishes NO cause — read the class's own ` +
-        `evidence for what the service refused to attribute — and it may only ever DEMOTE, never promote.`,
-    };
-  }
-
-  // A MEASURED ROUND TRIP THAT DELIVERED NOTHING FOR ONE ARGUMENT — the third
-  // reading, and the one that must NOT be reported as either of the two above.
-  // Reached only after the contradicting branch declined, so a site with a real
-  // surface-wide failure never hides an argument-scoped one behind it.
-  //
-  // WHY IT IS ITS OWN VERDICT RATHER THAN "no row": the row exists, the round
-  // trip was performed, and the refusal is quotable from it. Reporting it as
-  // unmeasured throws away real evidence; reporting it as CONTRADICTED asserts a
-  // surface-wide failure from an observation scoped to one `videoId`. What the
-  // read seam may say about a claim is "this argument did not deliver", and it
-  // still may not say "this surface works" — hence `measured` stays false.
-  const qualifying = mine.filter((r) => {
-    const cls = typeof r.class === "string" ? r.class : "";
-    if (!VERIFICATION_CLASSES.includes(cls as (typeof VERIFICATION_CLASSES)[number])) return false;
-    if (ROUNDTRIP_SUCCESS_CLASSES.has(cls)) return false;
-    if (falsifiesClaim(cls)) return false;
-    return inWindow(r);
-  });
-  if (qualifying.length > 0) {
-    const newest = qualifying.slice().sort((a, b) => String(b.measuredAt).localeCompare(String(a.measuredAt)))[0]!;
+  // A site with NO measured surface. The same two negatives as before, read
+  // from the same per-capability classification: a contradiction was already
+  // returned above, so what is left is the argument-scoped reading, which
+  // neither proves the surface works nor was ever absent.
+  const qualifiedCaps = at("qualified");
+  if (qualifiedCaps.length > 0) {
+    const top = qualifiedCaps[0]!;
     return {
       measured: false,
       contradicted: false,
       failureClass: null,
       qualified: true,
-      qualifiedClass: typeof newest.class === "string" ? newest.class : null,
+      qualifiedClass: top.class,
+      limitation: null,
+      capabilities,
       reason:
-        `MEASURED, DID NOT DELIVER, AND QUALIFIES — capabilities/roundtrip.json carries ${qualifying.length} row(s) for "${siteId}" whose ` +
-        `DERIVED class is an ARGUMENT-SCOPED non-delivery, the newest being ${String(newest.capability)} class=${String(newest.class)} ` +
-        `httpStatus=${String(newest.httpStatus)} measuredAt=${String(newest.measuredAt)} (inside the ${rec.stalenessWindowDays}-day window). ` +
-        `The round trip was PERFORMED and the surface delivered nothing for the argument this row was given; the row is kept because the ` +
-        `refusal is quotable and inspectable. It does NOT CONTRADICT a published \`verified\` claim, because a claim is about the surface ` +
-        `and this observation is about one argument — and it establishes NO cause: read the class's own evidence for the candidates the ` +
-        `service refused to choose between. It also does NOT PROMOTE: this site is still not measured, so it earns no verified claim.`,
+        `MEASURED, DID NOT DELIVER, AND QUALIFIES — capabilities/roundtrip.json carries ${qualifiedCaps.length} capability/capabilities for "${siteId}" whose ` +
+        `DERIVED class is an ARGUMENT-SCOPED non-delivery, the newest being ${top.capability} class=${String(top.class)}. It does NOT CONTRADICT a published ` +
+        `\`verified\` claim, because a claim is about the surface and this observation is about one argument — and it establishes NO cause. ` +
+        `It also does NOT PROMOTE: this site is still not measured, so it earns no verified claim.`,
     };
   }
 
-  const why = mine
-    .map((r) =>
-      r.provenance !== "harness"
-        ? `provenance=${String(r.provenance)} (imported from prose — backs nothing)`
-        : `${String(r.capability)}: probeNonceMatched=${String(r.probeNonceMatched)} class=${String(r.class)} httpStatus=${String(r.httpStatus)} answerChars=${String(r.answerChars)} doneReason=${String(r.doneReason)} capabilityOk=${String(r.capabilityOk)}`,
-    )
-    .join("; ");
-  return { measured: false, contradicted: false, failureClass: null, qualified: false, qualifiedClass: null, reason: `rows exist for "${siteId}" but none is MEASURED: ${why}` };
+  const why = capabilities.map((c) => `${c.capability}: ${c.reason}`).join("; ");
+  return {
+    measured: false,
+    contradicted: false,
+    failureClass: null,
+    qualified: false,
+    qualifiedClass: null,
+    limitation: null,
+    capabilities,
+    reason: `rows exist for "${siteId}" but none is MEASURED: ${why}`,
+  };
 }
 
 /**
@@ -1618,10 +1901,26 @@ export function buildRegistryPackages(): RegistryPackage[] {
     }
     // GOAL 61: per-entry filter — a malformed capability entry is EXCLUDED
     // (never advertised), never a TypeError that kills the whole registry.
+    // ONE per-capability read of the round-trip record, taken BEFORE the tool
+    // list so each tool can be answered from it. Read ONCE per package: a second
+    // `measuredRoundTripFor()` call per tool would re-read and re-classify the
+    // record seven times for youtube alone, and — worse — a consumer reading the
+    // tools could be served by a record read that disagrees with the package
+    // verdict printed beside it.
+    const siteVerdict = measuredRoundTripFor(siteId);
+    const toolRoundTrip = new Map(siteVerdict.capabilities.map((c) => [c.capability, c]));
     const tools: RegistryTool[] = caps.filter(validManifestCapability).map((c) => {
       const declared = declaredCapabilityInputSchema(c);
+      // A record row names the capability by the harness's own id, which is the
+      // raw manifest id (`youtube_transcript`) OR the bare chat sentinel
+      // (`chat`). Both spellings are looked up, so a chat-shaped row is not
+      // silently dropped for want of a match — a dropped lookup would read as
+      // "no measurement", which is exactly the fabrication this field exists to
+      // prevent.
+      const bare = bareCapabilityId(siteId, c.id);
+      const measured = toolRoundTrip.get(c.id) ?? toolRoundTrip.get(bare) ?? toolRoundTrip.get(`${bare}_chat`);
       return {
-        name: `${siteId}_${bareCapabilityId(siteId, c.id)}`,
+        name: `${siteId}_${bare}`,
         id: c.id,
         description: consumerProse(c.description) || c.name || c.id,
         method: c.method || "ui-path",
@@ -1641,6 +1940,7 @@ export function buildRegistryPackages(): RegistryPackage[] {
         // was invisible: the tool was advertised and then 404'd at call time.
         // A consumer building a client keys on this instead of finding out.
         dispatch: isDispatchable(siteId) ? "wired" : "declared-only",
+        ...(measured ? { roundTrip: measured } : {}),
       };
     });
     // Stored vault accounts for this site, keyed by the packaged profile's host
