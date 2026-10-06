@@ -562,3 +562,22 @@ the residue instead. **That is exactly this rule working — by luck, not by con
 `goal-driven-parallel-agents/multi-parallel-nested-subagent-goal-driven-development/references/`
 as a new section, staged explicitly, **without touching the ten files that carry ~1000 lines of
 abandoned uncommitted work** in that repo (stale ~45h, not live, but not mine to discard).
+
+### Correction to the above — I lost and then recovered one file's abandoned work
+
+While staging the doctrine section I rebuilt `nesting-contract.md` from `HEAD` + my own section,
+which **silently discarded that file's pre-existing uncommitted edits** (~88 insertions of work that
+was not mine). I caught it by checking `git diff --stat` on the file after committing, found it empty
+when it should have been dirty, and **restored the full content from the copy taken before the edit** —
+so the work was recovered rather than lost. The other 9 dirty files were never at risk.
+
+**What this is, stated plainly: I violated the same rule I wrote down thirty seconds earlier.** The
+precaution that would have prevented it is trivially available and costs one command —
+**`git diff --stat <path>` after writing, before staging** — and it is the same corroboration step
+this entire round has been about. The irony is exact: I wrote a decision record explaining that
+claims must be checked against residue, and then made an unverified edit to residue itself.
+
+**The general rule, added because it nearly cost real work: before committing a single path out of a
+dirty tree, diff the path after writing and confirm it contains ONLY your change.** A dirty working
+tree is not an obstacle to committing in; it is a hazard that must be *measured*, and the measurement
+is one command.
