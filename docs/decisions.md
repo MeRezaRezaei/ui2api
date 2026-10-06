@@ -513,3 +513,52 @@ that: the single consumer is `UI2API_VERSION` (`src/registry/package.ts:18`), wh
 **generated package metadata at packager time** — i.e. it describes the tree being packaged, not the
 deployed install. On that reading `-dev.1` is right. **No test pins the string**, so if the operator
 intends the other convention, reverting is a one-line change with no gate to unpick.
+
+## 2026-10-06 — The collect duty DESCENDS, and a nested parent has no way to tell thinking from a corpse
+
+**Decision.** When an agent spawns a child, the obligation to **collect** that child (re-arm
+`get_delegation_status` with `wait_ms` until terminal) is inherited by that child for **its own
+children**, transitively, to any depth. An agent that nests must collect every descendant it caused
+to exist. And: **a report claiming nested work is UNVERIFIED until the residue corroborates it** —
+the reporting agent must state each grandchild's `task_id` and terminal status, or state plainly
+"no nested children".
+
+**Who decided and why it is not a design fork.** The operator identified the gap directly: the same
+false positive that applies to the orchestrator applies to a sub-agent's own children. Research
+confirmed it is a real hole in the written doctrine, not a matter of taste.
+`references/nesting-contract.md:155` reads *"A child you spawn and never collect is a silent
+result"* — addressed to whoever spawns, and **silent on whether the duty descends**. Nothing in the
+contract tells an L1 that dispatching an L2 makes that L2 its own obligation.
+
+**The measured severity, which is worse than a wording gap.** A nested parent has **no registry row
+and no heartbeat** — the two instruments the operator's own lanes are given to distinguish thinking
+from death. So a nested parent calling `get_delegation_status` sees `status: "running"` for a child
+whose process is gone, and has **no available signal** to tell the two apart. It cannot diagnose it
+even in principle. Its only exits are the two bad ones: wait forever, or exhaust its own budget and
+report done. **A grandchild that died silently becomes a claim in a report that looks successful.**
+
+**Why the report obligation is the load-bearing half.** The residue check is what makes this
+detectable at all: every lane in this session has been verified by reading the tree, not the report.
+A grandchild's work either produced a commit or it did not. So requiring the report to *name* the
+descendants turns an invisible failure into a countable one — a report claiming three grandchildren
+with no commits between them is self-evidently false, and is checkable without any new tooling.
+
+**Alternative considered and rejected: a heartbeat for nested agents.** Tempting, since it is what
+works for the top-level lanes. Rejected because `AGENT_LIVENESS_KEY` is **not injected into
+children at all** in this stack — the tool refuses with `NO KEY`, and the file is named after a
+`child_conversation_id` a nested parent cannot reliably obtain for a grandchild. A heartbeat keyed
+on an id the parent does not have is a heartbeat that reports nothing. **Do not add an instrument
+that cannot fire; add an obligation that can be checked.** The same reasoning that retired the
+`DEAD-CANDIDATE` verdict.
+
+**What would make this wrong.** If `delegate_to_agent` ever propagates a parent's `task_id` scope
+such that the parent is auto-notified of grandchild terminal states, the report obligation becomes
+redundant — but it would still be cheap, and it is also the only part that requires no new tooling.
+Note also that this session's own evidence supports the gap being real rather than theoretical: one
+lane ended in `child_rejected` and left four commits whose report I never received, and I verified
+the residue instead. **That is exactly this rule working — by luck, not by contract.**
+
+**Where it is being written.** Appended to
+`goal-driven-parallel-agents/multi-parallel-nested-subagent-goal-driven-development/references/`
+as a new section, staged explicitly, **without touching the ten files that carry ~1000 lines of
+abandoned uncommitted work** in that repo (stale ~45h, not live, but not mine to discard).
